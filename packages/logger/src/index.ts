@@ -1,6 +1,6 @@
-const pino = require('pino')
+import pino = require('pino')
 
-let logger
+let logger: pino.Logger<never, boolean>
 
 if (process.env.NODE_ENV === 'production') {
   const transport = pino.transport({
