@@ -1,15 +1,16 @@
 // Main repository class
-export { ContactRepository } from './ContactRepository.js'
+
 export type { EmailMetadataContact } from './ContactRepository.js'
+export { ContactRepository } from './ContactRepository.js'
 
 // Type exports
-export type { ContactData, NormalizedContactData, ContactType } from './types/index.js'
+export type { ContactData, ContactType, NormalizedContactData } from './types/index.js'
 
 // Utility exports
 export {
-  extractEmailFromSender,
   extractDisplayNameFromSender,
   extractDomainFromEmail,
+  extractEmailFromSender,
   isValidEmail,
   normalizeContactData,
 } from './utils/email-parser.js'
