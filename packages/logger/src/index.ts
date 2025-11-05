@@ -1,8 +1,19 @@
-import pino = require('pino')
+import pino from 'pino'
 
 let logger: pino.Logger<never, boolean>
 
-if (process.env.NODE_ENV === 'production') {
+// Browser environment - use console
+if (typeof window !== 'undefined') {
+  logger = {
+    info: console.log,
+    error: console.error,
+    warn: console.warn,
+    debug: console.debug,
+    trace: console.trace,
+    fatal: console.error,
+    child: () => logger,
+  } as any
+} else if (process.env.NODE_ENV === 'production') {
   const transport = pino.transport({
     targets: [
       {
