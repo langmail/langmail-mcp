@@ -31,7 +31,9 @@ if (typeof window !== 'undefined') {
   })
   logger = pino(transport)
 } else {
-  logger = pino()
+  logger = pino({
+    level: process.env.LOG_LEVEL || 'info',
+  })
 }
 
 export { logger }
