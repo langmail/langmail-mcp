@@ -3,7 +3,7 @@ import pino from 'pino'
 let logger: pino.Logger<never, boolean>
 
 // Browser environment - use console
-if (typeof window !== 'undefined') {
+if ('window' in globalThis) {
   logger = {
     info: console.log,
     error: console.error,
