@@ -2,6 +2,9 @@ import pino from 'pino'
 
 let logger: pino.Logger<never, boolean>
 
+const serviceName = process.env.SERVICE_NAME || 'unknown'
+const base = { service: serviceName }
+
 // Browser environment - use console
 if ('window' in globalThis) {
   logger = {
@@ -29,9 +32,10 @@ if ('window' in globalThis) {
       },
     ],
   })
-  logger = pino(transport)
+  logger = pino({ base }, transport)
 } else {
   logger = pino({
+    base,
     level: process.env.LOG_LEVEL || 'info',
   })
 }
