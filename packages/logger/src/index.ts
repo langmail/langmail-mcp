@@ -43,5 +43,14 @@ if ('window' in globalThis) {
   }
 }
 
-export { logger }
+const requireEnv = (key: string): string => {
+  const value = process.env[key]
+  if (!value) {
+    logger.error(`${key} environment variable is required`)
+    throw new Error(`${key} environment variable is required`)
+  }
+  return value
+}
+
+export { logger, requireEnv }
 export default logger
