@@ -22,3 +22,4 @@ export function initSentry(serviceName: string): void {
 }
 
 export { Sentry }
+export type { Scope } from '@sentry/node'
