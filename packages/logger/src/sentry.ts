@@ -6,7 +6,7 @@ export function initSentry(serviceName: string): void {
 
   Sentry.init({
     dsn: dsn || '',
-    sendDefaultPii: true,
+    sendDefaultPii: false,
     environment: environment || 'development',
     enabled: environment === 'production',
     integrations: [
