@@ -1,25 +1,26 @@
-import * as Sentry from '@sentry/node'
+import { contextLinesIntegration, init, nodeContextIntegration, pinoIntegration, setTag } from '@sentry/node'
 
 export function initSentry(serviceName: string): void {
   const dsn = process.env.SENTRY_DSN
   const environment = process.env.NODE_ENV
 
-  Sentry.init({
+  init({
     dsn: dsn || '',
     sendDefaultPii: false,
     environment: environment || 'development',
     enabled: environment === 'production',
     integrations: [
-      Sentry.nodeContextIntegration(),
-      Sentry.contextLinesIntegration(),
-      Sentry.pinoIntegration({
+      nodeContextIntegration(),
+      contextLinesIntegration(),
+      pinoIntegration({
         error: { levels: ['error'] },
       }),
     ],
   })
 
-  Sentry.setTag('service', serviceName)
+  setTag('service', serviceName)
 }
 
-export { Sentry }
 export type { Scope } from '@sentry/node'
+// biome-ignore lint/performance/noBarrelFile: re-export needed for package consumers
+export { withScope } from '@sentry/node'
