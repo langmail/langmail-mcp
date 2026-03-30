@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import pino from 'pino'
 
 // Server only - safe to access process.env
@@ -24,10 +26,22 @@ if (process.env.NODE_ENV === 'production') {
   })
   logger = pino({ base }, transport)
 } else {
-  logger = pino({
-    base,
-    level: process.env.LOG_LEVEL || 'info',
+  // Resolve to repo root logs/ dir (packages/logger/src -> ../../../logs)
+  const logsDir = path.resolve(import.meta.dirname, '../../../logs')
+  fs.mkdirSync(logsDir, { recursive: true })
+
+  // Truncate on startup so each dev session starts with fresh logs
+  const logFilePath = path.join(logsDir, `${serviceName}.log`)
+  fs.writeFileSync(logFilePath, '')
+
+  const transport = pino.transport({
+    targets: [
+      { target: 'pino/file', options: { destination: 1 } },
+      { target: 'pino/file', options: { destination: logFilePath } },
+    ],
   })
+
+  logger = pino({ base, level: process.env.LOG_LEVEL || 'info' }, transport)
 }
 
 export { logger }
