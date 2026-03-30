@@ -1,4 +1,3 @@
-import fs from 'node:fs'
 import path from 'node:path'
 import pino from 'pino'
 
@@ -27,17 +26,20 @@ if (process.env.NODE_ENV === 'production') {
   logger = pino({ base }, transport)
 } else {
   // Resolve to repo root logs/ dir (packages/logger/src -> ../../../logs)
-  const logsDir = path.resolve(import.meta.dirname, '../../../logs')
-  fs.mkdirSync(logsDir, { recursive: true })
-
-  // Truncate on startup so each dev session starts with fresh logs
-  const logFilePath = path.join(logsDir, `${serviceName}.log`)
-  fs.writeFileSync(logFilePath, '')
+  const logFilePath = path.resolve(import.meta.dirname, `../../../logs/${serviceName}.log`)
 
   const transport = pino.transport({
     targets: [
       { target: 'pino/file', options: { destination: 1 } },
-      { target: 'pino/file', options: { destination: logFilePath } },
+      {
+        target: 'pino-roll',
+        options: {
+          file: logFilePath,
+          size: '10m',
+          limit: { count: 3 },
+          mkdir: true,
+        },
+      },
     ],
   })
 
