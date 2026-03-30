@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import path from 'node:path'
 import pino from 'pino'
 
@@ -25,21 +26,15 @@ if (process.env.NODE_ENV === 'production') {
   })
   logger = pino({ base }, transport)
 } else {
-  // Resolve to repo root logs/ dir (packages/logger/src -> ../../../logs)
-  const logFilePath = path.resolve(import.meta.dirname, `../../../logs/${serviceName}.log`)
+  // All services write to a single log file for easy agent consumption
+  const logFilePath = path.resolve(import.meta.dirname, '../../../logs/dev.log')
+  fs.mkdirSync(path.dirname(logFilePath), { recursive: true })
+  fs.writeFileSync(logFilePath, '', { flag: 'w' })
 
   const transport = pino.transport({
     targets: [
       { target: 'pino/file', options: { destination: 1 } },
-      {
-        target: 'pino-roll',
-        options: {
-          file: logFilePath,
-          size: '10m',
-          limit: { count: 3 },
-          mkdir: true,
-        },
-      },
+      { target: 'pino/file', options: { destination: logFilePath, append: true } },
     ],
   })
 
