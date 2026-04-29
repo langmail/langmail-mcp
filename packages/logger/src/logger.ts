@@ -26,8 +26,7 @@ if (process.env.NODE_ENV === 'production') {
   })
   logger = pino({ base }, transport)
 } else {
-  // All services write to a single log file for easy agent consumption
-  const logFilePath = path.resolve(import.meta.dirname, '../../../logs/dev.log')
+  const logFilePath = path.resolve(import.meta.dirname, `../../../logs/${serviceName}.log`)
   fs.mkdirSync(path.dirname(logFilePath), { recursive: true })
   fs.writeFileSync(logFilePath, '', { flag: 'w' })
 
