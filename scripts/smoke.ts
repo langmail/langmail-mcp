@@ -118,20 +118,48 @@ async function main() {
   pass(`search_emails registered (alongside: ${names.join(", ") || "—"})`);
 
   // --- 2. Round-trip via the smoke tag ---------------------------------
+  //
+  // Stalwart's FTS indexes asynchronously: a freshly-delivered message
+  // (the mail smoke runs immediately before us) won't always be visible
+  // on the first query. Retry a few times with a short backoff before
+  // calling it broken.
   if (smokeTag) {
-    log(`call search_emails query="${smokeTag}"`);
-    const result = await session.client.callTool({
-      name: "search_emails",
-      arguments: { query: smokeTag, limit: 5 },
-    });
-    const { text, isError } = unwrapText(
-      result as { content?: { type?: string; text?: string }[]; isError?: boolean },
-    );
+    log(`call search_emails query="${smokeTag}" (with FTS-index retry)`);
+    let text = "";
+    let isError = false;
+    let attempts = 0;
+    const maxAttempts = 6;
+    for (; attempts < maxAttempts; attempts++) {
+      const result = await session.client.callTool({
+        name: "search_emails",
+        arguments: { query: smokeTag, limit: 5 },
+      });
+      ({ text, isError } = unwrapText(
+        result as {
+          content?: { type?: string; text?: string }[];
+          isError?: boolean;
+        },
+      ));
+      if (!isError && text.includes(smokeTag)) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
     if (isError) fail(`smoke-tag query returned isError=true: ${text}`);
     if (!text.includes(smokeTag)) {
-      fail(`smoke-tag query response did not contain the tag: ${text}`);
+      fail(
+        `smoke-tag '${smokeTag}' not found after ${maxAttempts} attempts: ${text}`,
+      );
     }
-    pass("smoke-tag round-trip (Stalwart FTS → JMAP → MCP tool)");
+    // Tighten: exactly one hit, with the right sender. The tool formats
+    // hits as "N message(s) matched:\n\n1. <subject>\n   from: ...\n   date: ...".
+    if (!/^1 message\(s\) matched/m.test(text)) {
+      fail(`expected exactly one hit for unique tag; got: ${text}`);
+    }
+    if (!text.includes("smoketest@langmail.me")) {
+      fail(`hit's sender is not smoketest@langmail.me: ${text}`);
+    }
+    pass(
+      `smoke-tag round-trip (mail-side delivery → FTS → JMAP → MCP tool, ${attempts + 1} attempt(s))`,
+    );
   } else {
     process.stdout.write(
       "  (skipping round-trip check — MCP_SMOKE_TAG not set; pass the mail smoke tag in to enable)\n",
