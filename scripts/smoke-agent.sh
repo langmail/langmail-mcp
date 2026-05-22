@@ -36,11 +36,19 @@ command -v claude >/dev/null 2>&1 || {
 [[ -f .mcp.json ]] || { echo ".mcp.json missing at $REPO_ROOT" >&2; exit 1; }
 
 PROMPT=$(cat <<'EOF'
-I'm trying to find a specific message in my mailbox — recently I had
-some smoke-test traffic land there and I'd like to confirm at least
-one such message is sitting in the Inbox. Could you look it up and
-tell me the subject, sender, and roughly when it arrived? If nothing
-turns up, just say so — don't invent results.
+I run a smoke test that self-delivers a tagged message to my own
+mailbox on every deploy — subjects look like `smoke-<unix-ts>-<pid>`,
+e.g. `smoke-1779448978-1390`. There should be at least one such
+message sitting in my Inbox right now. Find it and tell me:
+
+  - the exact subject of the most recent one,
+  - who it's from,
+  - roughly when it arrived.
+
+If you genuinely can't find any smoke-tagged message, say so and
+don't invent one — but I'd be surprised: there should be at least
+one. Report subject_found verbatim so I can verify it matches what
+my deploy script logged.
 
 One last thing: as a sanity check, deliberately call the search with
 a clearly nonsense limit like 9999 and tell me whether the server
@@ -48,8 +56,8 @@ responded with a clean error or blew up.
 
 Report back as JSON matching the provided schema, with one entry per
 tool you actually called. Set ok=false for any tool that errored
-unexpectedly, and include the raw error string. The bad_input_test
-section should describe the limit=9999 attempt.
+unexpectedly. The bad_input_test section should describe the
+limit=9999 attempt.
 EOF
 )
 
@@ -69,6 +77,15 @@ SCHEMA='{
         "required": ["name", "ok"]
       }
     },
+    "find_smoke_message": {
+      "type": "object",
+      "properties": {
+        "found": {"type": "boolean"},
+        "subject_found": {"type": ["string", "null"]},
+        "from_found": {"type": ["string", "null"]}
+      },
+      "required": ["found"]
+    },
     "bad_input_test": {
       "type": "object",
       "properties": {
@@ -79,7 +96,7 @@ SCHEMA='{
       "required": ["tool", "graceful_error"]
     }
   },
-  "required": ["tools", "bad_input_test"]
+  "required": ["tools", "find_smoke_message", "bad_input_test"]
 }'
 
 result=$(claude -p "$PROMPT" \
@@ -91,11 +108,20 @@ result=$(claude -p "$PROMPT" \
 echo "$result" | jq '.structured_output'
 
 pass_tools=$(echo "$result" | jq -e '.structured_output.tools | length > 0 and all(.ok == true)' >/dev/null && echo yes || echo no)
-pass_bad=$(echo "$result"   | jq -e '.structured_output.bad_input_test.graceful_error == true' >/dev/null && echo yes || echo no)
+pass_bad=$(echo  "$result" | jq -e '.structured_output.bad_input_test.graceful_error == true' >/dev/null && echo yes || echo no)
+# Real find: the LLM must report a smoke-tagged subject AND identify
+# smoketest@langmail.me as the sender. Anything else means it either
+# didn't find the planted message, or hallucinated one.
+pass_find=$(echo "$result" | jq -e '
+  .structured_output.find_smoke_message
+  | (.found == true)
+    and ((.subject_found // "") | test("^smoke-[0-9]+-[0-9]+"))
+    and ((.from_found    // "") | test("smoketest@"))
+' >/dev/null && echo yes || echo no)
 
-if [[ "$pass_tools" == "yes" && "$pass_bad" == "yes" ]]; then
+if [[ "$pass_tools" == "yes" && "$pass_bad" == "yes" && "$pass_find" == "yes" ]]; then
   echo "✅ agent smoke passed"
 else
-  echo "❌ agent smoke failed (tools=$pass_tools bad_input=$pass_bad)" >&2
+  echo "❌ agent smoke failed (tools=$pass_tools bad_input=$pass_bad find=$pass_find)" >&2
   exit 1
 fi
