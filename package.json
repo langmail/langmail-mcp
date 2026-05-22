@@ -5,10 +5,13 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "build": "bun build --compile --minify --target=bun-linux-x64 src/index.ts --outfile dist/mcp",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "smoke": "bun run scripts/smoke.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.4"
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/bun": "latest",
