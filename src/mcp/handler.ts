@@ -40,9 +40,10 @@ export function createMcpHandler(
     });
     registerSearchEmails(server, deps, () => ctx.token);
 
-    const transport = new WebStandardStreamableHTTPServerTransport({
-      sessionIdGenerator: () => crypto.randomUUID(),
-    });
+    // Stateless mode (sessionIdGenerator omitted). Each request stands
+    // alone — initialize, tool call, and shutdown happen within the
+    // same HTTP exchange. Avoids needing a per-session transport map.
+    const transport = new WebStandardStreamableHTTPServerTransport();
     await server.connect(transport);
 
     return transport.handleRequest(req, {

@@ -54,9 +54,11 @@ export function createRoutes(cfg: HandlerConfig): Routes {
     }
 
     if (url.pathname === "/.well-known/oauth-authorization-server") {
+      // NB: Stalwart 0.16's authorize endpoint is /login, not the
+      // OIDC-conventional /authorize. Mirror upstream verbatim.
       return json({
         issuer: cfg.stalwartUrl,
-        authorization_endpoint: `${cfg.stalwartUrl}/authorize`,
+        authorization_endpoint: `${cfg.stalwartUrl}/login`,
         token_endpoint: `${cfg.stalwartUrl}/auth/token`,
         registration_endpoint: `${cfg.stalwartUrl}/auth/register`,
         userinfo_endpoint: `${cfg.stalwartUrl}/auth/userinfo`,
