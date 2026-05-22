@@ -36,9 +36,27 @@ describe("routes", () => {
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body["issuer"]).toBe(STALWART);
+    expect(body["issuer"]).toBe(PUBLIC);
     expect(body["resource"]).toBe(PUBLIC);
+    expect(body["authorization_endpoint"]).toBe(`${STALWART}/login`);
+    expect(body["token_endpoint"]).toBe(`${STALWART}/auth/token`);
     expect(body["code_challenge_methods_supported"]).toContain("S256");
+    // We proxy DCR — registration_endpoint must point at us, not Stalwart.
+    expect(body["registration_endpoint"]).toBe(`${PUBLIC}/auth/register`);
+  });
+
+  test("POST /auth/register proxies DCR (503 when no upstream creds)", async () => {
+    const r = makeRoutes();
+    const res = await r.fetch(
+      new Request(`${PUBLIC}/auth/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ redirect_uris: ["https://x/cb"] }),
+      }),
+    );
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body["error"]).toBe("temporarily_unavailable");
   });
 
   test("GET /.well-known/oauth-protected-resource is valid PRM (RFC 9728)", async () => {
@@ -49,7 +67,7 @@ describe("routes", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body["resource"]).toBe(PUBLIC);
-    expect(body["authorization_servers"]).toEqual([STALWART]);
+    expect(body["authorization_servers"]).toEqual([PUBLIC]);
     expect(body["bearer_methods_supported"]).toEqual(["header"]);
   });
 
