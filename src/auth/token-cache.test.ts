@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
-import { TokenCache } from "./tokenCache.ts";
+
+import { TokenCache } from "./token-cache.ts";
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -11,14 +12,14 @@ describe("TokenCache", () => {
 
   test("set then get within exp returns the entry", () => {
     const c = new TokenCache();
-    const entry = { principal: "alice@example.com", exp: now() + 60 };
+    const entry = { exp: now() + 60, principal: "alice@example.com" };
     c.set("t1", entry);
     expect(c.get("t1")).toEqual(entry);
   });
 
   test("expired entries are evicted lazily on read", () => {
     const c = new TokenCache();
-    c.set("t1", { principal: "alice", exp: now() - 1 });
+    c.set("t1", { exp: now() - 1, principal: "alice" });
     expect(c.get("t1")).toBeUndefined();
     // Internal map should no longer contain the key.
     expect(c.size).toBe(0);
@@ -26,15 +27,15 @@ describe("TokenCache", () => {
 
   test("set overwrites a previous entry for the same token", () => {
     const c = new TokenCache();
-    c.set("t1", { principal: "alice", exp: now() + 60 });
-    c.set("t1", { principal: "bob", exp: now() + 60 });
+    c.set("t1", { exp: now() + 60, principal: "alice" });
+    c.set("t1", { exp: now() + 60, principal: "bob" });
     expect(c.get("t1")?.principal).toBe("bob");
   });
 
   test("sweep removes all expired entries", () => {
     const c = new TokenCache();
-    c.set("dead", { principal: "x", exp: now() - 10 });
-    c.set("alive", { principal: "y", exp: now() + 60 });
+    c.set("dead", { exp: now() - 10, principal: "x" });
+    c.set("alive", { exp: now() + 60, principal: "y" });
     c.sweep();
     expect(c.size).toBe(1);
     expect(c.get("alive")?.principal).toBe("y");

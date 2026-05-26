@@ -23,46 +23,48 @@ export interface DcrProxyOptions {
 
 export type DcrHandler = (req: Request) => Promise<Response>;
 
-function err(
-  status: number,
-  error: string,
-  description: string,
-): Response {
-  return new Response(
-    JSON.stringify({ error, error_description: description }),
+const err = (status: number, error: string, description: string): Response =>
+  Response.json(
+    { error, error_description: description },
     {
-      status,
       headers: {
-        "content-type": "application/json",
         "cache-control": "no-store",
+        "content-type": "application/json",
       },
-    },
+      status,
+    }
   );
-}
 
 // RFC 7591 §5: native + web clients may use loopback redirect URIs
 // over http; everything else MUST be https. Permissive enough for
 // MCP CLI clients (loopback) and headless server-side callbacks.
-function isAllowedRedirectUri(raw: unknown): raw is string {
-  if (typeof raw !== "string" || raw.length === 0) return false;
+const isAllowedRedirectUri = (raw: unknown): raw is string => {
+  if (typeof raw !== "string" || raw.length === 0) {
+    return false;
+  }
   let u: URL;
   try {
     u = new URL(raw);
   } catch {
     return false;
   }
-  if (u.protocol === "https:") return true;
+  if (u.protocol === "https:") {
+    return true;
+  }
   if (u.protocol === "http:") {
     const h = u.hostname;
-    return h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h === "::1";
+    return (
+      h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h === "::1"
+    );
   }
   // Custom schemes (e.g. "myapp://cb") are valid RFC 7591 but we
   // don't expect them; reject defensively.
   return false;
-}
+};
 
-export function createDcrHandler(opts: DcrProxyOptions): DcrHandler {
-  return async (req) => {
+export const createDcrHandler =
+  (opts: DcrProxyOptions): DcrHandler =>
+  async (req) => {
     if (req.method !== "POST") {
       return err(405, "invalid_request", "POST required");
     }
@@ -71,7 +73,7 @@ export function createDcrHandler(opts: DcrProxyOptions): DcrHandler {
       return err(
         503,
         "temporarily_unavailable",
-        "DCR proxy not configured on this server",
+        "DCR proxy not configured on this server"
       );
     }
 
@@ -87,7 +89,7 @@ export function createDcrHandler(opts: DcrProxyOptions): DcrHandler {
       return err(
         400,
         "invalid_redirect_uri",
-        "redirect_uris must be a non-empty array",
+        "redirect_uris must be a non-empty array"
       );
     }
     for (const u of uris) {
@@ -95,18 +97,18 @@ export function createDcrHandler(opts: DcrProxyOptions): DcrHandler {
         return err(
           400,
           "invalid_redirect_uri",
-          `redirect_uri ${String(u)} is not https or loopback http`,
+          `redirect_uri ${String(u)} is not https or loopback http`
         );
       }
     }
 
     const upstream = await fetch(`${opts.stalwartBase}/auth/register`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: opts.upstreamAuth,
-      },
       body: JSON.stringify(body),
+      headers: {
+        authorization: opts.upstreamAuth,
+        "content-type": "application/json",
+      },
+      method: "POST",
     });
 
     const text = await upstream.text();
@@ -117,9 +119,11 @@ export function createDcrHandler(opts: DcrProxyOptions): DcrHandler {
       let detail = text;
       try {
         const parsed = JSON.parse(text) as Record<string, unknown>;
-        if (typeof parsed["detail"] === "string") detail = parsed["detail"];
-        else if (typeof parsed["error_description"] === "string")
+        if (typeof parsed["detail"] === "string") {
+          ({ detail } = parsed);
+        } else if (typeof parsed["error_description"] === "string") {
           detail = parsed["error_description"];
+        }
       } catch {
         // keep raw text
       }
@@ -127,7 +131,7 @@ export function createDcrHandler(opts: DcrProxyOptions): DcrHandler {
       return err(
         statusOut,
         upstream.status >= 500 ? "server_error" : "invalid_client_metadata",
-        `upstream ${upstream.status}: ${detail}`.slice(0, 500),
+        `upstream ${upstream.status}: ${detail}`.slice(0, 500)
       );
     }
 
@@ -138,7 +142,7 @@ export function createDcrHandler(opts: DcrProxyOptions): DcrHandler {
       return err(
         502,
         "server_error",
-        "upstream returned non-JSON success body",
+        "upstream returned non-JSON success body"
       );
     }
 
@@ -148,16 +152,18 @@ export function createDcrHandler(opts: DcrProxyOptions): DcrHandler {
     // token endpoint — default it to "none" so PKCE-only public-
     // client flows work, which is the only mode Stalwart's DCR
     // currently issues.
-    if (response["token_endpoint_auth_method"] == null) {
+    if (
+      response["token_endpoint_auth_method"] === undefined ||
+      response["token_endpoint_auth_method"] === null
+    ) {
       response["token_endpoint_auth_method"] = "none";
     }
 
-    return new Response(JSON.stringify(response), {
-      status: 201,
+    return Response.json(response, {
       headers: {
-        "content-type": "application/json",
         "cache-control": "no-store",
+        "content-type": "application/json",
       },
+      status: 201,
     });
   };
-}

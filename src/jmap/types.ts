@@ -6,7 +6,7 @@
 
 export interface JmapSession {
   apiUrl: string;
-  primaryAccounts: { [capability: string]: string };
+  primaryAccounts: Record<string, string>;
 }
 
 export interface JmapRequest {

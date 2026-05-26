@@ -71,12 +71,12 @@ mount `StreamableHTTPServerTransport` and register tools. Conventions:
 Environment variables (set via `infra/modules/mcp.nix`
 `EnvironmentFile=/run/secrets/mcp.env`):
 
-| Var | Default | Notes |
-|---|---|---|
-| `MCP_HOST` | `127.0.0.1` | bind address — keep loopback in prod (nginx fronts) |
-| `MCP_PORT` | `8080` | upstream port nginx proxies to |
-| `MCP_PUBLIC_URL` | `http://127.0.0.1:8080` | full base URL, e.g. `https://mcp.langmail.me` |
-| `STALWART_PUBLIC_URL` | `https://mail.langmail.me` | issuer for OAuth metadata |
+| Var                   | Default                    | Notes                                               |
+| --------------------- | -------------------------- | --------------------------------------------------- |
+| `MCP_HOST`            | `127.0.0.1`                | bind address — keep loopback in prod (nginx fronts) |
+| `MCP_PORT`            | `8080`                     | upstream port nginx proxies to                      |
+| `MCP_PUBLIC_URL`      | `http://127.0.0.1:8080`    | full base URL, e.g. `https://mcp.langmail.me`       |
+| `STALWART_PUBLIC_URL` | `https://mail.langmail.me` | issuer for OAuth metadata                           |
 
 The `EnvironmentFile` may be empty on a fresh VM — defaults boot a
 usable server, just with the wrong public URL.

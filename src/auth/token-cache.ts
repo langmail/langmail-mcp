@@ -20,7 +20,9 @@ export class TokenCache {
 
   get(token: string): CachedPrincipal | undefined {
     const hit = this.map.get(token);
-    if (!hit) return undefined;
+    if (!hit) {
+      return undefined;
+    }
     if (hit.exp <= nowSec()) {
       this.map.delete(token);
       return undefined;
@@ -35,7 +37,9 @@ export class TokenCache {
   sweep(): void {
     const t = nowSec();
     for (const [k, v] of this.map) {
-      if (v.exp <= t) this.map.delete(k);
+      if (v.exp <= t) {
+        this.map.delete(k);
+      }
     }
   }
 }

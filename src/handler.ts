@@ -4,13 +4,11 @@
 // without spinning up Bun.serve. `index.ts` does config + transport
 // wiring; this file owns routing.
 
-import { TokenCache } from "./auth/tokenCache.ts";
-import {
-  createAuthMiddleware,
-  type AuthContext,
-  type AuthMiddleware,
-} from "./auth/middleware.ts";
-import { createDcrHandler, type DcrHandler } from "./auth/dcr.ts";
+import type { DcrHandler } from "./auth/dcr.ts";
+import { createDcrHandler } from "./auth/dcr.ts";
+import type { AuthContext, AuthMiddleware } from "./auth/middleware.ts";
+import { createAuthMiddleware } from "./auth/middleware.ts";
+import { TokenCache } from "./auth/token-cache.ts";
 
 export interface HandlerConfig {
   publicUrl: string;
@@ -33,23 +31,22 @@ export interface Routes {
   authenticate: AuthMiddleware;
 }
 
-function json(body: unknown, init: ResponseInit = {}): Response {
-  return new Response(JSON.stringify(body, null, 2), {
+const json = (body: unknown, init: ResponseInit = {}): Response =>
+  new Response(JSON.stringify(body, null, 2), {
     ...init,
     headers: {
-      "content-type": "application/json",
       "cache-control": "no-store",
-      ...(init.headers ?? {}),
+      "content-type": "application/json",
+      ...init.headers,
     },
   });
-}
 
-export function createRoutes(cfg: HandlerConfig): Routes {
+export const createRoutes = (cfg: HandlerConfig): Routes => {
   const cache = cfg.cache ?? new TokenCache();
   const authenticate = createAuthMiddleware({
-    stalwartBase: cfg.stalwartUrl,
-    publicUrl: cfg.publicUrl,
     cache,
+    publicUrl: cfg.publicUrl,
+    stalwartBase: cfg.stalwartUrl,
   });
   const dcrHandler =
     cfg.dcrHandler ??
@@ -84,19 +81,19 @@ export function createRoutes(cfg: HandlerConfig): Routes {
       // NB: Stalwart 0.16's authorize endpoint is /login, not the
       // OIDC-conventional /authorize.
       return json({
-        issuer: cfg.publicUrl,
         authorization_endpoint: `${cfg.stalwartUrl}/login`,
-        token_endpoint: `${cfg.stalwartUrl}/auth/token`,
-        registration_endpoint: `${cfg.publicUrl}/auth/register`,
-        userinfo_endpoint: `${cfg.stalwartUrl}/auth/userinfo`,
-        introspection_endpoint: `${cfg.stalwartUrl}/auth/introspect`,
-        revocation_endpoint: `${cfg.stalwartUrl}/auth/revoke`,
-        response_types_supported: ["code"],
-        grant_types_supported: ["authorization_code", "refresh_token"],
         code_challenge_methods_supported: ["S256"],
-        token_endpoint_auth_methods_supported: ["none"],
-        scopes_supported: ["openid", "offline_access"],
+        grant_types_supported: ["authorization_code", "refresh_token"],
+        introspection_endpoint: `${cfg.stalwartUrl}/auth/introspect`,
+        issuer: cfg.publicUrl,
+        registration_endpoint: `${cfg.publicUrl}/auth/register`,
         resource: cfg.publicUrl,
+        response_types_supported: ["code"],
+        revocation_endpoint: `${cfg.stalwartUrl}/auth/revoke`,
+        scopes_supported: ["openid", "offline_access"],
+        token_endpoint: `${cfg.stalwartUrl}/auth/token`,
+        token_endpoint_auth_methods_supported: ["none"],
+        userinfo_endpoint: `${cfg.stalwartUrl}/auth/userinfo`,
       });
     }
 
@@ -105,13 +102,13 @@ export function createRoutes(cfg: HandlerConfig): Routes {
       // alone, which is what the `WWW-Authenticate: resource_metadata=...`
       // header points them at on a 401.
       return json({
-        resource: cfg.publicUrl,
         // Point at ourselves, not Stalwart, so the MCP SDK discovers
         // our AS metadata (with the DCR proxy registration_endpoint)
         // instead of Stalwart's (which advertises an admin-gated
         // /auth/register the SDK can't reach).
         authorization_servers: [cfg.publicUrl],
         bearer_methods_supported: ["header"],
+        resource: cfg.publicUrl,
       });
     }
 
@@ -121,20 +118,24 @@ export function createRoutes(cfg: HandlerConfig): Routes {
 
     if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) {
       const result = await authenticate(req);
-      if (result instanceof Response) return result;
-      if (cfg.mcpHandler) return cfg.mcpHandler(req, result);
+      if (result instanceof Response) {
+        return result;
+      }
+      if (cfg.mcpHandler) {
+        return cfg.mcpHandler(req, result);
+      }
       return json(
         {
-          error: "not_implemented",
           detail: "MCP transport lands in phase 2",
+          error: "not_implemented",
           principal: result.principal,
         },
-        { status: 501 },
+        { status: 501 }
       );
     }
 
     return new Response("not found\n", { status: 404 });
   };
 
-  return { fetch: fetchHandler, authenticate };
-}
+  return { authenticate, fetch: fetchHandler };
+};

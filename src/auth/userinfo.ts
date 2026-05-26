@@ -8,23 +8,26 @@
 
 export interface UserinfoResult {
   principal: string;
-  exp: number; // Unix seconds
+  // Unix seconds
+  exp: number;
 }
 
 export class UserinfoError extends Error {
-  constructor(public status: number, message: string) {
+  status: number;
+  constructor(status: number, message: string) {
     super(message);
+    this.status = status;
     this.name = "UserinfoError";
   }
 }
 
 const DEFAULT_TTL_SECONDS = 3600;
 
-export async function fetchUserinfo(
+export const fetchUserinfo = async (
   stalwartBase: string,
-  token: string,
-): Promise<UserinfoResult> {
-  const url = `${stalwartBase.replace(/\/+$/, "")}/auth/userinfo`;
+  token: string
+): Promise<UserinfoResult> => {
+  const url = `${stalwartBase.replace(/\/+$/u, "")}/auth/userinfo`;
   const res = await fetch(url, {
     headers: { authorization: `Bearer ${token}` },
   });
@@ -40,12 +43,12 @@ export async function fetchUserinfo(
   if (!principal) {
     throw new UserinfoError(
       200,
-      "userinfo response missing preferred_username and sub",
+      "userinfo response missing preferred_username and sub"
     );
   }
   const exp =
     typeof body["exp"] === "number"
       ? (body["exp"] as number)
       : Math.floor(Date.now() / 1000) + DEFAULT_TTL_SECONDS;
-  return { principal, exp };
-}
+  return { exp, principal };
+};

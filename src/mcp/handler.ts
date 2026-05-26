@@ -11,26 +11,24 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+
 import type { AuthContext } from "../auth/middleware.ts";
-import {
-  makeLiveDeps,
-  registerSearchEmails,
-} from "../tools/searchEmails.ts";
-import { SessionCache } from "../jmap/session.ts";
+import { SessionCache } from "../jmap/session-cache.ts";
+import { makeLiveDeps, registerSearchEmails } from "../tools/search-emails.ts";
 
 export interface McpHandlerConfig {
   stalwartUrl: string;
 }
 
-export function createMcpHandler(
-  cfg: McpHandlerConfig,
-): (req: Request, ctx: AuthContext) => Promise<Response> {
+export const createMcpHandler = (
+  cfg: McpHandlerConfig
+): ((req: Request, ctx: AuthContext) => Promise<Response>) => {
   // Shared across requests: JMAP session lookups dedupe across all
   // bearer tokens we've seen.
   const sessionCache = new SessionCache();
   const deps = makeLiveDeps({
-    stalwartUrl: cfg.stalwartUrl,
     sessionCache,
+    stalwartUrl: cfg.stalwartUrl,
   });
 
   return async (req, ctx) => {
@@ -48,11 +46,11 @@ export function createMcpHandler(
 
     return transport.handleRequest(req, {
       authInfo: {
-        token: ctx.token,
         clientId: "langmail-mcp",
-        scopes: [],
         extra: { principal: ctx.principal },
+        scopes: [],
+        token: ctx.token,
       },
     });
   };
-}
+};

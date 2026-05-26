@@ -1,28 +1,28 @@
 import { describe, test, expect, mock } from "bun:test";
+
 import { createDcrHandler } from "./dcr.ts";
 
 const STALWART = "https://mail.example.com";
 const AUTH = "Basic YWRtaW46cHc=";
 
-function withFetch<T>(
+const withFetch = <T>(
   impl: (url: string, init?: RequestInit) => Promise<Response>,
-  fn: () => Promise<T>,
-): Promise<T> {
+  fn: () => Promise<T>
+): Promise<T> => {
   const original = globalThis.fetch;
   globalThis.fetch = impl as unknown as typeof fetch;
   return fn().finally(() => {
     globalThis.fetch = original;
   });
-}
+};
 
-function req(body: unknown, init: RequestInit = {}): Request {
-  return new Request("https://mcp.example.com/auth/register", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
+const req = (body: unknown, init: RequestInit = {}): Request =>
+  new Request("https://mcp.example.com/auth/register", {
     body: typeof body === "string" ? body : JSON.stringify(body),
+    headers: { "content-type": "application/json" },
+    method: "POST",
     ...init,
   });
-}
 
 describe("DCR proxy", () => {
   test("rejects non-POST with RFC-6749 error", async () => {
@@ -58,29 +58,31 @@ describe("DCR proxy", () => {
   });
 
   test("accepts https and http loopback redirects", async () => {
-    const calls: Array<{ url: string; init?: RequestInit }> = [];
-    const upstream = mock(async (url: string, init?: RequestInit) => {
-      calls.push({ url, init });
-      return new Response(
-        JSON.stringify({
-          client_id: "abc123",
-          redirect_uris: ["http://localhost:1234/cb"],
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const upstream = mock((url: string, init?: RequestInit) => {
+      calls.push({ init, url });
+      return Promise.resolve(
+        Response.json(
+          {
+            client_id: "abc123",
+            redirect_uris: ["http://localhost:1234/cb"],
+          },
+          { status: 200 }
+        )
       );
     });
     const h = createDcrHandler({ stalwartBase: STALWART, upstreamAuth: AUTH });
     const res = await withFetch(upstream, () =>
       h(
         req({
+          client_name: "test",
           redirect_uris: [
             "http://localhost:1234/cb",
             "http://127.0.0.1/cb",
             "https://x.example/cb",
           ],
-          client_name: "test",
-        }),
-      ),
+        })
+      )
     );
     expect(res.status).toBe(201);
     const body = (await res.json()) as Record<string, unknown>;
@@ -88,50 +90,54 @@ describe("DCR proxy", () => {
     // Default for Stalwart's missing field.
     expect(body["token_endpoint_auth_method"]).toBe("none");
     // Upstream got the admin Authorization header.
-    expect(calls[0]!.url).toBe(`${STALWART}/auth/register`);
+    expect(calls[0]?.url).toBe(`${STALWART}/auth/register`);
     const sentAuth = new Headers(
-      calls[0]!.init?.headers as Record<string, string>,
+      calls[0]?.init?.headers as Record<string, string>
     ).get("authorization");
     expect(sentAuth).toBe(AUTH);
   });
 
   test("preserves a client-supplied token_endpoint_auth_method", async () => {
-    const upstream = mock(async () =>
-      new Response(
-        JSON.stringify({
-          client_id: "abc",
-          redirect_uris: ["https://x/cb"],
-          token_endpoint_auth_method: "client_secret_post",
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      ),
+    const upstream = mock(() =>
+      Promise.resolve(
+        Response.json(
+          {
+            client_id: "abc",
+            redirect_uris: ["https://x/cb"],
+            token_endpoint_auth_method: "client_secret_post",
+          },
+          { status: 200 }
+        )
+      )
     );
     const h = createDcrHandler({ stalwartBase: STALWART, upstreamAuth: AUTH });
     const res = await withFetch(upstream, () =>
-      h(req({ redirect_uris: ["https://x/cb"] })),
+      h(req({ redirect_uris: ["https://x/cb"] }))
     );
     const body = (await res.json()) as Record<string, unknown>;
     expect(body["token_endpoint_auth_method"]).toBe("client_secret_post");
   });
 
   test("translates Stalwart Problem Details 401 into RFC 6749 JSON", async () => {
-    const upstream = mock(async () =>
-      new Response(
-        JSON.stringify({
-          type: "about:blank",
-          status: 401,
-          title: "Unauthorized",
-          detail: "You have to authenticate first.",
-        }),
-        {
-          status: 401,
-          headers: { "content-type": "application/problem+json" },
-        },
-      ),
+    const upstream = mock(() =>
+      Promise.resolve(
+        Response.json(
+          {
+            detail: "You have to authenticate first.",
+            status: 401,
+            title: "Unauthorized",
+            type: "about:blank",
+          },
+          {
+            headers: { "content-type": "application/problem+json" },
+            status: 401,
+          }
+        )
+      )
     );
     const h = createDcrHandler({ stalwartBase: STALWART, upstreamAuth: AUTH });
     const res = await withFetch(upstream, () =>
-      h(req({ redirect_uris: ["https://x/cb"] })),
+      h(req({ redirect_uris: ["https://x/cb"] }))
     );
     expect(res.status).toBe(400);
     const body = (await res.json()) as Record<string, unknown>;
@@ -140,12 +146,12 @@ describe("DCR proxy", () => {
   });
 
   test("upstream 500 maps to 502 server_error", async () => {
-    const upstream = mock(async () =>
-      new Response("boom", { status: 500 }),
+    const upstream = mock(() =>
+      Promise.resolve(new Response("boom", { status: 500 }))
     );
     const h = createDcrHandler({ stalwartBase: STALWART, upstreamAuth: AUTH });
     const res = await withFetch(upstream, () =>
-      h(req({ redirect_uris: ["https://x/cb"] })),
+      h(req({ redirect_uris: ["https://x/cb"] }))
     );
     expect(res.status).toBe(502);
     const body = (await res.json()) as Record<string, unknown>;

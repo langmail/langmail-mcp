@@ -24,32 +24,37 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 
 const log = (msg: string) => process.stdout.write(`▶ ${msg}\n`);
 
-function requireEnv(name: string): string {
+const requireEnv = (name: string): string => {
   const v = process.env[name];
   if (!v) {
     process.stderr.write(`✗ missing required env var ${name}\n`);
     process.exit(2);
   }
   return v;
-}
+};
 
-function unwrapText(result: {
+const fail = (msg: string): never => {
+  process.stderr.write(`✗ ${msg}\n`);
+  process.exit(1);
+};
+
+const unwrapText = (result: {
   content?: { type?: string; text?: string }[];
   isError?: boolean;
-}): { text: string; isError: boolean } {
+}): { text: string; isError: boolean } => {
   const first = result.content?.[0];
   if (!first || first.type !== "text" || typeof first.text !== "string") {
     throw new Error(
-      `tool response missing content[0].text: ${JSON.stringify(result)}`,
+      `tool response missing content[0].text: ${JSON.stringify(result)}`
     );
   }
-  return { text: first.text, isError: Boolean(result.isError) };
-}
+  return { isError: Boolean(result.isError), text: first.text };
+};
 
-async function connect(
+const connect = async (
   mcpUrl: string,
-  token: string,
-): Promise<{ client: Client; close: () => Promise<void> }> {
+  token: string
+): Promise<{ client: Client; close: () => Promise<void> }> => {
   const transport = new StreamableHTTPClientTransport(new URL(mcpUrl), {
     requestInit: { headers: { authorization: `Bearer ${token}` } },
   });
@@ -59,36 +64,40 @@ async function connect(
     client,
     close: async () => {
       await client.close();
-      await transport.close().catch(() => {});
+      try {
+        await transport.close();
+      } catch {
+        // ignore
+      }
     },
   };
-}
+};
 
-async function exchangeRefresh(opts: {
+const exchangeRefresh = async (opts: {
   stalwartUrl: string;
   clientId: string;
   refreshToken: string;
-}): Promise<{ access_token: string; refresh_token?: string }> {
+}): Promise<{ access_token: string; refresh_token?: string }> => {
   const res = await fetch(`${opts.stalwartUrl}/auth/token`, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
+      client_id: opts.clientId,
       grant_type: "refresh_token",
       refresh_token: opts.refreshToken,
-      client_id: opts.clientId,
     }).toString(),
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    method: "POST",
   });
   if (!res.ok) {
     throw new Error(
-      `refresh exchange failed: HTTP ${res.status} ${await res.text()}`,
+      `refresh exchange failed: HTTP ${res.status} ${await res.text()}`
     );
   }
   return (await res.json()) as { access_token: string; refresh_token?: string };
-}
+};
 
-async function main() {
-  const mcpBase = requireEnv("MCP_PUBLIC_URL").replace(/\/+$/, "");
-  const stalwart = requireEnv("STALWART_PUBLIC_URL").replace(/\/+$/, "");
+const main = async () => {
+  const mcpBase = requireEnv("MCP_PUBLIC_URL").replace(/\/+$/u, "");
+  const stalwart = requireEnv("STALWART_PUBLIC_URL").replace(/\/+$/u, "");
   const clientId = requireEnv("MCP_OAUTH_CLIENT_ID");
   const accessToken = requireEnv("MCP_ACCESS_TOKEN");
   const refreshToken = process.env.MCP_REFRESH_TOKEN ?? "";
@@ -96,13 +105,9 @@ async function main() {
   const mcpUrl = `${mcpBase}/mcp`;
 
   let passed = 0;
-  const fail = (msg: string): never => {
-    process.stderr.write(`✗ ${msg}\n`);
-    process.exit(1);
-  };
   const pass = (msg: string) => {
     process.stdout.write(`✓ ${msg}\n`);
-    passed++;
+    passed += 1;
   };
 
   log(`connect to ${mcpUrl}`);
@@ -129,40 +134,44 @@ async function main() {
     let isError = false;
     let attempts = 0;
     const maxAttempts = 6;
-    for (; attempts < maxAttempts; attempts++) {
+    for (; attempts < maxAttempts; attempts += 1) {
       const result = await session.client.callTool({
+        arguments: { limit: 5, query: smokeTag },
         name: "search_emails",
-        arguments: { query: smokeTag, limit: 5 },
       });
       ({ text, isError } = unwrapText(
         result as {
           content?: { type?: string; text?: string }[];
           isError?: boolean;
-        },
+        }
       ));
-      if (!isError && text.includes(smokeTag)) break;
-      await new Promise((r) => setTimeout(r, 500));
+      if (!isError && text.includes(smokeTag)) {
+        break;
+      }
+      await Bun.sleep(500);
     }
-    if (isError) fail(`smoke-tag query returned isError=true: ${text}`);
+    if (isError) {
+      fail(`smoke-tag query returned isError=true: ${text}`);
+    }
     if (!text.includes(smokeTag)) {
       fail(
-        `smoke-tag '${smokeTag}' not found after ${maxAttempts} attempts: ${text}`,
+        `smoke-tag '${smokeTag}' not found after ${maxAttempts} attempts: ${text}`
       );
     }
     // Tighten: exactly one hit, with the right sender. The tool formats
     // hits as "N message(s) matched:\n\n1. <subject>\n   from: ...\n   date: ...".
-    if (!/^1 message\(s\) matched/m.test(text)) {
+    if (!/^1 message\(s\) matched/mu.test(text)) {
       fail(`expected exactly one hit for unique tag; got: ${text}`);
     }
     if (!text.includes("smoketest@langmail.me")) {
       fail(`hit's sender is not smoketest@langmail.me: ${text}`);
     }
     pass(
-      `smoke-tag round-trip (mail-side delivery → FTS → JMAP → MCP tool, ${attempts + 1} attempt(s))`,
+      `smoke-tag round-trip (mail-side delivery → FTS → JMAP → MCP tool, ${attempts + 1} attempt(s))`
     );
   } else {
     process.stdout.write(
-      "  (skipping round-trip check — MCP_SMOKE_TAG not set; pass the mail smoke tag in to enable)\n",
+      "  (skipping round-trip check — MCP_SMOKE_TAG not set; pass the mail smoke tag in to enable)\n"
     );
   }
 
@@ -170,11 +179,13 @@ async function main() {
   log("bad input: empty query");
   {
     const result = (await session.client.callTool({
-      name: "search_emails",
       arguments: { query: "" },
+      name: "search_emails",
     })) as { isError?: boolean; content?: { type?: string; text?: string }[] };
     if (!result.isError) {
-      fail(`expected isError=true for empty query; got: ${JSON.stringify(result)}`);
+      fail(
+        `expected isError=true for empty query; got: ${JSON.stringify(result)}`
+      );
     }
     pass("empty query rejected with isError=true");
   }
@@ -182,11 +193,13 @@ async function main() {
   log("bad input: limit above schema cap");
   {
     const result = (await session.client.callTool({
+      arguments: { limit: 9999, query: "x" },
       name: "search_emails",
-      arguments: { query: "x", limit: 9999 },
     })) as { isError?: boolean; content?: { type?: string; text?: string }[] };
     if (!result.isError) {
-      fail(`expected isError=true for limit=9999; got: ${JSON.stringify(result)}`);
+      fail(
+        `expected isError=true for limit=9999; got: ${JSON.stringify(result)}`
+      );
     }
     pass("limit > 100 rejected with isError=true");
   }
@@ -194,11 +207,13 @@ async function main() {
   log("bad input: nonexistent mailbox");
   {
     const result = (await session.client.callTool({
+      arguments: { mailbox: "DoesNotExist", query: "x" },
       name: "search_emails",
-      arguments: { query: "x", mailbox: "DoesNotExist" },
     })) as { isError?: boolean; content?: { type?: string; text?: string }[] };
     const { text, isError } = unwrapText(result);
-    if (!isError) fail(`expected isError=true for unknown mailbox; got: ${text}`);
+    if (!isError) {
+      fail(`expected isError=true for unknown mailbox; got: ${text}`);
+    }
     if (!text.toLowerCase().includes("mailbox")) {
       fail(`unknown-mailbox error text did not mention 'mailbox': ${text}`);
     }
@@ -209,11 +224,13 @@ async function main() {
   if (refreshToken) {
     log("exchange refresh token");
     const fresh = await exchangeRefresh({
-      stalwartUrl: stalwart,
       clientId,
       refreshToken,
+      stalwartUrl: stalwart,
     });
-    if (!fresh.access_token) fail("refresh exchange returned no access_token");
+    if (!fresh.access_token) {
+      fail("refresh exchange returned no access_token");
+    }
     pass("refresh exchange returned a new access_token");
 
     log("reconnect with the new bearer");
@@ -226,15 +243,19 @@ async function main() {
     pass("post-refresh listTools still works");
   } else {
     process.stdout.write(
-      "  (skipping refresh round-trip — MCP_REFRESH_TOKEN not set)\n",
+      "  (skipping refresh round-trip — MCP_REFRESH_TOKEN not set)\n"
     );
   }
 
   await session.close();
   process.stdout.write(`\n${passed} checks passed\n`);
-}
+};
 
-main().catch((err) => {
-  process.stderr.write(`✗ ${err instanceof Error ? err.stack : String(err)}\n`);
+try {
+  await main();
+} catch (error) {
+  process.stderr.write(
+    `✗ ${error instanceof Error ? error.stack : String(error)}\n`
+  );
   process.exit(1);
-});
+}
