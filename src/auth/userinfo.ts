@@ -7,48 +7,38 @@
 // is the cheapest path that gives us a usable principal.
 
 export interface UserinfoResult {
-  principal: string;
   // Unix seconds
-  exp: number;
+  exp: number
+  principal: string
 }
 
 export class UserinfoError extends Error {
-  status: number;
+  status: number
   constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-    this.name = "UserinfoError";
+    super(message)
+    this.status = status
+    this.name = 'UserinfoError'
   }
 }
 
-const DEFAULT_TTL_SECONDS = 3600;
+const DEFAULT_TTL_SECONDS = 3600
+const TRAILING_SLASHES_RE = /\/+$/u
 
-export const fetchUserinfo = async (
-  stalwartBase: string,
-  token: string
-): Promise<UserinfoResult> => {
-  const url = `${stalwartBase.replace(/\/+$/u, "")}/auth/userinfo`;
+export const fetchUserinfo = async (stalwartBase: string, token: string): Promise<UserinfoResult> => {
+  const url = `${stalwartBase.replace(TRAILING_SLASHES_RE, '')}/auth/userinfo`
   const res = await fetch(url, {
     headers: { authorization: `Bearer ${token}` },
-  });
+  })
   if (res.status !== 200) {
-    throw new UserinfoError(res.status, `userinfo returned ${res.status}`);
+    throw new UserinfoError(res.status, `userinfo returned ${res.status}`)
   }
-  const body = (await res.json()) as Record<string, unknown>;
+  const body = (await res.json()) as Record<string, unknown>
   const principal =
-    (typeof body["preferred_username"] === "string"
-      ? (body["preferred_username"] as string)
-      : undefined) ??
-    (typeof body["sub"] === "string" ? (body["sub"] as string) : undefined);
+    (typeof body.preferred_username === 'string' ? (body.preferred_username as string) : undefined) ??
+    (typeof body.sub === 'string' ? (body.sub as string) : undefined)
   if (!principal) {
-    throw new UserinfoError(
-      200,
-      "userinfo response missing preferred_username and sub"
-    );
+    throw new UserinfoError(200, 'userinfo response missing preferred_username and sub')
   }
-  const exp =
-    typeof body["exp"] === "number"
-      ? (body["exp"] as number)
-      : Math.floor(Date.now() / 1000) + DEFAULT_TTL_SECONDS;
-  return { exp, principal };
-};
+  const exp = typeof body.exp === 'number' ? (body.exp as number) : Math.floor(Date.now() / 1000) + DEFAULT_TTL_SECONDS
+  return { exp, principal }
+}

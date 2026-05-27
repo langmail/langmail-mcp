@@ -1,18 +1,4 @@
 {
-  "compilerOptions": {
-    "lib": ["ESNext"],
-    "target": "ESNext",
-    "module": "ESNext",
-    "moduleDetection": "force",
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true,
-    "noEmit": true,
-    "strict": true,
-    "skipLibCheck": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
-    "types": ["bun-types"]
-  },
+  "extends": "@marbles/tsconfig/base.json",
   "include": ["src/**/*.ts", "scripts/**/*.ts"]
 }

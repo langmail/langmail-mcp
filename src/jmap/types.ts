@@ -5,30 +5,30 @@
 // trying to mirror the whole RFC up front.
 
 export interface JmapSession {
-  apiUrl: string;
-  primaryAccounts: Record<string, string>;
+  apiUrl: string
+  primaryAccounts: Record<string, string>
 }
 
 export interface JmapRequest {
-  using: string[];
-  methodCalls: [string, Record<string, unknown>, string][];
+  methodCalls: [string, Record<string, unknown>, string][]
+  using: string[]
 }
 
 export interface JmapResponse {
-  methodResponses: [string, Record<string, unknown>, string][];
+  methodResponses: [string, Record<string, unknown>, string][]
 }
 
 // Properties we ask for in Email/get.
 export interface EmailRecord {
-  id: string;
-  subject?: string | null;
-  from?: { name?: string | null; email: string }[] | null;
-  receivedAt?: string | null;
-  preview?: string | null;
-  mailboxIds?: Record<string, boolean> | null;
+  from?: { name?: string | null; email: string }[] | null
+  id: string
+  mailboxIds?: Record<string, boolean> | null
+  preview?: string | null
+  receivedAt?: string | null
+  subject?: string | null
 }
 
 export interface MailboxRecord {
-  id: string;
-  name: string;
+  id: string
+  name: string
 }

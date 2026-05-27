@@ -14,91 +14,78 @@
 // MCP TypeScript SDK chokes on with a Zod parse error.
 
 export interface DcrProxyOptions {
-  stalwartBase: string;
+  stalwartBase: string
   // Full value for the Authorization header sent to Stalwart, e.g.
   // "Basic <base64(admin:password)>". Omit to disable the proxy
   // (handler returns 503 with a clear error).
-  upstreamAuth?: string;
+  upstreamAuth?: string
 }
 
-export type DcrHandler = (req: Request) => Promise<Response>;
+export type DcrHandler = (req: Request) => Promise<Response>
 
 const err = (status: number, error: string, description: string): Response =>
   Response.json(
     { error, error_description: description },
     {
       headers: {
-        "cache-control": "no-store",
-        "content-type": "application/json",
+        'cache-control': 'no-store',
+        'content-type': 'application/json',
       },
       status,
     }
-  );
+  )
 
 // RFC 7591 §5: native + web clients may use loopback redirect URIs
 // over http; everything else MUST be https. Permissive enough for
 // MCP CLI clients (loopback) and headless server-side callbacks.
 const isAllowedRedirectUri = (raw: unknown): raw is string => {
-  if (typeof raw !== "string" || raw.length === 0) {
-    return false;
+  if (typeof raw !== 'string' || raw.length === 0) {
+    return false
   }
-  let u: URL;
+  let u: URL
   try {
-    u = new URL(raw);
+    u = new URL(raw)
   } catch {
-    return false;
+    return false
   }
-  if (u.protocol === "https:") {
-    return true;
+  if (u.protocol === 'https:') {
+    return true
   }
-  if (u.protocol === "http:") {
-    const h = u.hostname;
-    return (
-      h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h === "::1"
-    );
+  if (u.protocol === 'http:') {
+    const h = u.hostname
+    return h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '::1'
   }
   // Custom schemes (e.g. "myapp://cb") are valid RFC 7591 but we
   // don't expect them; reject defensively.
-  return false;
-};
+  return false
+}
 
 export const createDcrHandler =
   (opts: DcrProxyOptions): DcrHandler =>
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: linear validation pipeline
   async (req) => {
-    if (req.method !== "POST") {
-      return err(405, "invalid_request", "POST required");
+    if (req.method !== 'POST') {
+      return err(405, 'invalid_request', 'POST required')
     }
 
     if (!opts.upstreamAuth) {
-      return err(
-        503,
-        "temporarily_unavailable",
-        "DCR proxy not configured on this server"
-      );
+      return err(503, 'temporarily_unavailable', 'DCR proxy not configured on this server')
     }
 
-    let body: Record<string, unknown>;
+    let body: Record<string, unknown>
     try {
-      body = (await req.json()) as Record<string, unknown>;
+      body = (await req.json()) as Record<string, unknown>
     } catch {
-      return err(400, "invalid_client_metadata", "body is not valid JSON");
+      return err(400, 'invalid_client_metadata', 'body is not valid JSON')
     }
 
-    const uris = body["redirect_uris"];
+    const uris = body.redirect_uris
     if (!Array.isArray(uris) || uris.length === 0) {
-      return err(
-        400,
-        "invalid_redirect_uri",
-        "redirect_uris must be a non-empty array"
-      );
+      return err(400, 'invalid_redirect_uri', 'redirect_uris must be a non-empty array')
     }
     for (const u of uris) {
       if (!isAllowedRedirectUri(u)) {
-        return err(
-          400,
-          "invalid_redirect_uri",
-          `redirect_uri ${String(u)} is not https or loopback http`
-        );
+        return err(400, 'invalid_redirect_uri', `redirect_uri ${String(u)} is not https or loopback http`)
       }
     }
 
@@ -106,44 +93,40 @@ export const createDcrHandler =
       body: JSON.stringify(body),
       headers: {
         authorization: opts.upstreamAuth,
-        "content-type": "application/json",
+        'content-type': 'application/json',
       },
-      method: "POST",
-    });
+      method: 'POST',
+    })
 
-    const text = await upstream.text();
+    const text = await upstream.text()
 
     if (!upstream.ok) {
       // Stalwart speaks Problem Details (application/problem+json);
       // translate to RFC 6749 so the MCP SDK can parse it.
-      let detail = text;
+      let detail = text
       try {
-        const parsed = JSON.parse(text) as Record<string, unknown>;
-        if (typeof parsed["detail"] === "string") {
-          ({ detail } = parsed);
-        } else if (typeof parsed["error_description"] === "string") {
-          detail = parsed["error_description"];
+        const parsed = JSON.parse(text) as Record<string, unknown>
+        if (typeof parsed.detail === 'string') {
+          ;({ detail } = parsed)
+        } else if (typeof parsed.error_description === 'string') {
+          detail = parsed.error_description
         }
       } catch {
         // keep raw text
       }
-      const statusOut = upstream.status >= 500 ? 502 : 400;
+      const statusOut = upstream.status >= 500 ? 502 : 400
       return err(
         statusOut,
-        upstream.status >= 500 ? "server_error" : "invalid_client_metadata",
+        upstream.status >= 500 ? 'server_error' : 'invalid_client_metadata',
         `upstream ${upstream.status}: ${detail}`.slice(0, 500)
-      );
+      )
     }
 
-    let response: Record<string, unknown>;
+    let response: Record<string, unknown>
     try {
-      response = JSON.parse(text) as Record<string, unknown>;
+      response = JSON.parse(text) as Record<string, unknown>
     } catch {
-      return err(
-        502,
-        "server_error",
-        "upstream returned non-JSON success body"
-      );
+      return err(502, 'server_error', 'upstream returned non-JSON success body')
     }
 
     // Stalwart doesn't populate token_endpoint_auth_method on the
@@ -152,18 +135,15 @@ export const createDcrHandler =
     // token endpoint — default it to "none" so PKCE-only public-
     // client flows work, which is the only mode Stalwart's DCR
     // currently issues.
-    if (
-      response["token_endpoint_auth_method"] === undefined ||
-      response["token_endpoint_auth_method"] === null
-    ) {
-      response["token_endpoint_auth_method"] = "none";
+    if (response.token_endpoint_auth_method === undefined || response.token_endpoint_auth_method === null) {
+      response.token_endpoint_auth_method = 'none'
     }
 
     return Response.json(response, {
       headers: {
-        "cache-control": "no-store",
-        "content-type": "application/json",
+        'cache-control': 'no-store',
+        'content-type': 'application/json',
       },
       status: 201,
-    });
-  };
+    })
+  }

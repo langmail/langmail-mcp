@@ -10,63 +10,61 @@
 // once per token, then caching the (principal, exp) tuple until the
 // token expires. See spec/02 §Architecture.
 
-import type { TokenCache } from "./token-cache.ts";
-import { fetchUserinfo, UserinfoError } from "./userinfo.ts";
+import type { TokenCache } from './token-cache.ts'
+import { fetchUserinfo, UserinfoError } from './userinfo.ts'
 
 export interface AuthContext {
-  principal: string;
-  token: string;
-  exp: number;
+  exp: number
+  principal: string
+  token: string
 }
 
 export interface AuthMiddlewareOptions {
-  stalwartBase: string;
-  publicUrl: string;
-  cache: TokenCache;
+  cache: TokenCache
+  publicUrl: string
+  stalwartBase: string
 }
 
-export type AuthMiddleware = (req: Request) => Promise<AuthContext | Response>;
+export type AuthMiddleware = (req: Request) => Promise<AuthContext | Response>
 
-export const createAuthMiddleware = (
-  opts: AuthMiddlewareOptions
-): AuthMiddleware => {
-  const challenge =
-    `Bearer realm="mcp", ` +
-    `resource_metadata="${opts.publicUrl}/.well-known/oauth-protected-resource"`;
+const BEARER_RE = /^Bearer\s+(.+)$/iu
+
+export const createAuthMiddleware = (opts: AuthMiddlewareOptions): AuthMiddleware => {
+  const challenge = `Bearer realm="mcp", resource_metadata="${opts.publicUrl}/.well-known/oauth-protected-resource"`
 
   const unauth = (error?: string): Response => {
-    const wa = error ? `${challenge}, error="${error}"` : challenge;
+    const wa = error ? `${challenge}, error="${error}"` : challenge
     return new Response(null, {
-      headers: { "www-authenticate": wa },
+      headers: { 'www-authenticate': wa },
       status: 401,
-    });
-  };
+    })
+  }
 
   return async (req) => {
-    const header = req.headers.get("authorization");
+    const header = req.headers.get('authorization')
     if (!header) {
-      return unauth();
+      return unauth()
     }
-    const m = /^Bearer\s+(.+)$/iu.exec(header);
+    const m = BEARER_RE.exec(header)
     if (!m) {
-      return unauth("invalid_token");
+      return unauth('invalid_token')
     }
-    const token = (m[1] ?? "").trim();
+    const token = (m[1] ?? '').trim()
 
-    const cached = opts.cache.get(token);
+    const cached = opts.cache.get(token)
     if (cached) {
-      return { exp: cached.exp, principal: cached.principal, token };
+      return { exp: cached.exp, principal: cached.principal, token }
     }
 
     try {
-      const { principal, exp } = await fetchUserinfo(opts.stalwartBase, token);
-      opts.cache.set(token, { exp, principal });
-      return { exp, principal, token };
+      const { principal, exp } = await fetchUserinfo(opts.stalwartBase, token)
+      opts.cache.set(token, { exp, principal })
+      return { exp, principal, token }
     } catch (error) {
       if (error instanceof UserinfoError) {
-        return unauth("invalid_token");
+        return unauth('invalid_token')
       }
-      throw error;
+      throw error
     }
-  };
-};
+  }
+}

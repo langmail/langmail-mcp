@@ -3,78 +3,57 @@
 // "extract to packages/jmap-client/ only when a second service needs
 // it" rule.
 
-import { JmapError } from "./session.ts";
-import type {
-  EmailRecord,
-  JmapRequest,
-  JmapResponse,
-  MailboxRecord,
-} from "./types.ts";
+import { JmapError } from './session.ts'
+import type { EmailRecord, JmapRequest, JmapResponse, MailboxRecord } from './types.ts'
 
-const MAIL_CAPABILITY = "urn:ietf:params:jmap:mail";
+const MAIL_CAPABILITY = 'urn:ietf:params:jmap:mail'
 
-export const EMAIL_PROPERTIES = [
-  "id",
-  "subject",
-  "from",
-  "receivedAt",
-  "preview",
-  "mailboxIds",
-] as const;
+const EMAIL_PROPERTIES = ['id', 'subject', 'from', 'receivedAt', 'preview', 'mailboxIds'] as const
 
 interface JmapCall {
-  apiUrl: string;
-  token: string;
+  apiUrl: string
+  token: string
 }
 
-const call = async <T extends JmapResponse>(
-  ctx: JmapCall,
-  body: JmapRequest
-): Promise<T> => {
+const call = async <T extends JmapResponse>(ctx: JmapCall, body: JmapRequest): Promise<T> => {
   const res = await fetch(ctx.apiUrl, {
     body: JSON.stringify(body),
     headers: {
       authorization: `Bearer ${ctx.token}`,
-      "content-type": "application/json",
+      'content-type': 'application/json',
     },
-    method: "POST",
-  });
+    method: 'POST',
+  })
   if (res.status !== 200) {
-    throw new JmapError(res.status, `jmap request returned ${res.status}`);
+    throw new JmapError(res.status, `jmap request returned ${res.status}`)
   }
-  return (await res.json()) as T;
-};
+  return (await res.json()) as T
+}
 
-const methodResponse = <T>(
-  resp: JmapResponse,
-  name: string,
-  callId: string
-): T => {
-  const entry = resp.methodResponses.find(
-    ([n, , id]) => n === name && id === callId
-  );
+const methodResponse = <T>(resp: JmapResponse, name: string, callId: string): T => {
+  const entry = resp.methodResponses.find(([n, , id]) => n === name && id === callId)
   if (!entry) {
-    throw new JmapError(200, `missing method response for ${name}/${callId}`);
+    throw new JmapError(200, `missing method response for ${name}/${callId}`)
   }
-  return entry[1] as T;
-};
+  return entry[1] as T
+}
 
 export interface EmailQueryParams extends JmapCall {
-  accountId: string;
-  text: string;
-  mailboxId?: string;
-  limit: number;
+  accountId: string
+  limit: number
+  mailboxId?: string
+  text: string
 }
 
 export const emailQuery = async (p: EmailQueryParams): Promise<string[]> => {
-  const filter: Record<string, unknown> = { text: p.text };
+  const filter: Record<string, unknown> = { text: p.text }
   if (p.mailboxId) {
-    filter["inMailbox"] = p.mailboxId;
+    filter.inMailbox = p.mailboxId
   }
   const resp = await call(p, {
     methodCalls: [
       [
-        "Email/query",
+        'Email/query',
         {
           accountId: p.accountId,
           // Stalwart FTS returns ids in mailbox order; full totals are
@@ -83,75 +62,69 @@ export const emailQuery = async (p: EmailQueryParams): Promise<string[]> => {
           filter,
           limit: p.limit,
         },
-        "0",
+        '0',
       ],
     ],
     using: [MAIL_CAPABILITY],
-  });
-  const out = methodResponse<{ ids?: string[] }>(resp, "Email/query", "0");
-  return out.ids ?? [];
-};
+  })
+  const out = methodResponse<{ ids?: string[] }>(resp, 'Email/query', '0')
+  return out.ids ?? []
+}
 
 export interface EmailGetParams extends JmapCall {
-  accountId: string;
-  ids: string[];
+  accountId: string
+  ids: string[]
 }
 
 export const emailGet = async (p: EmailGetParams): Promise<EmailRecord[]> => {
   if (p.ids.length === 0) {
-    return [];
+    return []
   }
   const resp = await call(p, {
     methodCalls: [
       [
-        "Email/get",
+        'Email/get',
         {
           accountId: p.accountId,
           ids: p.ids,
           properties: [...EMAIL_PROPERTIES],
         },
-        "0",
+        '0',
       ],
     ],
     using: [MAIL_CAPABILITY],
-  });
-  const out = methodResponse<{ list?: EmailRecord[] }>(resp, "Email/get", "0");
-  return out.list ?? [];
-};
-
-export interface MailboxIdByNameParams extends JmapCall {
-  accountId: string;
-  name: string;
+  })
+  const out = methodResponse<{ list?: EmailRecord[] }>(resp, 'Email/get', '0')
+  return out.list ?? []
 }
 
-export const mailboxIdByName = async (
-  p: MailboxIdByNameParams
-): Promise<string | null> => {
+export interface MailboxIdByNameParams extends JmapCall {
+  accountId: string
+  name: string
+}
+
+export const mailboxIdByName = async (p: MailboxIdByNameParams): Promise<string | null> => {
   // One round-trip: query all mailbox ids, hydrate names, match
   // case-insensitively. Stalwart's mailbox count is small enough that
   // skipping a name-filtered Mailbox/query (which JMAP doesn't directly
   // support anyway) is fine.
   const resp = await call(p, {
     methodCalls: [
-      ["Mailbox/query", { accountId: p.accountId }, "0"],
+      ['Mailbox/query', { accountId: p.accountId }, '0'],
       [
-        "Mailbox/get",
+        'Mailbox/get',
         {
-          "#ids": { name: "Mailbox/query", path: "/ids", resultOf: "0" },
+          '#ids': { name: 'Mailbox/query', path: '/ids', resultOf: '0' },
           accountId: p.accountId,
-          properties: ["id", "name"],
+          properties: ['id', 'name'],
         },
-        "1",
+        '1',
       ],
     ],
     using: [MAIL_CAPABILITY],
-  });
-  const got = methodResponse<{ list?: MailboxRecord[] }>(
-    resp,
-    "Mailbox/get",
-    "1"
-  );
-  const wanted = p.name.toLowerCase();
-  const hit = (got.list ?? []).find((m) => m.name.toLowerCase() === wanted);
-  return hit?.id ?? null;
-};
+  })
+  const got = methodResponse<{ list?: MailboxRecord[] }>(resp, 'Mailbox/get', '1')
+  const wanted = p.name.toLowerCase()
+  const hit = (got.list ?? []).find((m) => m.name.toLowerCase() === wanted)
+  return hit?.id ?? null
+}

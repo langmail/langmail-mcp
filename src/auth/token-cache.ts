@@ -5,40 +5,40 @@
 // timer; sweep() is also exposed for explicit cleanup.
 
 export interface CachedPrincipal {
-  principal: string;
-  exp: number;
+  exp: number
+  principal: string
 }
 
-const nowSec = () => Math.floor(Date.now() / 1000);
+const nowSec = () => Math.floor(Date.now() / 1000)
 
 export class TokenCache {
-  private map = new Map<string, CachedPrincipal>();
+  private readonly map = new Map<string, CachedPrincipal>()
 
   get size(): number {
-    return this.map.size;
+    return this.map.size
   }
 
   get(token: string): CachedPrincipal | undefined {
-    const hit = this.map.get(token);
+    const hit = this.map.get(token)
     if (!hit) {
-      return undefined;
+      return
     }
     if (hit.exp <= nowSec()) {
-      this.map.delete(token);
-      return undefined;
+      this.map.delete(token)
+      return
     }
-    return hit;
+    return hit
   }
 
   set(token: string, entry: CachedPrincipal): void {
-    this.map.set(token, entry);
+    this.map.set(token, entry)
   }
 
   sweep(): void {
-    const t = nowSec();
+    const t = nowSec()
     for (const [k, v] of this.map) {
       if (v.exp <= t) {
-        this.map.delete(k);
+        this.map.delete(k)
       }
     }
   }

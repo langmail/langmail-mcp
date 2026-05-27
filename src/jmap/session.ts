@@ -5,44 +5,43 @@
 // principal, not the token — multiple tokens for the same user share
 // one entry.
 
-import type { JmapSession } from "./types.ts";
+import type { JmapSession } from './types.ts'
 
 export class JmapError extends Error {
-  status: number;
+  status: number
   constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-    this.name = "JmapError";
+    super(message)
+    this.status = status
+    this.name = 'JmapError'
   }
 }
 
-export const fetchSession = async (
-  stalwartBase: string,
-  token: string
-): Promise<JmapSession> => {
-  const url = `${stalwartBase.replace(/\/+$/u, "")}/.well-known/jmap`;
+const TRAILING_SLASHES_RE = /\/+$/u
+
+export const fetchSession = async (stalwartBase: string, token: string): Promise<JmapSession> => {
+  const url = `${stalwartBase.replace(TRAILING_SLASHES_RE, '')}/.well-known/jmap`
   const res = await fetch(url, {
     headers: { authorization: `Bearer ${token}` },
-  });
+  })
   if (res.status !== 200) {
-    throw new JmapError(res.status, `jmap session returned ${res.status}`);
+    throw new JmapError(res.status, `jmap session returned ${res.status}`)
   }
-  const body = (await res.json()) as Record<string, unknown>;
-  const { apiUrl } = body;
-  const { primaryAccounts } = body;
-  if (typeof apiUrl !== "string" || typeof primaryAccounts !== "object") {
-    throw new JmapError(200, "malformed jmap session response");
+  const body = (await res.json()) as Record<string, unknown>
+  const { apiUrl } = body
+  const { primaryAccounts } = body
+  if (typeof apiUrl !== 'string' || typeof primaryAccounts !== 'object') {
+    throw new JmapError(200, 'malformed jmap session response')
   }
   return {
     apiUrl,
     primaryAccounts: primaryAccounts as Record<string, string>,
-  };
-};
+  }
+}
 
 export const accountIdForMail = (session: JmapSession): string => {
-  const id = session.primaryAccounts["urn:ietf:params:jmap:mail"];
+  const id = session.primaryAccounts['urn:ietf:params:jmap:mail']
   if (!id) {
-    throw new JmapError(200, "no primary mail account in session");
+    throw new JmapError(200, 'no primary mail account in session')
   }
-  return id;
-};
+  return id
+}
