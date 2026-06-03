@@ -14,7 +14,7 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
-    "@marbles/tsconfig": "*",
+    "@langmail/tsconfig": "*",
     "typescript": "^6.0.3"
   }
 }
