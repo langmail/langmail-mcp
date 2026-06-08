@@ -46,7 +46,7 @@ const unwrapText = (result: {
   isError?: boolean
 }): { text: string; isError: boolean } => {
   const first = result.content?.[0]
-  if (!first || first.type !== 'text' || typeof first.text !== 'string') {
+  if (first?.type !== 'text' || typeof first.text !== 'string') {
     throw new Error(`tool response missing content[0].text: ${JSON.stringify(result)}`)
   }
   return { isError: Boolean(result.isError), text: first.text }
