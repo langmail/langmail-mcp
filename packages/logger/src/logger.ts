@@ -14,13 +14,18 @@ const level = (process.env.LOG_LEVEL || 'info') as pino.Level
 // its entry files by path at runtime — that breaks under `bun build --compile`
 // (no node_modules on disk). multistream/destination run in-process, so the
 // same logger works for both interpreted and single-binary consumers.
+//
+// Destinations are async (sonic-boom's default, sync: false) so logging never
+// blocks the event loop on a write syscall — matching the non-blocking property
+// of the previous worker-thread transport. Short-lived processes that log and
+// exit immediately (e.g. the compile-smoke entry) must call logger.flush().
 
 let logger: pino.Logger<never, boolean>
 
 if (process.env.NODE_ENV === 'production') {
   const streams: pino.StreamEntry[] = [
     // stdout — captured by journald on the server.
-    { level, stream: pino.destination({ dest: 1, sync: true }) },
+    { level, stream: pino.destination({ dest: 1 }) },
   ]
 
   const token = process.env.BETTERSTACK_SOURCE_TOKEN
@@ -30,7 +35,7 @@ if (process.env.NODE_ENV === 'production') {
 
   logger = pino({ base, level }, pino.multistream(streams))
 } else {
-  const streams: pino.StreamEntry[] = [{ level, stream: pino.destination({ dest: 1, sync: true }) }]
+  const streams: pino.StreamEntry[] = [{ level, stream: pino.destination({ dest: 1 }) }]
 
   // Bun inlines process.env.NODE_ENV at build time, so a compiled binary built
   // without NODE_ENV=production bakes in this dev branch. Guard the /logs setup
@@ -40,9 +45,9 @@ if (process.env.NODE_ENV === 'production') {
     const logFilePath = path.resolve(import.meta.dirname, `../../../logs/${serviceName}.log`)
     fs.mkdirSync(path.dirname(logFilePath), { recursive: true })
     fs.writeFileSync(logFilePath, '', { flag: 'w' })
-    streams.push({ level, stream: pino.destination({ dest: logFilePath, sync: true }) })
-  } catch {
-    // No writable /logs — stdout-only is an acceptable fallback.
+    streams.push({ level, stream: pino.destination({ dest: logFilePath }) })
+  } catch (error) {
+    process.stderr.write(`@langmail/logger: /logs unavailable, falling back to stdout-only (${String(error)})\n`)
   }
 
   logger = pino({ base, level }, pino.multistream(streams))
