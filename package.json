@@ -4,12 +4,13 @@
   "type": "module",
   "scripts": {
     "dev": "bun run src/index.ts",
-    "build": "bun build --compile --minify --target=bun-linux-x64 src/index.ts --outfile dist/mcp",
+    "build": "NODE_ENV=production bun build --compile --minify --target=bun-linux-x64 src/index.ts --outfile dist/mcp",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "smoke": "bun run scripts/smoke.ts"
   },
   "dependencies": {
+    "@langmail/logger": "*",
     "@modelcontextprotocol/sdk": "^1.0.4",
     "zod": "^4.0.0"
   },

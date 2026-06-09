@@ -7,6 +7,8 @@
 // See spec/02-mcp.md for the design; spec/03 §MCP RS auth model for
 // why we trust /auth/userinfo rather than verifying JWTs locally.
 
+import { logger } from '@langmail/logger'
+
 import { createRoutes } from './handler.ts'
 import { createMcpHandler } from './mcp/handler.ts'
 
@@ -43,7 +45,12 @@ const server = Bun.serve({
   port: PORT,
 })
 
-console.log(`mcp listening on http://${server.hostname}:${server.port}`)
-console.log(`  public URL: ${PUBLIC_URL}`)
-console.log(`  upstream AS: ${STALWART_URL}`)
-console.log(`  DCR proxy:   ${dcrUpstreamAuth ? 'enabled' : 'DISABLED (no creds)'}`)
+logger.info(
+  {
+    address: `http://${server.hostname}:${server.port}`,
+    publicUrl: PUBLIC_URL,
+    upstreamAuthServer: STALWART_URL,
+    dcrProxy: dcrUpstreamAuth ? 'enabled' : 'disabled',
+  },
+  'mcp listening'
+)
