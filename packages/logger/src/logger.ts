@@ -15,13 +15,18 @@ const level = (process.env.LOG_LEVEL || 'info') as pino.Level
 // (no node_modules on disk). multistream/destination run in-process, so the
 // same logger works for both interpreted and single-binary consumers.
 //
-// Destinations are async (sonic-boom's default, sync: false) so logging never
-// blocks the event loop on a write syscall — matching the non-blocking property
-// of the previous worker-thread transport.
+// File/stdout destinations are synchronous (sync: true). Async (sonic-boom's
+// default) is non-blocking but loses buffered/in-flight writes when a short-lived
+// process calls process.exit() — flushSync on exit can't reconcile a write
+// already dispatched to the OS — which silently drops log lines for scripts and
+// for compiled binaries that log at startup. Sync writes complete before the next
+// line, so nothing is lost; the cost (a write syscall per log) is negligible at
+// this app's logging volume. The Logtail stream remains async (it batches over
+// the network and flushes on beforeExit).
 
 const streams: pino.StreamEntry[] = [
   // stdout — captured by journald (prod) or piped to pino-pretty (dev).
-  { level, stream: pino.destination({ dest: 1 }) },
+  { level, stream: pino.destination({ dest: 1, sync: true }) },
 ]
 
 if (process.env.NODE_ENV === 'production') {
@@ -38,22 +43,12 @@ if (process.env.NODE_ENV === 'production') {
     const logFilePath = path.resolve(import.meta.dirname, `../../../logs/${serviceName}.log`)
     fs.mkdirSync(path.dirname(logFilePath), { recursive: true })
     fs.writeFileSync(logFilePath, '', { flag: 'w' })
-    streams.push({ level, stream: pino.destination({ dest: logFilePath }) })
+    streams.push({ level, stream: pino.destination({ dest: logFilePath, sync: true }) })
   } catch (error) {
     process.stderr.write(`@langmail/logger: /logs unavailable, falling back to stdout-only (${String(error)})\n`)
   }
 }
 
-const multi = pino.multistream(streams)
-
-// Async destinations don't block the event loop during normal operation, but a
-// short-lived process that logs and exits would lose buffered lines. flushSync
-// on exit drains every sonic-boom destination synchronously (it skips streams
-// without flushSync, e.g. the Logtail stream, which flushes on beforeExit).
-process.on('exit', () => {
-  multi.flushSync()
-})
-
-const logger: pino.Logger<never, boolean> = pino({ base, level }, multi)
+const logger: pino.Logger<never, boolean> = pino({ base, level }, pino.multistream(streams))
 
 export { logger }
