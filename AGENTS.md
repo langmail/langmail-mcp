@@ -9,46 +9,38 @@ in `../../AGENTS.md`; the design rationale lives in
 
 ## Runtime: Bun only, no Node fallback
 
-This service is **Bun-only**. The compiled artifact (`dist/mcp`,
-produced by `bun build --compile`) embeds the Bun runtime; the target
-VM does not install Node and never will.
+This service is **Bun-only**. It ships as a container image (`oven/bun`
+base) that runs the TypeScript from source; the target VM does not
+install Node and never will.
 
 - `bun install` — installs into `node_modules/`; writes `bun.lock`.
 - `bun run dev` — local dev server on `127.0.0.1:8080`.
-- `bun run build` — produces `dist/mcp`, a standalone x86_64-linux
-  binary (target = `bun-linux-x64`, ~50–100 MB).
+- `bun run build` — `tsc --noEmit` type check (the turbo "build" gate;
+  the container runs from source, so there is no compile/bundle step).
+- `bun run start` — production entrypoint (`NODE_ENV=production bun
+  src/index.ts`), what the container's `CMD` runs.
 - `bun run typecheck` — typecheck only.
 
 Do not add a `node` or `npm` script anywhere. If a dependency is
 node-only and won't run under Bun, find another or write the call
 inline.
 
-## Build + deploy: rsync, not Nix-built
+## Build + deploy: container image, pinned by digest
 
-We chose the spec's **rsync fallback** (`spec/03 §Phase 3 step 4`) over
-the FOD-`bun install`-into-Nix path. Rationale:
+The artifact is a container image, not a Nix-built package — nixpkgs
+has no first-class `buildBunModule`, and a container is the
+language-agnostic unit shared with the deprecated stack. Pipeline:
 
-- nixpkgs has no first-class `buildBunModule`; `fetchNpmDeps` only
-  speaks `package-lock.json`.
-- Bun's installer is not deterministic enough to trust as the FOD
-  fetch phase without a non-trivial babysitting layer.
-- The artifact is a single static binary, so the "ship TS in the
-  closure" problem reduces to "rsync one file." Closure stays infra-
-  only; nothing TS leaks into Nix evaluation.
+1. Push to `main` → `.github/workflows/deploy-mcp.yml` tests, builds
+   `services/mcp/Dockerfile`, pushes `ghcr.io/langmail/platform-mcp`,
+   and commits the new `@sha256` digest into `infra/modules/mcp.nix`.
+2. `just rebuild-app` — NixOS pulls the pinned image and (re)starts the
+   `podman-mcp` container behind nginx. A fresh VM can't pull the
+   placeholder digest until the first image build — expected.
 
-Pipeline (driven by `just deploy-app`):
-
-1. `just build-mcp` — `bun install --frozen-lockfile && bun run build`
-   in this directory. Produces `services/mcp/dist/mcp`.
-2. `just push-mcp` — rsync the binary to
-   `/var/lib/mcp/bin/mcp` on the app VM.
-3. `just rebuild-app` — `nixos-rebuild switch` picks up any module
-   changes; `infra/modules/mcp.nix` declares the systemd unit that
-   ExecStarts `/var/lib/mcp/bin/mcp`.
-4. `systemctl restart mcp` (folded into `push-mcp`).
-
-Reconsider Nix-builds-Bun once nixpkgs ships `buildBunModule` or once
-a second TS consumer makes the rsync path painful.
+See `infra/AGENTS.md § app-VM services run as digest-pinned
+containers`. (Reconsider Nix-building Bun if nixpkgs ever ships
+`buildBunModule`.)
 
 ## Adding tools (preview of phase 4)
 
@@ -68,8 +60,8 @@ mount `StreamableHTTPServerTransport` and register tools. Conventions:
 
 ## Configuration
 
-Environment variables (set via `infra/modules/mcp.nix`
-`EnvironmentFile=/run/secrets/mcp.env`):
+Environment variables (set via `infra/modules/mcp.nix` — the container's
+`environment` plus `environmentFiles = [ "/run/secrets/mcp.env" ]`):
 
 | Var                   | Default                    | Notes                                               |
 | --------------------- | -------------------------- | --------------------------------------------------- |
