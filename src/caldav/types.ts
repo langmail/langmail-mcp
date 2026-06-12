@@ -1,0 +1,21 @@
+// Minimal CalDAV shapes used by the calendar tools.
+//
+// Like jmap/types.ts, this declares only what the tools read or send —
+// the tsdav DAVCalendar/DAVAccount types stay behind caldav/client.ts.
+
+// A calendar collection as surfaced to the agent: a human label and the
+// CalDAV URL used to address it (e.g. when PUTting an event).
+export interface CalendarSummary {
+  displayName: string
+  url: string
+}
+
+// Result of RFC 6764 discovery for the authenticated principal.
+export interface DiscoveredAccount {
+  calendars: CalendarSummary[]
+  // The calendar an event lands in when the caller doesn't pick one.
+  defaultCalendarUrl: string | null
+  // The principal's calendar-user-address (bare email, no `mailto:`),
+  // used as the VEVENT ORGANIZER so Stalwart can fan out the invite.
+  organizer: string | null
+}

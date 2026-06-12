@@ -14,7 +14,12 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 
 import type { AuthContext } from '../auth/middleware.ts'
 import { SessionCache } from '../jmap/session-cache.ts'
-import { makeLiveDeps, registerSearchEmails } from '../tools/search-emails.ts'
+import {
+  makeLiveDeps as makeCreateCalendarEventDeps,
+  registerCreateCalendarEvent,
+} from '../tools/create-calendar-event.ts'
+import { makeLiveDeps as makeListCalendarsDeps, registerListCalendars } from '../tools/list-calendars.ts'
+import { makeLiveDeps as makeSearchEmailsDeps, registerSearchEmails } from '../tools/search-emails.ts'
 
 export interface McpHandlerConfig {
   stalwartUrl: string
@@ -24,17 +29,24 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   // Shared across requests: JMAP session lookups dedupe across all
   // bearer tokens we've seen.
   const sessionCache = new SessionCache()
-  const deps = makeLiveDeps({
+  const searchEmailsDeps = makeSearchEmailsDeps({
     sessionCache,
     stalwartUrl: cfg.stalwartUrl,
   })
+  // CalDAV tools discover against the same Stalwart base; tsdav follows
+  // /.well-known/caldav to /dav/cal.
+  const caldavCfg = { serverUrl: cfg.stalwartUrl }
+  const listCalendarsDeps = makeListCalendarsDeps(caldavCfg)
+  const createCalendarEventDeps = makeCreateCalendarEventDeps(caldavCfg)
 
   return async (req, ctx) => {
     const server = new McpServer({
       name: 'langmail-mcp',
       version: '0.1.0',
     })
-    registerSearchEmails(server, deps, () => ctx.token)
+    registerSearchEmails(server, searchEmailsDeps, () => ctx.token)
+    registerListCalendars(server, listCalendarsDeps, () => ctx.token)
+    registerCreateCalendarEvent(server, createCalendarEventDeps, () => ctx.token)
 
     // Stateless mode (sessionIdGenerator omitted). Each request stands
     // alone — initialize, tool call, and shutdown happen within the

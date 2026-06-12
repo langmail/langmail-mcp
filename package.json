@@ -13,6 +13,8 @@
   "dependencies": {
     "@langmail/logger": "*",
     "@modelcontextprotocol/sdk": "^1.0.4",
+    "ical-generator": "^11.0.0",
+    "tsdav": "^2.2.2",
     "zod": "^4.0.0"
   },
   "devDependencies": {
