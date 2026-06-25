@@ -68,6 +68,18 @@ describe('buildInvite', () => {
     const ics = buildInvite({ ...baseInput, sequence: 3 })
     expect(ics).toContain('SEQUENCE:3')
   })
+
+  test('omits RRULE for a one-off event', () => {
+    expect(buildInvite(baseInput)).not.toContain('RRULE')
+  })
+
+  test('emits a single RRULE line when rrule is given', () => {
+    const ics = unfold(buildInvite({ ...baseInput, rrule: 'FREQ=WEEKLY;BYDAY=TH' }))
+    expect(ics).toContain('RRULE:FREQ=WEEKLY;BYDAY=TH')
+    // ical-generator owns the `RRULE:` prefix — passing the raw rule must not
+    // double it up.
+    expect(ics).not.toContain('RRULE:RRULE:')
+  })
 })
 
 describe('parseSequence', () => {

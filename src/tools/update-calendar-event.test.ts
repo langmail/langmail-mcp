@@ -93,6 +93,24 @@ describe('updateCalendarEvent', () => {
     expect(result.content[0]?.text).toContain('updated')
   })
 
+  test('re-rules the whole series when recurrence is given', async () => {
+    const cap = captured()
+    await updateCalendarEvent(makeDeps(account(), storedEvent(), cap), {
+      args: args({ recurrence: 'FREQ=WEEKLY;BYDAY=TH' }),
+      token: 'tok',
+    })
+    const ical = (cap.updated[0]?.ical ?? '').replace(/\r\n /gu, '')
+    expect(ical).toContain('RRULE:FREQ=WEEKLY;BYDAY=TH')
+    // SEQUENCE still bumps for a recurring edit.
+    expect(ical).toContain('SEQUENCE:3')
+  })
+
+  test('collapses a series to a one-off when recurrence is omitted', async () => {
+    const cap = captured()
+    await updateCalendarEvent(makeDeps(account(), storedEvent(), cap), { args: args(), token: 'tok' })
+    expect(cap.updated[0]?.ical ?? '').not.toContain('RRULE')
+  })
+
   test('errors when the event does not exist', async () => {
     const cap = captured()
     const result = await updateCalendarEvent(makeDeps(account(), null, cap), { args: args(), token: 'tok' })

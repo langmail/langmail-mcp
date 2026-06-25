@@ -12,6 +12,10 @@ export interface InviteInput {
   location?: string
   // Bare organizer email (no `mailto:`), the authenticated principal.
   organizer: string
+  // Raw RRULE (no `RRULE:` prefix), e.g. `FREQ=WEEKLY;BYDAY=TH`. Present →
+  // the VEVENT becomes a recurring series; start/end are the first
+  // occurrence. Omit for a one-off event. See caldav/recurrence.ts.
+  rrule?: string
   // iCalendar SEQUENCE. Omit (or 0) for a fresh invite; bump on every edit
   // so attendees' clients treat the re-sent REQUEST as an update, not a
   // duplicate. See update-calendar-event.ts.
@@ -42,6 +46,12 @@ export const buildInvite = (input: InviteInput): string => {
     ...(input.location ? { location: input.location } : {}),
     ...(input.sequence === undefined ? {} : { sequence: input.sequence }),
   })
+
+  // Passing the raw RRULE string makes this a recurring series; ical-generator
+  // emits it as a single `RRULE:` line (adding the prefix itself).
+  if (input.rrule) {
+    event.repeating(input.rrule)
+  }
 
   for (const email of input.attendees) {
     event.createAttendee({

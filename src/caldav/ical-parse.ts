@@ -6,6 +6,10 @@
 export interface ParsedEvent {
   end: string
   location?: string
+  // Raw RRULE (e.g. `FREQ=WEEKLY;BYDAY=TH`) when the event is a recurring
+  // series; absent for one-off events. Surfaced so the agent can re-supply it
+  // to update_calendar_event (which re-rules the whole series).
+  recurrence?: string
   start: string
   title: string
   uid: string
@@ -108,12 +112,14 @@ export const parseEvents = (ical: string): ParsedEvent[] => {
       continue
     }
     const location = block.get('LOCATION')
+    const recurrence = block.get('RRULE')
     events.push({
       end: icalDateToIso(block.get('DTEND') ?? ''),
       start: icalDateToIso(block.get('DTSTART') ?? ''),
       title: unescapeText(block.get('SUMMARY') ?? ''),
       uid,
       ...(location ? { location: unescapeText(location) } : {}),
+      ...(recurrence ? { recurrence } : {}),
     })
   }
   return events

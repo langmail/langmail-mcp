@@ -25,6 +25,23 @@ describe('parseEvents', () => {
     expect(ev?.location).toBe('Room 4')
   })
 
+  test('extracts the RRULE of a recurring event', () => {
+    const ics = buildInvite({
+      attendees: ['guest@example.com'],
+      end: new Date('2026-06-12T10:30:00Z'),
+      organizer: 'host@langmail.me',
+      rrule: 'FREQ=WEEKLY;BYDAY=TH',
+      start: new Date('2026-06-12T10:00:00Z'),
+      title: 'Weekly sync',
+      uid: 'evt-r@langmail.me',
+    })
+    expect(parseEvents(ics)[0]?.recurrence).toBe('FREQ=WEEKLY;BYDAY=TH')
+  })
+
+  test('omits recurrence for a one-off event', () => {
+    expect(parseEvents(sample)[0]?.recurrence).toBeUndefined()
+  })
+
   test('omits location when absent', () => {
     const ics = buildInvite({
       attendees: ['guest@example.com'],

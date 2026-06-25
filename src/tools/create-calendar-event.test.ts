@@ -43,6 +43,25 @@ describe('createCalendarEventInput schema', () => {
   test('accepts a valid event', () => {
     expect(createCalendarEventInput.safeParse(args()).success).toBe(true)
   })
+
+  test('accepts a raw RRULE recurrence', () => {
+    expect(createCalendarEventInput.safeParse({ ...args(), recurrence: 'FREQ=WEEKLY;BYDAY=TH' }).success).toBe(true)
+  })
+
+  test('accepts a structured recurrence', () => {
+    expect(
+      createCalendarEventInput.safeParse({ ...args(), recurrence: { byDay: ['TH'], frequency: 'weekly' } }).success
+    ).toBe(true)
+  })
+
+  test('rejects a recurrence that sets both until and count', () => {
+    expect(
+      createCalendarEventInput.safeParse({
+        ...args(),
+        recurrence: { count: 5, frequency: 'weekly', until: '2026-12-31T00:00:00Z' },
+      }).success
+    ).toBe(false)
+  })
 })
 
 describe('createCalendarEvent', () => {
@@ -63,6 +82,18 @@ describe('createCalendarEvent', () => {
     const txt = result.content[0]?.text ?? ''
     expect(txt).toContain('Sync')
     expect(txt).toContain('guest@example.com')
+  })
+
+  test('PUTs a recurring invite and reports it as recurring', async () => {
+    const captured: PutEventParams[] = []
+    const result = await createCalendarEvent(makeDeps(account(), captured), {
+      args: args({ recurrence: { byDay: ['TH'], frequency: 'weekly' } }),
+      token: 'tok',
+    })
+
+    const ical = (captured[0]?.ical ?? '').replace(/\r\n /gu, '')
+    expect(ical).toContain('RRULE:FREQ=WEEKLY;BYDAY=TH')
+    expect(result.content[0]?.text).toContain('Recurring event')
   })
 
   test('honours an explicit calendarUrl that exists', async () => {

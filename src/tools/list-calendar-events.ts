@@ -44,6 +44,9 @@ const formatEvent = (idx: number, ev: ParsedEvent): string => {
   if (ev.location) {
     lines.push(`   location: ${ev.location}`)
   }
+  if (ev.recurrence) {
+    lines.push(`   repeats: ${ev.recurrence}`)
+  }
   lines.push(`   uid: ${ev.uid}`)
   return lines.join('\n')
 }

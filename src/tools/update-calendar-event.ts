@@ -16,6 +16,7 @@ import { z } from 'zod'
 import type { CalDavConfig, FetchEventParams, UpdateEventParams } from '../caldav/client.ts'
 import { discoverAccount, fetchEvent, resolveCalendarUrl, updateEvent } from '../caldav/client.ts'
 import { buildInvite, parseSequence } from '../caldav/ical.ts'
+import { toRRule } from '../caldav/recurrence.ts'
 import type { CalendarObject, DiscoveredAccount } from '../caldav/types.ts'
 import { createCalendarEventInput, eventUidSchema } from './create-calendar-event.ts'
 import type { ToolResult } from './result.ts'
@@ -70,6 +71,9 @@ export const updateCalendarEvent = async (
     return errorResult(`Event not found: ${args.uid}`)
   }
 
+  // Full re-specification: a recurrence given here re-rules the whole series;
+  // omitting it drops the RRULE and collapses the series to a single event.
+  const rrule = args.recurrence ? toRRule(args.recurrence) : undefined
   const ical = buildInvite({
     attendees: args.attendees,
     end,
@@ -81,13 +85,14 @@ export const updateCalendarEvent = async (
     uid: args.uid,
     ...(args.description ? { description: args.description } : {}),
     ...(args.location ? { location: args.location } : {}),
+    ...(rrule ? { rrule } : {}),
   })
 
   await deps.updateEvent({ ical, token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
 
   return textResult(
-    `Event "${args.title}" updated and notifications sent to ${args.attendees.length} ` +
-      `attendee(s): ${args.attendees.join(', ')}.`
+    `${rrule ? 'Recurring event' : 'Event'} "${args.title}" updated and notifications sent ` +
+      `to ${args.attendees.length} attendee(s): ${args.attendees.join(', ')}.`
   )
 }
 
@@ -114,7 +119,11 @@ export const registerUpdateCalendarEvent = (
         'Updates an existing calendar event in place (identified by its uid from ' +
         'create_calendar_event) and re-sends iMIP notifications to the attendees. ' +
         'This is a full replacement: pass the complete event details, not just the ' +
-        'changed fields. Times are ISO 8601 with offset (e.g. 2026-06-12T10:00:00Z).',
+        'changed fields. For a recurring event this edits the ENTIRE series (all ' +
+        'occurrences) — to keep it recurring, pass `recurrence` again; omitting it ' +
+        'collapses the series back to a single event. Editing one occurrence of a ' +
+        'series (RECURRENCE-ID) is not supported. Times are ISO 8601 with offset ' +
+        '(e.g. 2026-06-12T10:00:00Z).',
       inputSchema: updateCalendarEventInput.shape,
       title: 'Update calendar event',
     },
