@@ -115,6 +115,20 @@ Parameters: none
 Returns:
 - A list of the user's calendars, each with its display name and CalDAV URL
 
+### create_calendar
+
+Creates a new calendar (CalDAV collection) for the authenticated user — e.g.
+a separate "Marketing" calendar so a workstream's events don't clutter the
+personal one. Returns the new calendar's CalDAV URL; pass it to
+`create_calendar_event` to add events to it.
+
+Parameters:
+- `name`: string — the calendar's display name (1–200 characters)
+- `color`: string (optional) — a hex display color (e.g. `#FF6600`), carried through the Apple `calendar-color` extension so the calendar is visually distinct
+
+Returns:
+- A confirmation including the new `calendarUrl` (pass it to `create_calendar_event`)
+
 ### list_calendar_events
 
 Lists events in the user's calendar, optionally bounded by a time window.

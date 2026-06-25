@@ -11,9 +11,11 @@ import type { DAVAccount, DAVCalendar, DAVCalendarObject } from 'tsdav'
 import {
   createAccount,
   createCalendarObject,
+  DAVNamespaceShort,
   deleteCalendarObject,
   fetchCalendarObjects,
   fetchCalendarUserAddresses,
+  makeCalendar,
   updateCalendarObject,
 } from 'tsdav'
 
@@ -109,6 +111,43 @@ export const discoverAccount = async (cfg: CalDavConfig, token: string): Promise
     defaultCalendarUrl: pickDefaultCalendar(calendars),
     organizer: pickOrganizer(addresses),
   }
+}
+
+export interface CreateCalendarParams {
+  // Apple `calendar-color` (e.g. "#FF6600"); set on the MKCALENDAR so the
+  // collection is born with a color rather than needing a follow-up PROPPATCH.
+  color?: string
+  // Human display name, carried as the DAV `displayname` prop.
+  name: string
+  token: string
+}
+
+// Creates a new CalDAV calendar collection under the principal's
+// calendar-home-set via MKCALENDAR, and returns its URL (trailing-slashed,
+// ready for create_calendar_event). The collection's path segment is a fresh
+// UUID — the human name lives in the `displayname` prop, not the URL — so
+// retries or same-named calendars never collide on a path.
+export const createCalendar = async (cfg: CalDavConfig, p: CreateCalendarParams): Promise<string> => {
+  const account = await loadAccount(cfg, p.token)
+  if (!account.homeUrl) {
+    throw new Error('no calendar-home-set discovered for the principal')
+  }
+  // homeUrl comes back absolute from RFC 6764 discovery, so the returned URL is
+  // directly usable as create_calendar_event's `calendarUrl`.
+  const url = withTrailingSlash(`${withTrailingSlash(account.homeUrl)}${crypto.randomUUID()}`)
+  const res = await makeCalendar({
+    headers: authHeaders(cfg, p.token),
+    props: {
+      [`${DAVNamespaceShort.DAV}:displayname`]: { _text: p.name },
+      ...(p.color ? { [`${DAVNamespaceShort.CALDAV_APPLE}:calendar-color`]: { _text: p.color } } : {}),
+    },
+    url,
+  })
+  const failed = res.find((r) => !r.ok)
+  if (failed) {
+    throw new CalDavError(failed.status, `caldav MKCALENDAR returned ${failed.status}`)
+  }
+  return url
 }
 
 export interface PutEventParams {
