@@ -152,14 +152,34 @@ export interface FetchEventsParams {
   token: string
 }
 
+// Stalwart answers a calendar-query REPORT over an *empty* collection with a
+// 404, which tsdav surfaces as a thrown "Collection query failed: 404". An
+// empty calendar is a normal state, not an error, so we map it to an empty
+// list (the calendar itself is already validated by resolveCalendarUrl, so a
+// 404 here means "no events", not "no such calendar"). The pattern matches
+// tsdav's internal error string (observed on tsdav 2.2.2) — re-check the
+// message format on tsdav upgrades, or the 404 starts propagating again.
+const EMPTY_COLLECTION_RE = /Collection query failed: 404\b/u
+
+export const isEmptyCollectionError = (err: unknown): boolean =>
+  err instanceof Error && EMPTY_COLLECTION_RE.test(err.message)
+
 // Lists the event objects in a calendar (optionally bounded by a time
 // range) so the agent can discover UIDs to update/delete.
 export const fetchEvents = async (cfg: CalDavConfig, p: FetchEventsParams): Promise<CalendarObject[]> => {
-  const objects = await fetchCalendarObjects({
-    calendar: { url: withTrailingSlash(p.calendarUrl) },
-    headers: authHeaders(cfg, p.token),
-    ...(p.timeRange ? { timeRange: p.timeRange } : {}),
-  })
+  let objects: DAVCalendarObject[]
+  try {
+    objects = await fetchCalendarObjects({
+      calendar: { url: withTrailingSlash(p.calendarUrl) },
+      headers: authHeaders(cfg, p.token),
+      ...(p.timeRange ? { timeRange: p.timeRange } : {}),
+    })
+  } catch (err) {
+    if (isEmptyCollectionError(err)) {
+      return []
+    }
+    throw err
+  }
   return objects.map(toCalendarObject).filter((o): o is CalendarObject => o !== null)
 }
 

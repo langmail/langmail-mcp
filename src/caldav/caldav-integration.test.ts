@@ -150,6 +150,22 @@ live('caldav client against a live server', () => {
     await deleteEvent(cfg, { token: TOKEN, url: obj?.url ?? '', ...(obj?.etag ? { etag: obj.etag } : {}) })
   })
 
+  test('listing a calendar with no events returns an empty result, not an error', async () => {
+    // A dedicated, never-populated collection guarantees emptiness regardless
+    // of test ordering — mirrors the reported repro (delete all → list → []).
+    const emptyUrl = withTrailingSlash(`${base}/${user}/mcp-it-empty`)
+    const res = await fetch(emptyUrl, { headers: { authorization: basic }, method: 'MKCALENDAR' })
+    if (!res.ok && res.status !== 405 && res.status !== 409) {
+      throw new Error(`MKCALENDAR ${emptyUrl} failed: ${res.status}`)
+    }
+
+    expect(await fetchEvents(cfg, { calendarUrl: emptyUrl, token: TOKEN })).toEqual([])
+
+    const result = await listCalendarEvents(makeListDeps(cfg), { args: { calendarUrl: emptyUrl }, token: TOKEN })
+    expect(result.isError).toBeUndefined()
+    expect(result.content[0]?.text).toContain('No events found')
+  })
+
   test('delete_calendar_event tool removes an event addressed by UID (filename differs)', async () => {
     const uid = `tool-del-${Date.now()}@mcp-it`
     await createCalendarObject({
