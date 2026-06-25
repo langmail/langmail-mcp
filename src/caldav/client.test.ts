@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 
-import { findEventObject, pickDefaultCalendar, pickOrganizer, withTrailingSlash } from './client.ts'
+import {
+  findEventObject,
+  isEmptyCollectionError,
+  pickDefaultCalendar,
+  pickOrganizer,
+  withTrailingSlash,
+} from './client.ts'
 import { buildInvite } from './ical.ts'
 import type { CalendarObject, CalendarSummary } from './types.ts'
 
@@ -82,5 +88,23 @@ describe('findEventObject', () => {
     expect(
       findEventObject([obj('a@langmail.me', 'https://m/dav/cal/u/default/a.ics')], 'missing@langmail.me')
     ).toBeNull()
+  })
+})
+
+describe('isEmptyCollectionError', () => {
+  test('matches the 404 tsdav throws over an empty collection', () => {
+    // Verbatim shape of the error Stalwart + tsdav produce for an empty calendar.
+    const err = new Error('Collection query failed: 404 Not Found. Raw response: [object Object]')
+    expect(isEmptyCollectionError(err)).toBe(true)
+  })
+
+  test('does not swallow other collection-query failures', () => {
+    expect(isEmptyCollectionError(new Error('Collection query failed: 500 Internal Server Error.'))).toBe(false)
+    expect(isEmptyCollectionError(new Error('Collection query failed: 403 Forbidden.'))).toBe(false)
+  })
+
+  test('does not match unrelated errors or non-errors', () => {
+    expect(isEmptyCollectionError(new Error('network unreachable'))).toBe(false)
+    expect(isEmptyCollectionError('Collection query failed: 404')).toBe(false)
   })
 })
