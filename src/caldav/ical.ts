@@ -45,5 +45,10 @@ export const buildInvite = (input: InviteInput): string => {
     })
   }
 
-  return cal.toString()
+  // ical-generator serializes the ATTENDEE CAL-ADDRESS scheme in uppercase
+  // (`:MAILTO:`) but the ORGANIZER in lowercase. Stalwart's iMIP scheduler
+  // only strips a lowercase `mailto:` to derive the SMTP recipient, so the
+  // uppercase scheme leaks into `RCPT TO:<mailto:…>` and the invite bounces.
+  // Normalize the value-position scheme to lowercase on every line.
+  return cal.toString().replaceAll(':MAILTO:', ':mailto:')
 }
