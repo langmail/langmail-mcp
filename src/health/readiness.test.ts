@@ -72,8 +72,7 @@ describe('readyzResponse', () => {
 describe('stalwartReachable', () => {
   test('returns the HTTP status on any response', async () => {
     const original = globalThis.fetch
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    globalThis.fetch = (() => Promise.resolve(new Response(null, { status: 401 }))) as any
+    globalThis.fetch = (() => Promise.resolve(new Response(null, { status: 401 }))) as unknown as typeof fetch
     try {
       const detail = await stalwartReachable('https://mail.example.com')(3000)
       expect(detail).toBe('HTTP 401')

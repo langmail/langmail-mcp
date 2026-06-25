@@ -41,6 +41,7 @@ export const createReadiness = (
 
   return async () => {
     const at = now()
+    // Cache the whole aggregate — including a not-ready result — for the TTL, so a burst of smoke retries triggers at most one real dependency check.
     if (cached && at - cached.at < ttlMs) {
       return cached.result
     }
