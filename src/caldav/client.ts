@@ -7,10 +7,17 @@
 // bearer through and reshape the result into our CalendarSummary /
 // DiscoveredAccount types.
 
-import type { DAVAccount, DAVCalendar } from 'tsdav'
-import { createAccount, createCalendarObject, fetchCalendarUserAddresses } from 'tsdav'
+import type { DAVAccount, DAVCalendar, DAVCalendarObject } from 'tsdav'
+import {
+  createAccount,
+  createCalendarObject,
+  deleteCalendarObject,
+  fetchCalendarObjects,
+  fetchCalendarUserAddresses,
+  updateCalendarObject,
+} from 'tsdav'
 
-import type { CalendarSummary, DiscoveredAccount } from './types.ts'
+import type { CalendarObject, CalendarSummary, DiscoveredAccount } from './types.ts'
 
 class CalDavError extends Error {
   status: number
@@ -47,6 +54,23 @@ const toSummary = (cal: DAVCalendar): CalendarSummary => ({
 export const pickDefaultCalendar = (calendars: CalendarSummary[]): string | null => {
   const def = calendars.find((c) => DEFAULT_CAL_RE.test(c.url))
   return (def ?? calendars[0])?.url ?? null
+}
+
+// Resolves the calendar a tool should act on. With no explicit request it
+// falls back to the discovered default; an explicit URL must name one of
+// the principal's calendars (matched modulo trailing slash). Shared by the
+// create/update/delete event tools so they agree on selection + errors.
+export type ResolvedCalendar = { ok: true; url: string } | { ok: false; reason: 'none' | 'not-found' }
+
+export const resolveCalendarUrl = (account: DiscoveredAccount, requested?: string): ResolvedCalendar => {
+  const url = requested ?? account.defaultCalendarUrl
+  if (!url) {
+    return { ok: false, reason: 'none' }
+  }
+  if (requested && !account.calendars.some((c) => withTrailingSlash(c.url) === withTrailingSlash(requested))) {
+    return { ok: false, reason: 'not-found' }
+  }
+  return { ok: true, url }
 }
 
 // The principal's `mailto:` calendar-user-address as a bare email.
@@ -97,5 +121,96 @@ export const putEvent = async (p: PutEventParams): Promise<void> => {
   })
   if (!res.ok) {
     throw new CalDavError(res.status, `caldav PUT returned ${res.status}`)
+  }
+}
+
+// The CalDAV URL of the `.ics` object for a UID, resolved the same way
+// createCalendarObject names it on PUT (`new URL(filename, collection)`),
+// so create and update/delete address the identical resource.
+const eventObjectUrl = (calendarUrl: string, uid: string): string =>
+  new URL(`${uid}.ics`, withTrailingSlash(calendarUrl)).href
+
+// tsdav stringifies a missing getetag as the literal "undefined"; treat
+// that as no ETag so we never send a bogus `If-Match: undefined`.
+const normalizeEtag = (etag?: string): string | undefined => (etag && etag !== 'undefined' ? etag : undefined)
+
+// Reshapes a tsdav object into our CalendarObject, dropping anything the
+// server returned without calendar data (e.g. a 404'd multiget href).
+const toCalendarObject = (obj: DAVCalendarObject): CalendarObject | null => {
+  if (typeof obj.data !== 'string' || obj.data.length === 0) {
+    return null
+  }
+  const etag = normalizeEtag(obj.etag)
+  return { data: obj.data, url: obj.url, ...(etag ? { etag } : {}) }
+}
+
+export interface FetchEventParams {
+  calendarUrl: string
+  token: string
+  uid: string
+}
+
+// Fetches a single event object by UID via calendar-multiget. Returns null
+// when the object doesn't exist (the server reports it with no calendar
+// data), which the tools surface as a friendly "not found".
+export const fetchEvent = async (p: FetchEventParams): Promise<CalendarObject | null> => {
+  const url = eventObjectUrl(p.calendarUrl, p.uid)
+  const objects = await fetchCalendarObjects({
+    calendar: { url: withTrailingSlash(p.calendarUrl) },
+    headers: bearer(p.token),
+    objectUrls: [url],
+  })
+  return objects.map(toCalendarObject).find((o) => o !== null) ?? null
+}
+
+export interface FetchEventsParams {
+  calendarUrl: string
+  // Optional inclusive window; without it every event in the calendar is
+  // returned. Both bounds are iCalendar-style UTC or ISO 8601 strings.
+  timeRange?: { end: string; start: string }
+  token: string
+}
+
+// Lists the event objects in a calendar (optionally bounded by a time
+// range) so the agent can discover UIDs to update/delete.
+export const fetchEvents = async (p: FetchEventsParams): Promise<CalendarObject[]> => {
+  const objects = await fetchCalendarObjects({
+    calendar: { url: withTrailingSlash(p.calendarUrl) },
+    headers: bearer(p.token),
+    ...(p.timeRange ? { timeRange: p.timeRange } : {}),
+  })
+  return objects.map(toCalendarObject).filter((o): o is CalendarObject => o !== null)
+}
+
+export interface UpdateEventParams {
+  etag?: string
+  ical: string
+  token: string
+  url: string
+}
+
+export const updateEvent = async (p: UpdateEventParams): Promise<void> => {
+  const res = await updateCalendarObject({
+    calendarObject: { data: p.ical, etag: p.etag, url: p.url },
+    headers: bearer(p.token),
+  })
+  if (!res.ok) {
+    throw new CalDavError(res.status, `caldav PUT returned ${res.status}`)
+  }
+}
+
+export interface DeleteEventParams {
+  etag?: string
+  token: string
+  url: string
+}
+
+export const deleteEvent = async (p: DeleteEventParams): Promise<void> => {
+  const res = await deleteCalendarObject({
+    calendarObject: { data: '', etag: p.etag, url: p.url },
+    headers: bearer(p.token),
+  })
+  if (!res.ok) {
+    throw new CalDavError(res.status, `caldav DELETE returned ${res.status}`)
   }
 }

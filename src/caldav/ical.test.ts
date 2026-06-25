@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { buildInvite } from './ical.ts'
+import { buildInvite, parseSequence } from './ical.ts'
 
 // RFC 5545 folds long lines at 75 octets with a CRLF + space; undo that
 // so substring assertions don't trip over a folded email address.
@@ -62,5 +62,24 @@ describe('buildInvite', () => {
     const ics = buildInvite({ ...baseInput, description: 'Quarterly review', location: 'Room 4' })
     expect(ics).toContain('DESCRIPTION:Quarterly review')
     expect(ics).toContain('LOCATION:Room 4')
+  })
+
+  test('emits the given SEQUENCE when set (for edits)', () => {
+    const ics = buildInvite({ ...baseInput, sequence: 3 })
+    expect(ics).toContain('SEQUENCE:3')
+  })
+})
+
+describe('parseSequence', () => {
+  test('reads the SEQUENCE off a serialized VEVENT', () => {
+    expect(parseSequence(buildInvite({ ...baseInput, sequence: 5 }))).toBe(5)
+  })
+
+  test('round-trips the implicit zero of a fresh invite', () => {
+    expect(parseSequence(buildInvite(baseInput))).toBe(0)
+  })
+
+  test('defaults to 0 when no SEQUENCE line is present', () => {
+    expect(parseSequence('BEGIN:VEVENT\r\nUID:x\r\nEND:VEVENT')).toBe(0)
   })
 })

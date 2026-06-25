@@ -17,7 +17,7 @@
 - Authenticates clients via OAuth 2.0 — advertises its own authorization metadata and proxies dynamic client registration to Stalwart
 - Full-text search over the authenticated user's mailbox
 - List the user's calendars
-- Create calendar events and send iMIP invitations to attendees
+- List, create, update, and delete calendar events — sending iMIP invitations and cancellations to attendees
 
 The public endpoint is `https://mcp.langmail.me/mcp`.
 
@@ -97,6 +97,20 @@ Parameters: none
 Returns:
 - A list of the user's calendars, each with its display name and CalDAV URL
 
+### list_calendar_events
+
+Lists events in the user's calendar, optionally bounded by a time window.
+Use the returned `uid` to target `update_calendar_event` or
+`delete_calendar_event`.
+
+Parameters:
+- `calendarUrl`: string (optional) — a CalDAV URL from `list_calendars`; defaults to the user's default calendar
+- `start`: string (optional) — window start (ISO 8601 with offset); must be paired with `end`
+- `end`: string (optional) — window end (ISO 8601 with offset); must be paired with `start`
+
+Returns:
+- A list of events, each with its title, time, location (if any), and `uid`
+
 ### create_calendar_event
 
 Creates a calendar event and sends iMIP invitations to the attendees, with
@@ -112,6 +126,35 @@ Parameters:
 - `location`: string (optional) — up to 500 characters
 
 Returns:
-- A confirmation that the event was created and invitations were sent
-</content>
-</invoke>
+- A confirmation that the event was created and invitations were sent, including the event `uid` and `calendarUrl` (pass these to `update_calendar_event` / `delete_calendar_event`)
+
+### update_calendar_event
+
+Updates an existing event in place (identified by its `uid`) and re-sends
+iMIP notifications to the attendees. This is a full replacement — pass the
+complete event details, not just the changed fields.
+
+Parameters:
+- `uid`: string — the event's iCalendar UID, from `create_calendar_event` or `list_calendar_events`
+- `title`: string — event title (1–200 characters)
+- `start`: string — start datetime (ISO 8601 with offset)
+- `end`: string — end datetime (ISO 8601 with offset); must be after `start`
+- `attendees`: array of string — 1–50 attendee email addresses
+- `calendarUrl`: string (optional) — a CalDAV URL from `list_calendars`; defaults to the user's default calendar
+- `description`: string (optional) — up to 5000 characters
+- `location`: string (optional) — up to 500 characters
+
+Returns:
+- A confirmation that the event was updated and notifications were sent
+
+### delete_calendar_event
+
+Deletes an event (identified by its `uid`); the server sends iMIP
+cancellations to any attendees.
+
+Parameters:
+- `uid`: string — the event's iCalendar UID, from `create_calendar_event` or `list_calendar_events`
+- `calendarUrl`: string (optional) — a CalDAV URL from `list_calendars`; defaults to the user's default calendar
+
+Returns:
+- A confirmation that the event was deleted
