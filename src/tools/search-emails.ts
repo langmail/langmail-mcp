@@ -1,5 +1,5 @@
 // search_emails tool — full-text search over the authenticated user's
-// mailbox, returning subject/sender/date/preview.
+// mailbox, returning subject/sender/date.
 //
 // The tool logic lives behind a `Deps` interface so it can be unit-
 // tested without spinning up Stalwart. `registerSearchEmails(server)`
@@ -162,7 +162,7 @@ export const registerSearchEmails = (
     {
       description:
         "Full-text search over the authenticated user's mailbox. " +
-        'Returns matching messages with subject, sender, date, and a short preview.',
+        'Returns matching messages with subject, sender, and date.',
       inputSchema: searchEmailsInput.shape,
       title: 'Search emails',
     },
