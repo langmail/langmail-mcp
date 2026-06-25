@@ -82,6 +82,10 @@ const eventBlocks = (ical: string): Map<string, string>[] => {
     if (nested > 0) {
       continue
     }
+    // First-colon split: misplaces the value boundary if a property
+    // parameter carries a quoted ':' (e.g. CN="Org:Unit"). The properties
+    // we read (UID/SUMMARY/DTSTART/DTEND/LOCATION) don't use such params, so
+    // this stays correct within the parser's happy-path scope.
     const colon = line.indexOf(':')
     if (colon === -1) {
       continue

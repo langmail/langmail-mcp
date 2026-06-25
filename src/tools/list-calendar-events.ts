@@ -75,6 +75,9 @@ export const listCalendarEvents = async (
     ...(args.start && args.end ? { timeRange: { end: args.end, start: args.start } } : {}),
   })
 
+  // Lexicographic sort on the rendered start. Exact for our UTC events;
+  // approximate if the server returns floating TZID times (no `Z`), which
+  // can order against a UTC instant slightly wrong — acceptable for a list.
   const events = objects.flatMap((o) => parseEvents(o.data)).sort((a, b) => a.start.localeCompare(b.start))
   if (events.length === 0) {
     return textResult('No events found.')

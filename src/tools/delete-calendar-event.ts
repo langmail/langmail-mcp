@@ -64,7 +64,7 @@ export const deleteCalendarEvent = async (
 
   await deps.deleteEvent({ token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
 
-  return textResult(`Event ${args.uid} deleted; cancellations sent to its attendees.`)
+  return textResult(`Event ${args.uid} deleted; Stalwart will send cancellations to any attendees.`)
 }
 
 // --- live-deps wiring ----------------------------------------------------
