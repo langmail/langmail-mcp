@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 
-import { pickDefaultCalendar, pickOrganizer, withTrailingSlash } from './client.ts'
-import type { CalendarSummary } from './types.ts'
+import { findEventObject, pickDefaultCalendar, pickOrganizer, withTrailingSlash } from './client.ts'
+import { buildInvite } from './ical.ts'
+import type { CalendarObject, CalendarSummary } from './types.ts'
 
 const cal = (url: string, displayName = ''): CalendarSummary => ({ displayName, url })
 
@@ -51,5 +52,35 @@ describe('pickOrganizer', () => {
 
   test('returns null when there are no addresses', () => {
     expect(pickOrganizer([])).toBeNull()
+  })
+})
+
+describe('findEventObject', () => {
+  const obj = (uid: string, url: string): CalendarObject => ({
+    data: buildInvite({
+      attendees: ['guest@example.com'],
+      end: new Date('2026-06-12T10:30:00Z'),
+      organizer: 'host@langmail.me',
+      start: new Date('2026-06-12T10:00:00Z'),
+      title: 'Sync',
+      uid,
+    }),
+    url,
+  })
+
+  test('matches on the iCalendar UID even when the filename differs', () => {
+    // Server-assigned filename ("abc123.ics") bears no relation to the UID.
+    const stored = obj('evt-1@langmail.me', 'https://m/dav/cal/u/default/abc123.ics')
+    const found = findEventObject(
+      [obj('other@langmail.me', 'https://m/dav/cal/u/default/x.ics'), stored],
+      'evt-1@langmail.me'
+    )
+    expect(found?.url).toBe('https://m/dav/cal/u/default/abc123.ics')
+  })
+
+  test('returns null when no object carries the UID', () => {
+    expect(
+      findEventObject([obj('a@langmail.me', 'https://m/dav/cal/u/default/a.ics')], 'missing@langmail.me')
+    ).toBeNull()
   })
 })

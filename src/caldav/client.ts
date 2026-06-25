@@ -17,6 +17,7 @@ import {
   updateCalendarObject,
 } from 'tsdav'
 
+import { parseEvents } from './ical-parse.ts'
 import type { CalendarObject, CalendarSummary, DiscoveredAccount } from './types.ts'
 
 class CalDavError extends Error {
@@ -124,12 +125,6 @@ export const putEvent = async (p: PutEventParams): Promise<void> => {
   }
 }
 
-// The CalDAV URL of the `.ics` object for a UID, resolved the same way
-// createCalendarObject names it on PUT (`new URL(filename, collection)`),
-// so create and update/delete address the identical resource.
-const eventObjectUrl = (calendarUrl: string, uid: string): string =>
-  new URL(`${uid}.ics`, withTrailingSlash(calendarUrl)).href
-
 // tsdav stringifies a missing getetag as the literal "undefined"; treat
 // that as no ETag so we never send a bogus `If-Match: undefined`.
 const normalizeEtag = (etag?: string): string | undefined => (etag && etag !== 'undefined' ? etag : undefined)
@@ -142,25 +137,6 @@ const toCalendarObject = (obj: DAVCalendarObject): CalendarObject | null => {
   }
   const etag = normalizeEtag(obj.etag)
   return { data: obj.data, url: obj.url, ...(etag ? { etag } : {}) }
-}
-
-export interface FetchEventParams {
-  calendarUrl: string
-  token: string
-  uid: string
-}
-
-// Fetches a single event object by UID via calendar-multiget. Returns null
-// when the object doesn't exist (the server reports it with no calendar
-// data), which the tools surface as a friendly "not found".
-export const fetchEvent = async (p: FetchEventParams): Promise<CalendarObject | null> => {
-  const url = eventObjectUrl(p.calendarUrl, p.uid)
-  const objects = await fetchCalendarObjects({
-    calendar: { url: withTrailingSlash(p.calendarUrl) },
-    headers: bearer(p.token),
-    objectUrls: [url],
-  })
-  return objects.map(toCalendarObject).find((o) => o !== null) ?? null
 }
 
 export interface FetchEventsParams {
@@ -180,6 +156,28 @@ export const fetchEvents = async (p: FetchEventsParams): Promise<CalendarObject[
     ...(p.timeRange ? { timeRange: p.timeRange } : {}),
   })
   return objects.map(toCalendarObject).filter((o): o is CalendarObject => o !== null)
+}
+
+export interface FetchEventParams {
+  calendarUrl: string
+  token: string
+  uid: string
+}
+
+// Finds the stored object holding a given iCalendar UID among a collection's
+// objects. CalDAV resource names are server-assigned and need NOT equal the
+// UID (only events created by our own tool happen to be named `${uid}.ics`),
+// so we match on the parsed VEVENT UID rather than guessing the filename.
+export const findEventObject = (objects: CalendarObject[], uid: string): CalendarObject | null =>
+  objects.find((o) => parseEvents(o.data).some((e) => e.uid === uid)) ?? null
+
+// Fetches the single event object carrying `uid`. Lists the collection and
+// matches by UID (see findEventObject) so it works regardless of how the
+// object was named — including events synced in from other clients. Returns
+// null when no object carries the UID, surfaced as a friendly "not found".
+export const fetchEvent = async (p: FetchEventParams): Promise<CalendarObject | null> => {
+  const objects = await fetchEvents({ calendarUrl: p.calendarUrl, token: p.token })
+  return findEventObject(objects, p.uid)
 }
 
 export interface UpdateEventParams {
