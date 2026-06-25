@@ -48,7 +48,7 @@ live('caldav client against a live server', () => {
   const cfg: CalDavConfig = { authHeaders: () => ({ authorization: basic }), serverUrl: base }
   const calendarUrl = withTrailingSlash(`${base}/${user}/mcp-it`)
 
-  const invite = (uid: string, title: string): string =>
+  const invite = (uid: string, title: string, rrule?: string): string =>
     buildInvite({
       attendees: ['guest@example.com'],
       end: new Date('2026-06-12T10:30:00Z'),
@@ -56,6 +56,7 @@ live('caldav client against a live server', () => {
       start: new Date('2026-06-12T10:00:00Z'),
       title,
       uid,
+      ...(rrule ? { rrule } : {}),
     })
 
   beforeAll(async () => {
@@ -85,6 +86,42 @@ live('caldav client against a live server', () => {
 
     const updated = await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })
     expect(updated?.data).toContain('SUMMARY:Updated')
+
+    await deleteEvent(cfg, {
+      token: TOKEN,
+      url: updated?.url ?? '',
+      ...(updated?.etag ? { etag: updated.etag } : {}),
+    })
+    expect(await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })).toBeNull()
+  })
+
+  // Recurrence (RRULE) round-trip against the real server: a recurring VEVENT
+  // must survive the PUT, come back with its RRULE intact, surface as `repeats:`
+  // through the list tool, and re-rule cleanly on update. Unit tests only prove
+  // we *emit* the RRULE — this proves Radicale stores and returns it unmangled.
+  test('recurring event round-trips its RRULE through create → list → update → delete', async () => {
+    const uid = `recurring-${Date.now()}@mcp-it`
+    await putEvent(cfg, { calendarUrl, ical: invite(uid, 'Weekly sync', 'FREQ=WEEKLY;BYDAY=TH'), token: TOKEN, uid })
+
+    const created = await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })
+    expect(created?.data).toContain('RRULE:FREQ=WEEKLY;BYDAY=TH')
+
+    // The list tool parses the stored RRULE back out and renders it as `repeats:`.
+    const list = await listCalendarEvents(makeListDeps(cfg), { args: { calendarUrl }, token: TOKEN })
+    expect(list.content[0]?.text).toContain('repeats: FREQ=WEEKLY;BYDAY=TH')
+
+    // Re-rule the whole series (here: weekdays, bounded by COUNT). The new rule
+    // must replace the old one, not accumulate a second RRULE line.
+    await updateEvent(cfg, {
+      ical: invite(uid, 'Weekly sync', 'FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=12'),
+      token: TOKEN,
+      url: created?.url ?? '',
+      ...(created?.etag ? { etag: created.etag } : {}),
+    })
+
+    const updated = await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })
+    expect(updated?.data).toContain('RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=12')
+    expect(updated?.data).not.toContain('FREQ=WEEKLY;BYDAY=TH')
 
     await deleteEvent(cfg, {
       token: TOKEN,
