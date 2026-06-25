@@ -70,9 +70,9 @@ export const deleteCalendarEvent = async (
 // --- live-deps wiring ----------------------------------------------------
 
 export const makeLiveDeps = (cfg: CalDavConfig): DeleteCalendarEventDeps => ({
-  deleteEvent: (params) => deleteEvent(params),
+  deleteEvent: (params) => deleteEvent(cfg, params),
   discover: (token) => discoverAccount(cfg, token),
-  fetchEvent: (params) => fetchEvent(params),
+  fetchEvent: (params) => fetchEvent(cfg, params),
 })
 
 // --- MCP registration ----------------------------------------------------

@@ -71,6 +71,24 @@ source, so there is no compile or bundle step:
 bun run build
 ```
 
+### Tests
+
+`bun test` runs the unit suite. The CalDAV adapter also has integration
+tests that drive the real client against a live CalDAV server; they skip
+unless `CALDAV_BASE_URL` / `CALDAV_USERNAME` / `CALDAV_PASSWORD` are set. CI
+runs them against a throwaway [Radicale](https://radicale.org) instance (see
+the `CalDAV Integration` job in `.github/workflows/test.yml`). To run them
+locally, start any CalDAV server and point the env at it:
+
+```bash
+pip install radicale
+printf 'test:test\n' > /tmp/radicale-users
+radicale --auth-type htpasswd --auth-htpasswd-filename /tmp/radicale-users \
+  --auth-htpasswd-encryption plain --storage-filesystem-folder /tmp/radicale &
+CALDAV_BASE_URL=http://127.0.0.1:5232 CALDAV_USERNAME=test CALDAV_PASSWORD=test \
+  bun run test:integration
+```
+
 ## Available Tools
 
 ### search_emails

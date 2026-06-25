@@ -30,6 +30,10 @@ class CalDavError extends Error {
 }
 
 export interface CalDavConfig {
+  // Builds the Authorization header from the per-request credential.
+  // Defaults to OAuth bearer (production, against Stalwart). Integration
+  // tests inject Basic auth to drive a local CalDAV server (Radicale).
+  authHeaders?: (credential: string) => Record<string, string>
   // Stalwart base URL; tsdav discovers /dav/cal via /.well-known/caldav.
   serverUrl: string
 }
@@ -37,7 +41,8 @@ export interface CalDavConfig {
 const DEFAULT_CAL_RE = /\/default\/?$/u
 const MAILTO_RE = /^mailto:/iu
 
-const bearer = (token: string): Record<string, string> => ({ authorization: `Bearer ${token}` })
+const authHeaders = (cfg: CalDavConfig, credential: string): Record<string, string> =>
+  cfg.authHeaders ? cfg.authHeaders(credential) : { authorization: `Bearer ${credential}` }
 
 // CalDAV collection URLs are canonically trailing-slashed; tsdav resolves
 // object URLs via `new URL(filename, url)`, which silently drops the last
@@ -86,7 +91,7 @@ export const pickOrganizer = (addresses: string[]): string | null => {
 const loadAccount = (cfg: CalDavConfig, token: string): Promise<DAVAccount> =>
   createAccount({
     account: { accountType: 'caldav', serverUrl: cfg.serverUrl },
-    headers: bearer(token),
+    headers: authHeaders(cfg, token),
     loadCollections: true,
   })
 
@@ -97,7 +102,7 @@ export const fetchCalendarList = async (cfg: CalDavConfig, token: string): Promi
 
 export const discoverAccount = async (cfg: CalDavConfig, token: string): Promise<DiscoveredAccount> => {
   const account = await loadAccount(cfg, token)
-  const addresses = await fetchCalendarUserAddresses({ account, headers: bearer(token) })
+  const addresses = await fetchCalendarUserAddresses({ account, headers: authHeaders(cfg, token) })
   const calendars = (account.calendars ?? []).map(toSummary)
   return {
     calendars,
@@ -113,11 +118,11 @@ export interface PutEventParams {
   uid: string
 }
 
-export const putEvent = async (p: PutEventParams): Promise<void> => {
+export const putEvent = async (cfg: CalDavConfig, p: PutEventParams): Promise<void> => {
   const res = await createCalendarObject({
     calendar: { url: withTrailingSlash(p.calendarUrl) },
     filename: `${p.uid}.ics`,
-    headers: bearer(p.token),
+    headers: authHeaders(cfg, p.token),
     iCalString: p.ical,
   })
   if (!res.ok) {
@@ -149,10 +154,10 @@ export interface FetchEventsParams {
 
 // Lists the event objects in a calendar (optionally bounded by a time
 // range) so the agent can discover UIDs to update/delete.
-export const fetchEvents = async (p: FetchEventsParams): Promise<CalendarObject[]> => {
+export const fetchEvents = async (cfg: CalDavConfig, p: FetchEventsParams): Promise<CalendarObject[]> => {
   const objects = await fetchCalendarObjects({
     calendar: { url: withTrailingSlash(p.calendarUrl) },
-    headers: bearer(p.token),
+    headers: authHeaders(cfg, p.token),
     ...(p.timeRange ? { timeRange: p.timeRange } : {}),
   })
   return objects.map(toCalendarObject).filter((o): o is CalendarObject => o !== null)
@@ -175,8 +180,8 @@ export const findEventObject = (objects: CalendarObject[], uid: string): Calenda
 // matches by UID (see findEventObject) so it works regardless of how the
 // object was named — including events synced in from other clients. Returns
 // null when no object carries the UID, surfaced as a friendly "not found".
-export const fetchEvent = async (p: FetchEventParams): Promise<CalendarObject | null> => {
-  const objects = await fetchEvents({ calendarUrl: p.calendarUrl, token: p.token })
+export const fetchEvent = async (cfg: CalDavConfig, p: FetchEventParams): Promise<CalendarObject | null> => {
+  const objects = await fetchEvents(cfg, { calendarUrl: p.calendarUrl, token: p.token })
   return findEventObject(objects, p.uid)
 }
 
@@ -187,10 +192,10 @@ export interface UpdateEventParams {
   url: string
 }
 
-export const updateEvent = async (p: UpdateEventParams): Promise<void> => {
+export const updateEvent = async (cfg: CalDavConfig, p: UpdateEventParams): Promise<void> => {
   const res = await updateCalendarObject({
     calendarObject: { data: p.ical, etag: p.etag, url: p.url },
-    headers: bearer(p.token),
+    headers: authHeaders(cfg, p.token),
   })
   if (!res.ok) {
     throw new CalDavError(res.status, `caldav PUT returned ${res.status}`)
@@ -203,10 +208,10 @@ export interface DeleteEventParams {
   url: string
 }
 
-export const deleteEvent = async (p: DeleteEventParams): Promise<void> => {
+export const deleteEvent = async (cfg: CalDavConfig, p: DeleteEventParams): Promise<void> => {
   const res = await deleteCalendarObject({
     calendarObject: { data: '', etag: p.etag, url: p.url },
-    headers: bearer(p.token),
+    headers: authHeaders(cfg, p.token),
   })
   if (!res.ok) {
     throw new CalDavError(res.status, `caldav DELETE returned ${res.status}`)

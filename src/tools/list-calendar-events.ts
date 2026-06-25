@@ -91,7 +91,7 @@ export const listCalendarEvents = async (
 
 export const makeLiveDeps = (cfg: CalDavConfig): ListCalendarEventsDeps => ({
   discover: (token) => discoverAccount(cfg, token),
-  fetchEvents: (params) => fetchEvents(params),
+  fetchEvents: (params) => fetchEvents(cfg, params),
 })
 
 // --- MCP registration ----------------------------------------------------

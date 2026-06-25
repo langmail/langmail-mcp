@@ -8,6 +8,7 @@
     "start": "NODE_ENV=production bun src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "test:integration": "bun test caldav-integration",
     "smoke": "bun run scripts/smoke.ts"
   },
   "dependencies": {

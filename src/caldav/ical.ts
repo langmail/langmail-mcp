@@ -18,7 +18,9 @@ export interface InviteInput {
   sequence?: number
   start: Date
   title: string
-  // Stable iCalendar UID; also names the `.ics` object on the server.
+  // Stable iCalendar UID. Our create tool also uses it to name the `.ics`
+  // resource on PUT, but the server is authoritative — other clients may
+  // name the object differently, so reads match by UID (see fetchEvent).
   uid: string
 }
 
