@@ -106,4 +106,27 @@ describe('routes', () => {
     const body = (await res.json()) as Record<string, unknown>
     expect(body.principal).toBe('alice')
   })
+
+  test('GET /readyz returns 200 when Stalwart is reachable', async () => {
+    const r = makeRoutes()
+    const res = await withFetch(
+      () => Promise.resolve(new Response(null, { status: 401 })),
+      () => r.fetch(new Request(`${PUBLIC}/readyz`))
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { status: string; checks: Record<string, string> }
+    expect(body.status).toBe('ready')
+    expect(body.checks.stalwart).toBe('HTTP 401')
+  })
+
+  test('GET /readyz returns 503 when Stalwart is unreachable', async () => {
+    const r = makeRoutes()
+    const res = await withFetch(
+      () => Promise.reject(new Error('ConnectionRefused')),
+      () => r.fetch(new Request(`${PUBLIC}/readyz`))
+    )
+    expect(res.status).toBe(503)
+    const body = (await res.json()) as { status: string }
+    expect(body.status).toBe('not_ready')
+  })
 })

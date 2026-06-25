@@ -9,6 +9,8 @@ import { createDcrHandler } from './auth/dcr.ts'
 import type { AuthContext, AuthMiddleware } from './auth/middleware.ts'
 import { createAuthMiddleware } from './auth/middleware.ts'
 import { TokenCache } from './auth/token-cache.ts'
+import type { ReadyResult } from './health/readiness.ts'
+import { createReadiness, readyzResponse, stalwartReachable } from './health/readiness.ts'
 
 export interface HandlerConfig {
   cache?: TokenCache
@@ -23,6 +25,9 @@ export interface HandlerConfig {
   // phase 2 wires StreamableHTTPServerTransport in here.
   mcpHandler?: (req: Request, ctx: AuthContext) => Promise<Response>
   publicUrl: string
+  // Readiness checker. Defaults to a Stalwart-userinfo reachability probe built
+  // from stalwartUrl; injectable so tests can supply a fake.
+  readiness?: () => Promise<ReadyResult>
   stalwartUrl: string
 }
 
@@ -54,6 +59,7 @@ export const createRoutes = (cfg: HandlerConfig): Routes => {
       stalwartBase: cfg.stalwartUrl,
       upstreamAuth: cfg.dcrUpstreamAuth,
     })
+  const readiness = cfg.readiness ?? createReadiness({ stalwart: stalwartReachable(cfg.stalwartUrl) })
 
   const fetchHandler = async (req: Request): Promise<Response> => {
     const url = new URL(req.url)
@@ -62,6 +68,10 @@ export const createRoutes = (cfg: HandlerConfig): Routes => {
       return new Response('ok\n', {
         headers: { 'content-type': 'text/plain' },
       })
+    }
+
+    if (url.pathname === '/readyz') {
+      return readyzResponse(await readiness())
     }
 
     if (url.pathname === '/.well-known/oauth-authorization-server') {
