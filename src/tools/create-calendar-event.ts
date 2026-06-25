@@ -9,11 +9,20 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
 import type { CalDavConfig, PutEventParams } from '../caldav/client.ts'
-import { discoverAccount, putEvent, withTrailingSlash } from '../caldav/client.ts'
+import { discoverAccount, putEvent, resolveCalendarUrl } from '../caldav/client.ts'
 import { buildInvite } from '../caldav/ical.ts'
 import type { DiscoveredAccount } from '../caldav/types.ts'
 import type { ToolResult } from './result.ts'
 import { errorResult, textResult } from './result.ts'
+
+// An event's iCalendar UID, as returned by create_calendar_event. Rejects
+// path separators: the UID names the `.ics` object relative to a calendar
+// collection, so a `/` or `\` could otherwise escape the validated calendar.
+export const eventUidSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .regex(/^[^/\\]+$/u, 'uid must not contain path separators')
 
 export const createCalendarEventInput = z.object({
   attendees: z.array(z.email()).min(1).max(50),
@@ -52,18 +61,15 @@ export const createCalendarEvent = async (
     return errorResult('Could not determine an organizer address for this account.')
   }
 
-  const calendarUrl = args.calendarUrl ?? account.defaultCalendarUrl
-  if (!calendarUrl) {
-    return errorResult('No calendar available to create the event in.')
+  const resolved = resolveCalendarUrl(account, args.calendarUrl)
+  if (!resolved.ok) {
+    return errorResult(
+      resolved.reason === 'none'
+        ? 'No calendar available to create the event in.'
+        : `Calendar not found: ${args.calendarUrl}`
+    )
   }
-  // Normalize both sides: discovered URLs are trailing-slashed, but the
-  // agent may pass the unslashed form (which putEvent accepts anyway).
-  if (
-    args.calendarUrl &&
-    !account.calendars.some((c) => withTrailingSlash(c.url) === withTrailingSlash(args.calendarUrl ?? ''))
-  ) {
-    return errorResult(`Calendar not found: ${args.calendarUrl}`)
-  }
+  const calendarUrl = resolved.url
 
   const start = new Date(args.start)
   const end = new Date(args.end)
@@ -87,7 +93,10 @@ export const createCalendarEvent = async (
 
   return textResult(
     `Event "${args.title}" created and invitations sent to ${args.attendees.length} ` +
-      `attendee(s): ${args.attendees.join(', ')}.`
+      `attendee(s): ${args.attendees.join(', ')}.\n` +
+      // Surface the UID + calendar so a later turn can update_calendar_event /
+      // delete_calendar_event this event.
+      `uid: ${uid}\ncalendarUrl: ${calendarUrl}`
   )
 }
 

@@ -18,8 +18,16 @@ import {
   makeLiveDeps as makeCreateCalendarEventDeps,
   registerCreateCalendarEvent,
 } from '../tools/create-calendar-event.ts'
+import {
+  makeLiveDeps as makeDeleteCalendarEventDeps,
+  registerDeleteCalendarEvent,
+} from '../tools/delete-calendar-event.ts'
 import { makeLiveDeps as makeListCalendarsDeps, registerListCalendars } from '../tools/list-calendars.ts'
 import { makeLiveDeps as makeSearchEmailsDeps, registerSearchEmails } from '../tools/search-emails.ts'
+import {
+  makeLiveDeps as makeUpdateCalendarEventDeps,
+  registerUpdateCalendarEvent,
+} from '../tools/update-calendar-event.ts'
 
 export interface McpHandlerConfig {
   stalwartUrl: string
@@ -38,6 +46,8 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   const caldavCfg = { serverUrl: cfg.stalwartUrl }
   const listCalendarsDeps = makeListCalendarsDeps(caldavCfg)
   const createCalendarEventDeps = makeCreateCalendarEventDeps(caldavCfg)
+  const updateCalendarEventDeps = makeUpdateCalendarEventDeps(caldavCfg)
+  const deleteCalendarEventDeps = makeDeleteCalendarEventDeps(caldavCfg)
 
   return async (req, ctx) => {
     const server = new McpServer({
@@ -47,6 +57,8 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     registerSearchEmails(server, searchEmailsDeps, () => ctx.token)
     registerListCalendars(server, listCalendarsDeps, () => ctx.token)
     registerCreateCalendarEvent(server, createCalendarEventDeps, () => ctx.token)
+    registerUpdateCalendarEvent(server, updateCalendarEventDeps, () => ctx.token)
+    registerDeleteCalendarEvent(server, deleteCalendarEventDeps, () => ctx.token)
 
     // Stateless mode (sessionIdGenerator omitted). Each request stands
     // alone — initialize, tool call, and shutdown happen within the

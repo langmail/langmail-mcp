@@ -10,6 +10,15 @@ export interface CalendarSummary {
   url: string
 }
 
+// A single stored calendar object (`.ics`) as fetched from the server:
+// its CalDAV URL, the current ETag (for conditional update/delete), and
+// the raw iCalendar payload.
+export interface CalendarObject {
+  data: string
+  etag?: string
+  url: string
+}
+
 // Result of RFC 6764 discovery for the authenticated principal.
 export interface DiscoveredAccount {
   calendars: CalendarSummary[]
