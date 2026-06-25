@@ -7,7 +7,7 @@
 // bearer through and reshape the result into our CalendarSummary /
 // DiscoveredAccount types.
 
-import type { DAVAccount, DAVCalendar } from 'tsdav'
+import type { DAVAccount, DAVCalendar, DAVCalendarObject } from 'tsdav'
 import {
   createAccount,
   createCalendarObject,
@@ -130,6 +130,20 @@ export const putEvent = async (p: PutEventParams): Promise<void> => {
 const eventObjectUrl = (calendarUrl: string, uid: string): string =>
   new URL(`${uid}.ics`, withTrailingSlash(calendarUrl)).href
 
+// tsdav stringifies a missing getetag as the literal "undefined"; treat
+// that as no ETag so we never send a bogus `If-Match: undefined`.
+const normalizeEtag = (etag?: string): string | undefined => (etag && etag !== 'undefined' ? etag : undefined)
+
+// Reshapes a tsdav object into our CalendarObject, dropping anything the
+// server returned without calendar data (e.g. a 404'd multiget href).
+const toCalendarObject = (obj: DAVCalendarObject): CalendarObject | null => {
+  if (typeof obj.data !== 'string' || obj.data.length === 0) {
+    return null
+  }
+  const etag = normalizeEtag(obj.etag)
+  return { data: obj.data, url: obj.url, ...(etag ? { etag } : {}) }
+}
+
 export interface FetchEventParams {
   calendarUrl: string
   token: string
@@ -146,14 +160,26 @@ export const fetchEvent = async (p: FetchEventParams): Promise<CalendarObject | 
     headers: bearer(p.token),
     objectUrls: [url],
   })
-  const obj = objects.find((o) => typeof o.data === 'string' && o.data.length > 0)
-  if (!obj) {
-    return null
-  }
-  // tsdav stringifies a missing getetag as the literal "undefined"; treat
-  // that as no ETag so we don't send a bogus `If-Match: undefined`.
-  const etag = obj.etag && obj.etag !== 'undefined' ? obj.etag : undefined
-  return { data: obj.data, url: obj.url, ...(etag ? { etag } : {}) }
+  return objects.map(toCalendarObject).find((o) => o !== null) ?? null
+}
+
+export interface FetchEventsParams {
+  calendarUrl: string
+  // Optional inclusive window; without it every event in the calendar is
+  // returned. Both bounds are iCalendar-style UTC or ISO 8601 strings.
+  timeRange?: { end: string; start: string }
+  token: string
+}
+
+// Lists the event objects in a calendar (optionally bounded by a time
+// range) so the agent can discover UIDs to update/delete.
+export const fetchEvents = async (p: FetchEventsParams): Promise<CalendarObject[]> => {
+  const objects = await fetchCalendarObjects({
+    calendar: { url: withTrailingSlash(p.calendarUrl) },
+    headers: bearer(p.token),
+    ...(p.timeRange ? { timeRange: p.timeRange } : {}),
+  })
+  return objects.map(toCalendarObject).filter((o): o is CalendarObject => o !== null)
 }
 
 export interface UpdateEventParams {

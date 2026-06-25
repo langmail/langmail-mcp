@@ -22,6 +22,10 @@ import {
   makeLiveDeps as makeDeleteCalendarEventDeps,
   registerDeleteCalendarEvent,
 } from '../tools/delete-calendar-event.ts'
+import {
+  makeLiveDeps as makeListCalendarEventsDeps,
+  registerListCalendarEvents,
+} from '../tools/list-calendar-events.ts'
 import { makeLiveDeps as makeListCalendarsDeps, registerListCalendars } from '../tools/list-calendars.ts'
 import { makeLiveDeps as makeSearchEmailsDeps, registerSearchEmails } from '../tools/search-emails.ts'
 import {
@@ -45,6 +49,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   // /.well-known/caldav to /dav/cal.
   const caldavCfg = { serverUrl: cfg.stalwartUrl }
   const listCalendarsDeps = makeListCalendarsDeps(caldavCfg)
+  const listCalendarEventsDeps = makeListCalendarEventsDeps(caldavCfg)
   const createCalendarEventDeps = makeCreateCalendarEventDeps(caldavCfg)
   const updateCalendarEventDeps = makeUpdateCalendarEventDeps(caldavCfg)
   const deleteCalendarEventDeps = makeDeleteCalendarEventDeps(caldavCfg)
@@ -56,6 +61,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     })
     registerSearchEmails(server, searchEmailsDeps, () => ctx.token)
     registerListCalendars(server, listCalendarsDeps, () => ctx.token)
+    registerListCalendarEvents(server, listCalendarEventsDeps, () => ctx.token)
     registerCreateCalendarEvent(server, createCalendarEventDeps, () => ctx.token)
     registerUpdateCalendarEvent(server, updateCalendarEventDeps, () => ctx.token)
     registerDeleteCalendarEvent(server, deleteCalendarEventDeps, () => ctx.token)
