@@ -16,8 +16,10 @@ import type { ToolResult } from './result.ts'
 import { errorResult, textResult } from './result.ts'
 
 // An event's iCalendar UID, as returned by create_calendar_event. Rejects
-// path separators: the UID names the `.ics` object relative to a calendar
-// collection, so a `/` or `\` could otherwise escape the validated calendar.
+// path separators: create names the `.ics` resource `${uid}.ics` on PUT (see
+// putEvent), so a `/` or `\` could otherwise escape the validated calendar
+// collection. (Reads no longer depend on the filename — they match by UID —
+// but the create-side PUT still does.)
 export const eventUidSchema = z
   .string()
   .min(1)

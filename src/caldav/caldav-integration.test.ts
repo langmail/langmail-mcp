@@ -50,8 +50,13 @@ live('caldav client against a live server', () => {
     })
 
   beforeAll(async () => {
-    // Provision the calendar collection; idempotent (ignore "already exists").
-    await fetch(calendarUrl, { headers: { authorization: basic }, method: 'MKCALENDAR' })
+    // Provision the calendar collection. 201 = created; 405/409 = already
+    // exists (idempotent). Anything else is a real setup failure (bad URL or
+    // auth) worth surfacing here rather than as confusing 404s in every test.
+    const res = await fetch(calendarUrl, { headers: { authorization: basic }, method: 'MKCALENDAR' })
+    if (!res.ok && res.status !== 405 && res.status !== 409) {
+      throw new Error(`MKCALENDAR ${calendarUrl} failed: ${res.status}`)
+    }
   })
 
   test('create → fetch → update → delete round-trips', async () => {
