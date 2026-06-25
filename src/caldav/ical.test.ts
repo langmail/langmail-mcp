@@ -34,6 +34,19 @@ describe('buildInvite', () => {
     expect(ics).toContain('PARTSTAT=NEEDS-ACTION')
   })
 
+  // ical-generator emits the ATTENDEE CAL-ADDRESS scheme in uppercase
+  // (`:MAILTO:`) while the ORGANIZER gets lowercase (`:mailto:`). Stalwart's
+  // iMIP scheduler only strips the lowercase prefix to derive the SMTP
+  // recipient, so an uppercase scheme leaks into `RCPT TO:<mailto:...>` and
+  // the message bounces. Keep every CAL-ADDRESS scheme lowercase.
+  test('emits attendee and organizer addresses with a lowercase mailto: scheme', () => {
+    const ics = unfold(buildInvite({ ...baseInput, attendees: ['guest@example.com'] }))
+    expect(ics).toContain('ATTENDEE')
+    expect(ics).not.toContain('MAILTO:')
+    expect(ics).toContain('mailto:guest@example.com')
+    expect(ics).toContain('mailto:host@langmail.me')
+  })
+
   test('uses CRLF line endings (RFC 5545)', () => {
     const ics = buildInvite(baseInput)
     expect(ics).toContain('\r\n')
