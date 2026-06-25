@@ -39,5 +39,5 @@ claude mcp list
 | Tool                    | Description                                                                                                                  |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `search_emails`         | Full-text search over the authenticated user's mailbox. Returns matching messages with subject, sender, and date. Optional `mailbox` filter and `limit` (1–100, default 20). |
-| `list_calendars`        | Lists the authenticated user's calendars, returning each calendar's display name and CalDAV URL.                            |
-| `create_calendar_event` | Creates a calendar event and sends iMIP invitations to the attendees, with the authenticated user as organizer. Times are ISO 8601 with offset; defaults to the user's default calendar. |
+| `list_calendars`        | Lists the authenticated user's calendars, returning each calendar's display name and CalDAV URL. Pass the URL to `create_calendar_event` to target a specific calendar. |
+| `create_calendar_event` | Creates a calendar event and sends iMIP invitations to the attendees, with the authenticated user as organizer. Times are ISO 8601 with offset; optionally pass a CalDAV URL from `list_calendars` to target a specific calendar, otherwise defaults to the user's default calendar. |
