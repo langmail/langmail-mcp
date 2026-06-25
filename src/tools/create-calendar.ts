@@ -38,9 +38,9 @@ export interface CreateCalendarContext {
 export const createCalendar = async (deps: CreateCalendarDeps, ctx: CreateCalendarContext): Promise<ToolResult> => {
   const { args, token } = ctx
   const url = await deps.createCalendar({
+    color: args.color,
     name: args.name,
     token,
-    ...(args.color ? { color: args.color } : {}),
   })
 
   return textResult(

@@ -143,6 +143,11 @@ export const createCalendar = async (cfg: CalDavConfig, p: CreateCalendarParams)
     },
     url,
   })
+  // An empty response array would otherwise slip past the `find` below and
+  // report success without confirmation, so treat it as a failure.
+  if (res.length === 0) {
+    throw new Error('caldav MKCALENDAR returned no response')
+  }
   const failed = res.find((r) => !r.ok)
   if (failed) {
     throw new CalDavError(failed.status, `caldav MKCALENDAR returned ${failed.status}`)

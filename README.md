@@ -16,7 +16,7 @@
 - Speaks the Streamable HTTP transport over `/mcp`
 - Authenticates clients via OAuth 2.0 — advertises its own authorization metadata and proxies dynamic client registration to Stalwart
 - Full-text search over the authenticated user's mailbox
-- List the user's calendars
+- List and create the user's calendars
 - List, create, update, and delete calendar events — sending iMIP invitations and cancellations to attendees
 
 The public endpoint is `https://mcp.langmail.me/mcp`.
