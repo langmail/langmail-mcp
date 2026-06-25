@@ -19,7 +19,16 @@ import { createCalendarObject } from 'tsdav'
 import { deleteCalendarEvent, makeLiveDeps as makeDeleteDeps } from '../tools/delete-calendar-event.ts'
 import { listCalendarEvents, makeLiveDeps as makeListDeps } from '../tools/list-calendar-events.ts'
 import type { CalDavConfig } from './client.ts'
-import { deleteEvent, fetchEvent, fetchEvents, putEvent, updateEvent, withTrailingSlash } from './client.ts'
+import {
+  createCalendar,
+  deleteEvent,
+  fetchCalendarList,
+  fetchEvent,
+  fetchEvents,
+  putEvent,
+  updateEvent,
+  withTrailingSlash,
+} from './client.ts'
 import { buildInvite } from './ical.ts'
 
 const BASE = process.env.CALDAV_BASE_URL
@@ -164,6 +173,24 @@ live('caldav client against a live server', () => {
     const result = await listCalendarEvents(makeListDeps(cfg), { args: { calendarUrl: emptyUrl }, token: TOKEN })
     expect(result.isError).toBeUndefined()
     expect(result.content[0]?.text).toContain('No events found')
+  })
+
+  // MKCALENDAR path: the new collection lands under the principal's
+  // calendar-home-set, carries the requested display name, and is immediately
+  // discoverable by fetchCalendarList — i.e. usable by create_calendar_event.
+  test('createCalendar makes a discoverable collection with the requested name', async () => {
+    const name = `Marketing ${Date.now()}`
+    const url = await createCalendar(cfg, { color: '#FF6600', name, token: TOKEN })
+    expect(url).toContain(base)
+
+    const calendars = await fetchCalendarList(cfg, TOKEN)
+    const created = calendars.find((c) => withTrailingSlash(c.url) === withTrailingSlash(url))
+    expect(created).toBeDefined()
+    expect(created?.displayName).toBe(name)
+
+    // Clean up the collection so repeated local runs don't accumulate calendars
+    // (the event tests delete what they create; keep parity).
+    await fetch(url, { headers: { authorization: basic }, method: 'DELETE' })
   })
 
   test('delete_calendar_event tool removes an event addressed by UID (filename differs)', async () => {

@@ -16,7 +16,7 @@
 - Speaks the Streamable HTTP transport over `/mcp`
 - Authenticates clients via OAuth 2.0 — advertises its own authorization metadata and proxies dynamic client registration to Stalwart
 - Full-text search over the authenticated user's mailbox
-- List the user's calendars
+- List and create the user's calendars
 - List, create, update, and delete calendar events — sending iMIP invitations and cancellations to attendees
 
 The public endpoint is `https://mcp.langmail.me/mcp`.
@@ -114,6 +114,20 @@ Parameters: none
 
 Returns:
 - A list of the user's calendars, each with its display name and CalDAV URL
+
+### create_calendar
+
+Creates a new calendar (CalDAV collection) for the authenticated user — e.g.
+a separate "Marketing" calendar so a workstream's events don't clutter the
+personal one. Returns the new calendar's CalDAV URL; pass it to
+`create_calendar_event` to add events to it.
+
+Parameters:
+- `name`: string — the calendar's display name (1–200 characters)
+- `color`: string (optional) — a hex display color (e.g. `#FF6600`), carried through the Apple `calendar-color` extension so the calendar is visually distinct
+
+Returns:
+- A confirmation including the new `calendarUrl` (pass it to `create_calendar_event`)
 
 ### list_calendar_events
 

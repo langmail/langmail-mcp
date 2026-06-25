@@ -14,6 +14,7 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 
 import type { AuthContext } from '../auth/middleware.ts'
 import { SessionCache } from '../jmap/session-cache.ts'
+import { makeLiveDeps as makeCreateCalendarDeps, registerCreateCalendar } from '../tools/create-calendar.ts'
 import {
   makeLiveDeps as makeCreateCalendarEventDeps,
   registerCreateCalendarEvent,
@@ -49,6 +50,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   // /.well-known/caldav to /dav/cal.
   const caldavCfg = { serverUrl: cfg.stalwartUrl }
   const listCalendarsDeps = makeListCalendarsDeps(caldavCfg)
+  const createCalendarDeps = makeCreateCalendarDeps(caldavCfg)
   const listCalendarEventsDeps = makeListCalendarEventsDeps(caldavCfg)
   const createCalendarEventDeps = makeCreateCalendarEventDeps(caldavCfg)
   const updateCalendarEventDeps = makeUpdateCalendarEventDeps(caldavCfg)
@@ -61,6 +63,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     })
     registerSearchEmails(server, searchEmailsDeps, () => ctx.token)
     registerListCalendars(server, listCalendarsDeps, () => ctx.token)
+    registerCreateCalendar(server, createCalendarDeps, () => ctx.token)
     registerListCalendarEvents(server, listCalendarEventsDeps, () => ctx.token)
     registerCreateCalendarEvent(server, createCalendarEventDeps, () => ctx.token)
     registerUpdateCalendarEvent(server, updateCalendarEventDeps, () => ctx.token)
