@@ -42,6 +42,11 @@ describe('parseEvents', () => {
     expect(parseEvents(sample)[0]?.recurrence).toBeUndefined()
   })
 
+  test('trims trailing whitespace a server may emit on the RRULE line', () => {
+    const ics = 'BEGIN:VEVENT\r\nUID:evt-w@langmail.me\r\nRRULE:FREQ=WEEKLY \r\nEND:VEVENT'
+    expect(parseEvents(ics)[0]?.recurrence).toBe('FREQ=WEEKLY')
+  })
+
   test('omits location when absent', () => {
     const ics = buildInvite({
       attendees: ['guest@example.com'],

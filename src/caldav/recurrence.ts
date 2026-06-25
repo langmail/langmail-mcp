@@ -76,7 +76,9 @@ export const recurrenceDescription =
   '(e.g. "FREQ=WEEKLY;BYDAY=TH" for every Thursday, "FREQ=DAILY;COUNT=10" for ten ' +
   'days) or a structured object {frequency, interval?, byDay?, until?|count?}. ' +
   'start/end describe the first occurrence. Use at most one of until/count; ' +
-  'in a raw RRULE express UNTIL as a UTC date-time (e.g. UNTIL=20261231T000000Z).'
+  'in a raw RRULE express UNTIL as a UTC date-time (e.g. UNTIL=20261231T000000Z). ' +
+  'A raw RRULE is only lightly validated, so it must be valid RFC 5545 ' +
+  '(e.g. BYDAY codes MO–SU) — malformed rules surface as CalDAV server errors.'
 
 // ISO `2026-12-31T00:00:00.000Z` → iCalendar `20261231T000000Z`: drop the
 // date/time separators, then the milliseconds.

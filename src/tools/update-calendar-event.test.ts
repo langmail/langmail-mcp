@@ -107,7 +107,21 @@ describe('updateCalendarEvent', () => {
 
   test('collapses a series to a one-off when recurrence is omitted', async () => {
     const cap = captured()
-    await updateCalendarEvent(makeDeps(account(), storedEvent(), cap), { args: args(), token: 'tok' })
+    // The stored event is genuinely recurring, so this exercises the collapse —
+    // not just a fresh non-recurring edit happening to lack an RRULE.
+    const recurringStored = storedEvent({
+      data: buildInvite({
+        attendees: ['guest@example.com'],
+        end: new Date('2026-06-12T10:30:00Z'),
+        organizer: 'host@langmail.me',
+        rrule: 'FREQ=WEEKLY;BYDAY=TH',
+        sequence: 2,
+        start: new Date('2026-06-12T10:00:00Z'),
+        title: 'Sync',
+        uid: UID,
+      }),
+    })
+    await updateCalendarEvent(makeDeps(account(), recurringStored, cap), { args: args(), token: 'tok' })
     expect(cap.updated[0]?.ical ?? '').not.toContain('RRULE')
   })
 

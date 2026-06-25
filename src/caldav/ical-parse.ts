@@ -112,7 +112,9 @@ export const parseEvents = (ical: string): ParsedEvent[] => {
       continue
     }
     const location = block.get('LOCATION')
-    const recurrence = block.get('RRULE')
+    // Trim so a server that emits a trailing space (`RRULE:FREQ=WEEKLY `) doesn't
+    // leak it into the listed `repeats:` value.
+    const recurrence = block.get('RRULE')?.trim()
     events.push({
       end: icalDateToIso(block.get('DTEND') ?? ''),
       start: icalDateToIso(block.get('DTSTART') ?? ''),
