@@ -103,6 +103,16 @@ describe('respondToEvent', () => {
     expect(result.content[0]?.text).toContain('declined')
   })
 
+  test('maps tentative → TENTATIVE and uses "tentatively" in the confirmation', async () => {
+    const cap = captured()
+    const result = await respondToEvent(makeDeps(account(), storedEvent(), cap), {
+      args: args({ response: 'tentative' }),
+      token: 'tok',
+    })
+    expect((cap.updated[0]?.ical ?? '').replace(/\r\n /gu, '')).toContain('PARTSTAT=TENTATIVE')
+    expect(result.content[0]?.text).toContain('tentatively')
+  })
+
   test('errors when the event does not exist, without writing', async () => {
     const cap = captured()
     const result = await respondToEvent(makeDeps(account(), null, cap), { args: args(), token: 'tok' })
