@@ -28,6 +28,7 @@ import {
   registerListCalendarEvents,
 } from '../tools/list-calendar-events.ts'
 import { makeLiveDeps as makeListCalendarsDeps, registerListCalendars } from '../tools/list-calendars.ts'
+import { makeLiveDeps as makeRespondToEventDeps, registerRespondToEvent } from '../tools/respond-to-event.ts'
 import { makeLiveDeps as makeSearchEmailsDeps, registerSearchEmails } from '../tools/search-emails.ts'
 import {
   makeLiveDeps as makeUpdateCalendarEventDeps,
@@ -55,6 +56,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   const createCalendarEventDeps = makeCreateCalendarEventDeps(caldavCfg)
   const updateCalendarEventDeps = makeUpdateCalendarEventDeps(caldavCfg)
   const deleteCalendarEventDeps = makeDeleteCalendarEventDeps(caldavCfg)
+  const respondToEventDeps = makeRespondToEventDeps(caldavCfg)
 
   return async (req, ctx) => {
     const server = new McpServer({
@@ -68,6 +70,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     registerCreateCalendarEvent(server, createCalendarEventDeps, () => ctx.token)
     registerUpdateCalendarEvent(server, updateCalendarEventDeps, () => ctx.token)
     registerDeleteCalendarEvent(server, deleteCalendarEventDeps, () => ctx.token)
+    registerRespondToEvent(server, respondToEventDeps, () => ctx.token)
 
     // Stateless mode (sessionIdGenerator omitted). Each request stands
     // alone — initialize, tool call, and shutdown happen within the

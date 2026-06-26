@@ -18,6 +18,7 @@ import { createCalendarObject } from 'tsdav'
 
 import { deleteCalendarEvent, makeLiveDeps as makeDeleteDeps } from '../tools/delete-calendar-event.ts'
 import { listCalendarEvents, makeLiveDeps as makeListDeps } from '../tools/list-calendar-events.ts'
+import { makeLiveDeps as makeRespondDeps, respondToEvent } from '../tools/respond-to-event.ts'
 import type { CalDavConfig } from './client.ts'
 import {
   createCalendar,
@@ -243,5 +244,51 @@ live('caldav client against a live server', () => {
     expect(result.isError).toBeUndefined()
     expect(result.content[0]?.text).toContain('deleted')
     expect(await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })).toBeNull()
+  })
+
+  // The respond_to_event "CI moment": PUT an event whose ATTENDEE is our user
+  // with PARTSTAT=NEEDS-ACTION, run the tool against the live server, and
+  // assert the stored object now reads PARTSTAT=ACCEPTED. discover is stubbed
+  // to a fixed address — Radicale doesn't expose calendar-user-address-set, so
+  // the real discovery yields no organizer (other tool tests sidestep it the
+  // same way); fetchEvent / updateEvent are the real client.
+  test('respond_to_event flips the stored PARTSTAT to ACCEPTED', async () => {
+    const uid = `rsvp-${Date.now()}@mcp-it`
+    const me = `${user}@example.com`
+    await putEvent(cfg, {
+      calendarUrl,
+      ical: buildInvite({
+        attendees: [me],
+        end: new Date('2026-06-12T10:30:00Z'),
+        organizer: 'organizer@example.com',
+        start: new Date('2026-06-12T10:00:00Z'),
+        title: 'Invite to RSVP',
+        uid,
+      }),
+      token: TOKEN,
+      uid,
+    })
+
+    const seeded = await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })
+    expect(seeded?.data).toContain('PARTSTAT=NEEDS-ACTION')
+
+    const deps = {
+      ...makeRespondDeps(cfg),
+      discover: () =>
+        Promise.resolve({
+          calendars: [{ displayName: '', url: calendarUrl }],
+          defaultCalendarUrl: calendarUrl,
+          organizer: me,
+        }),
+    }
+    const result = await respondToEvent(deps, { args: { calendarUrl, response: 'accept', uid }, token: TOKEN })
+    expect(result.isError).toBeUndefined()
+    expect(result.content[0]?.text).toContain('Invite to RSVP')
+
+    const updated = await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })
+    expect(updated?.data).toContain('PARTSTAT=ACCEPTED')
+    expect(updated?.data).not.toContain('PARTSTAT=NEEDS-ACTION')
+
+    await deleteEvent(cfg, { token: TOKEN, url: updated?.url ?? '', ...(updated?.etag ? { etag: updated.etag } : {}) })
   })
 })
