@@ -46,7 +46,7 @@ const PARTSTAT_BY_RESPONSE: Record<Response, Partstat> = {
 const CONFIRMATION_BY_RESPONSE: Record<Response, string> = {
   accept: 'accepted',
   decline: 'declined',
-  tentative: 'tentative',
+  tentative: 'tentatively',
 }
 
 export interface RespondToEventDeps {
