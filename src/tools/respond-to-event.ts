@@ -65,10 +65,11 @@ export const respondToEvent = async (deps: RespondToEventDeps, ctx: RespondToEve
   const account = await deps.discover(token)
 
   // discoverAccount surfaces the principal's calendar-user-address as
-  // `organizer`; here it doubles as the ATTENDEE address we match on.
+  // `organizer`; for an RSVP it doubles as the ATTENDEE address we match on.
   if (!account.organizer) {
     return errorResult('Could not determine your address for this account.')
   }
+  const attendeeEmail = account.organizer
 
   const resolved = resolveCalendarUrl(account, args.calendarUrl)
   if (!resolved.ok) {
@@ -83,7 +84,7 @@ export const respondToEvent = async (deps: RespondToEventDeps, ctx: RespondToEve
     return errorResult(`Event not found: ${args.uid}`)
   }
 
-  const result = setAttendeePartstat(existing.data, account.organizer, PARTSTAT_BY_RESPONSE[args.response])
+  const result = setAttendeePartstat(existing.data, attendeeEmail, PARTSTAT_BY_RESPONSE[args.response])
   if (!result.ok) {
     return errorResult("You are not an attendee of this event, so you can't RSVP.")
   }

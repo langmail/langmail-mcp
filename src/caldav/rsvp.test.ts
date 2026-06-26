@@ -71,9 +71,9 @@ describe('setAttendeePartstat', () => {
       return
     }
     // The edited line is re-emitted unfolded, so PARTSTAT and the full address
-    // land on one line.
-    expect(result.ical).toContain('PARTSTAT=ACCEPTED')
-    expect(result.ical).toContain(':mailto:attendee-with-a-long-address@example.com')
+    // reassemble onto one logical line — assert them together to catch a
+    // regression that splits the output.
+    expect(result.ical).toContain('PARTSTAT=ACCEPTED;RSVP=TRUE:mailto:attendee-with-a-long-address@example.com')
     expect(result.ical).not.toContain('NEEDS-ACTION')
   })
 
