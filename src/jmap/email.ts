@@ -6,7 +6,10 @@
 import { JmapError } from './session.ts'
 import type { EmailRecord, JmapRequest, JmapResponse, MailboxRecord } from './types.ts'
 
-const MAIL_CAPABILITY = 'urn:ietf:params:jmap:mail'
+// Every JMAP request must declare the core capability alongside any it uses
+// (RFC 8620 §3.3); Stalwart 0.16.10+ enforces this, rejecting requests whose
+// `using` omits a required capability. Mirrors auth's StalwartAdminClient.
+const USING = ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail']
 
 const EMAIL_PROPERTIES = ['id', 'subject', 'from', 'receivedAt', 'preview', 'mailboxIds'] as const
 
@@ -65,7 +68,7 @@ export const emailQuery = async (p: EmailQueryParams): Promise<string[]> => {
         '0',
       ],
     ],
-    using: [MAIL_CAPABILITY],
+    using: USING,
   })
   const out = methodResponse<{ ids?: string[] }>(resp, 'Email/query', '0')
   return out.ids ?? []
@@ -92,7 +95,7 @@ export const emailGet = async (p: EmailGetParams): Promise<EmailRecord[]> => {
         '0',
       ],
     ],
-    using: [MAIL_CAPABILITY],
+    using: USING,
   })
   const out = methodResponse<{ list?: EmailRecord[] }>(resp, 'Email/get', '0')
   return out.list ?? []
@@ -121,7 +124,7 @@ export const mailboxIdByName = async (p: MailboxIdByNameParams): Promise<string 
         '1',
       ],
     ],
-    using: [MAIL_CAPABILITY],
+    using: USING,
   })
   const got = methodResponse<{ list?: MailboxRecord[] }>(resp, 'Mailbox/get', '1')
   const wanted = p.name.toLowerCase()
