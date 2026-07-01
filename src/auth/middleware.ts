@@ -10,7 +10,7 @@
 // once per token, then caching the (principal, exp) tuple until the
 // token expires. See spec/02 §Architecture.
 
-import type { TokenCache } from './token-cache.ts'
+import { type TokenCache } from './token-cache.ts'
 import { fetchUserinfo, UserinfoError } from './userinfo.ts'
 
 export interface AuthContext {

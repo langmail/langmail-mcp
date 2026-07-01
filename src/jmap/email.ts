@@ -4,7 +4,7 @@
 // it" rule.
 
 import { JmapError } from './session.ts'
-import type { EmailRecord, JmapRequest, JmapResponse, MailboxRecord } from './types.ts'
+import { type EmailRecord, type JmapRequest, type JmapResponse, type MailboxRecord } from './types.ts'
 
 // Every JMAP request must declare the core capability alongside any it uses
 // (RFC 8620 §3.3); Stalwart 0.16.10+ enforces this, rejecting requests whose

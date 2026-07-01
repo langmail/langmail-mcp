@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { DeleteEventParams, FetchEventParams } from '../caldav/client.ts'
-import type { CalendarObject, DiscoveredAccount } from '../caldav/types.ts'
+import { type DeleteEventParams, type FetchEventParams } from '../caldav/client.ts'
+import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
 import { type DeleteCalendarEventArgs, deleteCalendarEvent, deleteCalendarEventInput } from './delete-calendar-event.ts'
 
 const CAL = 'https://m/dav/cal/u/default/'

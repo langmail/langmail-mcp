@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { FetchEventsParams } from '../caldav/client.ts'
+import { type FetchEventsParams } from '../caldav/client.ts'
 import { buildInvite } from '../caldav/ical.ts'
-import type { CalendarObject, DiscoveredAccount } from '../caldav/types.ts'
+import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
 import { type ListCalendarEventsArgs, listCalendarEvents, listCalendarEventsInput } from './list-calendar-events.ts'
 
 const CAL = 'https://m/dav/cal/u/default/'

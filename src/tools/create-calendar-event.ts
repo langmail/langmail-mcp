@@ -5,16 +5,20 @@
 // Logic sits behind a `Deps` interface (discover + putEvent) so it
 // unit-tests without live Stalwart; `makeLiveDeps` wires tsdav in.
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
-import type { CalDavConfig, PutEventParams } from '../caldav/client.ts'
-import { discoverAccount, putEvent, resolveCalendarUrl } from '../caldav/client.ts'
+import {
+  type CalDavConfig,
+  discoverAccount,
+  type PutEventParams,
+  putEvent,
+  resolveCalendarUrl,
+} from '../caldav/client.ts'
 import { buildInvite } from '../caldav/ical.ts'
 import { recurrenceDescription, recurrenceSchema, toRRule } from '../caldav/recurrence.ts'
-import type { DiscoveredAccount } from '../caldav/types.ts'
-import type { ToolResult } from './result.ts'
-import { errorResult, textResult } from './result.ts'
+import { type DiscoveredAccount } from '../caldav/types.ts'
+import { errorResult, type ToolResult, textResult } from './result.ts'
 
 // An event's iCalendar UID, as returned by create_calendar_event. Rejects
 // path separators: create names the `.ics` resource `${uid}.ics` on PUT (see

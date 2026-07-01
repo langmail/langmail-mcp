@@ -5,7 +5,7 @@
 // principal, not the token — multiple tokens for the same user share
 // one entry.
 
-import type { JmapSession } from './types.ts'
+import { type JmapSession } from './types.ts'
 
 export class JmapError extends Error {
   status: number

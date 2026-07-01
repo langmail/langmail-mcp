@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { CalendarSummary } from '../caldav/types.ts'
+import { type CalendarSummary } from '../caldav/types.ts'
 import { listCalendars } from './list-calendars.ts'
 
 const deps = (calendars: CalendarSummary[]) => ({

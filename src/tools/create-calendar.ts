@@ -5,13 +5,15 @@
 // Like the other CalDAV tools, the logic sits behind a `Deps` interface so it
 // unit-tests without live Stalwart; `makeLiveDeps` wires tsdav in.
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
-import type { CalDavConfig, CreateCalendarParams } from '../caldav/client.ts'
-import { createCalendar as createCalendarCollection } from '../caldav/client.ts'
-import type { ToolResult } from './result.ts'
-import { textResult } from './result.ts'
+import {
+  type CalDavConfig,
+  type CreateCalendarParams,
+  createCalendar as createCalendarCollection,
+} from '../caldav/client.ts'
+import { type ToolResult, textResult } from './result.ts'
 
 // A hex color for the Apple `calendar-color` extension, e.g. "#FF6600" or
 // "#FF6600FF" (with alpha). Kept strict so a malformed value can't ride

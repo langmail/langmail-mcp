@@ -8,7 +8,7 @@ import {
   withTrailingSlash,
 } from './client.ts'
 import { buildInvite } from './ical.ts'
-import type { CalendarObject, CalendarSummary } from './types.ts'
+import { type CalendarObject, type CalendarSummary } from './types.ts'
 
 const cal = (url: string, displayName = ''): CalendarSummary => ({ displayName, url })
 

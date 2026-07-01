@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { EmailRecord } from '../jmap/types.ts'
+import { type EmailRecord } from '../jmap/types.ts'
 import { searchEmails, searchEmailsInput } from './search-emails.ts'
 
 const fakeDeps = (opts: {

@@ -5,14 +5,13 @@
 // tested without spinning up Stalwart. `registerSearchEmails(server)`
 // wires the live deps into the MCP server.
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
-import type { EmailGetParams, EmailQueryParams } from '../jmap/email.ts'
-import { emailGet, emailQuery, mailboxIdByName } from '../jmap/email.ts'
+import { type EmailGetParams, type EmailQueryParams, emailGet, emailQuery, mailboxIdByName } from '../jmap/email.ts'
 import { accountIdForMail, fetchSession } from '../jmap/session.ts'
-import type { SessionCache } from '../jmap/session-cache.ts'
-import type { EmailRecord } from '../jmap/types.ts'
+import { type SessionCache } from '../jmap/session-cache.ts'
+import { type EmailRecord } from '../jmap/types.ts'
 
 export const searchEmailsInput = z.object({
   limit: z.number().int().min(1).max(100).default(20),

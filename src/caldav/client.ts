@@ -7,10 +7,12 @@
 // bearer through and reshape the result into our CalendarSummary /
 // DiscoveredAccount types.
 
-import type { DAVAccount, DAVCalendar, DAVCalendarObject } from 'tsdav'
 import {
   createAccount,
   createCalendarObject,
+  type DAVAccount,
+  type DAVCalendar,
+  type DAVCalendarObject,
   DAVNamespaceShort,
   deleteCalendarObject,
   fetchCalendarObjects,
@@ -20,7 +22,7 @@ import {
 } from 'tsdav'
 
 import { parseEvents } from './ical-parse.ts'
-import type { CalendarObject, CalendarSummary, DiscoveredAccount } from './types.ts'
+import { type CalendarObject, type CalendarSummary, type DiscoveredAccount } from './types.ts'
 
 class CalDavError extends Error {
   status: number

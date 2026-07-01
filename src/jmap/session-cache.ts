@@ -1,4 +1,4 @@
-import type { JmapSession } from './types.ts'
+import { type JmapSession } from './types.ts'
 
 export class SessionCache {
   private readonly map = new Map<string, { session: JmapSession; exp: number }>()

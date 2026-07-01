@@ -1,7 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test'
 
-import type { AuthContext } from './middleware.ts'
-import { createAuthMiddleware } from './middleware.ts'
+import { type AuthContext, createAuthMiddleware } from './middleware.ts'
 import { TokenCache } from './token-cache.ts'
 
 const STALWART = 'https://mail.example.com'

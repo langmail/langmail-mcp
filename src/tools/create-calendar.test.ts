@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { CreateCalendarParams } from '../caldav/client.ts'
+import { type CreateCalendarParams } from '../caldav/client.ts'
 import { createCalendar, createCalendarInput } from './create-calendar.ts'
 
 const makeDeps = (captured: CreateCalendarParams[] = [], url = 'https://m/dav/cal/u/abc/') => ({
