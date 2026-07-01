@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { PutEventParams } from '../caldav/client.ts'
-import type { DiscoveredAccount } from '../caldav/types.ts'
+import { type PutEventParams } from '../caldav/client.ts'
+import { type DiscoveredAccount } from '../caldav/types.ts'
 import { type CreateCalendarEventArgs, createCalendarEvent, createCalendarEventInput } from './create-calendar-event.ts'
 
 const account = (over: Partial<DiscoveredAccount> = {}): DiscoveredAccount => ({

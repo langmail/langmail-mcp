@@ -19,8 +19,8 @@ import { createCalendarObject } from 'tsdav'
 import { deleteCalendarEvent, makeLiveDeps as makeDeleteDeps } from '../tools/delete-calendar-event.ts'
 import { listCalendarEvents, makeLiveDeps as makeListDeps } from '../tools/list-calendar-events.ts'
 import { makeLiveDeps as makeRespondDeps, respondToEvent } from '../tools/respond-to-event.ts'
-import type { CalDavConfig } from './client.ts'
 import {
+  type CalDavConfig,
   createCalendar,
   deleteEvent,
   fetchCalendarList,

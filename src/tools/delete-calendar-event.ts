@@ -10,15 +10,21 @@
 // Logic sits behind a `Deps` interface (discover + fetchEvent + deleteEvent)
 // so it unit-tests without live Stalwart; `makeLiveDeps` wires tsdav in.
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
-import type { CalDavConfig, DeleteEventParams, FetchEventParams } from '../caldav/client.ts'
-import { deleteEvent, discoverAccount, fetchEvent, resolveCalendarUrl } from '../caldav/client.ts'
-import type { CalendarObject, DiscoveredAccount } from '../caldav/types.ts'
+import {
+  type CalDavConfig,
+  type DeleteEventParams,
+  deleteEvent,
+  discoverAccount,
+  type FetchEventParams,
+  fetchEvent,
+  resolveCalendarUrl,
+} from '../caldav/client.ts'
+import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
 import { eventUidSchema } from './create-calendar-event.ts'
-import type { ToolResult } from './result.ts'
-import { errorResult, textResult } from './result.ts'
+import { errorResult, type ToolResult, textResult } from './result.ts'
 
 export const deleteCalendarEventInput = z.object({
   // Optional CalDAV URL from list_calendars; defaults to the principal's

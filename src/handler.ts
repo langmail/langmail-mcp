@@ -4,13 +4,10 @@
 // without spinning up Bun.serve. `index.ts` does config + transport
 // wiring; this file owns routing.
 
-import type { DcrHandler } from './auth/dcr.ts'
-import { createDcrHandler } from './auth/dcr.ts'
-import type { AuthContext, AuthMiddleware } from './auth/middleware.ts'
-import { createAuthMiddleware } from './auth/middleware.ts'
+import { createDcrHandler, type DcrHandler } from './auth/dcr.ts'
+import { type AuthContext, type AuthMiddleware, createAuthMiddleware } from './auth/middleware.ts'
 import { TokenCache } from './auth/token-cache.ts'
-import type { ReadyResult } from './health/readiness.ts'
-import { createReadiness, readyzResponse, stalwartReachable } from './health/readiness.ts'
+import { createReadiness, type ReadyResult, readyzResponse, stalwartReachable } from './health/readiness.ts'
 
 export interface HandlerConfig {
   cache?: TokenCache
