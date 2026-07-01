@@ -6,9 +6,9 @@
 //     RFC 9728 protected-resource metadata so MCP clients can self-
 //     bootstrap discovery.
 //
-// Token validity is established by calling Stalwart's /auth/userinfo
+// Token validity is established by calling Better Auth's /oauth2/userinfo
 // once per token, then caching the (principal, exp) tuple until the
-// token expires. See spec/02 §Architecture.
+// token expires. See docs/reference/security/authentication.md.
 
 import { type TokenCache } from './token-cache.ts'
 import { fetchUserinfo, UserinfoError } from './userinfo.ts'
@@ -20,9 +20,11 @@ export interface AuthContext {
 }
 
 export interface AuthMiddlewareOptions {
+  // Better Auth OIDC issuer, e.g. https://auth.langmail.me/api/auth. The
+  // per-token principal is resolved at `${authIssuer}/oauth2/userinfo`.
+  authIssuer: string
   cache: TokenCache
   publicUrl: string
-  stalwartBase: string
 }
 
 export type AuthMiddleware = (req: Request) => Promise<AuthContext | Response>
@@ -57,7 +59,7 @@ export const createAuthMiddleware = (opts: AuthMiddlewareOptions): AuthMiddlewar
     }
 
     try {
-      const { principal, exp } = await fetchUserinfo(opts.stalwartBase, token)
+      const { principal, exp } = await fetchUserinfo(opts.authIssuer, token)
       opts.cache.set(token, { exp, principal })
       return { exp, principal, token }
     } catch (error) {

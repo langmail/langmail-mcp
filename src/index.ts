@@ -20,20 +20,14 @@ const HOST = process.env.MCP_HOST ?? '127.0.0.1'
 const PUBLIC_URL = (process.env.MCP_PUBLIC_URL ?? `http://${HOST}:${PORT}`).replace(TRAILING_SLASHES_RE, '')
 const STALWART_URL = (process.env.STALWART_PUBLIC_URL ?? 'https://mail.langmail.me').replace(TRAILING_SLASHES_RE, '')
 
-// Credentials for the DCR proxy. Two accepted shapes:
-//   STALWART_DCR_AUTH  — full header value (e.g. "Basic <base64>")
-//   STALWART_DCR_USER + STALWART_DCR_PASSWORD — convenience pair
-// The systemd unit picks up the env file from /run/secrets/mcp.env;
-// see infra/scripts/setup-mcp-dcr-secret.sh for how the value is
-// generated and shipped.
-let dcrUpstreamAuth = process.env.STALWART_DCR_AUTH
-if (!dcrUpstreamAuth && process.env.STALWART_DCR_USER && process.env.STALWART_DCR_PASSWORD) {
-  const raw = `${process.env.STALWART_DCR_USER}:${process.env.STALWART_DCR_PASSWORD}`
-  dcrUpstreamAuth = `Basic ${Buffer.from(raw).toString('base64')}`
-}
+// Better Auth is the OpenID Provider for the MCP server (as for app + webmail):
+// clients authenticate against it, and we validate every bearer at its userinfo.
+// The issuer mirrors services/auth's `${baseURL}/api/auth` derivation.
+const AUTH_URL = (process.env.AUTH_PUBLIC_URL ?? 'https://auth.langmail.me').replace(TRAILING_SLASHES_RE, '')
+const AUTH_ISSUER = `${AUTH_URL}/api/auth`
 
 const routes = createRoutes({
-  dcrUpstreamAuth,
+  authIssuer: AUTH_ISSUER,
   mcpHandler: createMcpHandler({ stalwartUrl: STALWART_URL }),
   publicUrl: PUBLIC_URL,
   stalwartUrl: STALWART_URL,
@@ -49,8 +43,8 @@ logger.info(
   {
     address: `http://${server.hostname}:${server.port}`,
     publicUrl: PUBLIC_URL,
-    upstreamAuthServer: STALWART_URL,
-    dcrProxy: dcrUpstreamAuth ? 'enabled' : 'disabled',
+    authIssuer: AUTH_ISSUER,
+    jmapUpstream: STALWART_URL,
   },
   'mcp listening'
 )

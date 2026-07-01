@@ -4,27 +4,30 @@
 // without spinning up Bun.serve. `index.ts` does config + transport
 // wiring; this file owns routing.
 
-import { createDcrHandler, type DcrHandler } from './auth/dcr.ts'
 import { type AuthContext, type AuthMiddleware, createAuthMiddleware } from './auth/middleware.ts'
 import { TokenCache } from './auth/token-cache.ts'
-import { createReadiness, type ReadyResult, readyzResponse, stalwartReachable } from './health/readiness.ts'
+import {
+  authReachable,
+  createReadiness,
+  type ReadyResult,
+  readyzResponse,
+  stalwartReachable,
+} from './health/readiness.ts'
 
 export interface HandlerConfig {
+  // Better Auth OIDC issuer, e.g. https://auth.langmail.me/api/auth. The MCP
+  // server advertises Better Auth's oauth2 endpoints (derived from this) as
+  // its authorization server and validates every bearer at its userinfo.
+  authIssuer: string
   cache?: TokenCache
-  // Test seam.
-  dcrHandler?: DcrHandler
-  // Authorization header value used by the DCR proxy when calling
-  // Stalwart's /auth/register (e.g. "Basic <base64>"). Unset → the
-  // proxy responds 503; discovery still advertises the endpoint so
-  // misconfiguration shows up loudly rather than masquerading.
-  dcrUpstreamAuth?: string
   // Authenticated MCP handler. Phase 1 leaves this stubbed to 501;
   // phase 2 wires StreamableHTTPServerTransport in here.
   mcpHandler?: (req: Request, ctx: AuthContext) => Promise<Response>
   publicUrl: string
-  // Readiness checker. Defaults to a Stalwart-userinfo reachability probe built
-  // from stalwartUrl; injectable so tests can supply a fake.
+  // Readiness checker. Defaults to probing Better Auth (token validation) and
+  // Stalwart (JMAP/DAV egress); injectable so tests can supply a fake.
   readiness?: () => Promise<ReadyResult>
+  // Stalwart base URL — where the validated bearer is forwarded for JMAP/DAV.
   stalwartUrl: string
 }
 
@@ -46,17 +49,16 @@ const json = (body: unknown, init: ResponseInit = {}): Response =>
 export const createRoutes = (cfg: HandlerConfig): Routes => {
   const cache = cfg.cache ?? new TokenCache()
   const authenticate = createAuthMiddleware({
+    authIssuer: cfg.authIssuer,
     cache,
     publicUrl: cfg.publicUrl,
-    stalwartBase: cfg.stalwartUrl,
   })
-  const dcrHandler =
-    cfg.dcrHandler ??
-    createDcrHandler({
-      stalwartBase: cfg.stalwartUrl,
-      upstreamAuth: cfg.dcrUpstreamAuth,
+  const readiness =
+    cfg.readiness ??
+    createReadiness({
+      auth: authReachable(cfg.authIssuer),
+      stalwart: stalwartReachable(cfg.stalwartUrl),
     })
-  const readiness = cfg.readiness ?? createReadiness({ stalwart: stalwartReachable(cfg.stalwartUrl) })
 
   const fetchHandler = async (req: Request): Promise<Response> => {
     const url = new URL(req.url)
@@ -73,54 +75,48 @@ export const createRoutes = (cfg: HandlerConfig): Routes => {
 
     if (url.pathname === '/.well-known/oauth-authorization-server') {
       // We advertise ourselves as the AS (issuer = our public URL) so the
-      // MCP SDK fetches THIS document instead of Stalwart's own (which
-      // would point it at Stalwart's admin-gated /auth/register and
-      // trigger a Problem-Details 401 the SDK can't parse). PRM below
-      // points clients here; per RFC 8414 §3.3 the SDK validates that
-      // `issuer` matches the URL it discovered the metadata from.
+      // MCP SDK fetches THIS document at the conventional well-known path,
+      // instead of trying to derive Better Auth's metadata location from its
+      // `/api/auth` issuer — the RFC 8414 path-insertion forms
+      // (`/.well-known/oauth-authorization-server/api/auth`) 404 on Better
+      // Auth, which only serves OIDC discovery at
+      // `/api/auth/.well-known/openid-configuration`. This facade sidesteps
+      // that discovery fragility. The PRM below points clients here; per RFC
+      // 8414 §3.3 the SDK validates `issuer` matches the metadata URL.
       //
-      // Authorize/token/etc. still point at Stalwart directly — the
-      // RFC doesn't require endpoints to live on the issuer's host.
-      // Only /auth/register has to be us (the DCR proxy). Access
-      // tokens stay opaque per RFC 6749, so the issuer mismatch
-      // doesn't surface anywhere client-side.
-      //
-      // NB: Stalwart 0.16's authorize endpoint is /login, not the
-      // OIDC-conventional /authorize.
+      // Authorize/token/userinfo/register all point at Better Auth — the RFC
+      // doesn't require endpoints to live on the issuer's host, and Better
+      // Auth's access tokens stay opaque, so the issuer mismatch doesn't
+      // surface client-side. `email` is advertised as a standard, requestable
+      // scope; note the mailbox-address `email` claim that Stalwart's JMAP
+      // mapping and our principal read consume is asserted by Better Auth's
+      // getAdditionalUserInfoClaim regardless of whether `email` was granted.
+      const oauth2 = `${cfg.authIssuer}/oauth2`
       return json({
-        authorization_endpoint: `${cfg.stalwartUrl}/login`,
+        authorization_endpoint: `${oauth2}/authorize`,
         code_challenge_methods_supported: ['S256'],
         grant_types_supported: ['authorization_code', 'refresh_token'],
-        introspection_endpoint: `${cfg.stalwartUrl}/auth/introspect`,
         issuer: cfg.publicUrl,
-        registration_endpoint: `${cfg.publicUrl}/auth/register`,
+        registration_endpoint: `${oauth2}/register`,
         resource: cfg.publicUrl,
         response_types_supported: ['code'],
-        revocation_endpoint: `${cfg.stalwartUrl}/auth/revoke`,
-        scopes_supported: ['openid', 'offline_access'],
-        token_endpoint: `${cfg.stalwartUrl}/auth/token`,
+        scopes_supported: ['openid', 'email', 'offline_access'],
+        token_endpoint: `${oauth2}/token`,
         token_endpoint_auth_methods_supported: ['none'],
-        userinfo_endpoint: `${cfg.stalwartUrl}/auth/userinfo`,
+        userinfo_endpoint: `${oauth2}/userinfo`,
       })
     }
 
     if (url.pathname === '/.well-known/oauth-protected-resource') {
       // RFC 9728 — lets MCP clients discover the AS from this RS's URL
       // alone, which is what the `WWW-Authenticate: resource_metadata=...`
-      // header points them at on a 401.
+      // header points them at on a 401. Point at our own AS facade above
+      // (not Better Auth directly) to avoid the discovery fragility noted there.
       return json({
-        // Point at ourselves, not Stalwart, so the MCP SDK discovers
-        // our AS metadata (with the DCR proxy registration_endpoint)
-        // instead of Stalwart's (which advertises an admin-gated
-        // /auth/register the SDK can't reach).
         authorization_servers: [cfg.publicUrl],
         bearer_methods_supported: ['header'],
         resource: cfg.publicUrl,
       })
-    }
-
-    if (url.pathname === '/auth/register') {
-      return dcrHandler(req)
     }
 
     if (url.pathname === '/mcp' || url.pathname.startsWith('/mcp/')) {
