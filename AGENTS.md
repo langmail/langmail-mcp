@@ -1,7 +1,8 @@
 # services/mcp — operational notes
 
 MCP resource server. Runs on the `app` VM, fronted by nginx for TLS +
-ACME; talks to Stalwart over public HTTPS for OAuth + JMAP.
+ACME; authenticates clients against Better Auth (OAuth/OIDC) and talks to
+Stalwart over public HTTPS for JMAP + CalDAV.
 
 This README captures per-service conventions. Repo-wide guidance lives
 in `../../AGENTS.md`; the design rationale lives in
@@ -53,10 +54,14 @@ mount `StreamableHTTPServerTransport` and register tools. Conventions:
   wrappers (`Email/query`, `Email/get`, ...). Extract to
   `packages/jmap-client/` only when a second service needs it — at
   which point a Bun workspace at the repo root lands too.
-- Auth principal comes from `GET /auth/userinfo` against Stalwart with
-  the client's bearer; cache `(token, principal)` until token `exp`.
-  See `../../spec/03-monorepo-and-app-vm.md §MCP RS auth model` for
-  why we don't gate on `aud` or `scope`.
+- Auth principal comes from `GET /oauth2/userinfo` against **Better Auth**
+  (the OpenID Provider — same IdP as app + webmail) with the client's bearer;
+  the principal is the `email` claim (the user's `username@langmail.me` mailbox
+  address), cached as `(token, principal)` until token `exp`. The validated
+  bearer is then forwarded to **Stalwart** for JMAP/CalDAV. See
+  `../../docs/reference/security/authentication.md` for the identity model and
+  `../../spec/03-monorepo-and-app-vm.md §MCP RS auth model` for why we don't
+  gate on `aud` or `scope`.
 
 ## Configuration
 
@@ -68,7 +73,8 @@ Environment variables (set via `infra/modules/mcp.nix` — the container's
 | `MCP_HOST`            | `127.0.0.1`                | bind address — keep loopback in prod (nginx fronts) |
 | `MCP_PORT`            | `8080`                     | upstream port nginx proxies to                      |
 | `MCP_PUBLIC_URL`      | `http://127.0.0.1:8080`    | full base URL, e.g. `https://mcp.langmail.me`       |
-| `STALWART_PUBLIC_URL` | `https://mail.langmail.me` | issuer for OAuth metadata                           |
+| `STALWART_PUBLIC_URL` | `https://mail.langmail.me` | JMAP/CalDAV egress — where the bearer is forwarded  |
+| `AUTH_PUBLIC_URL`     | `https://auth.langmail.me` | Better Auth base; issuer = `${AUTH_PUBLIC_URL}/api/auth`, the AS the MCP server advertises + validates bearers against |
 
 The `EnvironmentFile` may be empty on a fresh VM — defaults boot a
-usable server, just with the wrong public URL.
+usable server, just with the wrong public URLs.

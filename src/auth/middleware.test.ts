@@ -3,7 +3,7 @@ import { describe, expect, mock, test } from 'bun:test'
 import { type AuthContext, createAuthMiddleware } from './middleware.ts'
 import { TokenCache } from './token-cache.ts'
 
-const STALWART = 'https://mail.example.com'
+const AUTH = 'https://auth.example.com/api/auth'
 const RESOURCE = 'https://mcp.example.com'
 
 const withFetch = <T>(
@@ -19,9 +19,9 @@ const withFetch = <T>(
 
 const makeMw = (opts: { cache?: TokenCache } = {}) =>
   createAuthMiddleware({
+    authIssuer: AUTH,
     cache: opts.cache ?? new TokenCache(),
     publicUrl: RESOURCE,
-    stalwartBase: STALWART,
   })
 
 describe('auth middleware', () => {
@@ -61,6 +61,26 @@ describe('auth middleware', () => {
     expect(cache.size).toBe(0)
   })
 
+  test('returns 401 when userinfo has no email claim (non-mailbox user)', async () => {
+    // Better Auth suppresses the email claim for a Google identity with no
+    // langmail.me mailbox; the middleware must reject it, not pass a bogus
+    // principal downstream.
+    const cache = new TokenCache()
+    const mw = makeMw({ cache })
+    const f = mock(() =>
+      Promise.resolve(Response.json({ exp: Math.floor(Date.now() / 1000) + 60, sub: 'user_1' }, { status: 200 }))
+    )
+    const out = await withFetch(f, () =>
+      mw(
+        new Request('https://mcp.example.com/mcp', {
+          headers: { authorization: 'Bearer nomailbox' },
+        })
+      )
+    )
+    expect((out as Response).status).toBe(401)
+    expect(cache.size).toBe(0)
+  })
+
   test('populates principal and caches on success', async () => {
     const cache = new TokenCache()
     const mw = makeMw({ cache })
@@ -68,8 +88,8 @@ describe('auth middleware', () => {
       Promise.resolve(
         Response.json(
           {
+            email: 'alice@langmail.me',
             exp: Math.floor(Date.now() / 1000) + 60,
-            preferred_username: 'alice',
           },
           { status: 200 }
         )
@@ -84,7 +104,7 @@ describe('auth middleware', () => {
     )
     expect(out).not.toBeInstanceOf(Response)
     const ctx = out as AuthContext
-    expect(ctx.principal).toBe('alice')
+    expect(ctx.principal).toBe('alice@langmail.me')
     expect(ctx.token).toBe('good')
     expect(cache.size).toBe(1)
   })

@@ -1,10 +1,16 @@
-// Resolves a Stalwart-issued bearer token to a principal identity via
-// the OIDC `/auth/userinfo` endpoint. The caller maps a throw to a 401.
+// Resolves a Better Auth-issued bearer token to a principal identity via
+// the OIDC `/oauth2/userinfo` endpoint. The caller maps a throw to a 401.
 //
-// We don't try to validate the token cryptographically — Stalwart owns
-// that. See spec/03 §MCP RS auth model for why this is correct under
-// 0.16.6: scopes are absent, audience binding is absent, and userinfo
-// is the cheapest path that gives us a usable principal.
+// We don't validate the token cryptographically — Better Auth's access
+// token is opaque (only the ID token is a JWT), so userinfo is the
+// authoritative validation path, exactly as Stalwart validates the same
+// token for JMAP. See docs/reference/security/authentication.md.
+//
+// The principal is the `email` claim: Better Auth rewrites it to the user's
+// `username@langmail.me` mailbox address (getAdditionalUserInfoClaim) and
+// suppresses it for a user with no active mailbox. Requiring it here means a
+// non-mailbox Google identity is rejected with a clean 401 rather than
+// failing confusingly downstream in JMAP/CalDAV.
 
 export interface UserinfoResult {
   // Unix seconds
@@ -24,8 +30,8 @@ export class UserinfoError extends Error {
 const DEFAULT_TTL_SECONDS = 3600
 const TRAILING_SLASHES_RE = /\/+$/u
 
-export const fetchUserinfo = async (stalwartBase: string, token: string): Promise<UserinfoResult> => {
-  const url = `${stalwartBase.replace(TRAILING_SLASHES_RE, '')}/auth/userinfo`
+export const fetchUserinfo = async (authIssuer: string, token: string): Promise<UserinfoResult> => {
+  const url = `${authIssuer.replace(TRAILING_SLASHES_RE, '')}/oauth2/userinfo`
   const res = await fetch(url, {
     headers: { authorization: `Bearer ${token}` },
   })
@@ -33,11 +39,13 @@ export const fetchUserinfo = async (stalwartBase: string, token: string): Promis
     throw new UserinfoError(res.status, `userinfo returned ${res.status}`)
   }
   const body = (await res.json()) as Record<string, unknown>
-  const principal =
-    (typeof body.preferred_username === 'string' ? (body.preferred_username as string) : undefined) ??
-    (typeof body.sub === 'string' ? (body.sub as string) : undefined)
+  const principal = typeof body.email === 'string' ? body.email : undefined
   if (!principal) {
-    throw new UserinfoError(200, 'userinfo response missing preferred_username and sub')
+    // Better Auth's getAdditionalUserInfoClaim asserts the mailbox address as
+    // `email` for any mailbox user irrespective of requested scope, and
+    // suppresses it only when the user has no active langmail.me mailbox. So a
+    // missing `email` claim means "no mailbox" — the token can't act on one.
+    throw new UserinfoError(200, 'userinfo response missing email claim (no active mailbox)')
   }
   const exp = typeof body.exp === 'number' ? (body.exp as number) : Math.floor(Date.now() / 1000) + DEFAULT_TTL_SECONDS
   return { exp, principal }
