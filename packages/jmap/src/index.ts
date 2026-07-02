@@ -15,9 +15,11 @@ export {
   type MailboxCreateParams,
   type MailboxIdByNameParams,
   type MailboxIdByRoleParams,
+  type MailboxIdsByRolesParams,
   mailboxCreate,
   mailboxIdByName,
   mailboxIdByRole,
+  mailboxIdsByRoles,
   type ThreadEmailIdsParams,
   threadEmailIds,
 } from './email.ts'

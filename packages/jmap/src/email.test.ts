@@ -9,6 +9,7 @@ import {
   mailboxCreate,
   mailboxIdByName,
   mailboxIdByRole,
+  mailboxIdsByRoles,
   threadEmailIds,
 } from './email.ts'
 import { JmapError } from './session.ts'
@@ -407,6 +408,39 @@ describe('mailboxIdByRole', () => {
       mailboxIdByRole({ accountId: 'acct', apiUrl: API, role: 'archive', authorization: 'Bearer tok' })
     )
     expect(id).toBeNull()
+  })
+})
+
+describe('mailboxIdsByRoles', () => {
+  test('resolves several roles from a single mailbox listing', async () => {
+    const f = mock(() =>
+      Promise.resolve(
+        jmapResponse([
+          ['Mailbox/query', { ids: ['m1', 'm2'] }, '0'],
+          [
+            'Mailbox/get',
+            {
+              list: [
+                { id: 'm1', name: 'Inbox', role: 'inbox' },
+                { id: 'm2', name: 'Sent', role: 'sent' },
+              ],
+            },
+            '1',
+          ],
+        ])
+      )
+    )
+    const ids = await withFetch(f, () =>
+      mailboxIdsByRoles({
+        accountId: 'acct',
+        apiUrl: API,
+        authorization: 'Bearer tok',
+        roles: ['inbox', 'archive'],
+      })
+    )
+    expect(ids).toEqual({ archive: null, inbox: 'm1' })
+    // One listing round-trip for all roles.
+    expect(f).toHaveBeenCalledTimes(1)
   })
 })
 

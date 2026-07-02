@@ -412,6 +412,23 @@ export const mailboxIdByRole = async (p: MailboxIdByRoleParams): Promise<string 
   return hit?.id ?? null
 }
 
+export interface MailboxIdsByRolesParams extends JmapCall {
+  accountId: string
+  roles: string[]
+}
+
+// Resolve several special-use roles from one mailbox listing — the archive
+// move needs both inbox and archive, and one round-trip beats two.
+export const mailboxIdsByRoles = async (p: MailboxIdsByRolesParams): Promise<Record<string, string | null>> => {
+  const mailboxes = await fetchMailboxes(p)
+  return Object.fromEntries(
+    p.roles.map((role) => {
+      const wanted = role.toLowerCase()
+      return [role, mailboxes.find((m) => m.role?.toLowerCase() === wanted)?.id ?? null]
+    })
+  )
+}
+
 // --- Mailbox/set (create) --------------------------------------------------
 
 export interface MailboxCreateParams extends JmapCall {
