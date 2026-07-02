@@ -24,6 +24,18 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 const TRAILING_SLASHES_RE = /\/+$/u
 const SINGLE_MATCH_RE = /^1 message\(s\) matched/mu
+const FIRST_ID_RE = /^\s*id:\s*(\S+)/mu
+
+// Wide sentinel dates that bracket any real smoke message (delivered "now").
+// A message received today is after EPOCH_PAST and before EPOCH_FUTURE.
+const EPOCH_PAST = '2020-01-01T00:00:00Z'
+const EPOCH_FUTURE = '2100-01-01T00:00:00Z'
+
+// The category keyword the smoke run stamps onto its message so the
+// keyword-filter path can be exercised end-to-end. Maps to the `receipt`
+// enum value on search_emails.
+const SMOKE_LABEL = '$label:receipt'
+const JMAP_USING = ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail']
 
 const log = (msg: string) => process.stdout.write(`▶ ${msg}\n`)
 
@@ -91,6 +103,67 @@ const exchangeRefresh = async (opts: {
   return (await res.json()) as { access_token: string; refresh_token?: string }
 }
 
+const firstId = (text: string): string | null => FIRST_ID_RE.exec(text)?.[1] ?? null
+
+// Resolve the JMAP api URL + mail account id from the discovery doc, using the
+// same bearer the MCP tools forward. Needed to stamp a keyword onto the smoke
+// message (JMAP has no MCP write tool by design).
+const jmapSession = async (stalwartUrl: string, token: string): Promise<{ accountId: string; apiUrl: string }> => {
+  const res = await fetch(`${stalwartUrl}/.well-known/jmap`, {
+    headers: { authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    throw new Error(`jmap session discovery failed: HTTP ${res.status}`)
+  }
+  const body = (await res.json()) as {
+    apiUrl?: string
+    primaryAccounts?: Record<string, string>
+  }
+  const accountId = body.primaryAccounts?.['urn:ietf:params:jmap:mail']
+  if (!(body.apiUrl && accountId)) {
+    throw new Error('jmap session missing apiUrl / mail account')
+  }
+  return { accountId, apiUrl: body.apiUrl }
+}
+
+// Stamp a keyword onto a message via Email/set (patch form). Idempotent: a
+// re-run just re-sets the same keyword true.
+const setKeyword = async (opts: {
+  accountId: string
+  apiUrl: string
+  emailId: string
+  keyword: string
+  token: string
+}): Promise<void> => {
+  const res = await fetch(opts.apiUrl, {
+    body: JSON.stringify({
+      methodCalls: [
+        [
+          'Email/set',
+          {
+            accountId: opts.accountId,
+            update: { [opts.emailId]: { [`keywords/${opts.keyword}`]: true } },
+          },
+          '0',
+        ],
+      ],
+      using: JMAP_USING,
+    }),
+    headers: { authorization: `Bearer ${opts.token}`, 'content-type': 'application/json' },
+    method: 'POST',
+  })
+  if (!res.ok) {
+    throw new Error(`Email/set failed: HTTP ${res.status}`)
+  }
+  const json = (await res.json()) as {
+    methodResponses?: [string, { notUpdated?: Record<string, unknown> }, string][]
+  }
+  const notUpdated = json.methodResponses?.[0]?.[1]?.notUpdated
+  if (notUpdated && Object.keys(notUpdated).length > 0) {
+    throw new Error(`Email/set did not update ${opts.emailId}: ${JSON.stringify(notUpdated)}`)
+  }
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: integration smoke test is inherently sequential
 const main = async () => {
   const mcpBase = requireEnv('MCP_PUBLIC_URL').replace(TRAILING_SLASHES_RE, '')
@@ -110,14 +183,25 @@ const main = async () => {
   log(`connect to ${mcpUrl}`)
   let session = await connect(mcpUrl, accessToken)
 
-  // --- 1. listTools includes search_emails -----------------------------
+  // Thin wrapper: call a tool by name and unwrap its text result.
+  const callText = async (name: string, args: Record<string, unknown>): Promise<{ isError: boolean; text: string }> =>
+    unwrapText(
+      (await session.client.callTool({ arguments: args, name })) as {
+        content?: { type?: string; text?: string }[]
+        isError?: boolean
+      }
+    )
+
+  // --- 1. listTools includes search_emails + the new read tools --------
   log('listTools')
   const tools = await session.client.listTools()
   const names = tools.tools.map((t) => t.name)
-  if (!names.includes('search_emails')) {
-    fail(`search_emails missing from tool list: ${names.join(', ')}`)
+  for (const required of ['search_emails', 'get_email', 'get_thread']) {
+    if (!names.includes(required)) {
+      fail(`${required} missing from tool list: ${names.join(', ')}`)
+    }
   }
-  pass(`search_emails registered (alongside: ${names.join(', ') || '—'})`)
+  pass(`search_emails, get_email, get_thread registered (alongside: ${names.join(', ') || '—'})`)
 
   // --- 2. Round-trip via the smoke tag ---------------------------------
   //
@@ -162,6 +246,99 @@ const main = async () => {
       fail(`hit's sender is not smoketest@langmail.me: ${text}`)
     }
     pass(`smoke-tag round-trip (mail-side delivery → FTS → JMAP → MCP tool, ${attempts + 1} attempt(s))`)
+
+    // The lightweight hit carries the message id; every downstream tool needs
+    // it. Throw (not fail) so TS narrows messageId to string — the top-level
+    // catch reports and exits 1 just like fail().
+    const messageId = firstId(text)
+    if (!messageId) {
+      throw new Error(`could not parse a message id from search_emails output: ${text}`)
+    }
+
+    // --- 2a. Date-range filter includes the just-delivered message ------
+    log('call search_emails with an after/before window + tag')
+    const dated = await callText('search_emails', {
+      after: EPOCH_PAST,
+      before: EPOCH_FUTURE,
+      limit: 5,
+      query: smokeTag,
+    })
+    if (dated.isError || !dated.text.includes(smokeTag)) {
+      fail(`date-filtered search did not find the smoke message: ${dated.text}`)
+    }
+    pass('date-filtered search (after/before) finds the smoke message')
+
+    // --- 2b. Date-range filter excludes when the window is in the past --
+    log('call search_emails with before=past (must exclude a message delivered now)')
+    const excluded = await callText('search_emails', { before: EPOCH_PAST, limit: 5, query: smokeTag })
+    if (excluded.isError) {
+      fail(`before=past search errored: ${excluded.text}`)
+    }
+    if (excluded.text.includes(smokeTag)) {
+      fail(`before=past should have excluded a message delivered now: ${excluded.text}`)
+    }
+    pass('date filter correctly excludes a message outside the window')
+
+    // --- 2c. get_email returns the message body -------------------------
+    log(`call get_email id=${messageId}`)
+    const email = await callText('get_email', { id: messageId })
+    if (email.isError) {
+      fail(`get_email returned isError=true: ${email.text}`)
+    }
+    // The mail smoke's self-loop body is the single word "ping".
+    if (!email.text.toLowerCase().includes('ping')) {
+      fail(`get_email did not return the smoke message body ('ping'): ${email.text}`)
+    }
+    pass('get_email returns the message body')
+
+    // --- 2d. get_thread lists the message's thread ----------------------
+    log(`call get_thread id=${messageId}`)
+    const thread = await callText('get_thread', { id: messageId })
+    if (thread.isError) {
+      fail(`get_thread returned isError=true: ${thread.text}`)
+    }
+    if (!thread.text.includes(messageId)) {
+      fail(`get_thread did not include the requested message id ${messageId}: ${thread.text}`)
+    }
+    pass('get_thread lists the message thread')
+
+    // --- 2e. Keyword filter (stamp a label via JMAP, then search) -------
+    //
+    // The category keywords are Postgres-only today (the agent never echoes
+    // them to Stalwart), so no message carries one out of the box. Stamp one
+    // directly via Email/set to exercise the keyword-filter path end-to-end.
+    log(`stamp ${SMOKE_LABEL} onto the smoke message and search keywords=["receipt"]`)
+    const js = await jmapSession(stalwart, accessToken)
+    await setKeyword({
+      accountId: js.accountId,
+      apiUrl: js.apiUrl,
+      emailId: messageId,
+      keyword: SMOKE_LABEL,
+      token: accessToken,
+    })
+    let kwText = ''
+    let kwErr = false
+    for (let i = 0; i < 4; i += 1) {
+      ;({ text: kwText, isError: kwErr } = await callText('search_emails', {
+        keywords: ['receipt'],
+        limit: 5,
+        query: smokeTag,
+      }))
+      if (!kwErr && kwText.includes(smokeTag)) {
+        break
+      }
+      await Bun.sleep(500)
+    }
+    if (kwErr) {
+      fail(`keyword-filtered search returned isError=true: ${kwText}`)
+    }
+    if (!kwText.includes(smokeTag)) {
+      fail(`keyword-filtered search did not find the labeled smoke message: ${kwText}`)
+    }
+    if (!kwText.includes('tags: receipt')) {
+      fail(`keyword hit did not surface its 'receipt' tag: ${kwText}`)
+    }
+    pass('keyword-filtered search finds the labeled message and shows its tag')
   } else {
     process.stdout.write(
       '  (skipping round-trip check — MCP_SMOKE_TAG not set; pass the mail smoke tag in to enable)\n'
