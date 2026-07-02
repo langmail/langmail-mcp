@@ -47,14 +47,18 @@ const EMAIL_DETAIL_PROPERTIES = [
 
 interface JmapCall {
   apiUrl: string
-  token: string
+  // Full Authorization header value (`Bearer …` or `Basic …`) — the wrappers
+  // never mint or wrap credentials. MCP builds it via `bearerAuthorization`;
+  // the email-agent forwards the `Basic` value the auth service's
+  // stalwart-credential endpoint returns.
+  authorization: string
 }
 
 const call = async <T extends JmapResponse>(ctx: JmapCall, body: JmapRequest): Promise<T> => {
   const res = await fetch(ctx.apiUrl, {
     body: JSON.stringify(body),
     headers: {
-      authorization: `Bearer ${ctx.token}`,
+      authorization: ctx.authorization,
       'content-type': 'application/json',
     },
     method: 'POST',
@@ -406,4 +410,42 @@ export const mailboxIdByRole = async (p: MailboxIdByRoleParams): Promise<string 
   const wanted = p.role.toLowerCase()
   const hit = (await fetchMailboxes(p)).find((m) => m.role?.toLowerCase() === wanted)
   return hit?.id ?? null
+}
+
+// --- Mailbox/set (create) --------------------------------------------------
+
+export interface MailboxCreateParams extends JmapCall {
+  accountId: string
+  name: string
+  // RFC 8621 special-use role, e.g. "archive".
+  role?: string
+}
+
+// Create a mailbox and return its id. The agent uses this to ensure an
+// Archive mailbox exists before an auto-archive move — RFC 8621 requires
+// every email to stay in at least one mailbox, so archiving is add-Archive +
+// remove-Inbox rather than a bare removal.
+export const mailboxCreate = async (p: MailboxCreateParams): Promise<string> => {
+  const resp = await call(p, {
+    methodCalls: [
+      [
+        'Mailbox/set',
+        {
+          accountId: p.accountId,
+          create: { m0: { name: p.name, ...(p.role === undefined ? {} : { role: p.role }) } },
+        },
+        '0',
+      ],
+    ],
+    using: USING,
+  })
+  const out = methodResponse<{
+    created?: Record<string, { id?: string }>
+    notCreated?: Record<string, { description?: string; type?: string }>
+  }>(resp, 'Mailbox/set', '0')
+  const id = out.created?.m0?.id
+  if (!id) {
+    throw new JmapError(200, `Mailbox/set did not create ${p.name}: ${out.notCreated?.m0?.type ?? 'unknown'}`)
+  }
+  return id
 }

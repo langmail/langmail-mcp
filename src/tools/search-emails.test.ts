@@ -17,7 +17,7 @@ const fakeDeps = (opts: {
     return Promise.resolve(opts.queryIds ?? [])
   },
   resolveAccountId: () => Promise.resolve(opts.accountId ?? 'acct'),
-  resolveMailbox: (_token: string, name: string) =>
+  resolveMailbox: (_authorization: string, name: string) =>
     Promise.resolve(opts.mailboxByName ? opts.mailboxByName(name) : null),
 })
 
@@ -121,14 +121,14 @@ describe('searchEmails', () => {
     expect(txt).not.toContain('$seen')
   })
 
-  test('maps keyword enum values to $label: filters (todo -> to-do), no stray text', async () => {
+  test('maps keyword enum values verbatim to $label: filters, no stray text', async () => {
     let seen: EmailQueryParams | undefined
     await searchEmails(fakeDeps({ onQuery: (p) => (seen = p), queryIds: [] }), {
       args: { keywords: ['receipt', 'todo'], limit: 20 },
       token: 'tok',
     })
     // Exact shape: a keyword-only search carries no text/date/mailbox condition.
-    expect(seen?.filters).toEqual({ keywords: ['$label:receipt', '$label:to-do'] })
+    expect(seen?.filters).toEqual({ keywords: ['$label:receipt', '$label:todo'] })
   })
 
   test('threads text + date + from filters through to the query', async () => {
@@ -178,7 +178,7 @@ describe('searchEmails', () => {
           return Promise.resolve([])
         },
         resolveAccountId: () => Promise.resolve('acct'),
-        resolveMailbox: (_token, name) => Promise.resolve(name === 'Inbox' ? 'm1' : null),
+        resolveMailbox: (_authorization, name) => Promise.resolve(name === 'Inbox' ? 'm1' : null),
       },
       { args: { limit: 5, mailbox: 'Inbox', query: 'x' }, token: 'tok' }
     )

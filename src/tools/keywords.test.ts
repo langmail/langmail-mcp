@@ -26,11 +26,8 @@ describe('keyword vocabulary', () => {
     expect(keywordToJmapLabel('receipt')).toBe('$label:receipt')
     expect(keywordToJmapLabel('newsletter')).toBe('$label:newsletter')
     expect(keywordToJmapLabel('direct')).toBe('$label:direct')
-  })
-
-  // Temporary exception until the agent-keyword migration renames it.
-  test('todo maps to the legacy $label:to-do keyword', () => {
-    expect(keywordToJmapLabel('todo')).toBe('$label:to-do')
+    // Canonical since the JMAP-first agent migration — no legacy `to-do` alias.
+    expect(keywordToJmapLabel('todo')).toBe('$label:todo')
   })
 
   test('the enum description glosses every value', () => {

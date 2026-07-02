@@ -5,7 +5,13 @@
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
-import { type EmailDetailRecord, type EmailGetDetailParams, emailGetDetail, type JmapLive } from '@langmail/jmap'
+import {
+  bearerAuthorization,
+  type EmailDetailRecord,
+  type EmailGetDetailParams,
+  emailGetDetail,
+  type JmapLive,
+} from '@langmail/jmap'
 
 import { emailTags, formatAddressList } from './format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
@@ -24,7 +30,7 @@ export type GetEmailArgs = z.infer<typeof getEmailInput>
 
 export interface GetEmailDeps {
   emailGetDetail: (p: EmailGetDetailParams) => Promise<EmailDetailRecord[]>
-  resolveAccountId: (token: string) => Promise<string>
+  resolveAccountId: (authorization: string) => Promise<string>
 }
 
 export interface GetEmailContext {
@@ -45,13 +51,14 @@ const bodyText = (e: EmailDetailRecord): string => {
 
 export const getEmail = async (deps: GetEmailDeps, ctx: GetEmailContext): Promise<ToolResult> => {
   const { token, args } = ctx
-  const accountId = await deps.resolveAccountId(token)
+  const authorization = bearerAuthorization(token)
+  const accountId = await deps.resolveAccountId(authorization)
   const [email] = await deps.emailGetDetail({
     accountId,
     apiUrl: '',
+    authorization,
     ids: [args.id],
     maxBodyValueBytes: MAX_BODY_VALUE_BYTES,
-    token,
   })
   if (!email) {
     return errorResult(`Email not found: ${args.id}`)
@@ -78,7 +85,7 @@ export const getEmail = async (deps: GetEmailDeps, ctx: GetEmailContext): Promis
 // --- live-deps wiring ----------------------------------------------------
 
 export const makeLiveDeps = (live: JmapLive): GetEmailDeps => ({
-  emailGetDetail: async (p) => emailGetDetail({ ...p, apiUrl: (await live.getSession(p.token)).apiUrl }),
+  emailGetDetail: async (p) => emailGetDetail({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   resolveAccountId: live.resolveAccountId,
 })
 

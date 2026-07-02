@@ -12,6 +12,7 @@ import { z } from 'zod'
 
 import {
   accountIdForMail,
+  bearerAuthorization,
   type EmailGetParams,
   type EmailQueryParams,
   type EmailRecord,
@@ -66,8 +67,8 @@ export type SearchEmailsArgs = z.infer<typeof searchEmailsInput>
 export interface SearchEmailsDeps {
   emailGet: (p: EmailGetParams) => Promise<EmailRecord[]>
   emailQuery: (p: EmailQueryParams) => Promise<string[]>
-  resolveAccountId: (token: string) => Promise<string>
-  resolveMailbox: (token: string, name: string) => Promise<string | null>
+  resolveAccountId: (authorization: string) => Promise<string>
+  resolveMailbox: (authorization: string, name: string) => Promise<string | null>
 }
 
 export interface SearchEmailsContext {
@@ -77,11 +78,14 @@ export interface SearchEmailsContext {
 
 export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsContext): Promise<ToolResult> => {
   const { token, args } = ctx
-  const accountId = await deps.resolveAccountId(token)
+  // The JMAP layer takes a full Authorization header; the validated client
+  // bearer is wrapped once here.
+  const authorization = bearerAuthorization(token)
+  const accountId = await deps.resolveAccountId(authorization)
 
   let mailboxId: string | undefined
   if (args.mailbox) {
-    const id = await deps.resolveMailbox(token, args.mailbox)
+    const id = await deps.resolveMailbox(authorization, args.mailbox)
     if (!id) {
       return errorResult(`Mailbox not found: ${args.mailbox}`)
     }
@@ -92,6 +96,7 @@ export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsCont
     accountId,
     // wired by live deps; mock deps ignore
     apiUrl: '',
+    authorization,
     filters: {
       ...(args.query ? { text: args.query } : {}),
       ...(args.after ? { after: args.after } : {}),
@@ -101,14 +106,13 @@ export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsCont
       ...(mailboxId ? { mailboxId } : {}),
     },
     limit: args.limit,
-    token,
   })
 
   if (ids.length === 0) {
     return textResult('No messages matched.')
   }
 
-  const list = await deps.emailGet({ accountId, apiUrl: '', ids, token })
+  const list = await deps.emailGet({ accountId, apiUrl: '', authorization, ids })
   // Restore the query's newest-first order so the response reflects the
   // receivedAt-desc sort (Email/get doesn't preserve id order).
   const ordered = orderById(ids, list)
@@ -121,12 +125,12 @@ export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsCont
 // `live` is shared across the JMAP tools (built once in the handler) so a
 // bearer's session is resolved once per request cycle, not once per tool.
 export const makeLiveDeps = (live: JmapLive): SearchEmailsDeps => ({
-  emailGet: async (p) => emailGet({ ...p, apiUrl: (await live.getSession(p.token)).apiUrl }),
-  emailQuery: async (p) => emailQuery({ ...p, apiUrl: (await live.getSession(p.token)).apiUrl }),
+  emailGet: async (p) => emailGet({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
+  emailQuery: async (p) => emailQuery({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   resolveAccountId: live.resolveAccountId,
-  resolveMailbox: async (token, name) => {
-    const s = await live.getSession(token)
-    return mailboxIdByName({ accountId: accountIdForMail(s), apiUrl: s.apiUrl, name, token })
+  resolveMailbox: async (authorization, name) => {
+    const s = await live.getSession(authorization)
+    return mailboxIdByName({ accountId: accountIdForMail(s), apiUrl: s.apiUrl, authorization, name })
   },
 })
 

@@ -19,10 +19,15 @@ export class JmapError extends Error {
 
 const TRAILING_SLASHES_RE = /\/+$/u
 
-export const fetchSession = async (stalwartBase: string, token: string): Promise<JmapSession> => {
+// Build a Bearer Authorization header from a raw OAuth token. Every JMAP
+// wrapper takes the *full* header value, so Basic credentials (the agent's
+// stalwart-credential seam) and OAuth bearers (MCP) share one seam.
+export const bearerAuthorization = (token: string): string => `Bearer ${token}`
+
+export const fetchSession = async (stalwartBase: string, authorization: string): Promise<JmapSession> => {
   const url = `${stalwartBase.replace(TRAILING_SLASHES_RE, '')}/.well-known/jmap`
   const res = await fetch(url, {
-    headers: { authorization: `Bearer ${token}` },
+    headers: { authorization },
   })
   if (res.status !== 200) {
     throw new JmapError(res.status, `jmap session returned ${res.status}`)
