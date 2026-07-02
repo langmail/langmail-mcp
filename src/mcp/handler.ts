@@ -13,7 +13,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 
 import { type AuthContext } from '../auth/middleware.ts'
-import { SessionCache } from '../jmap/session-cache.ts'
+import { makeJmapLive } from '../jmap/live.ts'
 import { makeLiveDeps as makeCreateCalendarDeps, registerCreateCalendar } from '../tools/create-calendar.ts'
 import {
   makeLiveDeps as makeCreateCalendarEventDeps,
@@ -23,6 +23,8 @@ import {
   makeLiveDeps as makeDeleteCalendarEventDeps,
   registerDeleteCalendarEvent,
 } from '../tools/delete-calendar-event.ts'
+import { makeLiveDeps as makeGetEmailDeps, registerGetEmail } from '../tools/get-email.ts'
+import { makeLiveDeps as makeGetThreadDeps, registerGetThread } from '../tools/get-thread.ts'
 import {
   makeLiveDeps as makeListCalendarEventsDeps,
   registerListCalendarEvents,
@@ -40,13 +42,12 @@ export interface McpHandlerConfig {
 }
 
 export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: AuthContext) => Promise<Response>) => {
-  // Shared across requests: JMAP session lookups dedupe across all
-  // bearer tokens we've seen.
-  const sessionCache = new SessionCache()
-  const searchEmailsDeps = makeSearchEmailsDeps({
-    sessionCache,
-    stalwartUrl: cfg.stalwartUrl,
-  })
+  // Shared across requests AND across the JMAP tools: a per-token session
+  // cache so a bearer's JMAP session is resolved once, not once per tool.
+  const jmapLive = makeJmapLive(cfg.stalwartUrl)
+  const searchEmailsDeps = makeSearchEmailsDeps(jmapLive)
+  const getEmailDeps = makeGetEmailDeps(jmapLive)
+  const getThreadDeps = makeGetThreadDeps(jmapLive)
   // CalDAV tools discover against the same Stalwart base; tsdav follows
   // /.well-known/caldav to /dav/cal.
   const caldavCfg = { serverUrl: cfg.stalwartUrl }
@@ -64,6 +65,8 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
       version: '0.1.0',
     })
     registerSearchEmails(server, searchEmailsDeps, () => ctx.token)
+    registerGetEmail(server, getEmailDeps, () => ctx.token)
+    registerGetThread(server, getThreadDeps, () => ctx.token)
     registerListCalendars(server, listCalendarsDeps, () => ctx.token)
     registerCreateCalendar(server, createCalendarDeps, () => ctx.token)
     registerListCalendarEvents(server, listCalendarEventsDeps, () => ctx.token)

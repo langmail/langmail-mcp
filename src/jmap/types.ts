@@ -18,14 +18,49 @@ export interface JmapResponse {
   methodResponses: [string, Record<string, unknown>, string][]
 }
 
-// Properties we ask for in Email/get.
+export interface EmailAddress {
+  email: string
+  name?: string | null
+}
+
+// Lightweight shape returned by search_emails and get_thread listings.
+// `keywords` is surfaced so callers can show a message's labels (why it
+// matched); `threadId` lets a hit be expanded into its whole thread.
 export interface EmailRecord {
-  from?: { name?: string | null; email: string }[] | null
+  from?: EmailAddress[] | null
   id: string
+  keywords?: Record<string, boolean> | null
   mailboxIds?: Record<string, boolean> | null
   preview?: string | null
   receivedAt?: string | null
   subject?: string | null
+  threadId?: string | null
+}
+
+// A single body part reference (JMAP EmailBodyPart, narrowed).
+export interface EmailBodyPart {
+  partId?: string | null
+  type?: string | null
+}
+
+// A fetched body value (JMAP EmailBodyValue, narrowed).
+export interface EmailBodyValue {
+  isEncodingProblem?: boolean
+  isTruncated?: boolean
+  value: string
+}
+
+// Richer shape returned by get_email: recipients plus the text body.
+export interface EmailDetailRecord extends EmailRecord {
+  bodyValues?: Record<string, EmailBodyValue> | null
+  cc?: EmailAddress[] | null
+  textBody?: EmailBodyPart[] | null
+  to?: EmailAddress[] | null
+}
+
+export interface ThreadRecord {
+  emailIds: string[]
+  id: string
 }
 
 export interface MailboxRecord {
