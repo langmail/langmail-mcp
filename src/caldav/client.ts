@@ -1,6 +1,6 @@
 // Thin glue over `tsdav`: RFC 6764 discovery + calendar listing + event
 // PUT, each authenticated with the request's bearer. A fresh, stateless
-// call per request — same model as the JMAP wrappers in jmap/email.ts.
+// call per request — same model as the JMAP wrappers in @langmail/jmap.
 //
 // The transport details (well-known redirect to /dav/cal, principal ->
 // calendar-home-set -> calendars) live inside tsdav; we only thread the

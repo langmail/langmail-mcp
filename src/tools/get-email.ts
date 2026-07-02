@@ -5,9 +5,8 @@
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
-import { type EmailGetDetailParams, emailGetDetail } from '../jmap/email.ts'
-import { type JmapLive } from '../jmap/live.ts'
-import { type EmailDetailRecord } from '../jmap/types.ts'
+import { type EmailDetailRecord, type EmailGetDetailParams, emailGetDetail, type JmapLive } from '@langmail/jmap'
+
 import { emailTags, formatAddressList } from './format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 

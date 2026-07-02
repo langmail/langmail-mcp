@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type EmailGetParams } from '../jmap/email.ts'
-import { type EmailRecord } from '../jmap/types.ts'
+import { type EmailGetParams, type EmailRecord } from '@langmail/jmap'
+
 import { getThread, getThreadInput } from './get-thread.ts'
 
 const deps = (opts: { ids?: string[]; emails?: EmailRecord[]; onGet?: (p: EmailGetParams) => void }) => ({

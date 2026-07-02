@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type EmailDetailRecord } from '../jmap/types.ts'
+import { type EmailDetailRecord } from '@langmail/jmap'
+
 import { getEmail, getEmailInput } from './get-email.ts'
 
 const deps = (emails: EmailDetailRecord[]) => ({

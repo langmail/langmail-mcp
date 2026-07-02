@@ -1,4 +1,4 @@
-// Minimal subset of JMAP types used by the MCP service.
+// Minimal subset of JMAP types shared across Langmail's TS consumers.
 //
 // JMAP is huge; this file declares only the properties we actually read
 // or send. Adding fields when a new tool needs them is preferable to
@@ -63,7 +63,23 @@ export interface ThreadRecord {
   id: string
 }
 
+// `role` is the RFC 8621 special-use role (`inbox`, `archive`, `sent`, …);
+// null/absent for user-created mailboxes. It's the stable way to locate the
+// inbox for auto-archive, independent of the localized display name.
 export interface MailboxRecord {
   id: string
   name: string
+  role?: string | null
+}
+
+// The delta returned by Email/changes between two states (RFC 8621 §5.2).
+// `newState` becomes the next poll's cursor; `hasMoreChanges` signals the
+// caller to page again from `newState` before treating the batch as drained.
+export interface EmailChangesResult {
+  created: string[]
+  destroyed: string[]
+  hasMoreChanges: boolean
+  newState: string
+  oldState: string
+  updated: string[]
 }

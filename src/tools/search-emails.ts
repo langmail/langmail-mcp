@@ -10,10 +10,17 @@
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
-import { type EmailGetParams, type EmailQueryParams, emailGet, emailQuery, mailboxIdByName } from '../jmap/email.ts'
-import { type JmapLive } from '../jmap/live.ts'
-import { accountIdForMail } from '../jmap/session.ts'
-import { type EmailRecord } from '../jmap/types.ts'
+import {
+  accountIdForMail,
+  type EmailGetParams,
+  type EmailQueryParams,
+  type EmailRecord,
+  emailGet,
+  emailQuery,
+  type JmapLive,
+  mailboxIdByName,
+} from '@langmail/jmap'
+
 import { formatEmailLine, orderById } from './format.ts'
 import { KEYWORD_VALUES, KEYWORDS_DESCRIPTION, keywordToJmapLabel } from './keywords.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'

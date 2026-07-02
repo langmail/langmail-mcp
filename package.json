@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@langmail/agents": "*",
+    "@langmail/jmap": "*",
     "@langmail/logger": "*",
     "@modelcontextprotocol/sdk": "^1.0.4",
     "ical-generator": "^11.0.0",

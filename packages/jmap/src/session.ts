@@ -1,9 +1,10 @@
-// JMAP session discovery + a small per-principal cache.
+// JMAP session discovery.
 //
 // The session resource changes rarely (accountId is stable for the
-// lifetime of a mailbox), so we cache it long. The cache key is the
-// principal, not the token — multiple tokens for the same user share
-// one entry.
+// lifetime of a mailbox), so callers cache it (see `live.ts`). Auth is
+// caller-provided: MCP passes a validated client bearer, the email-agent
+// passes a credential minted by the auth service — this module never
+// mints tokens itself.
 
 import { type JmapSession } from './types.ts'
 

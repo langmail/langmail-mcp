@@ -5,9 +5,15 @@
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
-import { type EmailGetParams, emailGet, type ThreadEmailIdsParams, threadEmailIds } from '../jmap/email.ts'
-import { type JmapLive } from '../jmap/live.ts'
-import { type EmailRecord } from '../jmap/types.ts'
+import {
+  type EmailGetParams,
+  type EmailRecord,
+  emailGet,
+  type JmapLive,
+  type ThreadEmailIdsParams,
+  threadEmailIds,
+} from '@langmail/jmap'
+
 import { formatEmailLine, orderById } from './format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 

@@ -1,9 +1,11 @@
-// Typed JMAP wrappers for the Email, Thread, and Mailbox capabilities.
-// Narrow on purpose — see services/mcp/AGENTS.md and spec/02 §Phase 2 for
-// the "extract to packages/jmap/ only when a second service needs it" rule.
+// Typed JMAP wrappers for the Email, Thread, and Mailbox capabilities —
+// the read surface (query/get/thread/mailbox lookup) plus the write and
+// changes surface (Email/set patches, Email/changes, Mailbox/get by role)
+// the email-agent needs once it becomes a JMAP client (ADR 0004).
 
 import { JmapError } from './session.ts'
 import {
+  type EmailChangesResult,
   type EmailDetailRecord,
   type EmailRecord,
   type JmapRequest,
@@ -70,6 +72,14 @@ const methodResponse = <T>(resp: JmapResponse, name: string, callId: string): T 
   }
   return entry[1] as T
 }
+
+// Escape a keyword or mailbox id for use as an RFC 6901 JSON Pointer token in
+// an Email/set PatchObject: `~` and `/` are structural and MUST be escaped
+// (`~`→`~0`, `/`→`~1`), order matters (escape `~` first). Mirrors the Rust
+// mirror in email-sync's `set_keywords`. Agent `$label:` keywords contain
+// neither char, but keeping the escape correct means the same wrapper is safe
+// for nested-label keywords too.
+const jsonPointerEscape = (token: string): string => token.replaceAll('~', '~0').replaceAll('/', '~1')
 
 // --- Email/query ---------------------------------------------------------
 
@@ -212,6 +222,112 @@ export const emailGetDetail = async (p: EmailGetDetailParams): Promise<EmailDeta
   return out.list ?? []
 }
 
+// --- Email/set (patch) ---------------------------------------------------
+
+// Targeted membership changes for one email: `true` adds, `false` removes. Keys
+// are the full JMAP keyword string (`$label:receipt`) or the mailbox id; both
+// are JSON-pointer-escaped before hitting the wire. The two maps translate onto
+// the wire differently (see `buildSetPatch`): keyword removal follows
+// email-sync's production-proven `false` convention, mailbox removal follows the
+// RFC 8620 canonical `null`.
+export interface EmailSetChanges {
+  keywords?: Record<string, boolean>
+  mailboxIds?: Record<string, boolean>
+}
+
+export interface EmailSetParams extends JmapCall {
+  accountId: string
+  changes: EmailSetChanges
+  id: string
+}
+
+const buildSetPatch = (changes: EmailSetChanges): Record<string, boolean | null> => {
+  const patch: Record<string, boolean | null> = {}
+  // Keywords: boolean value, `false` removes. This mirrors email-sync's Rust
+  // `set_keywords` byte-for-byte and is production-proven against Stalwart
+  // (read-state + label mirroring both drive the `false`=remove path).
+  for (const [keyword, value] of Object.entries(changes.keywords ?? {})) {
+    patch[`keywords/${jsonPointerEscape(keyword)}`] = value
+  }
+  // MailboxIds: `true` adds, `null` removes. RFC 8621 requires mailboxIds map
+  // values be `true`, so removal uses the RFC 8620 canonical PatchObject `null`
+  // rather than `false` — and unlike keywords there's no proven `false`-removal
+  // precedent for mailboxes (Rust only ever replaces the set wholesale).
+  for (const [mailboxId, value] of Object.entries(changes.mailboxIds ?? {})) {
+    patch[`mailboxIds/${jsonPointerEscape(mailboxId)}`] = value ? true : null
+  }
+  return patch
+}
+
+// Patch keywords and/or mailbox membership on a single email via an Email/set
+// `update` with a JSON-pointer PatchObject, leaving every other keyword and
+// mailbox untouched — this is what lets sync's mirror and the agent's writes
+// compose without clobbering each other (ADR 0004). Throws JmapError if
+// Stalwart reports the id under `notUpdated` (or omits it from `updated`).
+export const emailSet = async (p: EmailSetParams): Promise<void> => {
+  const resp = await call(p, {
+    methodCalls: [
+      [
+        'Email/set',
+        {
+          accountId: p.accountId,
+          update: { [p.id]: buildSetPatch(p.changes) },
+        },
+        '0',
+      ],
+    ],
+    using: USING,
+  })
+  const out = methodResponse<{
+    notUpdated?: Record<string, { description?: string; type?: string }>
+    updated?: Record<string, unknown>
+  }>(resp, 'Email/set', '0')
+  if (out.updated && p.id in out.updated) {
+    return
+  }
+  const reason = out.notUpdated?.[p.id]
+  throw new JmapError(200, `Email/set did not update ${p.id}: ${reason?.type ?? 'unknown'}`)
+}
+
+// --- Email/changes -------------------------------------------------------
+
+export interface EmailChangesParams extends JmapCall {
+  accountId: string
+  // Cap the delta so a large backlog pages instead of returning unbounded
+  // ids; the caller loops on `hasMoreChanges` from `newState`.
+  maxChanges?: number
+  sinceState: string
+}
+
+// The delta of email ids created/updated/destroyed since `sinceState`
+// (RFC 8621 §5.2). The poller persists `newState` as its cursor and only
+// advances it once the batch is processed — a failed batch replays.
+export const emailChanges = async (p: EmailChangesParams): Promise<EmailChangesResult> => {
+  const resp = await call(p, {
+    methodCalls: [
+      [
+        'Email/changes',
+        {
+          accountId: p.accountId,
+          ...(p.maxChanges === undefined ? {} : { maxChanges: p.maxChanges }),
+          sinceState: p.sinceState,
+        },
+        '0',
+      ],
+    ],
+    using: USING,
+  })
+  const out = methodResponse<Partial<EmailChangesResult>>(resp, 'Email/changes', '0')
+  return {
+    created: out.created ?? [],
+    destroyed: out.destroyed ?? [],
+    hasMoreChanges: out.hasMoreChanges ?? false,
+    newState: out.newState ?? p.sinceState,
+    oldState: out.oldState ?? p.sinceState,
+    updated: out.updated ?? [],
+  }
+}
+
 // --- Thread/get ----------------------------------------------------------
 
 export interface ThreadEmailIdsParams extends JmapCall {
@@ -244,16 +360,10 @@ export const threadEmailIds = async (p: ThreadEmailIdsParams): Promise<string[]>
 
 // --- Mailbox/get ---------------------------------------------------------
 
-export interface MailboxIdByNameParams extends JmapCall {
-  accountId: string
-  name: string
-}
-
-export const mailboxIdByName = async (p: MailboxIdByNameParams): Promise<string | null> => {
-  // One round-trip: query all mailbox ids, hydrate names, match
-  // case-insensitively. Stalwart's mailbox count is small enough that
-  // skipping a name-filtered Mailbox/query (which JMAP doesn't directly
-  // support anyway) is fine.
+// One round-trip that hydrates every mailbox's id + name + role. Stalwart's
+// mailbox count is small, so listing all and matching in memory is cheaper
+// than the name/role-filtered Mailbox/query JMAP doesn't directly support.
+const fetchMailboxes = async (p: JmapCall & { accountId: string }): Promise<MailboxRecord[]> => {
   const resp = await call(p, {
     methodCalls: [
       ['Mailbox/query', { accountId: p.accountId }, '0'],
@@ -262,7 +372,7 @@ export const mailboxIdByName = async (p: MailboxIdByNameParams): Promise<string 
         {
           '#ids': { name: 'Mailbox/query', path: '/ids', resultOf: '0' },
           accountId: p.accountId,
-          properties: ['id', 'name'],
+          properties: ['id', 'name', 'role'],
         },
         '1',
       ],
@@ -270,7 +380,30 @@ export const mailboxIdByName = async (p: MailboxIdByNameParams): Promise<string 
     using: USING,
   })
   const got = methodResponse<{ list?: MailboxRecord[] }>(resp, 'Mailbox/get', '1')
+  return got.list ?? []
+}
+
+export interface MailboxIdByNameParams extends JmapCall {
+  accountId: string
+  name: string
+}
+
+export const mailboxIdByName = async (p: MailboxIdByNameParams): Promise<string | null> => {
   const wanted = p.name.toLowerCase()
-  const hit = (got.list ?? []).find((m) => m.name.toLowerCase() === wanted)
+  const hit = (await fetchMailboxes(p)).find((m) => m.name.toLowerCase() === wanted)
+  return hit?.id ?? null
+}
+
+export interface MailboxIdByRoleParams extends JmapCall {
+  accountId: string
+  // RFC 8621 special-use role, e.g. "inbox", "archive", "sent".
+  role: string
+}
+
+// Resolve a mailbox by its special-use role — the stable way to find the
+// inbox for auto-archive, independent of the localized display name.
+export const mailboxIdByRole = async (p: MailboxIdByRoleParams): Promise<string | null> => {
+  const wanted = p.role.toLowerCase()
+  const hit = (await fetchMailboxes(p)).find((m) => m.role?.toLowerCase() === wanted)
   return hit?.id ?? null
 }

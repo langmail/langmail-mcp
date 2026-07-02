@@ -1,6 +1,6 @@
 // Shared JMAP live-deps plumbing: a per-token session cache plus the
-// account-id resolution every JMAP tool needs. Extracted so search_emails,
-// get_email, and get_thread don't each re-implement it (DRY).
+// account-id resolution every JMAP call needs. Extracted so consumers
+// (MCP tools, the email-agent poller) don't each re-implement it (DRY).
 
 import { accountIdForMail, fetchSession } from './session.ts'
 import { type JmapSession } from './types.ts'

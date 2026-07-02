@@ -50,12 +50,12 @@ mount `StreamableHTTPServerTransport` and register tools. Conventions:
 
 - One file per tool under `src/tools/`. Default-export a registration
   function that takes the `McpServer` and adds the tool.
-- JMAP wire shape lives in `src/jmap/` as ~200 lines of typed `fetch`
-  wrappers (`Email/query`, `Email/get`, ...). Extract to
-  `packages/jmap/` only when a second service needs it — at
-  which point a Bun workspace at the repo root lands too. (ADR 0004
-  plans exactly that extraction: the email-agent becomes the second
-  consumer — see `docs/proposals/2026-07-02-jmap-first-email-agent/`.)
+- JMAP wire shape lives in the shared `@langmail/jmap` package (typed
+  `fetch` wrappers: `Email/query`, `Email/get`, `Email/set`,
+  `Email/changes`, mailbox lookup). It was extracted from `src/jmap/`
+  once the email-agent became the second consumer (ADR 0004, Phase 1 of
+  `docs/proposals/2026-07-02-jmap-first-email-agent/`). Add new JMAP
+  methods there, not in this service.
 - Auth principal comes from `GET /oauth2/userinfo` against **Better Auth**
   (the OpenID Provider — same IdP as app + webmail) with the client's bearer;
   the principal is the `email` claim (the user's `username@langmail.me` mailbox

@@ -1,9 +1,7 @@
 // Shared formatters for the lightweight email shape returned by search_emails
 // and get_thread. Kept token-frugal: one hit is a few short lines.
 
-import { type EmailAddress, type EmailRecord } from '../jmap/types.ts'
-
-const LABEL_PREFIX = '$label:'
+import { type EmailAddress, type EmailRecord, LABEL_KEYWORD_PREFIX } from '@langmail/jmap'
 
 export const formatAddressList = (addrs?: EmailAddress[] | null): string =>
   (addrs ?? []).map((a) => (a.name ? `${a.name} <${a.email}>` : a.email)).join(', ')
@@ -13,8 +11,8 @@ export const formatAddressList = (addrs?: EmailAddress[] | null): string =>
 // stripped for display.
 export const emailTags = (e: EmailRecord): string[] =>
   Object.keys(e.keywords ?? {})
-    .filter((k) => k.startsWith(LABEL_PREFIX))
-    .map((k) => k.slice(LABEL_PREFIX.length))
+    .filter((k) => k.startsWith(LABEL_KEYWORD_PREFIX))
+    .map((k) => k.slice(LABEL_KEYWORD_PREFIX.length))
 
 // Email/get doesn't guarantee list order; reorder fetched records to match a
 // caller-supplied id order (the query's newest-first sort, or a thread's

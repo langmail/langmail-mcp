@@ -1,6 +1,16 @@
 import { describe, expect, mock, test } from 'bun:test'
 
-import { emailGet, emailGetDetail, emailQuery, mailboxIdByName, threadEmailIds } from './email.ts'
+import {
+  emailChanges,
+  emailGet,
+  emailGetDetail,
+  emailQuery,
+  emailSet,
+  mailboxIdByName,
+  mailboxIdByRole,
+  threadEmailIds,
+} from './email.ts'
+import { JmapError } from './session.ts'
 
 const API = 'https://mail.example.com/jmap/'
 
@@ -344,5 +354,166 @@ describe('mailboxIdByName', () => {
       })
     )
     expect(id).toBeNull()
+  })
+})
+
+describe('mailboxIdByRole', () => {
+  test('matches on the special-use role, not the display name', async () => {
+    const f = mock((_u: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}')
+      // role must be requested so the match has something to compare against.
+      expect(body.methodCalls[1][1].properties).toContain('role')
+      return Promise.resolve(
+        jmapResponse([
+          ['Mailbox/query', { ids: ['m1', 'm2'] }, '0'],
+          [
+            'Mailbox/get',
+            {
+              list: [
+                { id: 'm1', name: 'Posteingang', role: 'inbox' },
+                { id: 'm2', name: 'Archiv', role: 'archive' },
+              ],
+            },
+            '1',
+          ],
+        ])
+      )
+    })
+    const id = await withFetch(f, () =>
+      mailboxIdByRole({ accountId: 'acct', apiUrl: API, role: 'inbox', token: 'tok' })
+    )
+    expect(id).toBe('m1')
+  })
+
+  test('returns null when no mailbox carries the role', async () => {
+    const f = mock(() =>
+      Promise.resolve(
+        jmapResponse([
+          ['Mailbox/query', { ids: ['m1'] }, '0'],
+          ['Mailbox/get', { list: [{ id: 'm1', name: 'Inbox', role: null }] }, '1'],
+        ])
+      )
+    )
+    const id = await withFetch(f, () =>
+      mailboxIdByRole({ accountId: 'acct', apiUrl: API, role: 'archive', token: 'tok' })
+    )
+    expect(id).toBeNull()
+  })
+})
+
+describe('emailSet', () => {
+  test('sends a JSON-pointer keyword+mailbox patch and resolves on updated', async () => {
+    const f = mock((_u: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}')
+      expect(body.methodCalls[0][0]).toBe('Email/set')
+      const update = body.methodCalls[0][1].update
+      // Keyword add stays boolean; mailbox removal is the RFC-canonical null.
+      expect(update).toEqual({
+        e1: {
+          'keywords/$label:receipt': true,
+          'mailboxIds/mbx-inbox': null,
+        },
+      })
+      return Promise.resolve(jmapResponse([['Email/set', { updated: { e1: null } }, '0']]))
+    })
+    await withFetch(f, () =>
+      emailSet({
+        accountId: 'acct',
+        apiUrl: API,
+        changes: { keywords: { '$label:receipt': true }, mailboxIds: { 'mbx-inbox': false } },
+        id: 'e1',
+        token: 'tok',
+      })
+    )
+    expect(f).toHaveBeenCalled()
+  })
+
+  test('escapes ~ and / in keyword pointer tokens (RFC 6901)', async () => {
+    const f = mock((_u: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}')
+      expect(body.methodCalls[0][1].update.e1).toEqual({
+        'keywords/$label:travel~1asia~0x': true,
+      })
+      return Promise.resolve(jmapResponse([['Email/set', { updated: { e1: null } }, '0']]))
+    })
+    await withFetch(f, () =>
+      emailSet({
+        accountId: 'acct',
+        apiUrl: API,
+        changes: { keywords: { '$label:travel/asia~x': true } },
+        id: 'e1',
+        token: 'tok',
+      })
+    )
+    expect(f).toHaveBeenCalled()
+  })
+
+  test('throws JmapError when the id lands in notUpdated', async () => {
+    const f = mock(() =>
+      Promise.resolve(jmapResponse([['Email/set', { notUpdated: { e1: { type: 'notFound' } } }, '0']]))
+    )
+    await withFetch(f, async () => {
+      const err = await emailSet({
+        accountId: 'acct',
+        apiUrl: API,
+        changes: { keywords: { '$label:ai': true } },
+        id: 'e1',
+        token: 'tok',
+      }).catch((error) => error)
+      expect(err).toBeInstanceOf(JmapError)
+      expect((err as Error).message).toContain('notFound')
+    })
+  })
+})
+
+describe('emailChanges', () => {
+  test('sends sinceState + maxChanges and normalizes the delta', async () => {
+    const f = mock((_u: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}')
+      expect(body.methodCalls[0][0]).toBe('Email/changes')
+      expect(body.methodCalls[0][1].sinceState).toBe('s0')
+      expect(body.methodCalls[0][1].maxChanges).toBe(50)
+      return Promise.resolve(
+        jmapResponse([
+          [
+            'Email/changes',
+            { created: ['e1'], destroyed: [], hasMoreChanges: true, newState: 's1', oldState: 's0', updated: ['e2'] },
+            '0',
+          ],
+        ])
+      )
+    })
+    const out = await withFetch(f, () =>
+      emailChanges({ accountId: 'acct', apiUrl: API, maxChanges: 50, sinceState: 's0', token: 'tok' })
+    )
+    expect(out).toEqual({
+      created: ['e1'],
+      destroyed: [],
+      hasMoreChanges: true,
+      newState: 's1',
+      oldState: 's0',
+      updated: ['e2'],
+    })
+  })
+
+  test('omits maxChanges when unset and fills sensible defaults', async () => {
+    const f = mock((_u: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}')
+      expect('maxChanges' in body.methodCalls[0][1]).toBe(false)
+      // A minimal server response still yields a well-formed result: the
+      // cursor stays put (newState falls back to sinceState) and lists empty.
+      return Promise.resolve(jmapResponse([['Email/changes', {}, '0']]))
+    })
+    const out = await withFetch(f, () =>
+      emailChanges({ accountId: 'acct', apiUrl: API, sinceState: 's0', token: 'tok' })
+    )
+    expect(out).toEqual({
+      created: [],
+      destroyed: [],
+      hasMoreChanges: false,
+      newState: 's0',
+      oldState: 's0',
+      updated: [],
+    })
   })
 })

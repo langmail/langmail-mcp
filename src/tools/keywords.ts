@@ -3,6 +3,7 @@
 // z.enum on search_emails; mapped to JMAP `$label:` keywords server-side.
 
 import { agentsConfig } from '@langmail/agents'
+import { toLabelKeyword } from '@langmail/jmap'
 
 // enum value -> human gloss. Each agent carries its own description; `todo` is
 // agent/user bookkeeping the taxonomy doesn't model as an agent, glossed here.
@@ -25,11 +26,12 @@ export const KEYWORDS_DESCRIPTION = `Category labels to filter by; multiple valu
   .map(([value, gloss]) => `"${value}" = ${gloss}`)
   .join('; ')}`
 
-// `$label:` is Bulwark's internal keyword convention the agent never sees.
-// Enum values (already lowercase slugs) are used verbatim as suffixes, EXCEPT
-// `todo`, which maps to the legacy `$label:to-do` until the JMAP-first
-// agent-keyword migration renames it to the canonical `$label:todo`. Drop this
-// override then — see docs/proposals/2026-07-02-mcp-email-search-filters/plan.md.
+// The `$label:` convention (shared via @langmail/jmap's toLabelKeyword) is
+// Bulwark's internal keyword namespace the agent never sees. Enum values
+// (already lowercase slugs) are used verbatim as suffixes, EXCEPT `todo`, which
+// maps to the legacy `$label:to-do` until the JMAP-first agent-keyword
+// migration renames it to the canonical `$label:todo`. Drop this override then
+// — see docs/proposals/2026-07-02-mcp-email-search-filters/plan.md.
 const LABEL_SUFFIX_OVERRIDES: Record<string, string> = { todo: 'to-do' }
 
-export const keywordToJmapLabel = (value: string): string => `$label:${LABEL_SUFFIX_OVERRIDES[value] ?? value}`
+export const keywordToJmapLabel = (value: string): string => toLabelKeyword(LABEL_SUFFIX_OVERRIDES[value] ?? value)
