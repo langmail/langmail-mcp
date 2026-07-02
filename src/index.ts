@@ -8,6 +8,9 @@
 // why we trust /auth/userinfo rather than verifying JWTs locally.
 
 import { logger } from '@langmail/logger'
+import { initErrorTracking } from '@langmail/logger/error-tracking'
+
+initErrorTracking('mcp')
 
 import { createRoutes } from './handler.ts'
 import { createMcpHandler } from './mcp/handler.ts'

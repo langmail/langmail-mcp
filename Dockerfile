@@ -6,9 +6,6 @@ ENV DO_NOT_TRACK=$DO_NOT_TRACK
 ARG COMMIT
 ENV APP_REVISION=$COMMIT
 
-ARG SENTRY_AUTH_TOKEN
-ENV SENTRY_AUTH_TOKEN=$SENTRY_AUTH_TOKEN
-
 # openssl + ca-certificates for TLS to outbound HTTP (Stalwart) at runtime
 RUN apt-get update -y && apt-get install -y openssl ca-certificates
 
