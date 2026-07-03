@@ -15,9 +15,11 @@
 
 - Speaks the Streamable HTTP transport over `/mcp`
 - Authenticates clients via OAuth 2.0 — advertises its own authorization metadata and proxies dynamic client registration to Stalwart
-- Full-text search over the authenticated user's mailbox
+- Structured search over the authenticated user's mailbox — free-text combined with date-range, sender, category-label, and mailbox filters
+- Read a single message's full body, or every message in a thread
 - List and create the user's calendars
-- List, create, update, and delete calendar events — sending iMIP invitations and cancellations to attendees
+- List, create, update, and delete calendar events — including recurring series — sending iMIP invitations and cancellations to attendees
+- RSVP to invitations (accept / decline / tentative), notifying the organizer automatically
 
 The public endpoint is `https://mcp.langmail.me/mcp`.
 
@@ -77,8 +79,9 @@ bun run build
 tests that drive the real client against a live CalDAV server; they skip
 unless `CALDAV_BASE_URL` / `CALDAV_USERNAME` / `CALDAV_PASSWORD` are set. CI
 runs them against a throwaway [Radicale](https://radicale.org) instance (see
-the `CalDAV Integration` job in `.github/workflows/test.yml`). To run them
-locally, start any CalDAV server and point the env at it:
+the `CalDAV Integration (mcp)` job in
+`.github/workflows/test-caldav.yml`). To run them locally, start any CalDAV
+server and point the env at it:
 
 ```bash
 pip install radicale
@@ -93,16 +96,44 @@ CALDAV_BASE_URL=http://127.0.0.1:5232 CALDAV_USERNAME=test CALDAV_PASSWORD=test 
 
 ### search_emails
 
-Full-text search over the authenticated user's mailbox. Returns matching
-messages with subject, sender, and date.
+Structured search over the authenticated user's mailbox. Combine free-text
+full-text search with any of the optional filters below; at least one filter
+is required. Returns a token-frugal hit list (no bodies) newest-first — fetch
+a full message with `get_email`.
 
-Parameters:
-- `query`: string — search text (1–500 characters)
-- `mailbox`: string (optional) — restrict the search to a named mailbox
+Parameters (at least one of `query`, `after`, `before`, `from`, `keywords`, or `mailbox` is required):
+- `query`: string (optional) — free-text full-text search over subject and body (1–500 characters)
+- `after`: string (optional) — only messages received on/after this UTC ISO-8601 timestamp (e.g. `2026-04-01T00:00:00Z`)
+- `before`: string (optional) — only messages received strictly before this UTC ISO-8601 timestamp
+- `from`: string (optional) — substring match on the sender name or address (1–200 characters)
+- `keywords`: array of string (optional) — category labels to filter by (combined with OR); values come from the classification taxonomy
+- `mailbox`: string (optional) — restrict to a named mailbox/folder (e.g. `Inbox`)
 - `limit`: number (optional) — maximum results, 1–100 (default 20)
 
 Returns:
-- A list of matching messages, each with its subject, sender, and date
+- A list of matching messages newest-first, each with its id, subject, sender, date, and tags
+
+### get_email
+
+Fetches a single message's recipients and plain-text body by id. `search_emails`
+and `get_thread` deliberately omit bodies; open a specific hit with this tool.
+
+Parameters:
+- `id`: string — the message id, as returned by `search_emails` or `get_thread`
+
+Returns:
+- The message's subject, sender, recipients, date, tags, and plain-text body
+
+### get_thread
+
+Lists every message in the same thread as a given message id, oldest-first, in
+the lightweight search-result shape. Fetch a body with `get_email`.
+
+Parameters:
+- `id`: string — a message id; every message in its thread is returned
+
+Returns:
+- A list of the thread's messages oldest-first, each with its id, subject, sender, date, and tags
 
 ### list_calendars
 
@@ -141,12 +172,13 @@ Parameters:
 - `end`: string (optional) — window end (ISO 8601 with offset); must be paired with `start`
 
 Returns:
-- A list of events, each with its title, time, location (if any), and `uid`
+- A list of events, each with its title, time, location (if any), repeat rule (for recurring events), and `uid`
 
 ### create_calendar_event
 
 Creates a calendar event and sends iMIP invitations to the attendees, with
-the authenticated user as organizer.
+the authenticated user as organizer. Pass `recurrence` to create a repeating
+series in a single call.
 
 Parameters:
 - `title`: string — event title (1–200 characters)
@@ -156,6 +188,7 @@ Parameters:
 - `calendarUrl`: string (optional) — a CalDAV URL from `list_calendars`; defaults to the user's default calendar
 - `description`: string (optional) — up to 5000 characters
 - `location`: string (optional) — up to 500 characters
+- `recurrence`: string or object (optional) — turns the event into a repeating series; either a raw iCalendar RRULE (e.g. `FREQ=WEEKLY;BYDAY=TH`) or a structured object `{frequency, interval?, byDay?, until?|count?}`. `start`/`end` describe the first occurrence
 
 Returns:
 - A confirmation that the event was created and invitations were sent, including the event `uid` and `calendarUrl` (pass these to `update_calendar_event` / `delete_calendar_event`)
@@ -164,7 +197,10 @@ Returns:
 
 Updates an existing event in place (identified by its `uid`) and re-sends
 iMIP notifications to the attendees. This is a full replacement — pass the
-complete event details, not just the changed fields.
+complete event details, not just the changed fields. For a recurring event
+this edits the entire series: pass `recurrence` again to keep it recurring;
+omitting it collapses the series back to a single event. (Editing a single
+occurrence of a series is not supported.)
 
 Parameters:
 - `uid`: string — the event's iCalendar UID, from `create_calendar_event` or `list_calendar_events`
@@ -175,6 +211,7 @@ Parameters:
 - `calendarUrl`: string (optional) — a CalDAV URL from `list_calendars`; defaults to the user's default calendar
 - `description`: string (optional) — up to 5000 characters
 - `location`: string (optional) — up to 500 characters
+- `recurrence`: string or object (optional) — same shape as `create_calendar_event`; re-rules the whole series (omit to make it a one-off)
 
 Returns:
 - A confirmation that the event was updated and notifications were sent
@@ -190,3 +227,18 @@ Parameters:
 
 Returns:
 - A confirmation that the event was deleted
+
+### respond_to_event
+
+RSVPs to a calendar invite on the authenticated user's behalf: sets their own
+attendee status to accept, decline, or tentative on the event and saves it
+back. The organizer is notified automatically. Use this to reply to an
+invitation you received; it does not change the event itself.
+
+Parameters:
+- `uid`: string — the event's iCalendar UID, from `list_calendar_events`
+- `response`: string — one of `accept`, `decline`, or `tentative`
+- `calendarUrl`: string (optional) — a CalDAV URL from `list_calendars`; defaults to the user's default calendar
+
+Returns:
+- A confirmation of the RSVP (including the event title when available)
