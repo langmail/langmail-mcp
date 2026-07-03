@@ -32,7 +32,8 @@ const EMAIL_PROPERTIES = [
   'threadId',
 ] as const
 
-// Richer properties for get_email: recipients plus the text body parts.
+// Richer properties for get_email and the poller's analysis input:
+// recipients, the text body parts, and the RFC 5322 Message-ID list.
 const EMAIL_DETAIL_PROPERTIES = [
   'id',
   'subject',
@@ -41,6 +42,7 @@ const EMAIL_DETAIL_PROPERTIES = [
   'cc',
   'receivedAt',
   'keywords',
+  'messageId',
   'textBody',
   'bodyValues',
 ] as const
@@ -291,6 +293,27 @@ export const emailSet = async (p: EmailSetParams): Promise<void> => {
   }
   const reason = out.notUpdated?.[p.id]
   throw new JmapError(200, `Email/set did not update ${p.id}: ${reason?.type ?? 'unknown'}`)
+}
+
+// --- Email state ----------------------------------------------------------
+
+export interface EmailStateParams extends JmapCall {
+  accountId: string
+}
+
+// The account's current Email state string (RFC 8621 §5), fetched via an
+// empty Email/get. The poller seeds a fresh cursor from this so only mail
+// arriving after the seed gets analyzed — no historical backfill.
+export const emailState = async (p: EmailStateParams): Promise<string> => {
+  const resp = await call(p, {
+    methodCalls: [['Email/get', { accountId: p.accountId, ids: [] }, '0']],
+    using: USING,
+  })
+  const out = methodResponse<{ state?: string }>(resp, 'Email/get', '0')
+  if (!out.state) {
+    throw new JmapError(200, 'Email/get returned no state')
+  }
+  return out.state
 }
 
 // --- Email/changes -------------------------------------------------------
