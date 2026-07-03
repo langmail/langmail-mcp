@@ -3,11 +3,12 @@ import path from 'node:path'
 import pino from 'pino'
 
 import { createLogtailStream } from './logtail-stream'
+import { resolveLevel } from './resolve-level'
 
 // Server only - safe to access process.env
 const serviceName = process.env.SERVICE_NAME || 'unknown'
 const base = { service: serviceName }
-const level = (process.env.LOG_LEVEL || 'info') as pino.Level
+const level = resolveLevel(process.env.LOG_LEVEL)
 
 // We use pino.multistream()/pino.destination() rather than pino.transport().
 // transport() runs each target on a worker thread (thread-stream), which loads
