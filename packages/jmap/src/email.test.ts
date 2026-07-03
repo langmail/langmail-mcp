@@ -6,8 +6,10 @@ import {
   emailGetDetail,
   emailQuery,
   emailSet,
+  mailboxCreate,
   mailboxIdByName,
   mailboxIdByRole,
+  mailboxIdsByRoles,
   threadEmailIds,
 } from './email.ts'
 import { JmapError } from './session.ts'
@@ -50,7 +52,7 @@ describe('emailQuery', () => {
         apiUrl: API,
         filters: { text: 'hello' },
         limit: 20,
-        token: 'tok',
+        authorization: 'Bearer tok',
       })
     )
     expect(ids).toEqual(['e1', 'e2'])
@@ -70,7 +72,7 @@ describe('emailQuery', () => {
         apiUrl: API,
         filters: { mailboxId: 'mbx', text: 'hi' },
         limit: 5,
-        token: 'tok',
+        authorization: 'Bearer tok',
       })
     )
     expect(f).toHaveBeenCalled()
@@ -94,7 +96,7 @@ describe('emailQuery', () => {
         apiUrl: API,
         filters: { after: '2026-04-01T00:00:00Z', before: '2026-07-01T00:00:00Z', from: 'amazon' },
         limit: 5,
-        token: 'tok',
+        authorization: 'Bearer tok',
       })
     )
     expect(f).toHaveBeenCalled()
@@ -112,7 +114,7 @@ describe('emailQuery', () => {
         apiUrl: API,
         filters: { keywords: ['$label:receipt'] },
         limit: 5,
-        token: 'tok',
+        authorization: 'Bearer tok',
       })
     )
     expect(f).toHaveBeenCalled()
@@ -133,7 +135,7 @@ describe('emailQuery', () => {
         apiUrl: API,
         filters: { keywords: ['$label:receipt', '$label:newsletter'] },
         limit: 5,
-        token: 'tok',
+        authorization: 'Bearer tok',
       })
     )
     expect(f).toHaveBeenCalled()
@@ -159,7 +161,7 @@ describe('emailQuery', () => {
         apiUrl: API,
         filters: { keywords: ['$label:receipt', '$label:newsletter'], text: 'invoice' },
         limit: 5,
-        token: 'tok',
+        authorization: 'Bearer tok',
       })
     )
     expect(f).toHaveBeenCalled()
@@ -209,7 +211,7 @@ describe('emailGet', () => {
         accountId: 'acct',
         apiUrl: API,
         ids: ['e1'],
-        token: 'tok',
+        authorization: 'Bearer tok',
       })
     )
     expect(out).toHaveLength(1)
@@ -219,7 +221,9 @@ describe('emailGet', () => {
 
   test('short-circuits with no request when ids is empty', async () => {
     const f = mock(() => Promise.resolve(jmapResponse([])))
-    const out = await withFetch(f, () => emailGet({ accountId: 'acct', apiUrl: API, ids: [], token: 'tok' }))
+    const out = await withFetch(f, () =>
+      emailGet({ accountId: 'acct', apiUrl: API, ids: [], authorization: 'Bearer tok' })
+    )
     expect(out).toEqual([])
     expect(f).not.toHaveBeenCalled()
   })
@@ -257,7 +261,13 @@ describe('emailGetDetail', () => {
       )
     })
     const out = await withFetch(f, () =>
-      emailGetDetail({ accountId: 'acct', apiUrl: API, ids: ['e1'], maxBodyValueBytes: 4096, token: 'tok' })
+      emailGetDetail({
+        accountId: 'acct',
+        apiUrl: API,
+        ids: ['e1'],
+        maxBodyValueBytes: 4096,
+        authorization: 'Bearer tok',
+      })
     )
     expect(out[0]?.bodyValues?.['1']?.value).toBe('hello body')
   })
@@ -283,7 +293,7 @@ describe('threadEmailIds', () => {
       )
     })
     const ids = await withFetch(f, () =>
-      threadEmailIds({ accountId: 'acct', apiUrl: API, emailId: 'e1', token: 'tok' })
+      threadEmailIds({ accountId: 'acct', apiUrl: API, emailId: 'e1', authorization: 'Bearer tok' })
     )
     expect(ids).toEqual(['e1', 'e2', 'e3'])
   })
@@ -298,7 +308,7 @@ describe('threadEmailIds', () => {
       )
     )
     const ids = await withFetch(f, () =>
-      threadEmailIds({ accountId: 'acct', apiUrl: API, emailId: 'nope', token: 'tok' })
+      threadEmailIds({ accountId: 'acct', apiUrl: API, emailId: 'nope', authorization: 'Bearer tok' })
     )
     expect(ids).toEqual([])
   })
@@ -330,7 +340,7 @@ describe('mailboxIdByName', () => {
         accountId: 'acct',
         apiUrl: API,
         name: 'inbox',
-        token: 'tok',
+        authorization: 'Bearer tok',
       })
     )
     expect(id).toBe('m1')
@@ -350,7 +360,7 @@ describe('mailboxIdByName', () => {
         accountId: 'acct',
         apiUrl: API,
         name: 'Nope',
-        token: 'tok',
+        authorization: 'Bearer tok',
       })
     )
     expect(id).toBeNull()
@@ -380,7 +390,7 @@ describe('mailboxIdByRole', () => {
       )
     })
     const id = await withFetch(f, () =>
-      mailboxIdByRole({ accountId: 'acct', apiUrl: API, role: 'inbox', token: 'tok' })
+      mailboxIdByRole({ accountId: 'acct', apiUrl: API, role: 'inbox', authorization: 'Bearer tok' })
     )
     expect(id).toBe('m1')
   })
@@ -395,9 +405,74 @@ describe('mailboxIdByRole', () => {
       )
     )
     const id = await withFetch(f, () =>
-      mailboxIdByRole({ accountId: 'acct', apiUrl: API, role: 'archive', token: 'tok' })
+      mailboxIdByRole({ accountId: 'acct', apiUrl: API, role: 'archive', authorization: 'Bearer tok' })
     )
     expect(id).toBeNull()
+  })
+})
+
+describe('mailboxIdsByRoles', () => {
+  test('resolves several roles from a single mailbox listing', async () => {
+    const f = mock(() =>
+      Promise.resolve(
+        jmapResponse([
+          ['Mailbox/query', { ids: ['m1', 'm2'] }, '0'],
+          [
+            'Mailbox/get',
+            {
+              list: [
+                { id: 'm1', name: 'Inbox', role: 'inbox' },
+                { id: 'm2', name: 'Sent', role: 'sent' },
+              ],
+            },
+            '1',
+          ],
+        ])
+      )
+    )
+    const ids = await withFetch(f, () =>
+      mailboxIdsByRoles({
+        accountId: 'acct',
+        apiUrl: API,
+        authorization: 'Bearer tok',
+        roles: ['inbox', 'archive'],
+      })
+    )
+    expect(ids).toEqual({ archive: null, inbox: 'm1' })
+    // One listing round-trip for all roles.
+    expect(f).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('mailboxCreate', () => {
+  test('creates a mailbox with name + role and returns its id', async () => {
+    const f = mock((_u: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}')
+      expect(body.methodCalls[0][0]).toBe('Mailbox/set')
+      expect(body.methodCalls[0][1].create).toEqual({ m0: { name: 'Archive', role: 'archive' } })
+      return Promise.resolve(jmapResponse([['Mailbox/set', { created: { m0: { id: 'mbx-arch' } } }, '0']]))
+    })
+    const id = await withFetch(f, () =>
+      mailboxCreate({ accountId: 'acct', apiUrl: API, authorization: 'Bearer tok', name: 'Archive', role: 'archive' })
+    )
+    expect(id).toBe('mbx-arch')
+  })
+
+  test('throws JmapError when the server reports notCreated', async () => {
+    const f = mock(() =>
+      Promise.resolve(jmapResponse([['Mailbox/set', { notCreated: { m0: { type: 'forbidden' } } }, '0']]))
+    )
+    await withFetch(f, async () => {
+      const err = await mailboxCreate({
+        accountId: 'acct',
+        apiUrl: API,
+        authorization: 'Bearer tok',
+        name: 'Archive',
+        role: 'archive',
+      }).catch((error) => error)
+      expect(err).toBeInstanceOf(JmapError)
+      expect((err as Error).message).toContain('forbidden')
+    })
   })
 })
 
@@ -422,7 +497,7 @@ describe('emailSet', () => {
         apiUrl: API,
         changes: { keywords: { '$label:receipt': true }, mailboxIds: { 'mbx-inbox': false } },
         id: 'e1',
-        token: 'tok',
+        authorization: 'Bearer tok',
       })
     )
     expect(f).toHaveBeenCalled()
@@ -442,7 +517,7 @@ describe('emailSet', () => {
         apiUrl: API,
         changes: { keywords: { '$label:travel/asia~x': true } },
         id: 'e1',
-        token: 'tok',
+        authorization: 'Bearer tok',
       })
     )
     expect(f).toHaveBeenCalled()
@@ -458,7 +533,7 @@ describe('emailSet', () => {
         apiUrl: API,
         changes: { keywords: { '$label:ai': true } },
         id: 'e1',
-        token: 'tok',
+        authorization: 'Bearer tok',
       }).catch((error) => error)
       expect(err).toBeInstanceOf(JmapError)
       expect((err as Error).message).toContain('notFound')
@@ -484,7 +559,7 @@ describe('emailChanges', () => {
       )
     })
     const out = await withFetch(f, () =>
-      emailChanges({ accountId: 'acct', apiUrl: API, maxChanges: 50, sinceState: 's0', token: 'tok' })
+      emailChanges({ accountId: 'acct', apiUrl: API, maxChanges: 50, sinceState: 's0', authorization: 'Bearer tok' })
     )
     expect(out).toEqual({
       created: ['e1'],
@@ -505,7 +580,7 @@ describe('emailChanges', () => {
       return Promise.resolve(jmapResponse([['Email/changes', {}, '0']]))
     })
     const out = await withFetch(f, () =>
-      emailChanges({ accountId: 'acct', apiUrl: API, sinceState: 's0', token: 'tok' })
+      emailChanges({ accountId: 'acct', apiUrl: API, sinceState: 's0', authorization: 'Bearer tok' })
     )
     expect(out).toEqual({
       created: [],

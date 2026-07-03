@@ -6,6 +6,7 @@ import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
 import {
+  bearerAuthorization,
   type EmailGetParams,
   type EmailRecord,
   emailGet,
@@ -27,7 +28,7 @@ export type GetThreadArgs = z.infer<typeof getThreadInput>
 
 export interface GetThreadDeps {
   emailGet: (p: EmailGetParams) => Promise<EmailRecord[]>
-  resolveAccountId: (token: string) => Promise<string>
+  resolveAccountId: (authorization: string) => Promise<string>
   threadEmailIds: (p: ThreadEmailIdsParams) => Promise<string[]>
 }
 
@@ -38,13 +39,14 @@ export interface GetThreadContext {
 
 export const getThread = async (deps: GetThreadDeps, ctx: GetThreadContext): Promise<ToolResult> => {
   const { token, args } = ctx
-  const accountId = await deps.resolveAccountId(token)
-  const ids = await deps.threadEmailIds({ accountId, apiUrl: '', emailId: args.id, token })
+  const authorization = bearerAuthorization(token)
+  const accountId = await deps.resolveAccountId(authorization)
+  const ids = await deps.threadEmailIds({ accountId, apiUrl: '', authorization, emailId: args.id })
   if (ids.length === 0) {
     return errorResult(`Thread not found for message: ${args.id}`)
   }
 
-  const list = await deps.emailGet({ accountId, apiUrl: '', ids, token })
+  const list = await deps.emailGet({ accountId, apiUrl: '', authorization, ids })
   // Restore Thread/get's chronological (oldest-first) order and mark the
   // message the caller asked about.
   const ordered = orderById(ids, list)
@@ -55,9 +57,9 @@ export const getThread = async (deps: GetThreadDeps, ctx: GetThreadContext): Pro
 // --- live-deps wiring ----------------------------------------------------
 
 export const makeLiveDeps = (live: JmapLive): GetThreadDeps => ({
-  emailGet: async (p) => emailGet({ ...p, apiUrl: (await live.getSession(p.token)).apiUrl }),
+  emailGet: async (p) => emailGet({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   resolveAccountId: live.resolveAccountId,
-  threadEmailIds: async (p) => threadEmailIds({ ...p, apiUrl: (await live.getSession(p.token)).apiUrl }),
+  threadEmailIds: async (p) => threadEmailIds({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
 })
 
 // --- MCP registration ----------------------------------------------------

@@ -12,16 +12,20 @@ export {
   emailGetDetail,
   emailQuery,
   emailSet,
+  type MailboxCreateParams,
   type MailboxIdByNameParams,
   type MailboxIdByRoleParams,
+  type MailboxIdsByRolesParams,
+  mailboxCreate,
   mailboxIdByName,
   mailboxIdByRole,
+  mailboxIdsByRoles,
   type ThreadEmailIdsParams,
   threadEmailIds,
 } from './email.ts'
 export { LABEL_KEYWORD_PREFIX, toLabelKeyword } from './keywords.ts'
 export { type JmapLive, makeJmapLive } from './live.ts'
-export { accountIdForMail, fetchSession, JmapError } from './session.ts'
+export { accountIdForMail, bearerAuthorization, fetchSession, JmapError } from './session.ts'
 export type {
   EmailAddress,
   EmailBodyPart,

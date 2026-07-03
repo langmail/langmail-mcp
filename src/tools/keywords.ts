@@ -28,10 +28,7 @@ export const KEYWORDS_DESCRIPTION = `Category labels to filter by; multiple valu
 
 // The `$label:` convention (shared via @langmail/jmap's toLabelKeyword) is
 // Bulwark's internal keyword namespace the agent never sees. Enum values
-// (already lowercase slugs) are used verbatim as suffixes, EXCEPT `todo`, which
-// maps to the legacy `$label:to-do` until the JMAP-first agent-keyword
-// migration renames it to the canonical `$label:todo`. Drop this override then
-// — see docs/proposals/2026-07-02-mcp-email-search-filters/plan.md.
-const LABEL_SUFFIX_OVERRIDES: Record<string, string> = { todo: 'to-do' }
-
-export const keywordToJmapLabel = (value: string): string => toLabelKeyword(LABEL_SUFFIX_OVERRIDES[value] ?? value)
+// (already lowercase slugs) are used verbatim as suffixes — including `todo`,
+// now that the JMAP-first email-agent writes the canonical `$label:todo`
+// (the legacy Gmail-echoed `$label:to-do` was dropped with that migration).
+export const keywordToJmapLabel = (value: string): string => toLabelKeyword(value)

@@ -1,33 +1,34 @@
-// Shared JMAP live-deps plumbing: a per-token session cache plus the
+// Shared JMAP live-deps plumbing: a per-credential session cache plus the
 // account-id resolution every JMAP call needs. Extracted so consumers
-// (MCP tools, the email-agent poller) don't each re-implement it (DRY).
+// (MCP tools, the email-agent's enrichment writer) don't each re-implement
+// it (DRY).
 
 import { accountIdForMail, fetchSession } from './session.ts'
 import { type JmapSession } from './types.ts'
 
 export interface JmapLive {
-  getSession: (token: string) => Promise<JmapSession>
-  resolveAccountId: (token: string) => Promise<string>
+  getSession: (authorization: string) => Promise<JmapSession>
+  resolveAccountId: (authorization: string) => Promise<string>
 }
 
 export const makeJmapLive = (stalwartUrl: string): JmapLive => {
-  // Cache by token (single process) rather than by principal — cheaper than
-  // re-deriving the principal from another userinfo call. The JMAP session
-  // resource is stable for a mailbox's lifetime.
-  const sessionByToken = new Map<string, JmapSession>()
+  // Cache by the Authorization header value (single process) rather than by
+  // principal — cheaper than re-deriving the principal from another userinfo
+  // call. The JMAP session resource is stable for a mailbox's lifetime.
+  const sessionByAuthorization = new Map<string, JmapSession>()
 
-  const getSession = async (token: string): Promise<JmapSession> => {
-    const hit = sessionByToken.get(token)
+  const getSession = async (authorization: string): Promise<JmapSession> => {
+    const hit = sessionByAuthorization.get(authorization)
     if (hit) {
       return hit
     }
-    const session = await fetchSession(stalwartUrl, token)
-    sessionByToken.set(token, session)
+    const session = await fetchSession(stalwartUrl, authorization)
+    sessionByAuthorization.set(authorization, session)
     return session
   }
 
   return {
     getSession,
-    resolveAccountId: async (token) => accountIdForMail(await getSession(token)),
+    resolveAccountId: async (authorization) => accountIdForMail(await getSession(authorization)),
   }
 }

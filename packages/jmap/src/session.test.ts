@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test'
 
-import { fetchSession, JmapError } from './session.ts'
+import { bearerAuthorization, fetchSession, JmapError } from './session.ts'
 
 const STALWART = 'https://mail.example.com'
 
@@ -15,8 +15,14 @@ const withFetch = <T>(
   })
 }
 
+describe('bearerAuthorization', () => {
+  test('wraps a raw OAuth token into a Bearer header value', () => {
+    expect(bearerAuthorization('tok')).toBe('Bearer tok')
+  })
+})
+
 describe('fetchSession', () => {
-  test('hits /.well-known/jmap with bearer and parses primaryAccount', async () => {
+  test('hits /.well-known/jmap forwarding the Authorization header verbatim', async () => {
     const f = mock((url: string, init?: RequestInit) => {
       expect(url).toBe(`${STALWART}/.well-known/jmap`)
       expect((init?.headers as Record<string, string>)?.authorization).toBe('Bearer tok')
@@ -32,7 +38,7 @@ describe('fetchSession', () => {
         )
       )
     })
-    const s = await withFetch(f, () => fetchSession(STALWART, 'tok'))
+    const s = await withFetch(f, () => fetchSession(STALWART, bearerAuthorization('tok')))
     expect(s.apiUrl).toBe(`${STALWART}/jmap/`)
     expect(s.primaryAccounts['urn:ietf:params:jmap:mail']).toBe('acct-1')
   })
@@ -40,7 +46,7 @@ describe('fetchSession', () => {
   test('throws JmapError on non-200', async () => {
     const f = mock(() => Promise.resolve(new Response('nope', { status: 401 })))
     await withFetch(f, async () => {
-      const err = await fetchSession(STALWART, 'tok').catch((error) => error)
+      const err = await fetchSession(STALWART, bearerAuthorization('tok')).catch((error) => error)
       expect(err).toBeInstanceOf(JmapError)
       expect((err as JmapError).status).toBe(401)
     })
