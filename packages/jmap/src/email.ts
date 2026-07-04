@@ -45,6 +45,7 @@ const EMAIL_DETAIL_PROPERTIES = [
   'messageId',
   'textBody',
   'bodyValues',
+  'threadId',
 ] as const
 
 interface JmapCall {
@@ -74,6 +75,15 @@ const call = async <T extends JmapResponse>(ctx: JmapCall, body: JmapRequest): P
 const methodResponse = <T>(resp: JmapResponse, name: string, callId: string): T => {
   const entry = resp.methodResponses.find(([n, , id]) => n === name && id === callId)
   if (!entry) {
+    // RFC 8620 §3.6.2: a failed method call is answered with an `error`
+    // response under the same call id. Surface its type so callers can
+    // recover from expected conditions (e.g. cannotCalculateChanges →
+    // reseed the poll cursor).
+    const err = resp.methodResponses.find(([n, , id]) => n === 'error' && id === callId)
+    if (err) {
+      const detail = err[1] as { description?: string; type?: string }
+      throw new JmapError(200, `jmap method error for ${name}/${callId}: ${detail.type ?? 'unknown'}`, detail.type)
+    }
     throw new JmapError(200, `missing method response for ${name}/${callId}`)
   }
   return entry[1] as T

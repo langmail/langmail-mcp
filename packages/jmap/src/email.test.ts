@@ -612,4 +612,17 @@ describe('emailState', () => {
       withFetch(f, () => emailState({ accountId: 'acct', apiUrl: API, authorization: 'Bearer tok' }))
     ).rejects.toThrow(JmapError)
   })
+
+  test('surfaces an RFC 8620 error method response as a typed JmapError', async () => {
+    const f = mock(() => Promise.resolve(jmapResponse([['error', { type: 'cannotCalculateChanges' }, '0']])))
+    try {
+      await withFetch(f, () =>
+        emailChanges({ accountId: 'acct', apiUrl: API, sinceState: 's0', authorization: 'Bearer tok' })
+      )
+      throw new Error('expected emailChanges to throw')
+    } catch (err) {
+      expect(err).toBeInstanceOf(JmapError)
+      expect((err as JmapError).errorType).toBe('cannotCalculateChanges')
+    }
+  })
 })
