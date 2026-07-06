@@ -51,9 +51,11 @@ export interface EmailBodyValue {
 }
 
 // Richer shape returned by get_email: recipients plus the text body.
+// `messageId` is the parsed RFC 5322 Message-ID header (a list per RFC 8621).
 export interface EmailDetailRecord extends EmailRecord {
   bodyValues?: Record<string, EmailBodyValue> | null
   cc?: EmailAddress[] | null
+  messageId?: string[] | null
   textBody?: EmailBodyPart[] | null
   to?: EmailAddress[] | null
 }

@@ -6,6 +6,7 @@ import {
   emailGetDetail,
   emailQuery,
   emailSet,
+  emailState,
   mailboxCreate,
   mailboxIdByName,
   mailboxIdByRole,
@@ -590,5 +591,38 @@ describe('emailChanges', () => {
       oldState: 's0',
       updated: [],
     })
+  })
+})
+
+describe('emailState', () => {
+  test('fetches the current Email state via an empty Email/get', async () => {
+    const f = mock((_u: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}')
+      expect(body.methodCalls[0][0]).toBe('Email/get')
+      expect(body.methodCalls[0][1].ids).toEqual([])
+      return Promise.resolve(jmapResponse([['Email/get', { list: [], state: 's42' }, '0']]))
+    })
+    const state = await withFetch(f, () => emailState({ accountId: 'acct', apiUrl: API, authorization: 'Bearer tok' }))
+    expect(state).toBe('s42')
+  })
+
+  test('throws when the server omits the state', async () => {
+    const f = mock(() => Promise.resolve(jmapResponse([['Email/get', { list: [] }, '0']])))
+    await expect(
+      withFetch(f, () => emailState({ accountId: 'acct', apiUrl: API, authorization: 'Bearer tok' }))
+    ).rejects.toThrow(JmapError)
+  })
+
+  test('surfaces an RFC 8620 error method response as a typed JmapError', async () => {
+    const f = mock(() => Promise.resolve(jmapResponse([['error', { type: 'cannotCalculateChanges' }, '0']])))
+    try {
+      await withFetch(f, () =>
+        emailChanges({ accountId: 'acct', apiUrl: API, sinceState: 's0', authorization: 'Bearer tok' })
+      )
+      throw new Error('expected emailChanges to throw')
+    } catch (err) {
+      expect(err).toBeInstanceOf(JmapError)
+      expect((err as JmapError).errorType).toBe('cannotCalculateChanges')
+    }
   })
 })

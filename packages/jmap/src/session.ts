@@ -10,9 +10,14 @@ import { type JmapSession } from './types.ts'
 
 export class JmapError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  // RFC 8620 method-level error type (e.g. "cannotCalculateChanges") when the
+  // server answered the call with an `error` method response; undefined for
+  // transport-level failures. Lets callers branch on recoverable conditions.
+  errorType: string | undefined
+  constructor(status: number, message: string, errorType?: string) {
     super(message)
     this.status = status
+    this.errorType = errorType
     this.name = 'JmapError'
   }
 }
