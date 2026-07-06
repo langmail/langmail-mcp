@@ -10,7 +10,7 @@
 //   Authorization: Bearer <internalToken>
 //   { "userId": "<uuid>" }
 //   -> 200 { "authorization": "Basic ...", "address": "user@langmail.me" }
-//   -> 404 { "error": "no_active_mailbox" }   (not provisioned / sync disabled)
+//   -> 404 { "error": "no_active_mailbox" }   (mailbox not provisioned yet)
 
 const STALWART_CREDENTIAL_PATH = '/internal/stalwart-credential'
 const DEFAULT_TIMEOUT_MS = 5000
