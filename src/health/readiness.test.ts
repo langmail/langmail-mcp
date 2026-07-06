@@ -4,20 +4,16 @@ import { authReachable, createReadiness, readyzResponse, stalwartReachable } fro
 
 describe('createReadiness', () => {
   test('reports ready when all checks pass', async () => {
-    const readiness = createReadiness({ a: async () => 'HTTP 200', b: async () => 'ok' })
+    const readiness = createReadiness({ a: async () => 'HTTP 200', b: () => Promise.resolve('ok') })
     const result = await readiness()
     expect(result.ready).toBe(true)
     expect(result.checks).toEqual({ a: 'HTTP 200', b: 'ok' })
   })
 
   test('reports not ready when a check throws', async () => {
-    // biome-ignore lint/suspicious/useAwait: Check type expects Promise-returning function
     const readiness = createReadiness({
-      up: async () => 'ok',
-      // biome-ignore lint/suspicious/useAwait: Check type expects Promise-returning function
-      down: async () => {
-        throw new Error('ConnectionRefused')
-      },
+      up: () => Promise.resolve('ok'),
+      down: () => Promise.reject(new Error('ConnectionRefused')),
     })
     const result = await readiness()
     expect(result.ready).toBe(false)
@@ -38,13 +34,11 @@ describe('createReadiness', () => {
   test('caches the aggregate result within the TTL', async () => {
     let calls = 0
     let clock = 1000
-    // biome-ignore lint/suspicious/useAwait: Check type expects Promise-returning function
     const readiness = createReadiness(
       {
-        // biome-ignore lint/suspicious/useAwait: Check type expects Promise-returning function
-        x: async () => {
+        x: () => {
           calls += 1
-          return 'ok'
+          return Promise.resolve('ok')
         },
       },
       { ttlMs: 100, now: () => clock }
