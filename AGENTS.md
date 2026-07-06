@@ -53,9 +53,8 @@ mount `StreamableHTTPServerTransport` and register tools. Conventions:
 - JMAP wire shape lives in the shared `@langmail/jmap` package (typed
   `fetch` wrappers: `Email/query`, `Email/get`, `Email/set`,
   `Email/changes`, mailbox lookup). It was extracted from `src/jmap/`
-  once the email-agent became the second consumer (ADR 0004, Phase 1 of
-  `docs/proposals/2026-07-02-jmap-first-email-agent/`). Add new JMAP
-  methods there, not in this service.
+  once the email-agent became the second consumer (ADR 0004, Phase 1).
+  Add new JMAP methods there, not in this service.
 - Auth principal comes from `GET /oauth2/userinfo` against **Better Auth**
   (the OpenID Provider — same IdP as app + webmail) with the client's bearer;
   the principal is the `email` claim (the user's `username@langmail.me` mailbox
