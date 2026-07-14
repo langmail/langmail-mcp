@@ -36,7 +36,7 @@ const unescapeText = (value: string): string =>
 // (already-ISO, or an exotic form) is returned untouched.
 const ICAL_DT_RE = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/u
 
-const icalDateToIso = (value: string): string => {
+export const icalDateToIso = (value: string): string => {
   const m = ICAL_DT_RE.exec(value)
   if (!m) {
     return value

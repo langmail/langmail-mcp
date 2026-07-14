@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { buildInvite, parseSequence } from './ical.ts'
+import { buildInvite, maxSequence, parseSequence } from './ical.ts'
 
 // RFC 5545 folds long lines at 75 octets with a CRLF + space; undo that
 // so substring assertions don't trip over a folded email address.
@@ -79,6 +79,42 @@ describe('buildInvite', () => {
     // ical-generator owns the `RRULE:` prefix — passing the raw rule must not
     // double it up.
     expect(ics).not.toContain('RRULE:RRULE:')
+  })
+
+  test('emits a RECURRENCE-ID line for a single-occurrence override', () => {
+    const ics = unfold(buildInvite({ ...baseInput, recurrenceId: new Date('2026-06-12T10:00:00Z') }))
+    expect(ics).toContain('RECURRENCE-ID:20260612T100000Z')
+  })
+
+  // An override targets one instance, so it must never also carry an RRULE —
+  // that would (re)declare a whole series on the override component.
+  test('suppresses the RRULE when a recurrenceId is set', () => {
+    const ics = buildInvite({
+      ...baseInput,
+      recurrenceId: new Date('2026-06-12T10:00:00Z'),
+      rrule: 'FREQ=WEEKLY;BYDAY=TH',
+    })
+    expect(ics).toContain('RECURRENCE-ID:20260612T100000Z')
+    expect(ics).not.toContain('RRULE')
+  })
+})
+
+describe('maxSequence', () => {
+  test('returns 0 when there is no SEQUENCE line', () => {
+    expect(maxSequence('BEGIN:VEVENT\r\nUID:x\r\nEND:VEVENT')).toBe(0)
+  })
+
+  test('reads the SEQUENCE off a single VEVENT', () => {
+    expect(maxSequence(buildInvite({ ...baseInput, sequence: 4 }))).toBe(4)
+  })
+
+  test('returns the highest SEQUENCE across several VEVENTs', () => {
+    // A recurring object holds a master plus overrides, each with its own
+    // SEQUENCE; the max is what a fresh override must bump past.
+    const master = buildInvite({ ...baseInput, rrule: 'FREQ=WEEKLY', sequence: 1 })
+    const override = buildInvite({ ...baseInput, recurrenceId: new Date('2026-06-19T10:00:00Z'), sequence: 5 })
+    const combined = `${master}\r\n${override}`
+    expect(maxSequence(combined)).toBe(5)
   })
 })
 

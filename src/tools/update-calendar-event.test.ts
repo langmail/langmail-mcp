@@ -40,6 +40,24 @@ const storedEvent = (over: Partial<CalendarObject> = {}): CalendarObject => ({
   ...over,
 })
 
+// A stored recurring master: Tuesdays 10:00Z from 2026-06-16, so 2026-06-23T10:00:00Z
+// is a valid occurrence and e.g. 2026-06-24 (a Wednesday) is not.
+const recurringStored = (over: Partial<CalendarObject> = {}): CalendarObject => ({
+  data: buildInvite({
+    attendees: ['guest@example.com'],
+    end: new Date('2026-06-16T10:30:00Z'),
+    organizer: 'host@langmail.me',
+    rrule: 'FREQ=WEEKLY;BYDAY=TU',
+    sequence: 2,
+    start: new Date('2026-06-16T10:00:00Z'),
+    title: 'Weekly Sync',
+    uid: UID,
+  }),
+  etag: '"abc"',
+  url: `${CAL}${UID}.ics`,
+  ...over,
+})
+
 interface Captured {
   fetched: FetchEventParams[]
   updated: UpdateEventParams[]
@@ -67,6 +85,14 @@ describe('updateCalendarEventInput schema', () => {
 
   test('accepts a valid edit', () => {
     expect(updateCalendarEventInput.safeParse(args()).success).toBe(true)
+  })
+
+  test('accepts an optional recurrenceId', () => {
+    expect(updateCalendarEventInput.safeParse(args({ recurrenceId: '2026-06-23T10:00:00Z' })).success).toBe(true)
+  })
+
+  test('rejects a recurrenceId without an offset', () => {
+    expect(updateCalendarEventInput.safeParse(args({ recurrenceId: '2026-06-23T10:00:00' })).success).toBe(false)
   })
 })
 
@@ -159,6 +185,105 @@ describe('updateCalendarEvent', () => {
     const cap = captured()
     const result = await updateCalendarEvent(makeDeps(account(), storedEvent(), cap), {
       args: args({ end: '2026-06-12T11:00:00Z', start: '2026-06-12T11:00:00Z' }),
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(cap.updated).toHaveLength(0)
+  })
+})
+
+describe('updateCalendarEvent — single occurrence (recurrenceId)', () => {
+  const OCCURRENCE = '2026-06-23T10:00:00Z'
+
+  test('splices an override alongside the untouched master', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
+      args: args({ recurrenceId: OCCURRENCE, title: 'Weekly Sync — Q3 planning' }),
+      token: 'tok',
+    })
+
+    expect(cap.updated).toHaveLength(1)
+    const put = cap.updated[0]
+    expect(put?.url).toBe(`${CAL}${UID}.ics`)
+    expect(put?.etag).toBe('"abc"')
+    const ical = (put?.ical ?? '').replace(/\r\n /gu, '')
+    // Master RRULE survives; the override targets just the one instance.
+    expect(ical).toContain('RRULE:FREQ=WEEKLY;BYDAY=TU')
+    expect(ical).toContain('RECURRENCE-ID:20260623T100000Z')
+    expect(ical).toContain('SUMMARY:Weekly Sync — Q3 planning')
+    expect((ical.match(/BEGIN:VEVENT/gu) ?? []).length).toBe(2)
+    // Fresh override bumps past the master's SEQUENCE 2.
+    expect(ical).toContain('SEQUENCE:3')
+
+    expect(result.isError).toBeUndefined()
+    expect(result.content[0]?.text).toContain('Occurrence')
+    expect(result.content[0]?.text).toContain(OCCURRENCE)
+  })
+
+  test('rejects a recurrenceId that is not an occurrence of the series', async () => {
+    const cap = captured()
+    // 2026-06-24 is a Wednesday — not on the Tuesday rule.
+    const result = await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
+      args: args({ recurrenceId: '2026-06-24T10:00:00Z' }),
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('occurrence')
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('rejects cleanly when the master rule cannot be parsed', async () => {
+    const cap = captured()
+    // A trailing `;` passes create's light RRULE validation and is stored, but
+    // the rrule engine throws on it — the tool must surface a clear error, not
+    // an opaque crash, and must not write an unvalidated override.
+    const brokenRule = recurringStored({
+      data: buildInvite({
+        attendees: ['guest@example.com'],
+        end: new Date('2026-06-16T10:30:00Z'),
+        organizer: 'host@langmail.me',
+        rrule: 'FREQ=WEEKLY;BYDAY=TU;',
+        sequence: 2,
+        start: new Date('2026-06-16T10:00:00Z'),
+        title: 'Weekly Sync',
+        uid: UID,
+      }),
+    })
+    const result = await updateCalendarEvent(makeDeps(account(), brokenRule, cap), {
+      args: args({ recurrenceId: OCCURRENCE }),
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('Could not evaluate')
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('rejects editing an occurrence of a non-recurring event', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), storedEvent(), cap), {
+      args: args({ recurrenceId: OCCURRENCE }),
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('not a recurring series')
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('rejects combining recurrence and recurrenceId (before any I/O)', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
+      args: args({ recurrence: 'FREQ=WEEKLY;BYDAY=TU', recurrenceId: OCCURRENCE }),
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(cap.fetched).toHaveLength(0)
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('errors when the recurring event does not exist', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), null, cap), {
+      args: args({ recurrenceId: OCCURRENCE }),
       token: 'tok',
     })
     expect(result.isError).toBe(true)

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { recurrenceSchema, toRRule } from './recurrence.ts'
+import { isSeriesOccurrence, recurrenceSchema, toRRule } from './recurrence.ts'
 
 describe('recurrenceSchema', () => {
   test('accepts a raw RRULE string', () => {
@@ -77,5 +77,48 @@ describe('toRRule', () => {
 
   test('joins multiple byDay codes with commas', () => {
     expect(toRRule({ byDay: ['MO', 'WE', 'FR'], frequency: 'weekly' })).toBe('FREQ=WEEKLY;BYDAY=MO,WE,FR')
+  })
+})
+
+describe('isSeriesOccurrence', () => {
+  // Master: every Tuesday at 10:00Z starting 2026-06-16 (itself a Tuesday).
+  const start = '2026-06-16T10:00:00Z'
+  const weekly = 'FREQ=WEEKLY;BYDAY=TU'
+
+  test('accepts the master start itself', () => {
+    expect(isSeriesOccurrence(start, weekly, '2026-06-16T10:00:00Z')).toBe(true)
+  })
+
+  test('accepts a later occurrence on the rule', () => {
+    expect(isSeriesOccurrence(start, weekly, '2026-06-23T10:00:00Z')).toBe(true)
+  })
+
+  test('rejects a date that is not on the weekday', () => {
+    expect(isSeriesOccurrence(start, weekly, '2026-06-24T10:00:00Z')).toBe(false)
+  })
+
+  test('rejects the right day at the wrong time', () => {
+    expect(isSeriesOccurrence(start, weekly, '2026-06-23T11:00:00Z')).toBe(false)
+  })
+
+  test('rejects an instant before the series begins', () => {
+    expect(isSeriesOccurrence(start, weekly, '2026-06-09T10:00:00Z')).toBe(false)
+  })
+
+  test('accepts an offset instant that is the same UTC moment', () => {
+    // 2026-06-23T12:00:00+02:00 == 2026-06-23T10:00:00Z
+    expect(isSeriesOccurrence(start, weekly, '2026-06-23T12:00:00+02:00')).toBe(true)
+  })
+
+  test('honours COUNT — rejects an instant past the final occurrence', () => {
+    // COUNT=3 → 06-16, 06-23, 06-30; 07-07 is the 4th and out of range.
+    expect(isSeriesOccurrence(start, 'FREQ=WEEKLY;COUNT=3', '2026-06-30T10:00:00Z')).toBe(true)
+    expect(isSeriesOccurrence(start, 'FREQ=WEEKLY;COUNT=3', '2026-07-07T10:00:00Z')).toBe(false)
+  })
+
+  test('honours UNTIL — rejects an instant after the bound', () => {
+    const until = 'FREQ=WEEKLY;UNTIL=20260623T100000Z'
+    expect(isSeriesOccurrence(start, until, '2026-06-23T10:00:00Z')).toBe(true)
+    expect(isSeriesOccurrence(start, until, '2026-06-30T10:00:00Z')).toBe(false)
   })
 })

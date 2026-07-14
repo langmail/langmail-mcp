@@ -7,11 +7,19 @@
 // the current object to confirm it exists, read its SEQUENCE, and PUT the
 // rebuilt iCal back to the same URL with the original ETag.
 //
+// Two edit modes, chosen by `recurrenceId`:
+//   - omitted → the whole event (the entire series for a recurring one), exactly
+//     as before;
+//   - present → a single occurrence of a recurring series, written as a
+//     RECURRENCE-ID override spliced alongside the untouched master (see
+//     caldav/occurrence.ts). Stalwart then schedules an iMIP update scoped to
+//     that instance.
+//
 // Logic sits behind a `Deps` interface (discover + fetchEvent + updateEvent)
 // so it unit-tests without live Stalwart; `makeLiveDeps` wires tsdav in.
 
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { type z } from 'zod'
+import { z } from 'zod'
 
 import {
   type CalDavConfig,
@@ -22,13 +30,26 @@ import {
   type UpdateEventParams,
   updateEvent,
 } from '../caldav/client.ts'
-import { buildInvite, parseSequence } from '../caldav/ical.ts'
-import { toRRule } from '../caldav/recurrence.ts'
+import { buildInvite, maxSequence, parseSequence } from '../caldav/ical.ts'
+import { parseEvents } from '../caldav/ical-parse.ts'
+import { spliceOccurrenceOverride } from '../caldav/occurrence.ts'
+import { isSeriesOccurrence, toRRule } from '../caldav/recurrence.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
 import { createCalendarEventInput, eventUidSchema } from './create-calendar-event.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
+const recurrenceIdDescription =
+  'Optional ISO 8601 instant that scopes this edit to a single occurrence of a ' +
+  'recurring series, identified by that occurrence’s original start (e.g. ' +
+  '2026-06-16T10:00:00Z). When set, only that occurrence changes — the master ' +
+  'rule and every other occurrence stay exactly as they are — and start/end ' +
+  'become the occurrence’s new time (pass the same instant here and in start to ' +
+  'keep the time and change only other fields). The instant must land on an ' +
+  'actual occurrence of the series. Omit to edit the whole event. Cannot be ' +
+  'combined with `recurrence`.'
+
 export const updateCalendarEventInput = createCalendarEventInput.extend({
+  recurrenceId: z.iso.datetime({ offset: true }).optional().describe(recurrenceIdDescription),
   uid: eventUidSchema,
 })
 
@@ -45,11 +66,96 @@ export interface UpdateCalendarEventContext {
   token: string
 }
 
+// Everything the single-occurrence path needs once the common preamble
+// (organizer + calendar + existence checks) has passed.
+interface OccurrenceUpdate {
+  args: UpdateCalendarEventArgs
+  deps: UpdateCalendarEventDeps
+  end: Date
+  existing: CalendarObject
+  // Bare organizer email — already confirmed non-null by the caller.
+  organizer: string
+  recurrenceId: string
+  start: Date
+  token: string
+}
+
+// Edits one occurrence of a recurring series: validate the target instant
+// against the master's RRULE, build a RECURRENCE-ID override, and splice it into
+// the stored object alongside the untouched master before PUTting it back.
+const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
+  const { args, deps, end, existing, organizer, recurrenceId, start, token } = u
+
+  // The stored object holds the master (the only VEVENT with an RRULE) plus any
+  // existing overrides. The master identifies the series we validate against.
+  const master = parseEvents(existing.data).find((e) => e.recurrence !== undefined)
+  if (!master?.recurrence) {
+    return errorResult(`Event ${args.uid} is not a recurring series; omit recurrenceId to edit it.`)
+  }
+
+  // The master RRULE is only lightly validated on create (raw rules pass
+  // through to CalDAV), so `rrule` may reject one Stalwart happily stored — a
+  // trailing `;`, an unknown BYDAY code, an exotic FREQ. Treat an unparseable
+  // rule as a clean rejection rather than let it surface as an opaque internal
+  // error: we can't confirm the instant is a real occurrence, and writing an
+  // unvalidated override risks the very orphan this guard exists to prevent.
+  let onOccurrence: boolean
+  try {
+    onOccurrence = isSeriesOccurrence(master.start, master.recurrence, recurrenceId)
+  } catch {
+    return errorResult(
+      `Could not evaluate this series' recurrence rule (${master.recurrence}) to validate ` +
+        `recurrenceId ${recurrenceId}.`
+    )
+  }
+  if (!onOccurrence) {
+    return errorResult(
+      `recurrenceId ${recurrenceId} does not match an occurrence of this series ` +
+        `(${master.recurrence}); it must equal an occurrence’s original start.`
+    )
+  }
+
+  const override = buildInvite({
+    attendees: args.attendees,
+    end,
+    organizer,
+    recurrenceId: new Date(recurrenceId),
+    // Bump past every SEQUENCE already in the object so this override supersedes
+    // any prior edit of the same instance.
+    sequence: maxSequence(existing.data) + 1,
+    start,
+    title: args.title,
+    uid: args.uid,
+    ...(args.description ? { description: args.description } : {}),
+    ...(args.location ? { location: args.location } : {}),
+  })
+  const ical = spliceOccurrenceOverride(existing.data, override, recurrenceId)
+
+  await deps.updateEvent({ ical, token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
+
+  return textResult(
+    `Occurrence of "${args.title}" on ${recurrenceId} updated and notifications sent ` +
+      `to ${args.attendees.length} attendee(s): ${args.attendees.join(', ')}. ` +
+      'The rest of the series is unchanged.'
+  )
+}
+
 export const updateCalendarEvent = async (
   deps: UpdateCalendarEventDeps,
   ctx: UpdateCalendarEventContext
 ): Promise<ToolResult> => {
   const { args, token } = ctx
+
+  // The two modes are contradictory: `recurrence` re-rules the whole series,
+  // `recurrenceId` edits a single occurrence. Reject the ambiguous combination
+  // rather than silently favouring one.
+  if (args.recurrenceId !== undefined && args.recurrence !== undefined) {
+    return errorResult(
+      'Pass either `recurrence` (to re-rule the whole series) or `recurrenceId` ' +
+        '(to edit a single occurrence), not both.'
+    )
+  }
+
   const account = await deps.discover(token)
 
   if (!account.organizer) {
@@ -75,6 +181,19 @@ export const updateCalendarEvent = async (
   const existing = await deps.fetchEvent({ calendarUrl, token, uid: args.uid })
   if (!existing) {
     return errorResult(`Event not found: ${args.uid}`)
+  }
+
+  if (args.recurrenceId !== undefined) {
+    return updateOccurrence({
+      args,
+      deps,
+      end,
+      existing,
+      organizer: account.organizer,
+      recurrenceId: args.recurrenceId,
+      start,
+      token,
+    })
   }
 
   // Full re-specification: a recurrence given here re-rules the whole series;
@@ -122,14 +241,16 @@ export const registerUpdateCalendarEvent = (
     'update_calendar_event',
     {
       description:
-        'Updates an existing calendar event in place (identified by its uid from ' +
+        'Updates an existing calendar event (identified by its uid from ' +
         'create_calendar_event) and re-sends iMIP notifications to the attendees. ' +
         'This is a full replacement: pass the complete event details, not just the ' +
-        'changed fields. For a recurring event this edits the ENTIRE series (all ' +
-        'occurrences) — to keep it recurring, pass `recurrence` again; omitting it ' +
-        'collapses the series back to a single event. Editing one occurrence of a ' +
-        'series (RECURRENCE-ID) is not supported. Times are ISO 8601 with offset ' +
-        '(e.g. 2026-06-12T10:00:00Z).',
+        'changed fields. By default this edits the ENTIRE event — for a recurring ' +
+        'event that means every occurrence, so to keep it recurring pass ' +
+        '`recurrence` again; omitting it collapses the series back to a single ' +
+        'event. To instead edit ONE occurrence in isolation (e.g. a per-week agenda ' +
+        'on a recurring meeting), pass `recurrenceId` naming that occurrence by its ' +
+        'original start; the master rule and every other occurrence stay unchanged. ' +
+        'Times are ISO 8601 with offset (e.g. 2026-06-12T10:00:00Z).',
       inputSchema: updateCalendarEventInput.shape,
       title: 'Update calendar event',
     },

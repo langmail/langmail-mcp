@@ -4,6 +4,7 @@
 // (friendlier to fill in field-by-field). Both normalize to a single RRULE
 // string that ical-generator serializes onto the VEVENT (see ical.ts).
 
+import { rrulestr } from 'rrule'
 import { z } from 'zod'
 
 // RFC 5545 FREQ values we expose. Lowercase in the structured form for the
@@ -114,4 +115,19 @@ export const toRRule = (recurrence: Recurrence): string => {
     parts.push(`UNTIL=${toIcalUtc(recurrence.until)}`)
   }
   return parts.join(';')
+}
+
+// True when `recurrenceId` (an ISO 8601 instant) is the original start of an
+// occurrence the series generates — i.e. expanding `rrule` from `masterStart`
+// lands exactly on it. update_calendar_event uses this to reject an occurrence
+// override that would otherwise dangle off the series: RFC 5545 §3.8.4.4
+// requires a RECURRENCE-ID to name a real instance of the master's RRULE.
+//
+// Membership is tested with a single-instant `between(t, t, inclusive)` rather
+// than expanding the whole (possibly unbounded) series. Our events are UTC, so
+// both bounds are normalized to a UTC DTSTART before handing off to `rrule`.
+export const isSeriesOccurrence = (masterStart: string, rrule: string, recurrenceId: string): boolean => {
+  const rule = rrulestr(`DTSTART:${toIcalUtc(masterStart)}\nRRULE:${rrule}`)
+  const at = new Date(recurrenceId)
+  return rule.between(at, at, true).length > 0
 }
