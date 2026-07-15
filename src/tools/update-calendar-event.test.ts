@@ -77,6 +77,10 @@ const makeDeps = (acc: DiscoveredAccount, existing: CalendarObject | null, captu
 
 const captured = (): Captured => ({ fetched: [], updated: [] })
 
+// The whole ORGANIZER content line including folded continuations, for
+// building a stored object that never carried one.
+const ORGANIZER_LINE_RE = /^ORGANIZER[^\r\n]*(?:\r\n[ \t][^\r\n]*)*\r\n/mu
+
 describe('updateCalendarEventInput schema', () => {
   test('requires a uid', () => {
     const { uid: _uid, ...rest } = args()
@@ -181,6 +185,43 @@ describe('updateCalendarEvent', () => {
     expect(cap.updated).toHaveLength(0)
   })
 
+  test('reuses the stored ORGANIZER when it differs from the discovered principal', async () => {
+    const cap = captured()
+    // The event was created under a previous account address (still an enabled
+    // alias). Discovery now returns the new primary; rebuilding the invite with
+    // it would make Stalwart reject any later occurrence edit with 412
+    // SameOrganizerInAllComponents — the stored organizer must win.
+    const stored = storedEvent({
+      data: buildInvite({
+        attendees: ['guest@example.com'],
+        end: new Date('2026-06-12T10:30:00Z'),
+        organizer: 'old-alias@langmail.me',
+        sequence: 2,
+        start: new Date('2026-06-12T10:00:00Z'),
+        title: 'Sync',
+        uid: UID,
+      }),
+    })
+    const result = await updateCalendarEvent(makeDeps(account(), stored, cap), { args: args(), token: 'tok' })
+
+    const ical = (cap.updated[0]?.ical ?? '').replace(/\r\n /gu, '')
+    expect(ical).toContain('ORGANIZER;CN="old-alias@langmail.me":mailto:old-alias@langmail.me')
+    expect(ical).not.toContain('mailto:host@langmail.me')
+    expect(result.isError).toBeUndefined()
+  })
+
+  test('falls back to the discovered organizer when the stored object has none', async () => {
+    const cap = captured()
+    const stored = storedEvent({
+      data: storedEvent().data.replace(ORGANIZER_LINE_RE, ''),
+    })
+    expect(stored.data).not.toContain('ORGANIZER')
+    await updateCalendarEvent(makeDeps(account(), stored, cap), { args: args(), token: 'tok' })
+
+    const ical = (cap.updated[0]?.ical ?? '').replace(/\r\n /gu, '')
+    expect(ical).toContain('ORGANIZER;CN="host@langmail.me":mailto:host@langmail.me')
+  })
+
   test('errors when end is not after start', async () => {
     const cap = captured()
     const result = await updateCalendarEvent(makeDeps(account(), storedEvent(), cap), {
@@ -218,6 +259,34 @@ describe('updateCalendarEvent — single occurrence (recurrenceId)', () => {
     expect(result.isError).toBeUndefined()
     expect(result.content[0]?.text).toContain('Occurrence')
     expect(result.content[0]?.text).toContain(OCCURRENCE)
+  })
+
+  test('override reuses the stored master ORGANIZER, not the discovered principal', async () => {
+    const cap = captured()
+    const stored = recurringStored({
+      data: buildInvite({
+        attendees: ['guest@example.com'],
+        end: new Date('2026-06-16T10:30:00Z'),
+        organizer: 'old-alias@langmail.me',
+        rrule: 'FREQ=WEEKLY;BYDAY=TU',
+        sequence: 2,
+        start: new Date('2026-06-16T10:00:00Z'),
+        title: 'Weekly Sync',
+        uid: UID,
+      }),
+    })
+    const result = await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: args({ recurrenceId: OCCURRENCE }),
+      token: 'tok',
+    })
+
+    const ical = (cap.updated[0]?.ical ?? '').replace(/\r\n /gu, '')
+    // Master and override must agree on ORGANIZER or Stalwart rejects the PUT
+    // with 412 SameOrganizerInAllComponents.
+    expect(ical).toContain('RECURRENCE-ID:20260623T100000Z')
+    expect(ical).not.toContain('mailto:host@langmail.me')
+    expect(ical.match(/ORGANIZER;CN="old-alias@langmail\.me":mailto:old-alias@langmail\.me/gu)).toHaveLength(2)
+    expect(result.isError).toBeUndefined()
   })
 
   test('rejects a recurrenceId that is not an occurrence of the series', async () => {

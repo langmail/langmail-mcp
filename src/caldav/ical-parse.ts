@@ -6,6 +6,12 @@
 export interface ParsedEvent {
   end: string
   location?: string
+  // Bare organizer email (mailto: stripped). Edits must reuse it instead of
+  // the freshly discovered principal: an event created under a previous
+  // account address (still an enabled alias) otherwise gets a second,
+  // different ORGANIZER, which Stalwart rejects with 412
+  // SameOrganizerInAllComponents.
+  organizer?: string
   // Raw RRULE (e.g. `FREQ=WEEKLY;BYDAY=TH`) when the event is a recurring
   // series; absent for one-off events. Surfaced so the agent can re-supply it
   // to update_calendar_event (which re-rules the whole series).
@@ -87,9 +93,10 @@ const eventBlocks = (ical: string): Map<string, string>[] => {
       continue
     }
     // First-colon split: misplaces the value boundary if a property
-    // parameter carries a quoted ':' (e.g. CN="Org:Unit"). The properties
-    // we read (UID/SUMMARY/DTSTART/DTEND/LOCATION) don't use such params, so
-    // this stays correct within the parser's happy-path scope.
+    // parameter carries a quoted ':' (e.g. CN="Org:Unit"). Of the properties
+    // we read, only ORGANIZER realistically carries such params (SENT-BY,
+    // display-name CNs) — parseOrganizerEmail re-anchors on the trailing
+    // mailto: URI, so the mis-split stays harmless.
     const colon = line.indexOf(':')
     if (colon === -1) {
       continue
@@ -102,6 +109,23 @@ const eventBlocks = (ical: string): Map<string, string>[] => {
   return blocks
 }
 
+// Bare organizer email from a first-colon-split ORGANIZER value. The
+// cal-address is the mailto: URI at the END of the content line, but params
+// can smuggle colons inside quotes past the split (SENT-BY="mailto:…",
+// CN="Team: Weekly"), leaving param debris in `value` — so anchor on the last
+// mailto: instead of the front. A value we can't reduce to a clean bare
+// address (non-mailto cal-address, leftover quotes/colons) is dropped rather
+// than risk callers writing garbage back into a rebuilt invite.
+const LAST_MAILTO_RE = /^.*mailto:/isu
+const NOT_BARE_EMAIL_RE = /["\s:;,]/u
+const parseOrganizerEmail = (value: string | undefined): string | undefined => {
+  if (!value) {
+    return
+  }
+  const email = value.replace(LAST_MAILTO_RE, '').trim()
+  return email && email !== value.trim() && !NOT_BARE_EMAIL_RE.test(email) ? email : undefined
+}
+
 // Parses every VEVENT in a VCALENDAR. Blocks without a UID are skipped —
 // an event we can't address with update/delete isn't useful to list.
 export const parseEvents = (ical: string): ParsedEvent[] => {
@@ -112,6 +136,7 @@ export const parseEvents = (ical: string): ParsedEvent[] => {
       continue
     }
     const location = block.get('LOCATION')
+    const organizer = parseOrganizerEmail(block.get('ORGANIZER'))
     // Trim so a server that emits a trailing space (`RRULE:FREQ=WEEKLY `) doesn't
     // leak it into the listed `repeats:` value.
     const recurrence = block.get('RRULE')?.trim()
@@ -121,6 +146,7 @@ export const parseEvents = (ical: string): ParsedEvent[] => {
       title: unescapeText(block.get('SUMMARY') ?? ''),
       uid,
       ...(location ? { location: unescapeText(location) } : {}),
+      ...(organizer ? { organizer } : {}),
       ...(recurrence ? { recurrence } : {}),
     })
   }

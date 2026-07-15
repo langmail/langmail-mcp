@@ -109,6 +109,40 @@ describe('parseEvents', () => {
     expect(ev?.title).toBe('Real meeting')
   })
 
+  test('extracts the bare organizer email, mailto: stripped', () => {
+    const [ev] = parseEvents(sample)
+    expect(ev?.organizer).toBe('host@langmail.me')
+  })
+
+  test('reads the organizer past params carrying quoted colons', () => {
+    // Foreign clients (delegation, display names) put colons inside quoted
+    // params; the cal-address is the mailto: URI at the end of the line.
+    const ics = [
+      'BEGIN:VEVENT',
+      'UID:c@langmail.me',
+      'ORGANIZER;SENT-BY="mailto:assistant@x.com";CN="Team: Weekly":mailto:boss@x.com',
+      'END:VEVENT',
+    ].join('\r\n')
+    expect(parseEvents(ics)[0]?.organizer).toBe('boss@x.com')
+  })
+
+  test('omits an organizer it cannot reduce to a bare address', () => {
+    // A non-mailto cal-address (e.g. a principal URL) is useless for rebuilding
+    // an invite — better absent (callers fall back to discovery) than garbage.
+    const ics = [
+      'BEGIN:VEVENT',
+      'UID:d@langmail.me',
+      'ORGANIZER;SENT-BY="mailto:assistant@x.com":/principals/users/boss/',
+      'END:VEVENT',
+    ].join('\r\n')
+    expect(parseEvents(ics)[0]?.organizer).toBeUndefined()
+  })
+
+  test('omits organizer when the event has none', () => {
+    const ics = 'BEGIN:VEVENT\r\nUID:e@langmail.me\r\nSUMMARY:No invitees\r\nEND:VEVENT'
+    expect(parseEvents(ics)[0]?.organizer).toBeUndefined()
+  })
+
   test('decodes an escaped backslash without turning it into a newline', () => {
     // RFC 5545: `\\` is a literal backslash, so `\\n` is backslash + "n".
     const ics = 'BEGIN:VEVENT\r\nUID:b@langmail.me\r\nSUMMARY:path C:\\\\new\r\nEND:VEVENT'
