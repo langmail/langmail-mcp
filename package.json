@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:integration": "bun test caldav-integration",
+    "test:stalwart": "bun test stalwart-update-organizer",
     "smoke": "bun run scripts/smoke.ts"
   },
   "dependencies": {

@@ -118,7 +118,11 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
   const override = buildInvite({
     attendees: args.attendees,
     end,
-    organizer,
+    // The master's stored ORGANIZER wins over the discovered principal: an
+    // event created under a previous account address (still an alias) would
+    // otherwise get an override with a different ORGANIZER, which Stalwart
+    // rejects with 412 SameOrganizerInAllComponents.
+    organizer: master.organizer ?? organizer,
     recurrenceId: new Date(recurrenceId),
     // Bump past every SEQUENCE already in the object so this override supersedes
     // any prior edit of the same instance.
@@ -199,10 +203,15 @@ export const updateCalendarEvent = async (
   // Full re-specification: a recurrence given here re-rules the whole series;
   // omitting it drops the RRULE and collapses the series to a single event.
   const rrule = args.recurrence ? toRRule(args.recurrence) : undefined
+  // Keep the stored ORGANIZER (see updateOccurrence): re-stamping the freshly
+  // discovered principal onto an event created under a previous account
+  // address silently changes the organizer, which Stalwart's scheduler treats
+  // as an unsupported organizer replacement (RFC 6638).
+  const storedOrganizer = parseEvents(existing.data).find((e) => e.organizer)?.organizer
   const ical = buildInvite({
     attendees: args.attendees,
     end,
-    organizer: account.organizer,
+    organizer: storedOrganizer ?? account.organizer,
     // Bump past the stored SEQUENCE so the re-sent REQUEST supersedes it.
     sequence: parseSequence(existing.data) + 1,
     start,
