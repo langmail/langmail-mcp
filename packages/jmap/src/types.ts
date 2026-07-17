@@ -30,6 +30,9 @@ export interface EmailAddress {
 // `keywords` is surfaced so callers can show a message's labels (why it
 // matched); `threadId` lets a hit be expanded into its whole thread.
 export interface EmailRecord {
+  // RFC 8621 §4.1.4 computed property: body parts outside the rendered
+  // text/html body. Lightweight list fetches use this for attachment summaries.
+  attachments?: EmailBodyPart[] | null
   from?: EmailAddress[] | null
   hasAttachment?: boolean | null
   id: string
@@ -64,9 +67,6 @@ export interface EmailBodyValue {
 // Richer shape returned by get_email: recipients plus the text body.
 // `messageId` is the parsed RFC 5322 Message-ID header (a list per RFC 8621).
 export interface EmailDetailRecord extends EmailRecord {
-  // RFC 8621 §4.1.4 computed property: body parts outside the rendered
-  // text/html body — the message's attachments (including cid-inline ones).
-  attachments?: EmailBodyPart[] | null
   // RFC 8621 §4.1.1 metadata: the blob holding the raw RFC 5322 message —
   // get_email downloads this to run the langmail cleaning pipeline.
   blobId?: string | null

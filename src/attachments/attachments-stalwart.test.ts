@@ -24,11 +24,20 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 
-import { blobDownload, emailGetDetail, mailboxCreate, mailboxIdByRole, makeJmapLive } from '@langmail/jmap'
+import {
+  blobDownload,
+  emailGet,
+  emailGetDetail,
+  emailQuery,
+  mailboxCreate,
+  mailboxIdByRole,
+  makeJmapLive,
+} from '@langmail/jmap'
 
 import { createRoutes, type Routes } from '../handler.ts'
 import { type DownloadAttachmentDeps, downloadAttachment } from '../tools/download-attachment.ts'
 import { type GetEmailDeps, getEmail } from '../tools/get-email.ts'
+import { type SearchEmailsDeps, searchEmails } from '../tools/search-emails.ts'
 import { createAttachmentDownload } from './download.ts'
 import { createTicketStore, type TicketStore } from './tickets.ts'
 
@@ -45,10 +54,17 @@ const USING = ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail']
 // model-visible result — the thing F1 exists to prevent.
 const BASE64_RUN_RE = /[A-Za-z0-9+/=]{100,}/u
 const DOWNLOAD_URL_RE = /^(https:\/\/\S+\/attachments\/\S+)$/mu
-const PDF_LINE_RE = /^\d+\. invoice\.pdf — application\/pdf, 602 B — blobId: (\S+)$/mu
-const PNG_LINE_RE = /^\d+\. logo\.png — image\/png, 70 B — inline — blobId: (\S+)$/mu
+const PDF_LINE_RE = /^\s*\d+\. invoice\.pdf — application\/pdf, 602 B — blobId: (\S+)$/mu
+const PNG_LINE_RE = /^\s*\d+\. logo\.png — image\/png, 70 B — inline — blobId: (\S+)$/mu
 
 const live = ADMIN_URL ? describe : describe.skip
+
+describe('attachment metadata line matchers', () => {
+  test('match both get_email attachment lines and indented search hit attachment lines', () => {
+    expect('1. invoice.pdf — application/pdf, 602 B — blobId: Gpdf'.match(PDF_LINE_RE)?.[1]).toBe('Gpdf')
+    expect('   1. invoice.pdf — application/pdf, 602 B — blobId: Gpdf'.match(PDF_LINE_RE)?.[1]).toBe('Gpdf')
+  })
+})
 
 // Minimal admin JMAP call (x:-prefixed management methods; see
 // services/auth/src/stalwart/admin-client.ts for the full contract).
@@ -89,6 +105,7 @@ live('attachments against live Stalwart — metadata, capability URL, blob strea
   let withAttachmentsId: string
   let plainId: string
   let emailDeps: GetEmailDeps
+  let searchDeps: SearchEmailsDeps
   let dlDeps: DownloadAttachmentDeps
   let tickets: TicketStore
   let routes: Routes
@@ -244,6 +261,12 @@ live('attachments against live Stalwart — metadata, capability URL, blob strea
       emailGetDetail: (p) => emailGetDetail({ ...p, apiUrl, authorization }),
       resolveAccountId: () => Promise.resolve(accountId),
     }
+    searchDeps = {
+      emailGet: (p) => emailGet({ ...p, apiUrl, authorization }),
+      emailQuery: (p) => emailQuery({ ...p, apiUrl, authorization }),
+      resolveAccountId: () => Promise.resolve(accountId),
+      resolveMailbox: () => Promise.resolve(null),
+    }
     tickets = createTicketStore()
     dlDeps = {
       emailGetDetail: (p) => emailGetDetail({ ...p, apiUrl, authorization }),
@@ -278,6 +301,25 @@ live('attachments against live Stalwart — metadata, capability URL, blob strea
     expect(txt).toContain('Attachments (2):')
     expect(txt).toMatch(PDF_LINE_RE)
     expect(txt).toMatch(PNG_LINE_RE)
+  })
+
+  test('search_emails lists the PDF metadata and its blobId is directly redeemable', async () => {
+    const result = await searchEmails(searchDeps, { args: { limit: 10, query: 'Invoice' }, token: TOKEN })
+    expect(result.isError).toBeUndefined()
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toContain(withAttachmentsId)
+    expect(txt).toContain('snippet:')
+    expect(txt).toMatch(PDF_LINE_RE)
+    expect(txt).not.toMatch(PNG_LINE_RE)
+
+    const blobId = txt.match(PDF_LINE_RE)?.[1]
+    expect(blobId).toBeDefined()
+    const download = await downloadAttachment(dlDeps, {
+      args: { blobId: blobId as string, emailId: withAttachmentsId },
+      token: TOKEN,
+    })
+    expect(download.isError).toBeUndefined()
+    expect(download.content[0]?.text ?? '').toContain('invoice.pdf (application/pdf, 602 B)')
   })
 
   test('download_attachment mints a URL whose GET streams back the exact fixture bytes', async () => {

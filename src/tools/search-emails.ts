@@ -1,8 +1,8 @@
 // search_emails tool — structured search over the authenticated user's
 // mailbox. Supports free-text FTS plus optional date-range, sender, keyword
 // (category label), and mailbox filters, returning a token-frugal hit list
-// (id/subject/sender/date/tags), newest-first. Bodies are fetched separately
-// via get_email.
+// (id/subject/sender/date/tags/snippet/attachments), newest-first. Full
+// bodies are fetched separately via get_email.
 //
 // The tool logic lives behind a `Deps` interface so it can be unit-tested
 // without spinning up Stalwart. `makeLiveDeps` wires the live JMAP deps.
@@ -151,9 +151,10 @@ export const registerSearchEmails = (
         "Search the authenticated user's mailbox. Combine free-text (query) with " +
         'optional filters: date range (after/before), sender (from), category ' +
         'labels (keywords), and mailbox. At least one filter is required. Returns ' +
-        'matching messages newest-first with id, subject, sender, date, and tags; ' +
-        'hits carrying files show "attachments: yes". Fetch a full body (and the ' +
-        'attachment list) with get_email.',
+        'matching messages newest-first with id, subject, sender, date, tags, a ' +
+        'body snippet, and attachment metadata including blobId. Use get_email ' +
+        'for full bodies and recipients; call download_attachment directly from ' +
+        'a hit when the attachment blobId is present.',
       inputSchema: searchEmailsShape,
       title: 'Search emails',
     },

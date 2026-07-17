@@ -99,6 +99,37 @@ describe('searchEmails', () => {
     expect(txt).toContain('2026-01-01')
   })
 
+  test('renders preview snippets and attachment metadata in search hits', async () => {
+    const result = await searchEmails(
+      fakeDeps({
+        emails: [
+          {
+            attachments: [
+              {
+                blobId: 'Ginvoice',
+                disposition: 'attachment',
+                name: 'invoice.pdf',
+                size: 35_738,
+                type: 'application/pdf',
+              },
+            ],
+            from: [{ email: 'billing@example.com', name: 'Billing' }],
+            hasAttachment: true,
+            id: 'e1',
+            preview: 'Invoice No. IWGKCS-00018 · $34.86',
+            receivedAt: '2026-01-01T00:00:00Z',
+            subject: 'Invoice',
+          },
+        ],
+        queryIds: ['e1'],
+      }),
+      { args: { limit: 20, query: 'invoice' }, token: 'tok' }
+    )
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toContain('snippet: Invoice No. IWGKCS-00018 · $34.86')
+    expect(txt).toContain('invoice.pdf — application/pdf, 34.9 KB — blobId: Ginvoice')
+  })
+
   test("shows a matched message's $label tags stripped of the prefix", async () => {
     const result = await searchEmails(
       fakeDeps({
