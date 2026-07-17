@@ -31,7 +31,9 @@ describe('getThread', () => {
           { id: 'e1', receivedAt: '2026-01-01T00:00:00Z', subject: 'Hi' },
         ],
         ids: ['e1', 'e2'],
-        onGet: (p) => (getIds = p.ids),
+        onGet: (p) => {
+          getIds = p.ids
+        },
       }),
       { args: { id: 'e2' }, token: 'tok' }
     )

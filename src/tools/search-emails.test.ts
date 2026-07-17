@@ -123,20 +123,36 @@ describe('searchEmails', () => {
 
   test('maps keyword enum values verbatim to $label: filters, no stray text', async () => {
     let seen: EmailQueryParams | undefined
-    await searchEmails(fakeDeps({ onQuery: (p) => (seen = p), queryIds: [] }), {
-      args: { keywords: ['receipt', 'todo'], limit: 20 },
-      token: 'tok',
-    })
+    await searchEmails(
+      fakeDeps({
+        onQuery: (p) => {
+          seen = p
+        },
+        queryIds: [],
+      }),
+      {
+        args: { keywords: ['receipt', 'todo'], limit: 20 },
+        token: 'tok',
+      }
+    )
     // Exact shape: a keyword-only search carries no text/date/mailbox condition.
     expect(seen?.filters).toEqual({ keywords: ['$label:receipt', '$label:todo'] })
   })
 
   test('threads text + date + from filters through to the query', async () => {
     let seen: EmailQueryParams | undefined
-    await searchEmails(fakeDeps({ onQuery: (p) => (seen = p), queryIds: [] }), {
-      args: { after: '2026-04-01T00:00:00Z', from: 'amazon', limit: 20, query: 'invoice' },
-      token: 'tok',
-    })
+    await searchEmails(
+      fakeDeps({
+        onQuery: (p) => {
+          seen = p
+        },
+        queryIds: [],
+      }),
+      {
+        args: { after: '2026-04-01T00:00:00Z', from: 'amazon', limit: 20, query: 'invoice' },
+        token: 'tok',
+      }
+    )
     expect(seen?.filters).toEqual({ after: '2026-04-01T00:00:00Z', from: 'amazon', text: 'invoice' })
   })
 
