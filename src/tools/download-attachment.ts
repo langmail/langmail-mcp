@@ -39,7 +39,10 @@ const shellSafeFilename = (name: string): string => {
 }
 
 const downloadAttachmentShape = {
-  blobId: z.string().min(1).describe('The attachment blobId, as listed by get_email for that message.'),
+  blobId: z
+    .string()
+    .min(1)
+    .describe('The attachment blobId, as listed by search_emails, get_thread, or get_email for that message.'),
   emailId: z.string().min(1).describe('The id of the message the attachment belongs to.'),
 }
 
@@ -119,7 +122,7 @@ export const registerDownloadAttachment = (
     {
       description:
         'Get a short-lived download URL for one email attachment, identified ' +
-        'by the emailId + blobId that get_email lists. The result is metadata ' +
+        'by the emailId + blobId that search_emails, get_thread, or get_email lists. The result is metadata ' +
         'plus an HTTPS URL — never the file content. Save the file to disk ' +
         "out-of-band, e.g. `curl -sS -o '<filename>' '<url>'`; do not fetch " +
         'the URL into the conversation, the file may be large. The URL ' +

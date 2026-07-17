@@ -309,21 +309,25 @@ const main = async () => {
     }
     pass('get_thread lists the message thread')
 
-    // --- 2e. Attachments: marker → listing → capability-URL download ----
-    log('attachment marker on the search hit')
-    if (!text.includes('attachments: yes')) {
+    // --- 2e. Attachments: search-hit metadata → capability-URL download --
+    log('attachment metadata on the search hit')
+    const searchHitBlobId = SMOKE_PDF_LINE_RE.exec(text)?.[1]
+    if (!searchHitBlobId) {
       fail(
-        'search hit for the smoke message lacks the attachments marker (a stale /tmp/langmail-smoke-tag from a ' +
+        'search hit for the smoke message lacks smoke.pdf attachment metadata (a stale /tmp/langmail-smoke-tag from a ' +
           `pre-attachment deploy looks exactly like this — re-run smoke-test-mail.sh first): ${text}`
       )
     }
-    pass('search hit shows the attachments marker')
+    pass('search hit shows smoke.pdf attachment metadata with blobId')
 
     log('get_email lists smoke.pdf with type/size/blobId')
     const pdfLine = SMOKE_PDF_LINE_RE.exec(email.text)
     const blobId = pdfLine?.[1]
     if (!blobId) {
       throw new Error(`get_email did not list smoke.pdf with a blobId: ${email.text}`)
+    }
+    if (searchHitBlobId !== blobId) {
+      fail(`search hit blobId ${searchHitBlobId} did not match get_email blobId ${blobId}`)
     }
     pass('get_email lists smoke.pdf with type/size/blobId')
 

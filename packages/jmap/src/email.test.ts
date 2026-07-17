@@ -170,7 +170,7 @@ describe('emailQuery', () => {
 })
 
 describe('emailGet', () => {
-  test('requests the declared lightweight properties (incl. keywords) and returns the list', async () => {
+  test('requests the declared lightweight properties, attachment metadata, and returns the list', async () => {
     const f = mock((_u: string, init?: RequestInit) => {
       const body = JSON.parse((init?.body as string) ?? '{}')
       expect(body.methodCalls[0][0]).toBe('Email/get')
@@ -185,6 +185,16 @@ describe('emailGet', () => {
         'keywords',
         'threadId',
         'hasAttachment',
+        'attachments',
+      ])
+      expect(body.methodCalls[0][1].bodyProperties).toEqual([
+        'partId',
+        'blobId',
+        'name',
+        'type',
+        'size',
+        'disposition',
+        'cid',
       ])
       return Promise.resolve(
         jmapResponse([
@@ -193,6 +203,17 @@ describe('emailGet', () => {
             {
               list: [
                 {
+                  attachments: [
+                    {
+                      blobId: 'Gpdf',
+                      cid: null,
+                      disposition: 'attachment',
+                      name: 'invoice.pdf',
+                      partId: 'p1',
+                      size: 602,
+                      type: 'application/pdf',
+                    },
+                  ],
                   from: [{ email: 'a@x', name: 'Alice' }],
                   id: 'e1',
                   keywords: { '$label:receipt': true, $seen: true },
@@ -219,6 +240,7 @@ describe('emailGet', () => {
     expect(out).toHaveLength(1)
     expect(out[0]?.subject).toBe('Test')
     expect(out[0]?.keywords).toEqual({ '$label:receipt': true, $seen: true })
+    expect(out[0]?.attachments?.[0]?.blobId).toBe('Gpdf')
   })
 
   test('short-circuits with no request when ids is empty', async () => {

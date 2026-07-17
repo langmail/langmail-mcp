@@ -32,6 +32,7 @@ const EMAIL_PROPERTIES = [
   'threadId',
   // Cheap boolean so list views can flag hits worth opening for their files.
   'hasAttachment',
+  'attachments',
 ] as const
 
 // Richer properties for get_email and the poller's analysis input:
@@ -201,6 +202,7 @@ export const emailGet = async (p: EmailGetParams): Promise<EmailRecord[]> => {
         'Email/get',
         {
           accountId: p.accountId,
+          bodyProperties: [...EMAIL_BODY_PROPERTIES],
           ids: p.ids,
           properties: [...EMAIL_PROPERTIES],
         },

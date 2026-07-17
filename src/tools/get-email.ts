@@ -7,14 +7,13 @@ import { z } from 'zod'
 
 import {
   bearerAuthorization,
-  type EmailBodyPart,
   type EmailDetailRecord,
   type EmailGetDetailParams,
   emailGetDetail,
   type JmapLive,
 } from '@langmail/jmap'
 
-import { emailTags, formatAddressList, formatSize } from './format.ts'
+import { emailTags, formatAddressList, formatAttachmentLine } from './format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 // Cap the body we pull back so a huge newsletter can't blow the token budget;
@@ -50,28 +49,12 @@ const bodyText = (e: EmailDetailRecord): string => {
     .trim()
 }
 
-// A part referenced from the rendered HTML body by Content-ID (logos,
-// signature images, tracking pixels) — listed but marked so the agent can
-// skip it when hunting for genuine documents.
-const isInlinePart = (part: EmailBodyPart): boolean => part.disposition === 'inline' && Boolean(part.cid)
-
-const attachmentLine = (idx: number, part: EmailBodyPart): string => {
-  const pieces = [
-    `${part.name ?? '(unnamed)'} — ${part.type ?? 'application/octet-stream'}, ${formatSize(part.size ?? 0)}`,
-  ]
-  if (isInlinePart(part)) {
-    pieces.push('inline')
-  }
-  pieces.push(`blobId: ${part.blobId ?? '(none)'}`)
-  return `${idx}. ${pieces.join(' — ')}`
-}
-
 const attachmentsSection = (e: EmailDetailRecord): string => {
   const parts = e.attachments ?? []
   if (parts.length === 0) {
     return ''
   }
-  const lines = parts.map((part, i) => attachmentLine(i + 1, part))
+  const lines = parts.map((part, i) => formatAttachmentLine(i + 1, part))
   return `\n\nAttachments (${parts.length}):\n${lines.join('\n')}`
 }
 
