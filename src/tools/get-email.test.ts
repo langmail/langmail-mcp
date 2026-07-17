@@ -197,6 +197,30 @@ describe('getEmail', () => {
     expect(result.content[0]?.text ?? '').toContain('small text body')
   })
 
+  test('treats a missing size as oversized and skips the raw download', async () => {
+    let called = 0
+    const result = await getEmail(
+      deps(
+        [
+          {
+            blobId: 'Graw1',
+            bodyValues: { '1': { value: 'small text body' } },
+            id: 'e1',
+            subject: 'No size',
+            textBody: [{ partId: '1', type: 'text/plain' }],
+          },
+        ],
+        () => {
+          called += 1
+          return Promise.resolve(htmlInvoiceEml())
+        }
+      ),
+      { args: { id: 'e1' }, token: 'tok' }
+    )
+    expect(called).toBe(0)
+    expect(result.content[0]?.text ?? '').toContain('small text body')
+  })
+
   test('returns an error result when the id is not found', async () => {
     const result = await getEmail(deps([]), { args: { id: 'missing' }, token: 'tok' })
     expect(result.isError).toBe(true)

@@ -20,6 +20,7 @@ import {
   type EmailDetailRecord,
   type EmailGetDetailParams,
   emailGetDetail,
+  JmapError,
   type JmapLive,
 } from '@langmail/jmap'
 import { logger } from '@langmail/logger'
@@ -76,6 +77,16 @@ const bodyText = (e: EmailDetailRecord): string => {
     .trim()
 }
 
+// JmapError messages are status-only; anything else is reduced to its name
+// so a fetch-level error can't leak the download URL — it embeds the
+// accountId (REVIEW.md: no user IDs in logs).
+const errorDetail = (err: unknown): string => {
+  if (err instanceof JmapError) {
+    return err.message
+  }
+  return err instanceof Error ? err.name : 'unknown'
+}
+
 // Primary body path: download the raw message and run it through langmail's
 // cleaning pipeline (HTML → readable markdown, consistent across senders).
 // Quotes and signatures are kept — the agent opened this specific message,
@@ -87,7 +98,10 @@ const cleanedBody = async (
   p: Omit<RawMessageParams, 'blobId'>,
   email: EmailDetailRecord
 ): Promise<string | null> => {
-  if (!email.blobId || (email.size ?? 0) > MAX_RAW_MESSAGE_BYTES) {
+  // Unknown size counts as oversized — the guard exists to avoid buffering
+  // an arbitrarily large blob, so it must not be bypassable by a missing
+  // property.
+  if (!email.blobId || email.size == null || email.size > MAX_RAW_MESSAGE_BYTES) {
     return null
   }
   try {
@@ -99,8 +113,7 @@ const cleanedBody = async (
     })
     return processed.body.trim() || null
   } catch (err) {
-    // No message id or subject in the log line (REVIEW.md: no PII in logs).
-    logger.warn({ err }, 'raw message preprocessing failed, falling back to jmap text body')
+    logger.warn({ detail: errorDetail(err) }, 'raw message preprocessing failed, falling back to jmap text body')
     return null
   }
 }
