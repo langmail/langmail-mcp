@@ -46,10 +46,17 @@ const USING = ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail']
 // model-visible result — the thing F1 exists to prevent.
 const BASE64_RUN_RE = /[A-Za-z0-9+/=]{100,}/u
 const DOWNLOAD_URL_RE = /^(https:\/\/\S+\/attachments\/\S+)$/mu
-const PDF_LINE_RE = /^\d+\. invoice\.pdf — application\/pdf, 602 B — blobId: (\S+)$/mu
-const PNG_LINE_RE = /^\d+\. logo\.png — image\/png, 70 B — inline — blobId: (\S+)$/mu
+const PDF_LINE_RE = /^\s*\d+\. invoice\.pdf — application\/pdf, 602 B — blobId: (\S+)$/mu
+const PNG_LINE_RE = /^\s*\d+\. logo\.png — image\/png, 70 B — inline — blobId: (\S+)$/mu
 
 const live = ADMIN_URL ? describe : describe.skip
+
+describe('attachment metadata line matchers', () => {
+  test('match both get_email attachment lines and indented search hit attachment lines', () => {
+    expect('1. invoice.pdf — application/pdf, 602 B — blobId: Gpdf'.match(PDF_LINE_RE)?.[1]).toBe('Gpdf')
+    expect('   1. invoice.pdf — application/pdf, 602 B — blobId: Gpdf'.match(PDF_LINE_RE)?.[1]).toBe('Gpdf')
+  })
+})
 
 // Minimal admin JMAP call (x:-prefixed management methods; see
 // services/auth/src/stalwart/admin-client.ts for the full contract).
