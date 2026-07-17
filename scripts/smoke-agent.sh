@@ -35,10 +35,14 @@ command -v claude >/dev/null 2>&1 || {
   exit 1; }
 [[ -f .mcp.json ]] || { echo ".mcp.json missing at $REPO_ROOT" >&2; exit 1; }
 
-PROMPT=$(cat <<'EOF'
+# Where the agent is told to save the attachment — created fresh per run so
+# the size/magic verification below can't match a stale file.
+SAVE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/langmail-agent-smoke.XXXXXX")"
+
+PROMPT=$(cat <<EOF
 I run a smoke test that self-delivers a tagged message to my own
-mailbox on every deploy — subjects look like `smoke-<unix-ts>-<pid>`,
-e.g. `smoke-1779448978-1390`. There should be at least one such
+mailbox on every deploy — subjects look like \`smoke-<unix-ts>-<pid>\`,
+e.g. \`smoke-1779448978-1390\`. There should be at least one such
 message sitting in my Inbox right now. Find it and tell me:
 
   - the exact subject of the most recent one,
@@ -49,6 +53,13 @@ If you genuinely can't find any smoke-tagged message, say so and
 don't invent one — but I'd be surprised: there should be at least
 one. Report subject_found verbatim so I can verify it matches what
 my deploy script logged.
+
+That message carries a PDF attachment (an invoice-style smoke file).
+This is the accounting task I actually care about: save that PDF into
+the directory ${SAVE_DIR} on this machine, then report which tool you
+used to get it, the absolute path you saved it to, and the file size
+in bytes as it ended up on disk. Do not paste the file's content into
+the conversation.
 
 One last thing: as a sanity check, deliberately call the search with
 a clearly nonsense limit like 9999 and tell me whether the server
@@ -86,6 +97,15 @@ SCHEMA='{
       },
       "required": ["found"]
     },
+    "save_attachment": {
+      "type": "object",
+      "properties": {
+        "tool_used": {"type": "string"},
+        "saved_path": {"type": ["string", "null"]},
+        "file_size_bytes": {"type": ["number", "null"]}
+      },
+      "required": ["tool_used", "saved_path", "file_size_bytes"]
+    },
     "bad_input_test": {
       "type": "object",
       "properties": {
@@ -96,12 +116,14 @@ SCHEMA='{
       "required": ["tool", "graceful_error"]
     }
   },
-  "required": ["tools", "find_smoke_message", "bad_input_test"]
+  "required": ["tools", "find_smoke_message", "save_attachment", "bad_input_test"]
 }'
 
+# Bash(curl:*) lets the agent save the capability URL to disk — the
+# download_attachment contract is bytes-out-of-band, never through context.
 result=$(claude -p "$PROMPT" \
   --mcp-config .mcp.json \
-  --allowedTools "mcp__langmail__*" \
+  --allowedTools "mcp__langmail__*,Bash(curl:*)" \
   --output-format json \
   --json-schema "$SCHEMA")
 
@@ -119,9 +141,28 @@ pass_find=$(echo "$result" | jq -e '
     and ((.from_found    // "") | test("smoketest@"))
 ' >/dev/null && echo yes || echo no)
 
-if [[ "$pass_tools" == "yes" && "$pass_bad" == "yes" && "$pass_find" == "yes" ]]; then
+# The accounting task: the LLM must have chained to download_attachment from
+# the descriptions alone, and the file it reports must really be on disk with
+# the reported size and a PDF magic — bytes to disk, not into context.
+pass_save=no
+saved_path=$(echo "$result" | jq -r '.structured_output.save_attachment.saved_path // ""')
+reported_size=$(echo "$result" | jq -r '.structured_output.save_attachment.file_size_bytes // 0')
+tool_used=$(echo "$result" | jq -r '.structured_output.save_attachment.tool_used // ""')
+if [[ "$tool_used" == "download_attachment" && -f "$saved_path" ]]; then
+  actual_size=$(wc -c < "$saved_path" | tr -d ' ')
+  if [[ "$actual_size" == "$reported_size" ]] && head -c 5 "$saved_path" | grep -q '%PDF'; then
+    pass_save=yes
+  fi
+fi
+
+# No base64 blob anywhere in the response — the transcript-level check that
+# the agent curled the URL instead of reading the bytes into context.
+pass_hygiene=$(echo "$result" | grep -qE '[A-Za-z0-9+/=]{300,}' && echo no || echo yes)
+
+if [[ "$pass_tools" == "yes" && "$pass_bad" == "yes" && "$pass_find" == "yes" \
+      && "$pass_save" == "yes" && "$pass_hygiene" == "yes" ]]; then
   echo "✅ agent smoke passed"
 else
-  echo "❌ agent smoke failed (tools=$pass_tools bad_input=$pass_bad find=$pass_find)" >&2
+  echo "❌ agent smoke failed (tools=$pass_tools bad_input=$pass_bad find=$pass_find save=$pass_save hygiene=$pass_hygiene)" >&2
   exit 1
 fi
