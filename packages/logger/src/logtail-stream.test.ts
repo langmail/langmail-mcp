@@ -62,7 +62,8 @@ describe('createLogtailStream', () => {
     expect(logCalls).toHaveLength(1)
     expect(logCalls[0]?.message).toBe('hello world')
     expect(logCalls[0]?.context.dt).toBeInstanceOf(Date)
-    expect((logCalls[0]?.context.dt as Date).toISOString()).toBe('2026-06-09T12:00:00.000Z')
+    const dt = logCalls[0]?.context.dt as Date
+    expect(dt.toISOString()).toBe('2026-06-09T12:00:00.000Z')
   })
 
   test('prefers msg over message and preserves the conflicting message as message_field', async () => {

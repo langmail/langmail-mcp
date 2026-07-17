@@ -84,8 +84,8 @@ export const buildInvite = (input: InviteInput): string => {
 // it. A VEVENT without a SEQUENCE line is implicitly 0 (RFC 5545 §3.8.7.4).
 const SEQUENCE_RE = /^SEQUENCE:(\d+)/mu
 
-export const parseSequence = (ical: string): number => {
-  const match = SEQUENCE_RE.exec(ical)
+export const parseSequence = (icalString: string): number => {
+  const match = SEQUENCE_RE.exec(icalString)
   return match?.[1] ? Number(match[1]) : 0
 }
 
@@ -96,9 +96,9 @@ export const parseSequence = (ical: string): number => {
 // No SEQUENCE lines → implicitly 0 (RFC 5545 §3.8.7.4).
 const SEQUENCE_ALL_RE = /^SEQUENCE:(\d+)/gmu
 
-export const maxSequence = (ical: string): number => {
+export const maxSequence = (icalString: string): number => {
   let max = 0
-  for (const match of ical.matchAll(SEQUENCE_ALL_RE)) {
+  for (const match of icalString.matchAll(SEQUENCE_ALL_RE)) {
     const value = Number(match[1])
     if (value > max) {
       max = value
