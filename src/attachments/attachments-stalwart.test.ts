@@ -24,7 +24,15 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 
-import { emailGet, emailGetDetail, emailQuery, mailboxCreate, mailboxIdByRole, makeJmapLive } from '@langmail/jmap'
+import {
+  blobDownload,
+  emailGet,
+  emailGetDetail,
+  emailQuery,
+  mailboxCreate,
+  mailboxIdByRole,
+  makeJmapLive,
+} from '@langmail/jmap'
 
 import { createRoutes, type Routes } from '../handler.ts'
 import { type DownloadAttachmentDeps, downloadAttachment } from '../tools/download-attachment.ts'
@@ -219,7 +227,7 @@ live('attachments against live Stalwart — metadata, capability URL, blob strea
     // helper needs uploadUrl.
     const res = await fetch(`${ADMIN_URL}/.well-known/jmap`, { headers: { authorization } })
     expect(res.status).toBe(200)
-    const session = (await res.json()) as { apiUrl: string; uploadUrl: string }
+    const session = (await res.json()) as { apiUrl: string; downloadUrl: string; uploadUrl: string }
     apiUrl = session.apiUrl
     const jmapLive = makeJmapLive(ADMIN_URL as string)
     accountId = await jmapLive.resolveAccountId(authorization)
@@ -240,6 +248,16 @@ live('attachments against live Stalwart — metadata, capability URL, blob strea
 
     // Live deps with the Basic credential pinned at the deps seam (see header).
     emailDeps = {
+      downloadRawMessage: async (p) => {
+        const raw = await blobDownload({
+          ...p,
+          authorization,
+          downloadUrl: session.downloadUrl,
+          name: 'message.eml',
+          type: 'message/rfc822',
+        })
+        return new Uint8Array(await raw.arrayBuffer())
+      },
       emailGetDetail: (p) => emailGetDetail({ ...p, apiUrl, authorization }),
       resolveAccountId: () => Promise.resolve(accountId),
     }
