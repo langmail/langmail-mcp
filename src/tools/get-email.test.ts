@@ -77,4 +77,71 @@ describe('getEmail', () => {
     expect(result.isError).toBe(true)
     expect(result.content[0]?.text).toContain('missing')
   })
+
+  test('lists attachments with name, type, human size, and blobId', async () => {
+    const result = await getEmail(
+      deps([
+        {
+          attachments: [
+            {
+              blobId: 'Gd41d8cd',
+              disposition: 'attachment',
+              name: 'invoice-2026-06.pdf',
+              partId: '2',
+              size: 186_778,
+              type: 'application/pdf',
+            },
+            {
+              blobId: 'G98f00b2',
+              cid: 'logo@corp',
+              disposition: 'inline',
+              name: 'logo.png',
+              partId: '3',
+              size: 3174,
+              type: 'image/png',
+            },
+          ],
+          bodyValues: { '1': { value: 'see attached' } },
+          id: 'e1',
+          subject: 'Invoice',
+          textBody: [{ partId: '1', type: 'text/plain' }],
+        },
+      ]),
+      { args: { id: 'e1' }, token: 'tok' }
+    )
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toContain('Attachments (2):')
+    expect(txt).toContain('1. invoice-2026-06.pdf — application/pdf, 182.4 KB — blobId: Gd41d8cd')
+    // cid-referenced inline parts (logos, pixels) carry the inline marker...
+    expect(txt).toContain('2. logo.png — image/png, 3.1 KB — inline — blobId: G98f00b2')
+    // ...and genuine documents don't.
+    expect(txt).not.toContain('invoice-2026-06.pdf — application/pdf, 182.4 KB — inline')
+  })
+
+  test('a disposition-inline part without a cid is not marked inline', async () => {
+    const result = await getEmail(
+      deps([
+        {
+          attachments: [
+            { blobId: 'b1', disposition: 'inline', name: 'scan.pdf', partId: '2', size: 1024, type: 'application/pdf' },
+          ],
+          id: 'e1',
+          subject: 'Scan',
+          textBody: [],
+        },
+      ]),
+      { args: { id: 'e1' }, token: 'tok' }
+    )
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toContain('1. scan.pdf — application/pdf, 1.0 KB — blobId: b1')
+    expect(txt).not.toContain('— inline —')
+  })
+
+  test('renders no attachments section when there are none', async () => {
+    const result = await getEmail(deps([{ attachments: [], id: 'e1', subject: 'Plain', textBody: [] }]), {
+      args: { id: 'e1' },
+      token: 'tok',
+    })
+    expect(result.content[0]?.text ?? '').not.toContain('Attachments')
+  })
 })

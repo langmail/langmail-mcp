@@ -25,6 +25,13 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 const TRAILING_SLASHES_RE = /\/+$/u
 const SINGLE_MATCH_RE = /^1 message\(s\) matched/mu
 const FIRST_ID_RE = /^\s*id:\s*(\S+)/mu
+// The smoke message's attachment as get_email lists it (human size varies
+// with the exact PDF bytes, so only name/type/blobId are pinned).
+const SMOKE_PDF_LINE_RE = /^\d+\. smoke\.pdf — application\/pdf, \S+ [KM]?B — blobId: (\S+)$/mu
+const DOWNLOAD_URL_RE = /^(https?:\/\/\S+\/attachments\/\S+)$/mu
+// A base64 run this long in a tool result means attachment bytes leaked
+// into the conversation — the thing the capability-URL design forbids.
+const BASE64_RUN_RE = /[A-Za-z0-9+/=]{100,}/u
 
 // Wide sentinel dates that bracket any real smoke message (delivered "now").
 // A message received today is after EPOCH_PAST and before EPOCH_FUTURE.
@@ -196,12 +203,12 @@ const main = async () => {
   log('listTools')
   const tools = await session.client.listTools()
   const names = tools.tools.map((t) => t.name)
-  for (const required of ['search_emails', 'get_email', 'get_thread']) {
+  for (const required of ['search_emails', 'get_email', 'get_thread', 'download_attachment']) {
     if (!names.includes(required)) {
       fail(`${required} missing from tool list: ${names.join(', ')}`)
     }
   }
-  pass(`search_emails, get_email, get_thread registered (alongside: ${names.join(', ') || '—'})`)
+  pass(`search_emails, get_email, get_thread, download_attachment registered (alongside: ${names.join(', ') || '—'})`)
 
   // --- 2. Round-trip via the smoke tag ---------------------------------
   //
@@ -302,7 +309,64 @@ const main = async () => {
     }
     pass('get_thread lists the message thread')
 
-    // --- 2e. Keyword filter (stamp a label via JMAP, then search) -------
+    // --- 2e. Attachments: marker → listing → capability-URL download ----
+    log('attachment marker on the search hit')
+    if (!text.includes('attachments: yes')) {
+      fail(
+        'search hit for the smoke message lacks the attachments marker (a stale /tmp/langmail-smoke-tag from a ' +
+          `pre-attachment deploy looks exactly like this — re-run smoke-test-mail.sh first): ${text}`
+      )
+    }
+    pass('search hit shows the attachments marker')
+
+    log('get_email lists smoke.pdf with type/size/blobId')
+    const pdfLine = SMOKE_PDF_LINE_RE.exec(email.text)
+    const blobId = pdfLine?.[1]
+    if (!blobId) {
+      throw new Error(`get_email did not list smoke.pdf with a blobId: ${email.text}`)
+    }
+    pass('get_email lists smoke.pdf with type/size/blobId')
+
+    log(`call download_attachment blobId=${blobId}`)
+    const download = await callText('download_attachment', { blobId, emailId: messageId })
+    if (download.isError) {
+      fail(`download_attachment returned isError=true: ${download.text}`)
+    }
+    // Never echo download.text/URLs into failure output from here on — a
+    // failing CI run must not persist a live capability URL in its logs.
+    if (BASE64_RUN_RE.test(download.text)) {
+      fail('download_attachment result carries a base64 payload instead of a URL')
+    }
+    const downloadUrl = DOWNLOAD_URL_RE.exec(download.text)?.[1]
+    if (!downloadUrl) {
+      throw new Error('download_attachment did not return a download URL')
+    }
+    const blobRes = await fetch(downloadUrl)
+    if (blobRes.status !== 200) {
+      fail(`capability URL GET returned HTTP ${blobRes.status}`)
+    }
+    if (blobRes.headers.get('content-type') !== 'application/pdf') {
+      fail(`capability URL served content-type ${blobRes.headers.get('content-type')}, want application/pdf`)
+    }
+    const blobBytes = new Uint8Array(await blobRes.arrayBuffer())
+    if (!new TextDecoder().decode(blobBytes.slice(0, 5)).startsWith('%PDF')) {
+      fail('downloaded blob does not start with the %PDF magic')
+    }
+    const declaredLength = blobRes.headers.get('content-length')
+    if (declaredLength && Number(declaredLength) !== blobBytes.byteLength) {
+      fail(`content-length ${declaredLength} does not match downloaded ${blobBytes.byteLength} bytes`)
+    }
+    pass(`capability URL streams the PDF (${blobBytes.byteLength} bytes, %PDF magic)`)
+
+    log('tampered token must 404')
+    const flipped = downloadUrl.slice(0, -1) + (downloadUrl.endsWith('A') ? 'B' : 'A')
+    const tampered = await fetch(flipped)
+    if (tampered.status !== 404) {
+      fail(`tampered capability URL returned HTTP ${tampered.status}, want 404`)
+    }
+    pass('tampered capability token → 404')
+
+    // --- 2f. Keyword filter (stamp a label via JMAP, then search) -------
     //
     // The category keywords are Postgres-only today (the agent never echoes
     // them to Stalwart), so no message carries one out of the box. Stamp one

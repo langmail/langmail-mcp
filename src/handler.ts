@@ -4,6 +4,7 @@
 // without spinning up Bun.serve. `index.ts` does config + transport
 // wiring; this file owns routing.
 
+import { type AttachmentDownload } from './attachments/download.ts'
 import { type AuthContext, type AuthMiddleware, createAuthMiddleware } from './auth/middleware.ts'
 import { TokenCache } from './auth/token-cache.ts'
 import {
@@ -15,6 +16,10 @@ import {
 } from './health/readiness.ts'
 
 export interface HandlerConfig {
+  // Redeems a minted attachment ticket (GET /attachments/:token). No bearer
+  // required on that route — the unguessable token is the credential, same
+  // model as a presigned URL. Absent → the route 404s.
+  attachmentDownload?: AttachmentDownload
   // Better Auth OIDC issuer, e.g. https://auth.langmail.me/api/auth. The MCP
   // server advertises Better Auth's oauth2 endpoints (derived from this) as
   // its authorization server and validates every bearer at its userinfo.
@@ -34,6 +39,16 @@ export interface HandlerConfig {
 export interface Routes {
   authenticate: AuthMiddleware
   fetch: (req: Request) => Promise<Response>
+}
+
+// Anything but a clean GET of a single token segment is a plain 404 —
+// indistinguishable from an unknown/expired token, on purpose.
+const attachmentsRoute = (req: Request, pathname: string, download?: AttachmentDownload): Promise<Response> => {
+  const token = pathname.slice('/attachments/'.length)
+  if (req.method === 'GET' && download && token && !token.includes('/')) {
+    return download(token)
+  }
+  return Promise.resolve(new Response('not found\n', { status: 404 }))
 }
 
 const json = (body: unknown, init: ResponseInit = {}): Response =>
@@ -117,6 +132,10 @@ export const createRoutes = (cfg: HandlerConfig): Routes => {
         bearer_methods_supported: ['header'],
         resource: cfg.publicUrl,
       })
+    }
+
+    if (url.pathname.startsWith('/attachments/')) {
+      return attachmentsRoute(req, url.pathname, cfg.attachmentDownload)
     }
 
     if (url.pathname === '/mcp' || url.pathname.startsWith('/mcp/')) {

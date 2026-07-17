@@ -1,4 +1,5 @@
 // biome-ignore lint/performance/noBarrelFile: package entry point requires re-exports
+export { type BlobDownloadParams, blobDownload, blobDownloadUrl } from './blob.ts'
 export {
   type EmailChangesParams,
   type EmailGetDetailParams,

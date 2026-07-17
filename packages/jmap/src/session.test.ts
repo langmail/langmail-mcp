@@ -30,6 +30,7 @@ describe('fetchSession', () => {
         Response.json(
           {
             apiUrl: `${STALWART}/jmap/`,
+            downloadUrl: `${STALWART}/jmap/download/{accountId}/{blobId}/{name}?accept={type}`,
             primaryAccounts: {
               'urn:ietf:params:jmap:mail': 'acct-1',
             },
@@ -40,7 +41,27 @@ describe('fetchSession', () => {
     })
     const s = await withFetch(f, () => fetchSession(STALWART, bearerAuthorization('tok')))
     expect(s.apiUrl).toBe(`${STALWART}/jmap/`)
+    expect(s.downloadUrl).toBe(`${STALWART}/jmap/download/{accountId}/{blobId}/{name}?accept={type}`)
     expect(s.primaryAccounts['urn:ietf:params:jmap:mail']).toBe('acct-1')
+  })
+
+  test('rejects a session without downloadUrl as malformed', async () => {
+    const f = mock(() =>
+      Promise.resolve(
+        Response.json(
+          {
+            apiUrl: `${STALWART}/jmap/`,
+            primaryAccounts: { 'urn:ietf:params:jmap:mail': 'acct-1' },
+          },
+          { status: 200 }
+        )
+      )
+    )
+    await withFetch(f, async () => {
+      const err = await fetchSession(STALWART, bearerAuthorization('tok')).catch((error) => error)
+      expect(err).toBeInstanceOf(JmapError)
+      expect((err as JmapError).message).toContain('malformed')
+    })
   })
 
   test('throws JmapError on non-200', async () => {
