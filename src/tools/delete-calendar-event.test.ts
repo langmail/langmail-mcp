@@ -31,14 +31,14 @@ interface Captured {
   fetched: FetchEventParams[]
 }
 
-const makeDeps = (acc: DiscoveredAccount, existing: CalendarObject | null, captured: Captured) => ({
+const makeDeps = (acc: DiscoveredAccount, existing: CalendarObject | null, capturedState: Captured) => ({
   deleteEvent: (p: DeleteEventParams) => {
-    captured.deleted.push(p)
+    capturedState.deleted.push(p)
     return Promise.resolve()
   },
   discover: () => Promise.resolve(acc),
   fetchEvent: (p: FetchEventParams) => {
-    captured.fetched.push(p)
+    capturedState.fetched.push(p)
     return Promise.resolve(existing)
   },
 })

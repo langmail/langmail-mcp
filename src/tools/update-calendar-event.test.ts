@@ -63,14 +63,14 @@ interface Captured {
   updated: UpdateEventParams[]
 }
 
-const makeDeps = (acc: DiscoveredAccount, existing: CalendarObject | null, captured: Captured) => ({
+const makeDeps = (acc: DiscoveredAccount, existing: CalendarObject | null, capturedState: Captured) => ({
   discover: () => Promise.resolve(acc),
   fetchEvent: (p: FetchEventParams) => {
-    captured.fetched.push(p)
+    capturedState.fetched.push(p)
     return Promise.resolve(existing)
   },
   updateEvent: (p: UpdateEventParams) => {
-    captured.updated.push(p)
+    capturedState.updated.push(p)
     return Promise.resolve()
   },
 })
@@ -139,7 +139,7 @@ describe('updateCalendarEvent', () => {
     const cap = captured()
     // The stored event is genuinely recurring, so this exercises the collapse —
     // not just a fresh non-recurring edit happening to lack an RRULE.
-    const recurringStored = storedEvent({
+    const recurringEvent = storedEvent({
       data: buildInvite({
         attendees: ['guest@example.com'],
         end: new Date('2026-06-12T10:30:00Z'),
@@ -151,7 +151,7 @@ describe('updateCalendarEvent', () => {
         uid: UID,
       }),
     })
-    await updateCalendarEvent(makeDeps(account(), recurringStored, cap), { args: args(), token: 'tok' })
+    await updateCalendarEvent(makeDeps(account(), recurringEvent, cap), { args: args(), token: 'tok' })
     expect(cap.updated[0]?.ical ?? '').not.toContain('RRULE')
   })
 
