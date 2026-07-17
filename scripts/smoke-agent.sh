@@ -36,8 +36,10 @@ command -v claude >/dev/null 2>&1 || {
 [[ -f .mcp.json ]] || { echo ".mcp.json missing at $REPO_ROOT" >&2; exit 1; }
 
 # Where the agent is told to save the attachment — created fresh per run so
-# the size/magic verification below can't match a stale file.
+# the size/magic verification below can't match a stale file, removed on exit
+# so runs don't accumulate downloads on the operator's machine.
 SAVE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/langmail-agent-smoke.XXXXXX")"
+trap 'rm -rf "$SAVE_DIR"' EXIT
 
 PROMPT=$(cat <<EOF
 I run a smoke test that self-delivers a tagged message to my own

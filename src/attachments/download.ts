@@ -12,12 +12,24 @@ import { type TicketStore } from './tickets.ts'
 
 export type AttachmentDownload = (token: string) => Promise<Response>
 
-// Keep the filename header-safe: strip quotes, backslashes, and control
-// characters (Unicode category Cc) so a hostile filename can't smuggle
-// extra headers or escape the quoted-string.
-const sanitizeFilename = (name: string): string => {
-  const cleaned = name.replaceAll(/[\p{Cc}"\\]/gu, '').trim()
-  return cleaned || 'attachment'
+const CONTROL_QUOTE_RE = /[\p{Cc}"\\]/gu
+const NON_ASCII_RE = /[^ -~]/gu
+// RFC 5987 attr-char does NOT include !'()* — encodeURIComponent leaves
+// those bare, so they get a second pass.
+const RFC5987_EXTRA_RE = /[!'()*]/gu
+
+const rfc5987Encode = (value: string): string =>
+  encodeURIComponent(value).replaceAll(RFC5987_EXTRA_RE, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+
+// Build a header-safe content-disposition. Strip quotes/backslashes/control
+// chars (header smuggling), then — because fetch header values are Latin-1
+// ByteStrings and Bun's Headers constructor throws on anything above U+00FF
+// (an em dash or CJK filename would 500 the route) — send an ASCII fallback
+// in filename= and the real UTF-8 name via RFC 6266/5987 filename*.
+const contentDisposition = (name: string): string => {
+  const cleaned = name.replaceAll(CONTROL_QUOTE_RE, '').trim() || 'attachment'
+  const ascii = cleaned.replaceAll(NON_ASCII_RE, '_').trim() || 'attachment'
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${rfc5987Encode(cleaned)}`
 }
 
 const notFound = (): Response => new Response('not found\n', { status: 404 })
@@ -50,7 +62,7 @@ export const createAttachmentDownload = (live: JmapLive, tickets: TicketStore): 
 
     const headers = new Headers({
       'cache-control': 'no-store',
-      'content-disposition': `attachment; filename="${sanitizeFilename(ticket.name)}"`,
+      'content-disposition': contentDisposition(ticket.name),
       'content-type': upstream.headers.get('content-type') ?? ticket.type,
     })
     const contentLength = upstream.headers.get('content-length')

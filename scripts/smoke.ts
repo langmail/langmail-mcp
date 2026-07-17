@@ -27,7 +27,7 @@ const SINGLE_MATCH_RE = /^1 message\(s\) matched/mu
 const FIRST_ID_RE = /^\s*id:\s*(\S+)/mu
 // The smoke message's attachment as get_email lists it (human size varies
 // with the exact PDF bytes, so only name/type/blobId are pinned).
-const SMOKE_PDF_LINE_RE = /^\d+\. smoke\.pdf — application\/pdf, \S+ K?B — blobId: (\S+)$/mu
+const SMOKE_PDF_LINE_RE = /^\d+\. smoke\.pdf — application\/pdf, \S+ [KM]?B — blobId: (\S+)$/mu
 const DOWNLOAD_URL_RE = /^(https?:\/\/\S+\/attachments\/\S+)$/mu
 // A base64 run this long in a tool result means attachment bytes leaked
 // into the conversation — the thing the capability-URL design forbids.
@@ -312,7 +312,10 @@ const main = async () => {
     // --- 2e. Attachments: marker → listing → capability-URL download ----
     log('attachment marker on the search hit')
     if (!text.includes('attachments: yes')) {
-      fail(`search hit for the smoke message lacks the attachments marker: ${text}`)
+      fail(
+        'search hit for the smoke message lacks the attachments marker (a stale /tmp/langmail-smoke-tag from a ' +
+          `pre-attachment deploy looks exactly like this — re-run smoke-test-mail.sh first): ${text}`
+      )
     }
     pass('search hit shows the attachments marker')
 
@@ -329,16 +332,18 @@ const main = async () => {
     if (download.isError) {
       fail(`download_attachment returned isError=true: ${download.text}`)
     }
+    // Never echo download.text/URLs into failure output from here on — a
+    // failing CI run must not persist a live capability URL in its logs.
     if (BASE64_RUN_RE.test(download.text)) {
-      fail(`download_attachment result carries a base64 payload instead of a URL: ${download.text}`)
+      fail('download_attachment result carries a base64 payload instead of a URL')
     }
     const downloadUrl = DOWNLOAD_URL_RE.exec(download.text)?.[1]
     if (!downloadUrl) {
-      throw new Error(`download_attachment did not return a download URL: ${download.text}`)
+      throw new Error('download_attachment did not return a download URL')
     }
     const blobRes = await fetch(downloadUrl)
     if (blobRes.status !== 200) {
-      fail(`GET ${downloadUrl} returned HTTP ${blobRes.status}`)
+      fail(`capability URL GET returned HTTP ${blobRes.status}`)
     }
     if (blobRes.headers.get('content-type') !== 'application/pdf') {
       fail(`capability URL served content-type ${blobRes.headers.get('content-type')}, want application/pdf`)

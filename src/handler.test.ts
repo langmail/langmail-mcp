@@ -174,7 +174,9 @@ describe('GET /attachments/:token', () => {
     const res = await withFetch(f, () => routes.fetch(new Request(`${PUBLIC}/attachments/${token}`)))
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toBe('application/pdf')
-    expect(res.headers.get('content-disposition')).toBe('attachment; filename="invoice.pdf"')
+    expect(res.headers.get('content-disposition')).toBe(
+      'attachment; filename="invoice.pdf"; filename*=UTF-8\'\'invoice.pdf'
+    )
     expect(res.headers.get('content-length')).toBe(String(pdf.length))
     expect(await res.text()).toBe(pdf)
   })
@@ -190,7 +192,28 @@ describe('GET /attachments/:token', () => {
     })
     const f = mock(() => Promise.resolve(new Response('x', { status: 200 })))
     const res = await withFetch(f, () => routes.fetch(new Request(`${PUBLIC}/attachments/${token}`)))
-    expect(res.headers.get('content-disposition')).toBe('attachment; filename="evilx-injected: 1.pdf"')
+    expect(res.headers.get('content-disposition')).toBe(
+      'attachment; filename="evilx-injected: 1.pdf"; filename*=UTF-8\'\'evilx-injected%3A%201.pdf'
+    )
+  })
+
+  test('non-Latin-1 filenames get an ASCII fallback plus RFC 5987 filename* (no 500)', async () => {
+    const { routes, tickets } = makeAttachmentRoutes()
+    const token = tickets.mint({
+      accountId: 'acct',
+      authorization: 'Bearer t',
+      blobId: 'b1',
+      // Em dash + umlaut + CJK — fetch header values are Latin-1 ByteStrings,
+      // so the raw name in filename= would make the Headers constructor throw.
+      name: 'Rechnung — Büro 請求書.pdf',
+      type: 'application/pdf',
+    })
+    const f = mock(() => Promise.resolve(new Response('x', { status: 200 })))
+    const res = await withFetch(f, () => routes.fetch(new Request(`${PUBLIC}/attachments/${token}`)))
+    expect(res.status).toBe(200)
+    const disposition = res.headers.get('content-disposition') ?? ''
+    expect(disposition).toContain('filename="Rechnung _ B_ro ___.pdf"')
+    expect(disposition).toContain("filename*=UTF-8''Rechnung%20%E2%80%94%20B%C3%BCro%20%E8%AB%8B%E6%B1%82%E6%9B%B8.pdf")
   })
 
   test('unknown or tampered tokens return a plain 404 without touching Stalwart', async () => {
