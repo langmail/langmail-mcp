@@ -46,7 +46,14 @@ const searchEmailsShape = {
   keywords: z.array(z.enum(KEYWORD_VALUES)).min(1).optional().describe(KEYWORDS_DESCRIPTION),
   limit: z.number().int().min(1).max(100).default(20),
   mailbox: z.string().optional().describe('Restrict to a named mailbox/folder (e.g. "Inbox").'),
-  query: z.string().min(1).max(500).optional().describe('Free-text full-text search over subject and body.'),
+  query: z
+    .string()
+    .min(1)
+    .max(500)
+    .optional()
+    .describe(
+      "Free-text search over subject, body, and addresses. Terms are OR'd — a message matches if it contains ANY term, so extra synonyms broaden (not narrow) the result. Wrap a phrase in double quotes to require all its words in the same field. Narrow with from/keywords/after/before, not by adding terms."
+    ),
 }
 
 const hasAnyFilter = (v: {
@@ -63,6 +70,14 @@ export const searchEmailsInput = z.object(searchEmailsShape).refine(hasAnyFilter
 })
 
 export type SearchEmailsArgs = z.infer<typeof searchEmailsInput>
+
+// Split a free-text query into search terms: double-quoted phrases stay
+// intact, everything else splits on whitespace. Each term becomes its own
+// JMAP `text` condition, OR'd in the JMAP layer — see the rationale on
+// `EmailQueryFilters.text` for why a whole query must not be sent as one
+// condition.
+export const queryTerms = (query: string): string[] =>
+  [...query.matchAll(/"([^"]*)"|(\S+)/g)].map((m) => (m[1] ?? m[2] ?? '').trim()).filter((t) => t.length > 0)
 
 export interface SearchEmailsDeps {
   emailGet: (p: EmailGetParams) => Promise<EmailRecord[]>
@@ -92,13 +107,19 @@ export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsCont
     mailboxId = id
   }
 
+  const terms = args.query ? queryTerms(args.query) : []
+  // A query of only whitespace/quotes would otherwise drop the text filter
+  // and present an unfiltered newest-first page as search hits.
+  if (args.query && terms.length === 0) {
+    return errorResult('query contains no searchable terms.')
+  }
   const ids = await deps.emailQuery({
     accountId,
     // wired by live deps; mock deps ignore
     apiUrl: '',
     authorization,
     filters: {
-      ...(args.query ? { text: args.query } : {}),
+      ...(terms.length > 0 ? { text: terms } : {}),
       ...(args.after ? { after: args.after } : {}),
       ...(args.before ? { before: args.before } : {}),
       ...(args.from ? { from: args.from } : {}),
@@ -117,7 +138,13 @@ export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsCont
   // receivedAt-desc sort (Email/get doesn't preserve id order).
   const ordered = orderById(ids, list)
   const lines = ordered.map((e, i) => formatEmailLine(i + 1, e))
-  return textResult(`${ordered.length} message(s) matched:\n\n${lines.join('\n\n')}`)
+  // A full page is indistinguishable from a complete result unless we say so
+  // — silent truncation is what turns "capped at 20" into a false negative.
+  const truncationNote =
+    ids.length === args.limit
+      ? `\n\nResult hit the limit of ${args.limit} — older matches may exist. Narrow with after/before or other filters, or raise limit.`
+      : ''
+  return textResult(`${ordered.length} message(s) matched:\n\n${lines.join('\n\n')}${truncationNote}`)
 }
 
 // --- live-deps wiring ----------------------------------------------------
@@ -148,8 +175,9 @@ export const registerSearchEmails = (
     'search_emails',
     {
       description:
-        "Search the authenticated user's mailbox. Combine free-text (query) with " +
-        'optional filters: date range (after/before), sender (from), category ' +
+        "Search the authenticated user's mailbox. Combine free-text (query — " +
+        'any-term match, quoted phrases supported) with optional filters: date ' +
+        'range (after/before), sender (from), category ' +
         'labels (keywords), and mailbox. At least one filter is required. Returns ' +
         'matching messages newest-first with id, subject, sender, date, tags, a ' +
         'body snippet, and attachment metadata including blobId. Use get_email ' +

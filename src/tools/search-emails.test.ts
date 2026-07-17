@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import { type EmailQueryParams, type EmailRecord } from '@langmail/jmap'
 
-import { searchEmails, searchEmailsInput } from './search-emails.ts'
+import { queryTerms, searchEmails, searchEmailsInput } from './search-emails.ts'
 
 const fakeDeps = (opts: {
   accountId?: string
@@ -70,6 +70,28 @@ describe('searchEmailsInput schema', () => {
   test('rejects a non-UTC (offset) timestamp — JMAP UTCDate requires Z', () => {
     expect(searchEmailsInput.safeParse({ after: '2026-04-01T00:00:00+02:00' }).success).toBe(false)
     expect(searchEmailsInput.safeParse({ before: '2026-04-01T00:00:00-05:00' }).success).toBe(false)
+  })
+})
+
+describe('queryTerms', () => {
+  test('splits whitespace-separated words into terms', () => {
+    expect(queryTerms('Supabase invoice receipt')).toEqual(['Supabase', 'invoice', 'receipt'])
+  })
+
+  test('keeps a quoted phrase together and strips the quotes', () => {
+    expect(queryTerms('"Google Workspace" invoice')).toEqual(['Google Workspace', 'invoice'])
+  })
+
+  test('collapses extra whitespace and drops empty quotes', () => {
+    expect(queryTerms('  invoice   ""  ')).toEqual(['invoice'])
+  })
+
+  test('a single word is a single term', () => {
+    expect(queryTerms('invoice')).toEqual(['invoice'])
+  })
+
+  test('an unbalanced quote degrades to plain word terms (quote kept literally)', () => {
+    expect(queryTerms('bar "baz qux')).toEqual(['bar', '"baz', 'qux'])
   })
 })
 
@@ -184,7 +206,35 @@ describe('searchEmails', () => {
         token: 'tok',
       }
     )
-    expect(seen?.filters).toEqual({ after: '2026-04-01T00:00:00Z', from: 'amazon', text: 'invoice' })
+    expect(seen?.filters).toEqual({ after: '2026-04-01T00:00:00Z', from: 'amazon', text: ['invoice'] })
+  })
+
+  test('splits a multi-word query into individual OR terms for the JMAP layer', async () => {
+    let seen: EmailQueryParams | undefined
+    await searchEmails(
+      fakeDeps({
+        onQuery: (p) => {
+          seen = p
+        },
+        queryIds: [],
+      }),
+      { args: { limit: 20, query: 'Supabase invoice receipt' }, token: 'tok' }
+    )
+    expect(seen?.filters).toEqual({ text: ['Supabase', 'invoice', 'receipt'] })
+  })
+
+  test('keeps a double-quoted phrase as a single term', async () => {
+    let seen: EmailQueryParams | undefined
+    await searchEmails(
+      fakeDeps({
+        onQuery: (p) => {
+          seen = p
+        },
+        queryIds: [],
+      }),
+      { args: { limit: 20, query: '"Google Workspace" invoice' }, token: 'tok' }
+    )
+    expect(seen?.filters).toEqual({ text: ['Google Workspace', 'invoice'] })
   })
 
   test('preserves the query id order (trusts the query sort, does not re-sort by receivedAt)', async () => {
@@ -204,6 +254,43 @@ describe('searchEmails', () => {
     expect(txt.indexOf('bravo')).toBeLessThan(txt.indexOf('alpha'))
     expect(txt).toContain('1. bravo')
     expect(txt).toContain('2. alpha')
+  })
+
+  test('flags a full page as possibly truncated', async () => {
+    const emails: EmailRecord[] = [
+      { id: 'a', receivedAt: '2026-06-01T00:00:00Z', subject: 'alpha' },
+      { id: 'b', receivedAt: '2026-05-01T00:00:00Z', subject: 'bravo' },
+    ]
+    const result = await searchEmails(fakeDeps({ emails, queryIds: ['a', 'b'] }), {
+      args: { limit: 2, query: 'invoice' },
+      token: 'tok',
+    })
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toContain('hit the limit of 2')
+  })
+
+  test('does not flag truncation when the result is under the limit', async () => {
+    const emails: EmailRecord[] = [{ id: 'a', receivedAt: '2026-06-01T00:00:00Z', subject: 'alpha' }]
+    const result = await searchEmails(fakeDeps({ emails, queryIds: ['a'] }), {
+      args: { limit: 20, query: 'invoice' },
+      token: 'tok',
+    })
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).not.toContain('hit the limit')
+  })
+
+  test('rejects a query that tokenizes to zero terms instead of matching everything', async () => {
+    let queried = false
+    const result = await searchEmails(
+      fakeDeps({
+        onQuery: () => {
+          queried = true
+        },
+      }),
+      { args: { limit: 20, query: '""' }, token: 'tok' }
+    )
+    expect(result.isError).toBe(true)
+    expect(queried).toBe(false)
   })
 
   test("reports 'no messages' on empty hit set", async () => {

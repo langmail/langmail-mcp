@@ -51,7 +51,7 @@ describe('emailQuery', () => {
       emailQuery({
         accountId: 'acct',
         apiUrl: API,
-        filters: { text: 'hello' },
+        filters: { text: ['hello'] },
         limit: 20,
         authorization: 'Bearer tok',
       })
@@ -71,7 +71,7 @@ describe('emailQuery', () => {
       emailQuery({
         accountId: 'acct',
         apiUrl: API,
-        filters: { mailboxId: 'mbx', text: 'hi' },
+        filters: { mailboxId: 'mbx', text: ['hi'] },
         limit: 5,
         authorization: 'Bearer tok',
       })
@@ -160,7 +160,54 @@ describe('emailQuery', () => {
       emailQuery({
         accountId: 'acct',
         apiUrl: API,
-        filters: { keywords: ['$label:receipt', '$label:newsletter'], text: 'invoice' },
+        filters: { keywords: ['$label:receipt', '$label:newsletter'], text: ['invoice'] },
+        limit: 5,
+        authorization: 'Bearer tok',
+      })
+    )
+    expect(f).toHaveBeenCalled()
+  })
+
+  test('multiple text terms are OR-ed as separate text conditions, then AND-ed with dates', async () => {
+    const f = mock((_u: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}')
+      const filter = body.methodCalls[0][1].filter
+      expect(filter.operator).toBe('AND')
+      expect(filter.conditions).toEqual([
+        {
+          conditions: [{ text: 'supabase' }, { text: 'invoice' }, { text: 'receipt' }],
+          operator: 'OR',
+        },
+        { after: '2026-04-17T00:00:00Z' },
+      ])
+      return Promise.resolve(jmapResponse([['Email/query', { ids: [] }, '0']]))
+    })
+    await withFetch(f, () =>
+      emailQuery({
+        accountId: 'acct',
+        apiUrl: API,
+        filters: { after: '2026-04-17T00:00:00Z', text: ['supabase', 'invoice', 'receipt'] },
+        limit: 20,
+        authorization: 'Bearer tok',
+      })
+    )
+    expect(f).toHaveBeenCalled()
+  })
+
+  test('multiple text terms with no other filter yield a bare top-level OR node', async () => {
+    const f = mock((_u: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}')
+      expect(body.methodCalls[0][1].filter).toEqual({
+        conditions: [{ text: 'alpha' }, { text: 'bravo' }],
+        operator: 'OR',
+      })
+      return Promise.resolve(jmapResponse([['Email/query', { ids: [] }, '0']]))
+    })
+    await withFetch(f, () =>
+      emailQuery({
+        accountId: 'acct',
+        apiUrl: API,
+        filters: { text: ['alpha', 'bravo'] },
         limit: 5,
         authorization: 'Bearer tok',
       })

@@ -119,7 +119,11 @@ export interface EmailQueryFilters {
   // Full JMAP keyword strings, e.g. "$label:receipt". OR'd among themselves.
   keywords?: string[]
   mailboxId?: string
-  text?: string
+  // Free-text terms, OR'd among themselves. Each term is its own JMAP `text`
+  // condition: Stalwart matches a multi-word `text` string only when every
+  // token occurs in a single field, so passing a whole query as one condition
+  // silently drops near-matches (e.g. a subject containing 2 of 3 words).
+  text?: string[]
 }
 
 export interface EmailQueryParams extends JmapCall {
@@ -128,14 +132,23 @@ export interface EmailQueryParams extends JmapCall {
   limit: number
 }
 
-// Compose the JMAP filter: keyword conditions OR'd among themselves, then
-// AND'd with the scalar conditions (text/date/from/mailbox). A single overall
-// condition is passed through flat — JMAP treats a bare condition and a
-// one-element AND identically, but the flat form keeps the wire minimal.
+// OR a set of conditions, collapsing a single element to its flat form —
+// JMAP treats a bare condition and a one-element operator identically, but
+// the flat form keeps the wire minimal.
+const orNode = (conds: Record<string, unknown>[]): Record<string, unknown> | undefined =>
+  conds.length === 1 ? conds[0] : { conditions: conds, operator: 'OR' }
+
+// Compose the JMAP filter: text terms OR'd among themselves, keyword
+// conditions OR'd among themselves, then both AND'd with the scalar
+// conditions (date/from/mailbox). A single overall condition is passed
+// through flat, like the OR nodes.
 const buildFilter = (f: EmailQueryFilters): Record<string, unknown> => {
   const conditions: Record<string, unknown>[] = []
-  if (f.text) {
-    conditions.push({ text: f.text })
+  if (f.text && f.text.length > 0) {
+    const node = orNode(f.text.map((t) => ({ text: t })))
+    if (node) {
+      conditions.push(node)
+    }
   }
   if (f.after) {
     conditions.push({ after: f.after })
@@ -150,8 +163,7 @@ const buildFilter = (f: EmailQueryFilters): Record<string, unknown> => {
     conditions.push({ inMailbox: f.mailboxId })
   }
   if (f.keywords && f.keywords.length > 0) {
-    const kw = f.keywords.map((k) => ({ hasKeyword: k }))
-    const node = kw.length === 1 ? kw[0] : { conditions: kw, operator: 'OR' }
+    const node = orNode(f.keywords.map((k) => ({ hasKeyword: k })))
     if (node) {
       conditions.push(node)
     }
