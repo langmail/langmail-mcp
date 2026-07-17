@@ -1,8 +1,9 @@
 // search_emails tool — structured search over the authenticated user's
-// mailbox. Supports free-text FTS plus optional date-range, sender, keyword
-// (category label), and mailbox filters, returning a token-frugal hit list
-// (id/subject/sender/date/tags/snippet/attachments), newest-first. Full
-// bodies are fetched separately via get_email.
+// mailbox. Supports free-text search plus optional date-range, sender,
+// keyword (category label), and mailbox filters, returning a token-frugal
+// hit list (id/subject/sender/date/tags/snippet/attachments). Multi-term
+// queries rank messages matching more terms first; everything else is
+// newest-first. Full bodies are fetched separately via get_email.
 //
 // The tool logic lives behind a `Deps` interface so it can be unit-tested
 // without spinning up Stalwart. `makeLiveDeps` wires the live JMAP deps.
@@ -15,9 +16,11 @@ import {
   bearerAuthorization,
   type EmailGetParams,
   type EmailQueryParams,
+  type EmailQueryPerTermParams,
   type EmailRecord,
   emailGet,
   emailQuery,
+  emailQueryPerTerm,
   type JmapLive,
   mailboxIdByName,
 } from '@langmail/jmap'
@@ -52,7 +55,7 @@ const searchEmailsShape = {
     .max(500)
     .optional()
     .describe(
-      "Free-text search over subject, body, and addresses. Terms are OR'd — a message matches if it contains ANY term, so extra synonyms broaden (not narrow) the result. Wrap a phrase in double quotes to require all its words in the same field. Narrow with from/keywords/after/before, not by adding terms."
+      "Free-text search over subject, body, and addresses. Terms are OR'd — a message matches if it contains ANY term, and messages matching more terms rank first (each hit shows matched: X/N terms). Wrap a phrase in double quotes to require all its words in the same field. Narrow with from/keywords/after/before, not by adding terms; only the first 10 terms are used."
     ),
 }
 
@@ -79,9 +82,54 @@ export type SearchEmailsArgs = z.infer<typeof searchEmailsInput>
 export const queryTerms = (query: string): string[] =>
   [...query.matchAll(/"([^"]*)"|(\S+)/g)].map((m) => (m[1] ?? m[2] ?? '').trim()).filter((t) => t.length > 0)
 
+// Fan-out bound for the per-term ranked queries: a degenerate 500-char query
+// must not turn into dozens of Email/query calls.
+const MAX_QUERY_TERMS = 10
+
+// Each term's query fetches a wider newest-first window than the final page:
+// match counts are computed within these windows, so a term whose window
+// overflows would otherwise undercount older multi-term hits. Ids are cheap;
+// the wider window shrinks that bias and a full window still triggers the
+// truncation note.
+const perTermWindow = (limit: number): number => Math.min(limit * 3, 100)
+
+interface RankedHits {
+  hitLimit: boolean
+  ids: string[]
+  matchCounts?: Map<string, number>
+}
+
+// Rank multi-term hits by how many terms matched, tie-broken by the best
+// newest-first position across the per-term lists (a recency proxy — only
+// reliable within a term's list; exact receivedAt ordering is restored after
+// the fetch). JMAP has no relevance sort, so ranking happens client-side
+// from the per-term id lists.
+const rankByMatchCount = (lists: string[][], limit: number, window: number): RankedHits => {
+  const counts = new Map<string, number>()
+  const bestIndex = new Map<string, number>()
+  for (const list of lists) {
+    list.forEach((id, index) => {
+      counts.set(id, (counts.get(id) ?? 0) + 1)
+      const prev = bestIndex.get(id)
+      if (prev === undefined || index < prev) {
+        bestIndex.set(id, index)
+      }
+    })
+  }
+  const ranked = [...counts.keys()].sort(
+    (a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0) || (bestIndex.get(a) ?? 0) - (bestIndex.get(b) ?? 0)
+  )
+  return {
+    hitLimit: ranked.length > limit || lists.some((l) => l.length === window),
+    ids: ranked.slice(0, limit),
+    matchCounts: counts,
+  }
+}
+
 export interface SearchEmailsDeps {
   emailGet: (p: EmailGetParams) => Promise<EmailRecord[]>
   emailQuery: (p: EmailQueryParams) => Promise<string[]>
+  emailQueryPerTerm: (p: EmailQueryPerTermParams) => Promise<string[][]>
   resolveAccountId: (authorization: string) => Promise<string>
   resolveMailbox: (authorization: string, name: string) => Promise<string | null>
 }
@@ -93,6 +141,14 @@ export interface SearchEmailsContext {
 
 export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsContext): Promise<ToolResult> => {
   const { token, args } = ctx
+  // Purely local check first — a query of only whitespace/quotes would
+  // otherwise drop the text filter and present an unfiltered newest-first
+  // page as search hits.
+  const terms = args.query ? queryTerms(args.query).slice(0, MAX_QUERY_TERMS) : []
+  if (args.query && terms.length === 0) {
+    return errorResult('query contains no searchable terms.')
+  }
+
   // The JMAP layer takes a full Authorization header; the validated client
   // bearer is wrapped once here.
   const authorization = bearerAuthorization(token)
@@ -107,43 +163,63 @@ export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsCont
     mailboxId = id
   }
 
-  const terms = args.query ? queryTerms(args.query) : []
-  // A query of only whitespace/quotes would otherwise drop the text filter
-  // and present an unfiltered newest-first page as search hits.
-  if (args.query && terms.length === 0) {
-    return errorResult('query contains no searchable terms.')
+  const filters = {
+    ...(args.after ? { after: args.after } : {}),
+    ...(args.before ? { before: args.before } : {}),
+    ...(args.from ? { from: args.from } : {}),
+    ...(args.keywords && args.keywords.length > 0 ? { keywords: args.keywords.map(keywordToJmapLabel) } : {}),
+    ...(mailboxId ? { mailboxId } : {}),
   }
-  const ids = await deps.emailQuery({
-    accountId,
-    // wired by live deps; mock deps ignore
-    apiUrl: '',
-    authorization,
-    filters: {
-      ...(terms.length > 0 ? { text: terms } : {}),
-      ...(args.after ? { after: args.after } : {}),
-      ...(args.before ? { before: args.before } : {}),
-      ...(args.from ? { from: args.from } : {}),
-      ...(args.keywords && args.keywords.length > 0 ? { keywords: args.keywords.map(keywordToJmapLabel) } : {}),
-      ...(mailboxId ? { mailboxId } : {}),
-    },
-    limit: args.limit,
-  })
 
-  if (ids.length === 0) {
+  // apiUrl is wired by live deps; mock deps ignore it.
+  let hits: RankedHits
+  if (terms.length > 1) {
+    const window = perTermWindow(args.limit)
+    const lists = await deps.emailQueryPerTerm({
+      accountId,
+      apiUrl: '',
+      authorization,
+      filters,
+      limit: window,
+      terms,
+    })
+    hits = rankByMatchCount(lists, args.limit, window)
+  } else {
+    const ids = await deps.emailQuery({
+      accountId,
+      apiUrl: '',
+      authorization,
+      filters: { ...filters, ...(terms.length > 0 ? { text: terms } : {}) },
+      limit: args.limit,
+    })
+    hits = { hitLimit: ids.length === args.limit, ids }
+  }
+
+  if (hits.ids.length === 0) {
     return textResult('No messages matched.')
   }
 
-  const list = await deps.emailGet({ accountId, apiUrl: '', authorization, ids })
-  // Restore the query's newest-first order so the response reflects the
-  // receivedAt-desc sort (Email/get doesn't preserve id order).
-  const ordered = orderById(ids, list)
-  const lines = ordered.map((e, i) => formatEmailLine(i + 1, e))
+  const list = await deps.emailGet({ accountId, apiUrl: '', authorization, ids: hits.ids })
+  // Restore the ranking order (Email/get doesn't preserve id order), then —
+  // for ranked results — replace the pre-fetch recency proxy with the real
+  // receivedAt as the within-count tie-break.
+  const ordered = orderById(hits.ids, list)
+  const counts = hits.matchCounts
+  if (counts) {
+    ordered.sort(
+      (a, b) =>
+        (counts.get(b.id) ?? 0) - (counts.get(a.id) ?? 0) || (b.receivedAt ?? '').localeCompare(a.receivedAt ?? '')
+    )
+  }
+  const lines = ordered.map((e, i) => {
+    const line = formatEmailLine(i + 1, e)
+    return counts ? `${line}\n   matched: ${counts.get(e.id) ?? 0}/${terms.length} terms` : line
+  })
   // A full page is indistinguishable from a complete result unless we say so
   // — silent truncation is what turns "capped at 20" into a false negative.
-  const truncationNote =
-    ids.length === args.limit
-      ? `\n\nResult hit the limit of ${args.limit} — older matches may exist. Narrow with after/before or other filters, or raise limit.`
-      : ''
+  const truncationNote = hits.hitLimit
+    ? `\n\nResult hit the limit of ${args.limit} — more matches may exist. Narrow with after/before or other filters, or raise limit.`
+    : ''
   return textResult(`${ordered.length} message(s) matched:\n\n${lines.join('\n\n')}${truncationNote}`)
 }
 
@@ -154,6 +230,7 @@ export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsCont
 export const makeLiveDeps = (live: JmapLive): SearchEmailsDeps => ({
   emailGet: async (p) => emailGet({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   emailQuery: async (p) => emailQuery({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
+  emailQueryPerTerm: async (p) => emailQueryPerTerm({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   resolveAccountId: live.resolveAccountId,
   resolveMailbox: async (authorization, name) => {
     const s = await live.getSession(authorization)
@@ -179,7 +256,8 @@ export const registerSearchEmails = (
         'any-term match, quoted phrases supported) with optional filters: date ' +
         'range (after/before), sender (from), category ' +
         'labels (keywords), and mailbox. At least one filter is required. Returns ' +
-        'matching messages newest-first with id, subject, sender, date, tags, a ' +
+        'matching messages — multi-term queries rank messages matching more terms ' +
+        'first, otherwise newest-first — with id, subject, sender, date, tags, a ' +
         'body snippet, and attachment metadata including blobId. Use get_email ' +
         'for full bodies and recipients; call download_attachment directly from ' +
         'a hit when the attachment blobId is present.',

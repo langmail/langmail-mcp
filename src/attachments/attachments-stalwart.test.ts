@@ -29,6 +29,7 @@ import {
   emailGet,
   emailGetDetail,
   emailQuery,
+  emailQueryPerTerm,
   mailboxCreate,
   mailboxIdByRole,
   makeJmapLive,
@@ -264,6 +265,7 @@ live('attachments against live Stalwart — metadata, capability URL, blob strea
     searchDeps = {
       emailGet: (p) => emailGet({ ...p, apiUrl, authorization }),
       emailQuery: (p) => emailQuery({ ...p, apiUrl, authorization }),
+      emailQueryPerTerm: (p) => emailQueryPerTerm({ ...p, apiUrl, authorization }),
       resolveAccountId: () => Promise.resolve(accountId),
       resolveMailbox: () => Promise.resolve(null),
     }
@@ -320,6 +322,21 @@ live('attachments against live Stalwart — metadata, capability URL, blob strea
     })
     expect(download.isError).toBeUndefined()
     expect(download.content[0]?.text ?? '').toContain('invoice.pdf (application/pdf, 602 B)')
+  })
+
+  test('multi-term search ranks the message matching more terms first, with matched counts', async () => {
+    // "Invoice June text": the invoice message matches "Invoice"+"June" (2/3),
+    // the plain message ("Just text.") matches only "text" (1/3). Both were
+    // imported with the same receivedAt, so only ranking makes the order
+    // deterministic.
+    const result = await searchEmails(searchDeps, { args: { limit: 10, query: 'Invoice June text' }, token: TOKEN })
+    expect(result.isError).toBeUndefined()
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toContain(withAttachmentsId)
+    expect(txt).toContain(plainId)
+    expect(txt.indexOf(withAttachmentsId)).toBeLessThan(txt.indexOf(plainId))
+    expect(txt).toContain('matched: 2/3 terms')
+    expect(txt).toContain('matched: 1/3 terms')
   })
 
   test('download_attachment mints a URL whose GET streams back the exact fixture bytes', async () => {

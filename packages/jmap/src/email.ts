@@ -175,6 +175,38 @@ const buildFilter = (f: EmailQueryFilters): Record<string, unknown> => {
   return { conditions, operator: 'AND' }
 }
 
+export interface EmailQueryPerTermParams extends JmapCall {
+  accountId: string
+  // Scalar filters applied to every term's query; `text` is ignored here —
+  // each term becomes its own query.
+  filters: EmailQueryFilters
+  limit: number
+  terms: string[]
+}
+
+// One Email/query per term, batched into a single JMAP request. JMAP has no
+// relevance sort, so a caller that wants match-count ranking ("messages
+// hitting more terms first") needs to know which terms matched which
+// messages — an OR query collapses that information. Each per-term filter
+// ANDs the term with the scalar filters; each list is newest-first.
+export const emailQueryPerTerm = async (p: EmailQueryPerTermParams): Promise<string[][]> => {
+  const resp = await call(p, {
+    methodCalls: p.terms.map((term, i) => [
+      'Email/query',
+      {
+        accountId: p.accountId,
+        calculateTotal: false,
+        filter: buildFilter({ ...p.filters, text: [term] }),
+        limit: p.limit,
+        sort: [{ isAscending: false, property: 'receivedAt' }],
+      },
+      String(i),
+    ]),
+    using: USING,
+  })
+  return p.terms.map((_, i) => methodResponse<{ ids?: string[] }>(resp, 'Email/query', String(i)).ids ?? [])
+}
+
 export const emailQuery = async (p: EmailQueryParams): Promise<string[]> => {
   const resp = await call(p, {
     methodCalls: [

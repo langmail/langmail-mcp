@@ -98,11 +98,12 @@ CALDAV_BASE_URL=http://127.0.0.1:5232 CALDAV_USERNAME=test CALDAV_PASSWORD=test 
 
 Structured search over the authenticated user's mailbox. Combine free-text
 search (any-term OR match) with any of the optional filters below; at least
-one filter is required. Returns a token-frugal hit list (no bodies)
-newest-first — fetch a full message with `get_email`.
+one filter is required. Returns a token-frugal hit list (no bodies) — multi-term
+queries rank messages matching more terms first, otherwise newest-first — fetch
+a full message with `get_email`.
 
 Parameters (at least one of `query`, `after`, `before`, `from`, `keywords`, or `mailbox` is required):
-- `query`: string (optional) — free-text search over subject, body, and addresses (1–500 characters); terms are OR'd (any-term match), a double-quoted phrase requires all its words in the same field
+- `query`: string (optional) — free-text search over subject, body, and addresses (1–500 characters); terms are OR'd (any-term match, first 10 terms used) and messages matching more terms rank first (each hit shows `matched: X/N terms`), a double-quoted phrase requires all its words in the same field
 - `after`: string (optional) — only messages received on/after this UTC ISO-8601 timestamp (e.g. `2026-04-01T00:00:00Z`)
 - `before`: string (optional) — only messages received strictly before this UTC ISO-8601 timestamp
 - `from`: string (optional) — substring match on the sender name or address (1–200 characters)
@@ -111,8 +112,10 @@ Parameters (at least one of `query`, `after`, `before`, `from`, `keywords`, or `
 - `limit`: number (optional) — maximum results, 1–100 (default 20)
 
 Returns:
-- A list of matching messages newest-first, each with its id, subject, sender, date, and tags
-- A truncation note when the hit count equals `limit` — older matches may exist beyond the page
+- A list of matching messages, each with its id, subject, sender, date, and tags — multi-term
+  queries rank messages matching more terms first (with a `matched: X/N terms` line per hit),
+  otherwise newest-first
+- A truncation note when the result filled `limit` — more matches may exist beyond the page
 
 ### get_email
 

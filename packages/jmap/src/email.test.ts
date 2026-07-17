@@ -5,6 +5,7 @@ import {
   emailGet,
   emailGetDetail,
   emailQuery,
+  emailQueryPerTerm,
   emailSet,
   emailState,
   mailboxCreate,
@@ -213,6 +214,68 @@ describe('emailQuery', () => {
       })
     )
     expect(f).toHaveBeenCalled()
+  })
+})
+
+describe('emailQueryPerTerm', () => {
+  test('sends one Email/query per term in a single request, each AND-ing its term with the scalars', async () => {
+    const f = mock((_u: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}')
+      expect(body.methodCalls).toHaveLength(2)
+      expect(body.methodCalls[0][0]).toBe('Email/query')
+      expect(body.methodCalls[0][1].filter).toEqual({
+        conditions: [{ text: 'supabase' }, { after: '2026-04-17T00:00:00Z' }],
+        operator: 'AND',
+      })
+      expect(body.methodCalls[0][2]).toBe('0')
+      expect(body.methodCalls[1][1].filter).toEqual({
+        conditions: [{ text: 'invoice' }, { after: '2026-04-17T00:00:00Z' }],
+        operator: 'AND',
+      })
+      expect(body.methodCalls[1][2]).toBe('1')
+      // Each per-term query keeps the newest-first sort and the limit.
+      expect(body.methodCalls[0][1].sort).toEqual([{ isAscending: false, property: 'receivedAt' }])
+      expect(body.methodCalls[0][1].limit).toBe(20)
+      return Promise.resolve(
+        jmapResponse([
+          ['Email/query', { ids: ['e1', 'e2'] }, '0'],
+          ['Email/query', { ids: ['e2'] }, '1'],
+        ])
+      )
+    })
+    const lists = await withFetch(f, () =>
+      emailQueryPerTerm({
+        accountId: 'acct',
+        apiUrl: API,
+        authorization: 'Bearer tok',
+        filters: { after: '2026-04-17T00:00:00Z' },
+        limit: 20,
+        terms: ['supabase', 'invoice'],
+      })
+    )
+    expect(lists).toEqual([['e1', 'e2'], ['e2']])
+  })
+
+  test('a missing ids field in one response yields an empty list for that term', async () => {
+    const f = mock(() =>
+      Promise.resolve(
+        jmapResponse([
+          ['Email/query', {}, '0'],
+          ['Email/query', { ids: ['e9'] }, '1'],
+        ])
+      )
+    )
+    const lists = await withFetch(f, () =>
+      emailQueryPerTerm({
+        accountId: 'acct',
+        apiUrl: API,
+        authorization: 'Bearer tok',
+        filters: {},
+        limit: 5,
+        terms: ['alpha', 'bravo'],
+      })
+    )
+    expect(lists).toEqual([[], ['e9']])
   })
 })
 

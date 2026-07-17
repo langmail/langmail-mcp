@@ -1,20 +1,30 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type EmailQueryParams, type EmailRecord } from '@langmail/jmap'
+import { type EmailQueryParams, type EmailQueryPerTermParams, type EmailRecord } from '@langmail/jmap'
 
 import { queryTerms, searchEmails, searchEmailsInput } from './search-emails.ts'
+
+// Distinguishes per-hit "matched: X/N terms" lines from the "N message(s)
+// matched:" header.
+const MATCHED_LINE_RE = /matched: \d/
 
 const fakeDeps = (opts: {
   accountId?: string
   mailboxByName?: (name: string) => string | null
   queryIds?: string[]
+  perTermIds?: string[][]
   emails?: EmailRecord[]
   onQuery?: (p: EmailQueryParams) => void
+  onPerTermQuery?: (p: EmailQueryPerTermParams) => void
 }) => ({
   emailGet: () => Promise.resolve(opts.emails ?? []),
   emailQuery: (p: EmailQueryParams) => {
     opts.onQuery?.(p)
     return Promise.resolve(opts.queryIds ?? [])
+  },
+  emailQueryPerTerm: (p: EmailQueryPerTermParams) => {
+    opts.onPerTermQuery?.(p)
+    return Promise.resolve(opts.perTermIds ?? p.terms.map(() => []))
   },
   resolveAccountId: () => Promise.resolve(opts.accountId ?? 'acct'),
   resolveMailbox: (_authorization: string, name: string) =>
@@ -209,32 +219,132 @@ describe('searchEmails', () => {
     expect(seen?.filters).toEqual({ after: '2026-04-01T00:00:00Z', from: 'amazon', text: ['invoice'] })
   })
 
-  test('splits a multi-word query into individual OR terms for the JMAP layer', async () => {
-    let seen: EmailQueryParams | undefined
+  test('routes a multi-word query through per-term queries with the scalar filters', async () => {
+    let seen: EmailQueryPerTermParams | undefined
     await searchEmails(
       fakeDeps({
-        onQuery: (p) => {
+        onPerTermQuery: (p) => {
           seen = p
         },
-        queryIds: [],
       }),
-      { args: { limit: 20, query: 'Supabase invoice receipt' }, token: 'tok' }
+      {
+        args: { after: '2026-04-17T00:00:00Z', limit: 20, query: 'Supabase invoice receipt' },
+        token: 'tok',
+      }
     )
-    expect(seen?.filters).toEqual({ text: ['Supabase', 'invoice', 'receipt'] })
+    expect(seen?.terms).toEqual(['Supabase', 'invoice', 'receipt'])
+    expect(seen?.filters).toEqual({ after: '2026-04-17T00:00:00Z' })
   })
 
-  test('keeps a double-quoted phrase as a single term', async () => {
-    let seen: EmailQueryParams | undefined
+  test('keeps a double-quoted phrase as a single term in the per-term fan-out', async () => {
+    let seen: EmailQueryPerTermParams | undefined
     await searchEmails(
       fakeDeps({
-        onQuery: (p) => {
+        onPerTermQuery: (p) => {
           seen = p
         },
-        queryIds: [],
       }),
       { args: { limit: 20, query: '"Google Workspace" invoice' }, token: 'tok' }
     )
-    expect(seen?.filters).toEqual({ text: ['Google Workspace', 'invoice'] })
+    expect(seen?.terms).toEqual(['Google Workspace', 'invoice'])
+  })
+
+  test('ranks messages matching more terms first and renders matched counts', async () => {
+    // 'both' matches two term lists, 'single' only one — but 'single' is
+    // newer. Match count must beat recency.
+    const emails: EmailRecord[] = [
+      { id: 'single', receivedAt: '2026-07-10T00:00:00Z', subject: 'newer single-term hit' },
+      { id: 'both', receivedAt: '2026-06-01T00:00:00Z', subject: 'older double-term hit' },
+    ]
+    const result = await searchEmails(
+      fakeDeps({
+        emails,
+        perTermIds: [['single', 'both'], ['both'], []],
+      }),
+      { args: { limit: 20, query: 'alpha bravo charlie' }, token: 'tok' }
+    )
+    const txt = result.content[0]?.text ?? ''
+    expect(txt.indexOf('older double-term hit')).toBeLessThan(txt.indexOf('newer single-term hit'))
+    expect(txt).toContain('1. older double-term hit')
+    expect(txt).toContain('matched: 2/3 terms')
+    expect(txt).toContain('matched: 1/3 terms')
+  })
+
+  test('ties on match count fall back to newest-first', async () => {
+    const emails: EmailRecord[] = [
+      { id: 'old', receivedAt: '2026-01-01T00:00:00Z', subject: 'old tie' },
+      { id: 'new', receivedAt: '2026-07-01T00:00:00Z', subject: 'new tie' },
+    ]
+    const result = await searchEmails(
+      fakeDeps({
+        emails,
+        perTermIds: [
+          ['old', 'new'],
+          ['new', 'old'],
+        ],
+      }),
+      { args: { limit: 20, query: 'alpha bravo' }, token: 'tok' }
+    )
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toContain('1. new tie')
+    expect(txt).toContain('2. old tie')
+  })
+
+  test('caps ranked hits at the limit and flags truncation', async () => {
+    const emails: EmailRecord[] = [
+      { id: 'a', receivedAt: '2026-06-03T00:00:00Z', subject: 'hit a' },
+      { id: 'b', receivedAt: '2026-06-02T00:00:00Z', subject: 'hit b' },
+    ]
+    const result = await searchEmails(
+      fakeDeps({
+        emails,
+        perTermIds: [
+          ['a', 'b'],
+          ['b', 'c'],
+        ],
+      }),
+      { args: { limit: 2, query: 'alpha bravo' }, token: 'tok' }
+    )
+    const txt = result.content[0]?.text ?? ''
+    // 'b' matched both terms and ranks first; 'c' fell past the limit.
+    expect(txt).toContain('1. hit b')
+    expect(txt).toContain('hit the limit of 2')
+  })
+
+  test('caps the fan-out at 10 terms and widens the per-term window', async () => {
+    let seen: EmailQueryPerTermParams | undefined
+    await searchEmails(
+      fakeDeps({
+        onPerTermQuery: (p) => {
+          seen = p
+        },
+      }),
+      { args: { limit: 20, query: 't1 t2 t3 t4 t5 t6 t7 t8 t9 t10 t11 t12' }, token: 'tok' }
+    )
+    expect(seen?.terms).toEqual(['t1', 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9', 't10'])
+    expect(seen?.limit).toBe(60)
+  })
+
+  test('multi-term query with no hits in any term reports no messages', async () => {
+    const result = await searchEmails(fakeDeps({ perTermIds: [[], []] }), {
+      args: { limit: 20, query: 'alpha bravo' },
+      token: 'tok',
+    })
+    const txt = result.content[0]?.text ?? ''
+    expect(txt.toLowerCase()).toContain('no messages')
+  })
+
+  test('single-term queries keep plain newest-first output without matched lines', async () => {
+    const result = await searchEmails(
+      fakeDeps({
+        emails: [{ id: 'e1', receivedAt: '2026-06-01T00:00:00Z', subject: 'only hit' }],
+        queryIds: ['e1'],
+      }),
+      { args: { limit: 20, query: 'invoice' }, token: 'tok' }
+    )
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toContain('only hit')
+    expect(txt).not.toMatch(MATCHED_LINE_RE)
   })
 
   test('preserves the query id order (trusts the query sort, does not re-sort by receivedAt)', async () => {
@@ -311,6 +421,7 @@ describe('searchEmails', () => {
           seenMailboxId = p.filters.mailboxId
           return Promise.resolve([])
         },
+        emailQueryPerTerm: () => Promise.resolve([]),
         resolveAccountId: () => Promise.resolve('acct'),
         resolveMailbox: (_authorization, name) => Promise.resolve(name === 'Inbox' ? 'm1' : null),
       },
