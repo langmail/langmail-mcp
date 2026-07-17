@@ -1,5 +1,9 @@
 import { describe, expect, mock, test } from 'bun:test'
 
+import { type JmapLive } from '@langmail/jmap'
+
+import { createAttachmentDownload } from './attachments/download.ts'
+import { createTicketStore } from './attachments/tickets.ts'
 import { TokenCache } from './auth/token-cache.ts'
 import { createRoutes } from './handler.ts'
 
@@ -121,5 +125,110 @@ describe('routes', () => {
     expect(res.status).toBe(503)
     const body = (await res.json()) as { status: string }
     expect(body.status).toBe('not_ready')
+  })
+})
+
+describe('GET /attachments/:token', () => {
+  const live: JmapLive = {
+    getSession: () =>
+      Promise.resolve({
+        apiUrl: `${STALWART}/jmap/`,
+        downloadUrl: `${STALWART}/jmap/download/{accountId}/{blobId}/{name}?accept={type}`,
+        primaryAccounts: { 'urn:ietf:params:jmap:mail': 'acct' },
+      }),
+    resolveAccountId: () => Promise.resolve('acct'),
+  }
+
+  const makeAttachmentRoutes = () => {
+    const tickets = createTicketStore()
+    const routes = createRoutes({
+      attachmentDownload: createAttachmentDownload(live, tickets),
+      authIssuer: AUTH,
+      publicUrl: PUBLIC,
+      stalwartUrl: STALWART,
+    })
+    return { routes, tickets }
+  }
+
+  test('streams the Stalwart blob through with download headers, no bearer required', async () => {
+    const { routes, tickets } = makeAttachmentRoutes()
+    const token = tickets.mint({
+      accountId: 'acct',
+      authorization: 'Bearer stalwart-tok',
+      blobId: 'Gd41d8cd',
+      name: 'invoice.pdf',
+      type: 'application/pdf',
+    })
+    const pdf = '%PDF-1.4 fake'
+    const f = mock((url: string, init?: RequestInit) => {
+      // The stored bearer (not any client credential) is forwarded upstream.
+      expect(url).toBe(`${STALWART}/jmap/download/acct/Gd41d8cd/invoice.pdf?accept=application%2Fpdf`)
+      expect((init?.headers as Record<string, string>)?.authorization).toBe('Bearer stalwart-tok')
+      return Promise.resolve(
+        new Response(pdf, {
+          headers: { 'content-length': String(pdf.length), 'content-type': 'application/pdf' },
+          status: 200,
+        })
+      )
+    })
+    const res = await withFetch(f, () => routes.fetch(new Request(`${PUBLIC}/attachments/${token}`)))
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('application/pdf')
+    expect(res.headers.get('content-disposition')).toBe('attachment; filename="invoice.pdf"')
+    expect(res.headers.get('content-length')).toBe(String(pdf.length))
+    expect(await res.text()).toBe(pdf)
+  })
+
+  test('sanitizes hostile filenames in content-disposition', async () => {
+    const { routes, tickets } = makeAttachmentRoutes()
+    const token = tickets.mint({
+      accountId: 'acct',
+      authorization: 'Bearer t',
+      blobId: 'b1',
+      name: 'evil"\r\nx-injected: 1.pdf',
+      type: 'application/pdf',
+    })
+    const f = mock(() => Promise.resolve(new Response('x', { status: 200 })))
+    const res = await withFetch(f, () => routes.fetch(new Request(`${PUBLIC}/attachments/${token}`)))
+    expect(res.headers.get('content-disposition')).toBe('attachment; filename="evilx-injected: 1.pdf"')
+  })
+
+  test('unknown or tampered tokens return a plain 404 without touching Stalwart', async () => {
+    const { routes } = makeAttachmentRoutes()
+    const f = mock(() => {
+      throw new Error('must not reach upstream')
+    })
+    const res = await withFetch(f, () => routes.fetch(new Request(`${PUBLIC}/attachments/garbage`)))
+    expect(res.status).toBe(404)
+    expect(f).not.toHaveBeenCalled()
+  })
+
+  test('non-GET methods and nested paths are 404', async () => {
+    const { routes, tickets } = makeAttachmentRoutes()
+    const token = tickets.mint({
+      accountId: 'acct',
+      authorization: 'Bearer t',
+      blobId: 'b1',
+      name: 'x.pdf',
+      type: 'application/pdf',
+    })
+    expect((await routes.fetch(new Request(`${PUBLIC}/attachments/${token}`, { method: 'POST' }))).status).toBe(404)
+    expect((await routes.fetch(new Request(`${PUBLIC}/attachments/${token}/extra`))).status).toBe(404)
+    expect((await routes.fetch(new Request(`${PUBLIC}/attachments/`))).status).toBe(404)
+  })
+
+  test('an upstream failure surfaces as 502, never the bearer', async () => {
+    const { routes, tickets } = makeAttachmentRoutes()
+    const token = tickets.mint({
+      accountId: 'acct',
+      authorization: 'Bearer expired',
+      blobId: 'b1',
+      name: 'x.pdf',
+      type: 'application/pdf',
+    })
+    const f = mock(() => Promise.resolve(new Response('unauthorized', { status: 401 })))
+    const res = await withFetch(f, () => routes.fetch(new Request(`${PUBLIC}/attachments/${token}`)))
+    expect(res.status).toBe(502)
+    expect(await res.text()).not.toContain('expired')
   })
 })

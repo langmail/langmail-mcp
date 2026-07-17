@@ -184,6 +184,7 @@ describe('emailGet', () => {
         'mailboxIds',
         'keywords',
         'threadId',
+        'hasAttachment',
       ])
       return Promise.resolve(
         jmapResponse([
@@ -240,6 +241,11 @@ describe('emailGetDetail', () => {
       expect(args.properties).toContain('bodyValues')
       expect(args.properties).toContain('textBody')
       expect(args.properties).toContain('to')
+      expect(args.properties).toContain('attachments')
+      expect(args.properties).toContain('hasAttachment')
+      // Parts come back minimal and explicit: just enough to list files,
+      // classify cid-inline parts, and hand back the blobId handle.
+      expect(args.bodyProperties).toEqual(['partId', 'blobId', 'name', 'type', 'size', 'disposition', 'cid'])
       return Promise.resolve(
         jmapResponse([
           [
@@ -247,8 +253,20 @@ describe('emailGetDetail', () => {
             {
               list: [
                 {
+                  attachments: [
+                    {
+                      blobId: 'Gd41d8cd',
+                      cid: null,
+                      disposition: 'attachment',
+                      name: 'invoice.pdf',
+                      partId: '2',
+                      size: 186_777,
+                      type: 'application/pdf',
+                    },
+                  ],
                   bodyValues: { '1': { value: 'hello body' } },
                   from: [{ email: 'a@x' }],
+                  hasAttachment: true,
                   id: 'e1',
                   subject: 'Test',
                   textBody: [{ partId: '1', type: 'text/plain' }],
@@ -271,6 +289,9 @@ describe('emailGetDetail', () => {
       })
     )
     expect(out[0]?.bodyValues?.['1']?.value).toBe('hello body')
+    expect(out[0]?.hasAttachment).toBe(true)
+    expect(out[0]?.attachments?.[0]?.blobId).toBe('Gd41d8cd')
+    expect(out[0]?.attachments?.[0]?.size).toBe(186_777)
   })
 })
 

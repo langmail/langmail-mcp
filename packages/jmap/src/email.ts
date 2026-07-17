@@ -30,6 +30,8 @@ const EMAIL_PROPERTIES = [
   'mailboxIds',
   'keywords',
   'threadId',
+  // Cheap boolean so list views can flag hits worth opening for their files.
+  'hasAttachment',
 ] as const
 
 // Richer properties for get_email and the poller's analysis input:
@@ -46,7 +48,14 @@ const EMAIL_DETAIL_PROPERTIES = [
   'textBody',
   'bodyValues',
   'threadId',
+  'attachments',
+  'hasAttachment',
 ] as const
+
+// Body-part properties requested alongside the detail fetch: enough to list
+// attachments (name/type/size), classify cid-inline parts, and hand back the
+// blobId retrieval handle — explicit so parts come back minimal.
+const EMAIL_BODY_PROPERTIES = ['partId', 'blobId', 'name', 'type', 'size', 'disposition', 'cid'] as const
 
 interface JmapCall {
   apiUrl: string
@@ -222,6 +231,7 @@ export const emailGetDetail = async (p: EmailGetDetailParams): Promise<EmailDeta
         'Email/get',
         {
           accountId: p.accountId,
+          bodyProperties: [...EMAIL_BODY_PROPERTIES],
           // Populate bodyValues for the text parts, capped so a huge message
           // can't blow the token budget (Stalwart truncates at this size).
           fetchTextBodyValues: true,

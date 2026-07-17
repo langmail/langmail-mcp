@@ -151,8 +151,9 @@ export const registerSearchEmails = (
         "Search the authenticated user's mailbox. Combine free-text (query) with " +
         'optional filters: date range (after/before), sender (from), category ' +
         'labels (keywords), and mailbox. At least one filter is required. Returns ' +
-        'matching messages newest-first with id, subject, sender, date, and tags. ' +
-        'Fetch a full body with get_email.',
+        'matching messages newest-first with id, subject, sender, date, and tags; ' +
+        'hits carrying files show "attachments: yes". Fetch a full body (and the ' +
+        'attachment list) with get_email.',
       inputSchema: searchEmailsShape,
       title: 'Search emails',
     },

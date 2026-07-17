@@ -38,5 +38,20 @@ export const formatEmailLine = (idx: number, e: EmailRecord, opts: EmailLineOpti
   if (tags.length > 0) {
     lines.push(`   tags: ${tags.join(', ')}`)
   }
+  // Boolean only at list level (token-frugal); names/sizes are get_email's job.
+  if (e.hasAttachment) {
+    lines.push('   attachments: yes')
+  }
   return lines.join('\n')
+}
+
+// Human-readable size for attachment listings, e.g. "182.4 KB".
+export const formatSize = (bytes: number): string => {
+  if (bytes < 1024) {
+    return `${bytes} B`
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }

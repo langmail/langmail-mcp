@@ -6,6 +6,9 @@
 
 export interface JmapSession {
   apiUrl: string
+  // RFC 8620 §6.2 URI template ({accountId}/{blobId}/{name}/{type}) for
+  // fetching raw blob bytes — attachments are downloaded through this.
+  downloadUrl: string
   primaryAccounts: Record<string, string>
 }
 
@@ -28,6 +31,7 @@ export interface EmailAddress {
 // matched); `threadId` lets a hit be expanded into its whole thread.
 export interface EmailRecord {
   from?: EmailAddress[] | null
+  hasAttachment?: boolean | null
   id: string
   keywords?: Record<string, boolean> | null
   mailboxIds?: Record<string, boolean> | null
@@ -37,9 +41,16 @@ export interface EmailRecord {
   threadId?: string | null
 }
 
-// A single body part reference (JMAP EmailBodyPart, narrowed).
+// A single body part reference (JMAP EmailBodyPart, narrowed). The blob
+// fields (blobId/name/size/disposition/cid) are populated for attachment
+// parts; `blobId` is the retrieval handle for blob download.
 export interface EmailBodyPart {
+  blobId?: string | null
+  cid?: string | null
+  disposition?: string | null
+  name?: string | null
   partId?: string | null
+  size?: number | null
   type?: string | null
 }
 
@@ -53,6 +64,9 @@ export interface EmailBodyValue {
 // Richer shape returned by get_email: recipients plus the text body.
 // `messageId` is the parsed RFC 5322 Message-ID header (a list per RFC 8621).
 export interface EmailDetailRecord extends EmailRecord {
+  // RFC 8621 §4.1.4 computed property: body parts outside the rendered
+  // text/html body — the message's attachments (including cid-inline ones).
+  attachments?: EmailBodyPart[] | null
   bodyValues?: Record<string, EmailBodyValue> | null
   cc?: EmailAddress[] | null
   messageId?: string[] | null

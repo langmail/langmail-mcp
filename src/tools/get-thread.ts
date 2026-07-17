@@ -70,7 +70,8 @@ export const registerGetThread = (server: McpServer, deps: GetThreadDeps, getTok
     {
       description:
         'List every message in the same thread as a given message id, oldest-first ' +
-        '(id, subject, sender, date, tags). Fetch a body with get_email.',
+        '(id, subject, sender, date, tags; hits carrying files show ' +
+        '"attachments: yes"). Fetch a body with get_email.',
       inputSchema: getThreadShape,
       title: 'Get thread',
     },

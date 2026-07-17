@@ -12,6 +12,10 @@ import { initErrorTracking } from '@langmail/logger/error-tracking'
 
 initErrorTracking('mcp')
 
+import { makeJmapLive } from '@langmail/jmap'
+
+import { createAttachmentDownload } from './attachments/download.ts'
+import { createTicketStore } from './attachments/tickets.ts'
 import { createRoutes } from './handler.ts'
 import { createMcpHandler } from './mcp/handler.ts'
 
@@ -29,9 +33,16 @@ const STALWART_URL = (process.env.STALWART_PUBLIC_URL ?? 'https://mail.langmail.
 const AUTH_URL = (process.env.AUTH_PUBLIC_URL ?? 'https://auth.langmail.me').replace(TRAILING_SLASHES_RE, '')
 const AUTH_ISSUER = `${AUTH_URL}/api/auth`
 
+// One JMAP session cache + one ticket store shared between the MCP tool
+// surface (download_attachment mints) and the plain-HTTP download route
+// (GET /attachments/:token redeems).
+const jmapLive = makeJmapLive(STALWART_URL)
+const tickets = createTicketStore()
+
 const routes = createRoutes({
+  attachmentDownload: createAttachmentDownload(jmapLive, tickets),
   authIssuer: AUTH_ISSUER,
-  mcpHandler: createMcpHandler({ stalwartUrl: STALWART_URL }),
+  mcpHandler: createMcpHandler({ live: jmapLive, publicUrl: PUBLIC_URL, stalwartUrl: STALWART_URL, tickets }),
   publicUrl: PUBLIC_URL,
   stalwartUrl: STALWART_URL,
 })
