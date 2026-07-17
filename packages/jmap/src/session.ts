@@ -39,12 +39,16 @@ export const fetchSession = async (stalwartBase: string, authorization: string):
   }
   const body = (await res.json()) as Record<string, unknown>
   const { apiUrl } = body
+  const { downloadUrl } = body
   const { primaryAccounts } = body
-  if (typeof apiUrl !== 'string' || typeof primaryAccounts !== 'object') {
+  // downloadUrl is mandatory in the session resource (RFC 8620 §2) and
+  // Stalwart always sends it — a session without it is malformed.
+  if (typeof apiUrl !== 'string' || typeof downloadUrl !== 'string' || typeof primaryAccounts !== 'object') {
     throw new JmapError(200, 'malformed jmap session response')
   }
   return {
     apiUrl,
+    downloadUrl,
     primaryAccounts: primaryAccounts as Record<string, string>,
   }
 }

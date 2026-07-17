@@ -48,6 +48,35 @@ describe('getThread', () => {
     expect(txt).toContain('id: e2')
   })
 
+  test('renders preview snippets and attachment metadata in thread hits', async () => {
+    const result = await getThread(
+      deps({
+        emails: [
+          {
+            attachments: [
+              {
+                blobId: 'Ginvoice',
+                disposition: 'attachment',
+                name: 'invoice.pdf',
+                size: 35_738,
+                type: 'application/pdf',
+              },
+            ],
+            hasAttachment: true,
+            id: 'e1',
+            preview: 'Invoice No. IWGKCS-00018 · $34.86',
+            subject: 'Invoice',
+          },
+        ],
+        ids: ['e1'],
+      }),
+      { args: { id: 'e1' }, token: 'tok' }
+    )
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toContain('snippet: Invoice No. IWGKCS-00018 · $34.86')
+    expect(txt).toContain('invoice.pdf — application/pdf, 34.9 KB — blobId: Ginvoice')
+  })
+
   test('returns an error result when the thread is empty/unknown', async () => {
     const result = await getThread(deps({ ids: [] }), { args: { id: 'nope' }, token: 'tok' })
     expect(result.isError).toBe(true)

@@ -12,8 +12,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 
-import { makeJmapLive } from '@langmail/jmap'
+import { type JmapLive } from '@langmail/jmap'
 
+import { type TicketStore } from '../attachments/tickets.ts'
 import { type AuthContext } from '../auth/middleware.ts'
 import { makeLiveDeps as makeCreateCalendarDeps, registerCreateCalendar } from '../tools/create-calendar.ts'
 import {
@@ -24,6 +25,7 @@ import {
   makeLiveDeps as makeDeleteCalendarEventDeps,
   registerDeleteCalendarEvent,
 } from '../tools/delete-calendar-event.ts'
+import { makeLiveDeps as makeDownloadAttachmentDeps, registerDownloadAttachment } from '../tools/download-attachment.ts'
 import { makeLiveDeps as makeGetEmailDeps, registerGetEmail } from '../tools/get-email.ts'
 import { makeLiveDeps as makeGetThreadDeps, registerGetThread } from '../tools/get-thread.ts'
 import {
@@ -39,16 +41,22 @@ import {
 } from '../tools/update-calendar-event.ts'
 
 export interface McpHandlerConfig {
+  // Shared with the /attachments/:token route (handler.ts) so a bearer's
+  // JMAP session is resolved once, not once per surface.
+  live: JmapLive
+  // Base URL the download_attachment tool mints links under.
+  publicUrl: string
   stalwartUrl: string
+  // Shared with the /attachments/:token route: the tool mints, the route redeems.
+  tickets: TicketStore
 }
 
 export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: AuthContext) => Promise<Response>) => {
-  // Shared across requests AND across the JMAP tools: a per-token session
-  // cache so a bearer's JMAP session is resolved once, not once per tool.
-  const jmapLive = makeJmapLive(cfg.stalwartUrl)
+  const jmapLive = cfg.live
   const searchEmailsDeps = makeSearchEmailsDeps(jmapLive)
   const getEmailDeps = makeGetEmailDeps(jmapLive)
   const getThreadDeps = makeGetThreadDeps(jmapLive)
+  const downloadAttachmentDeps = makeDownloadAttachmentDeps(jmapLive, cfg.tickets, cfg.publicUrl)
   // CalDAV tools discover against the same Stalwart base; tsdav follows
   // /.well-known/caldav to /dav/cal.
   const caldavCfg = { serverUrl: cfg.stalwartUrl }
@@ -68,6 +76,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     registerSearchEmails(server, searchEmailsDeps, () => ctx.token)
     registerGetEmail(server, getEmailDeps, () => ctx.token)
     registerGetThread(server, getThreadDeps, () => ctx.token)
+    registerDownloadAttachment(server, downloadAttachmentDeps, () => ctx.token)
     registerListCalendars(server, listCalendarsDeps, () => ctx.token)
     registerCreateCalendar(server, createCalendarDeps, () => ctx.token)
     registerListCalendarEvents(server, listCalendarEventsDeps, () => ctx.token)

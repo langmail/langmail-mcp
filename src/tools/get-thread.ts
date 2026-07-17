@@ -1,6 +1,6 @@
 // get_thread tool — list every message in the same thread as a given message
-// id, oldest-first, in the lightweight search-result shape. Bodies are fetched
-// per-message via get_email.
+// id, oldest-first, in the lightweight search-result shape. Full bodies are
+// fetched per-message via get_email.
 
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
@@ -70,7 +70,9 @@ export const registerGetThread = (server: McpServer, deps: GetThreadDeps, getTok
     {
       description:
         'List every message in the same thread as a given message id, oldest-first ' +
-        '(id, subject, sender, date, tags). Fetch a body with get_email.',
+        'with id, subject, sender, date, tags, a body snippet, and attachment ' +
+        'metadata including blobId. Use get_email for full bodies and recipients; ' +
+        'call download_attachment directly from a hit when the attachment blobId is present.',
       inputSchema: getThreadShape,
       title: 'Get thread',
     },
