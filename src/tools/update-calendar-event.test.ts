@@ -32,6 +32,7 @@ const storedEvent = (over: Partial<CalendarObject> = {}): CalendarObject => ({
     organizer: 'host@langmail.me',
     sequence: 2,
     start: new Date('2026-06-12T10:00:00Z'),
+    timeZone: 'UTC',
     title: 'Sync',
     uid: UID,
   }),
@@ -50,6 +51,7 @@ const recurringStored = (over: Partial<CalendarObject> = {}): CalendarObject => 
     rrule: 'FREQ=WEEKLY;BYDAY=TU',
     sequence: 2,
     start: new Date('2026-06-16T10:00:00Z'),
+    timeZone: 'UTC',
     title: 'Weekly Sync',
     uid: UID,
   }),
@@ -69,6 +71,7 @@ const makeDeps = (acc: DiscoveredAccount, existing: CalendarObject | null, captu
     capturedState.fetched.push(p)
     return Promise.resolve(existing)
   },
+  getAccountTimeZone: () => Promise.resolve(null),
   updateEvent: (p: UpdateEventParams) => {
     capturedState.updated.push(p)
     return Promise.resolve()
@@ -89,6 +92,14 @@ describe('updateCalendarEventInput schema', () => {
 
   test('accepts a valid edit', () => {
     expect(updateCalendarEventInput.safeParse(args()).success).toBe(true)
+  })
+
+  test('accepts naive start/end with a timezone', () => {
+    expect(
+      updateCalendarEventInput.safeParse(
+        args({ end: '2026-07-20T12:30:00', start: '2026-07-20T12:00:00', timeZone: 'Europe/Berlin' })
+      ).success
+    ).toBe(true)
   })
 
   test('accepts an optional recurrenceId', () => {
@@ -135,6 +146,45 @@ describe('updateCalendarEvent', () => {
     expect(ical).toContain('SEQUENCE:3')
   })
 
+  test('uses explicit timeZone as wall-clock authority on full updates', async () => {
+    const cap = captured()
+    await updateCalendarEvent(makeDeps(account(), storedEvent(), cap), {
+      args: args({
+        end: '2026-07-20T12:30:00+02:00',
+        start: '2026-07-20T12:00:00+02:00',
+        timeZone: 'America/New_York',
+      }),
+      token: 'tok',
+    })
+
+    const ical = (cap.updated[0]?.ical ?? '').replace(/\r\n /gu, '')
+    expect(ical).toContain('DTSTART;TZID=America/New_York:20260720T120000')
+    expect(ical).toContain('DTEND;TZID=America/New_York:20260720T123000')
+  })
+
+  test('keeps the stored event timezone when no explicit timezone is passed', async () => {
+    const cap = captured()
+    const stored = storedEvent({
+      data: buildInvite({
+        attendees: ['guest@example.com'],
+        end: new Date('2026-07-20T10:30:00Z'),
+        organizer: 'host@langmail.me',
+        sequence: 2,
+        start: new Date('2026-07-20T10:00:00Z'),
+        timeZone: 'Europe/Berlin',
+        title: 'Sync',
+        uid: UID,
+      }),
+    })
+    await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: args({ end: '2026-07-20T13:30:00', start: '2026-07-20T13:00:00' }),
+      token: 'tok',
+    })
+
+    const ical = (cap.updated[0]?.ical ?? '').replace(/\r\n /gu, '')
+    expect(ical).toContain('DTSTART;TZID=Europe/Berlin:20260720T130000')
+  })
+
   test('collapses a series to a one-off when recurrence is omitted', async () => {
     const cap = captured()
     // The stored event is genuinely recurring, so this exercises the collapse —
@@ -147,6 +197,7 @@ describe('updateCalendarEvent', () => {
         rrule: 'FREQ=WEEKLY;BYDAY=TH',
         sequence: 2,
         start: new Date('2026-06-12T10:00:00Z'),
+        timeZone: 'UTC',
         title: 'Sync',
         uid: UID,
       }),
@@ -198,6 +249,7 @@ describe('updateCalendarEvent', () => {
         organizer: 'old-alias@langmail.me',
         sequence: 2,
         start: new Date('2026-06-12T10:00:00Z'),
+        timeZone: 'UTC',
         title: 'Sync',
         uid: UID,
       }),
@@ -271,6 +323,7 @@ describe('updateCalendarEvent — single occurrence (recurrenceId)', () => {
         rrule: 'FREQ=WEEKLY;BYDAY=TU',
         sequence: 2,
         start: new Date('2026-06-16T10:00:00Z'),
+        timeZone: 'UTC',
         title: 'Weekly Sync',
         uid: UID,
       }),
@@ -314,6 +367,7 @@ describe('updateCalendarEvent — single occurrence (recurrenceId)', () => {
         rrule: 'FREQ=WEEKLY;BYDAY=TU;',
         sequence: 2,
         start: new Date('2026-06-16T10:00:00Z'),
+        timeZone: 'UTC',
         title: 'Weekly Sync',
         uid: UID,
       }),

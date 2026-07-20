@@ -20,6 +20,7 @@ const event = (uid: string, title: string, start: string, end: string): Calendar
     end: new Date(end),
     organizer: 'host@langmail.me',
     start: new Date(start),
+    timeZone: 'UTC',
     title,
     uid,
   }),
@@ -58,6 +59,26 @@ describe('listCalendarEvents', () => {
     expect(txt).toContain('uid: later@langmail.me')
     // Sorted ascending: "Early" appears before "Later".
     expect(txt.indexOf('Early')).toBeLessThan(txt.indexOf('Later'))
+  })
+
+  test('lists TZID-qualified events with their timezone', async () => {
+    const object: CalendarObject = {
+      data: buildInvite({
+        attendees: ['guest@example.com'],
+        end: new Date('2026-07-20T10:30:00Z'),
+        organizer: 'host@langmail.me',
+        start: new Date('2026-07-20T10:00:00Z'),
+        timeZone: 'Europe/Berlin',
+        title: 'Berlin Lunch',
+        uid: 'berlin@langmail.me',
+      }),
+      url: `${CAL}berlin.ics`,
+    }
+
+    const result = await listCalendarEvents(makeDeps(account(), [object]), { args: {}, token: 'tok' })
+
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toContain('when: 2026-07-20T12:00:00 Europe/Berlin → 2026-07-20T12:30:00 Europe/Berlin')
   })
 
   test('passes a time range through when both bounds are given', async () => {

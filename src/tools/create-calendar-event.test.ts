@@ -21,6 +21,7 @@ const args = (over: Partial<CreateCalendarEventArgs> = {}): CreateCalendarEventA
 
 const makeDeps = (acc: DiscoveredAccount, captured: PutEventParams[] = []) => ({
   discover: () => Promise.resolve(acc),
+  getAccountTimeZone: () => Promise.resolve(null),
   putEvent: (p: PutEventParams) => {
     captured.push(p)
     return Promise.resolve()
@@ -42,6 +43,18 @@ describe('createCalendarEventInput schema', () => {
 
   test('accepts a valid event', () => {
     expect(createCalendarEventInput.safeParse(args()).success).toBe(true)
+  })
+
+  test('accepts naive datetimes and an optional IANA timezone', () => {
+    expect(
+      createCalendarEventInput.safeParse(
+        args({ end: '2026-07-20T12:30:00', start: '2026-07-20T12:00:00', timeZone: 'Europe/Berlin' })
+      ).success
+    ).toBe(true)
+  })
+
+  test('rejects an invalid timezone', () => {
+    expect(createCalendarEventInput.safeParse(args({ timeZone: 'Mars/Base' })).success).toBe(false)
   })
 
   test('accepts a raw RRULE recurrence', () => {
@@ -94,6 +107,54 @@ describe('createCalendarEvent', () => {
     const ical = (captured[0]?.ical ?? '').replace(/\r\n /gu, '')
     expect(ical).toContain('RRULE:FREQ=WEEKLY;BYDAY=TH')
     expect(result.content[0]?.text).toContain('Recurring event')
+  })
+
+  test('uses explicit timeZone as wall-clock authority even when offsets are present', async () => {
+    const captured: PutEventParams[] = []
+    await createCalendarEvent(makeDeps(account(), captured), {
+      args: args({
+        end: '2026-07-20T12:30:00+02:00',
+        start: '2026-07-20T12:00:00+02:00',
+        timeZone: 'America/New_York',
+      }),
+      token: 'tok',
+    })
+
+    const ical = (captured[0]?.ical ?? '').replace(/\r\n /gu, '')
+    expect(ical).toContain('TZID:America/New_York')
+    expect(ical).toContain('DTSTART;TZID=America/New_York:20260720T120000')
+    expect(ical).toContain('DTEND;TZID=America/New_York:20260720T123000')
+  })
+
+  test('interprets naive datetimes in the account timezone fallback', async () => {
+    const captured: PutEventParams[] = []
+    const deps = {
+      ...makeDeps(account(), captured),
+      getAccountTimeZone: () => Promise.resolve('Europe/Berlin'),
+    }
+    await createCalendarEvent(deps, {
+      args: args({ end: '2026-07-20T12:30:00', start: '2026-07-20T12:00:00' }),
+      token: 'tok',
+    })
+
+    const ical = (captured[0]?.ical ?? '').replace(/\r\n /gu, '')
+    expect(ical).toContain('DTSTART;TZID=Europe/Berlin:20260720T120000')
+  })
+
+  test('keeps an offset datetime instant when only the account timezone fallback exists', async () => {
+    const captured: PutEventParams[] = []
+    const deps = {
+      ...makeDeps(account(), captured),
+      getAccountTimeZone: () => Promise.resolve('America/New_York'),
+    }
+    await createCalendarEvent(deps, {
+      args: args({ end: '2026-07-20T12:30:00+02:00', start: '2026-07-20T12:00:00+02:00' }),
+      token: 'tok',
+    })
+
+    const ical = (captured[0]?.ical ?? '').replace(/\r\n /gu, '')
+    expect(ical).toContain('DTSTART;TZID=America/New_York:20260720T060000')
+    expect(ical).toContain('DTEND;TZID=America/New_York:20260720T063000')
   })
 
   test('honours an explicit calendarUrl that exists', async () => {

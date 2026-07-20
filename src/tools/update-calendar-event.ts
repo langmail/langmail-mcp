@@ -25,6 +25,7 @@ import {
   type CalDavConfig,
   discoverAccount,
   type FetchEventParams,
+  fetchAccountTimeZone,
   fetchEvent,
   resolveCalendarUrl,
   type UpdateEventParams,
@@ -34,6 +35,7 @@ import { buildInvite, maxSequence, parseSequence } from '../caldav/ical.ts'
 import { parseEvents } from '../caldav/ical-parse.ts'
 import { spliceOccurrenceOverride } from '../caldav/occurrence.ts'
 import { isSeriesOccurrence, toRRule } from '../caldav/recurrence.ts'
+import { resolveInputDateTime, UTC_TIME_ZONE } from '../caldav/timezone.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
 import { createCalendarEventInput, eventUidSchema } from './create-calendar-event.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
@@ -58,6 +60,7 @@ export type UpdateCalendarEventArgs = z.infer<typeof updateCalendarEventInput>
 export interface UpdateCalendarEventDeps {
   discover: (token: string) => Promise<DiscoveredAccount>
   fetchEvent: (params: FetchEventParams) => Promise<CalendarObject | null>
+  getAccountTimeZone: (token: string) => Promise<string | null>
   updateEvent: (params: UpdateEventParams) => Promise<void>
 }
 
@@ -77,6 +80,7 @@ interface OccurrenceUpdate {
   organizer: string
   recurrenceId: string
   start: Date
+  timeZone: string
   token: string
 }
 
@@ -84,7 +88,7 @@ interface OccurrenceUpdate {
 // against the master's RRULE, build a RECURRENCE-ID override, and splice it into
 // the stored object alongside the untouched master before PUTting it back.
 const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
-  const { args, deps, end, existing, organizer, recurrenceId, start, token } = u
+  const { args, deps, end, existing, organizer, recurrenceId, start, timeZone, token } = u
 
   // The stored object holds the master (the only VEVENT with an RRULE) plus any
   // existing overrides. The master identifies the series we validate against.
@@ -101,7 +105,7 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
   // unvalidated override risks the very orphan this guard exists to prevent.
   let onOccurrence: boolean
   try {
-    onOccurrence = isSeriesOccurrence(master.start, master.recurrence, recurrenceId)
+    onOccurrence = isSeriesOccurrence(master.start, master.recurrence, recurrenceId, master.timeZone)
   } catch {
     return errorResult(
       `Could not evaluate this series' recurrence rule (${master.recurrence}) to validate ` +
@@ -123,11 +127,13 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
     // otherwise get an override with a different ORGANIZER, which Stalwart
     // rejects with 412 SameOrganizerInAllComponents.
     organizer: master.organizer ?? organizer,
+    recurrenceTimeZone: master.timeZone ?? UTC_TIME_ZONE,
     recurrenceId: new Date(recurrenceId),
     // Bump past every SEQUENCE already in the object so this override supersedes
     // any prior edit of the same instance.
     sequence: maxSequence(existing.data) + 1,
     start,
+    timeZone,
     title: args.title,
     uid: args.uid,
     ...(args.description ? { description: args.description } : {}),
@@ -176,15 +182,17 @@ export const updateCalendarEvent = async (
   }
   const calendarUrl = resolved.url
 
-  const start = new Date(args.start)
-  const end = new Date(args.end)
-  if (end <= start) {
-    return errorResult('Event end must be after its start.')
-  }
-
   const existing = await deps.fetchEvent({ calendarUrl, token, uid: args.uid })
   if (!existing) {
     return errorResult(`Event not found: ${args.uid}`)
+  }
+  const storedMaster =
+    parseEvents(existing.data).find((e) => e.recurrence !== undefined) ?? parseEvents(existing.data)[0]
+  const timeZone = args.timeZone ?? storedMaster?.timeZone ?? (await deps.getAccountTimeZone(token)) ?? UTC_TIME_ZONE
+  const start = resolveInputDateTime(args.start, timeZone, args.timeZone !== undefined)
+  const end = resolveInputDateTime(args.end, timeZone, args.timeZone !== undefined)
+  if (end <= start) {
+    return errorResult('Event end must be after its start.')
   }
 
   if (args.recurrenceId !== undefined) {
@@ -196,6 +204,7 @@ export const updateCalendarEvent = async (
       organizer: account.organizer,
       recurrenceId: args.recurrenceId,
       start,
+      timeZone,
       token,
     })
   }
@@ -215,6 +224,7 @@ export const updateCalendarEvent = async (
     // Bump past the stored SEQUENCE so the re-sent REQUEST supersedes it.
     sequence: parseSequence(existing.data) + 1,
     start,
+    timeZone,
     title: args.title,
     uid: args.uid,
     ...(args.description ? { description: args.description } : {}),
@@ -235,6 +245,7 @@ export const updateCalendarEvent = async (
 export const makeLiveDeps = (cfg: CalDavConfig): UpdateCalendarEventDeps => ({
   discover: (token) => discoverAccount(cfg, token),
   fetchEvent: (params) => fetchEvent(cfg, params),
+  getAccountTimeZone: (token) => fetchAccountTimeZone(cfg, token),
   updateEvent: (params) => updateEvent(cfg, params),
 })
 
@@ -259,7 +270,8 @@ export const registerUpdateCalendarEvent = (
         'event. To instead edit ONE occurrence in isolation (e.g. a per-week agenda ' +
         'on a recurring meeting), pass `recurrenceId` naming that occurrence by its ' +
         'original start; the master rule and every other occurrence stay unchanged. ' +
-        'Times are ISO 8601 with offset (e.g. 2026-06-12T10:00:00Z).',
+        'Times are ISO 8601 with offset or naive local form. Optional `timeZone` is ' +
+        'an IANA zone and, when passed, overrides embedded offsets so wall-clock digits win.',
       inputSchema: updateCalendarEventInput.shape,
       title: 'Update calendar event',
     },

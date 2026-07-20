@@ -11,12 +11,19 @@ import { z } from 'zod'
 import {
   type CalDavConfig,
   discoverAccount,
+  fetchAccountTimeZone,
   type PutEventParams,
   putEvent,
   resolveCalendarUrl,
 } from '../caldav/client.ts'
 import { buildInvite } from '../caldav/ical.ts'
 import { recurrenceDescription, recurrenceSchema, toRRule } from '../caldav/recurrence.ts'
+import {
+  dateTimeWithOptionalOffsetSchema,
+  resolveInputDateTime,
+  timeZoneSchema,
+  UTC_TIME_ZONE,
+} from '../caldav/timezone.ts'
 import { type DiscoveredAccount } from '../caldav/types.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
@@ -37,10 +44,19 @@ export const createCalendarEventInput = z.object({
   // discovered default calendar.
   calendarUrl: z.url().optional(),
   description: z.string().max(5000).optional(),
-  end: z.iso.datetime({ offset: true }),
+  end: dateTimeWithOptionalOffsetSchema.describe(
+    'Event end as ISO 8601. With explicit `timeZone`, the clock digits are interpreted in that zone and any embedded offset is ignored. Without `timeZone`, an offset fixes the instant; a naive value uses the account timezone fallback.'
+  ),
   location: z.string().max(500).optional(),
   recurrence: recurrenceSchema.describe(recurrenceDescription).optional(),
-  start: z.iso.datetime({ offset: true }),
+  start: dateTimeWithOptionalOffsetSchema.describe(
+    'Event start as ISO 8601. With explicit `timeZone`, the clock digits are interpreted in that zone and any embedded offset is ignored. Without `timeZone`, an offset fixes the instant; a naive value uses the account timezone fallback.'
+  ),
+  timeZone: timeZoneSchema
+    .optional()
+    .describe(
+      'Optional IANA timezone, e.g. Europe/Berlin. Overrides offsets in start/end: the clock digits are treated as wall-clock time in this zone. Defaults to the account timezone preference, then UTC.'
+    ),
   title: z.string().min(1).max(200),
 })
 
@@ -48,6 +64,7 @@ export type CreateCalendarEventArgs = z.infer<typeof createCalendarEventInput>
 
 export interface CreateCalendarEventDeps {
   discover: (token: string) => Promise<DiscoveredAccount>
+  getAccountTimeZone: (token: string) => Promise<string | null>
   putEvent: (params: PutEventParams) => Promise<void>
 }
 
@@ -79,8 +96,9 @@ export const createCalendarEvent = async (
   }
   const calendarUrl = resolved.url
 
-  const start = new Date(args.start)
-  const end = new Date(args.end)
+  const timeZone = args.timeZone ?? (await deps.getAccountTimeZone(token)) ?? UTC_TIME_ZONE
+  const start = resolveInputDateTime(args.start, timeZone, args.timeZone !== undefined)
+  const end = resolveInputDateTime(args.end, timeZone, args.timeZone !== undefined)
   if (end <= start) {
     return errorResult('Event end must be after its start.')
   }
@@ -92,6 +110,7 @@ export const createCalendarEvent = async (
     end,
     organizer: account.organizer,
     start,
+    timeZone,
     title: args.title,
     uid,
     ...(args.description ? { description: args.description } : {}),
@@ -114,6 +133,7 @@ export const createCalendarEvent = async (
 
 export const makeLiveDeps = (cfg: CalDavConfig): CreateCalendarEventDeps => ({
   discover: (token) => discoverAccount(cfg, token),
+  getAccountTimeZone: (token) => fetchAccountTimeZone(cfg, token),
   putEvent: (params) => putEvent(cfg, params),
 })
 
@@ -131,7 +151,8 @@ export const registerCreateCalendarEvent = (
       description:
         'Creates a calendar event and sends iMIP invitations to the attendees, ' +
         'with the authenticated user as organizer. Times are ISO 8601 with offset ' +
-        '(e.g. 2026-06-12T10:00:00Z). Pass `recurrence` to create a repeating series ' +
+        'or naive local form. Optional `timeZone` is an IANA zone and, when passed, ' +
+        'overrides embedded offsets so wall-clock digits win. Pass `recurrence` to create a repeating series ' +
         '(e.g. a weekly team meeting) in a single call. Defaults to the user’s ' +
         'default calendar.',
       inputSchema: createCalendarEventInput.shape,

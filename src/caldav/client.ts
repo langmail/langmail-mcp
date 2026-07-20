@@ -22,6 +22,7 @@ import {
 } from 'tsdav'
 
 import { parseEvents } from './ical-parse.ts'
+import { isValidTimeZone } from './timezone.ts'
 import { type CalendarObject, type CalendarSummary, type DiscoveredAccount } from './types.ts'
 
 class CalDavError extends Error {
@@ -43,10 +44,51 @@ export interface CalDavConfig {
 }
 
 const DEFAULT_CAL_RE = /\/default\/?$/u
+const TRAILING_SLASHES_RE = /\/+$/u
 const MAILTO_RE = /^mailto:/iu
 
 const authHeaders = (cfg: CalDavConfig, credential: string): Record<string, string> =>
   cfg.authHeaders ? cfg.authHeaders(credential) : { authorization: `Bearer ${credential}` }
+
+const ACCOUNT_SETTINGS_USING = ['urn:ietf:params:jmap:core', 'urn:stalwart:jmap']
+
+interface AccountSettingsResponse {
+  methodResponses?: [string, Record<string, unknown>, string][]
+}
+
+interface AccountSettingsCacheEntry {
+  timeZone: string | null
+}
+
+const accountSettingsCache = new Map<string, AccountSettingsCacheEntry>()
+
+export const fetchAccountTimeZone = async (cfg: CalDavConfig, token: string): Promise<string | null> => {
+  const cached = accountSettingsCache.get(token)
+  if (cached) {
+    return cached.timeZone
+  }
+  let timeZone: string | null = null
+  try {
+    const res = await fetch(`${cfg.serverUrl.replace(TRAILING_SLASHES_RE, '')}/api`, {
+      method: 'POST',
+      headers: { ...authHeaders(cfg, token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        using: ACCOUNT_SETTINGS_USING,
+        methodCalls: [['x:AccountSettings/get', { ids: ['singleton'] }, '0']],
+      }),
+    })
+    if (res.status === 200) {
+      const body = (await res.json()) as AccountSettingsResponse
+      const payload = body.methodResponses?.[0]?.[1]
+      const settings = (payload?.list as Array<{ timeZone?: unknown }> | undefined)?.[0]
+      timeZone = typeof settings?.timeZone === 'string' && isValidTimeZone(settings.timeZone) ? settings.timeZone : null
+    }
+  } catch {
+    timeZone = null
+  }
+  accountSettingsCache.set(token, { timeZone })
+  return timeZone
+}
 
 // CalDAV collection URLs are canonically trailing-slashed; tsdav resolves
 // object URLs via `new URL(filename, url)`, which silently drops the last

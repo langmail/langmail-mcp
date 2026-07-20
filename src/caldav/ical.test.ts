@@ -11,6 +11,7 @@ const baseInput = {
   end: new Date('2026-06-12T10:30:00Z'),
   organizer: 'host@langmail.me',
   start: new Date('2026-06-12T10:00:00Z'),
+  timeZone: 'UTC',
   title: 'Sync',
   uid: 'evt-1@langmail.me',
 }
@@ -84,6 +85,53 @@ describe('buildInvite', () => {
   test('emits a RECURRENCE-ID line for a single-occurrence override', () => {
     const ics = unfold(buildInvite({ ...baseInput, recurrenceId: new Date('2026-06-12T10:00:00Z') }))
     expect(ics).toContain('RECURRENCE-ID:20260612T100000Z')
+  })
+
+  test('emits DTSTART with TZID and a matching VTIMEZONE for non-UTC invites', () => {
+    const ics = unfold(
+      buildInvite({
+        ...baseInput,
+        end: new Date('2026-07-20T10:30:00Z'),
+        start: new Date('2026-07-20T10:00:00Z'),
+        timeZone: 'Europe/Berlin',
+      })
+    )
+
+    expect(ics).toContain('BEGIN:VTIMEZONE')
+    expect(ics).toContain('TZID:Europe/Berlin')
+    expect(ics).toContain('DTSTART;TZID=Europe/Berlin:20260720T120000')
+    expect(ics).toContain('DTEND;TZID=Europe/Berlin:20260720T123000')
+  })
+
+  test('emits RECURRENCE-ID with the event timezone', () => {
+    const ics = unfold(
+      buildInvite({
+        ...baseInput,
+        end: new Date('2026-07-27T10:30:00Z'),
+        recurrenceId: new Date('2026-07-20T10:00:00Z'),
+        start: new Date('2026-07-27T10:00:00Z'),
+        timeZone: 'Europe/Berlin',
+      })
+    )
+
+    expect(ics).toContain('RECURRENCE-ID;TZID=Europe/Berlin:20260720T120000')
+  })
+
+  test('can emit RECURRENCE-ID in the master timezone while start/end use the edit timezone', () => {
+    const ics = unfold(
+      buildInvite({
+        ...baseInput,
+        end: new Date('2026-07-20T17:30:00Z'),
+        recurrenceId: new Date('2026-07-20T10:00:00Z'),
+        recurrenceTimeZone: 'Europe/Berlin',
+        start: new Date('2026-07-20T17:00:00Z'),
+        timeZone: 'America/New_York',
+      })
+    )
+
+    expect(ics).toContain('DTSTART;TZID=America/New_York:20260720T130000')
+    expect(ics).toContain('DTEND;TZID=America/New_York:20260720T133000')
+    expect(ics).toContain('RECURRENCE-ID;TZID=Europe/Berlin:20260720T120000')
   })
 
   // An override targets one instance, so it must never also carry an RRULE —
