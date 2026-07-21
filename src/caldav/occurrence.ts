@@ -12,7 +12,9 @@
 // Pure string in/out (no live server), so the merge is unit-testable — the same
 // shape as rsvp.ts and ical-parse.ts.
 
+import { maxSequence } from './ical.ts'
 import { icalDateToIso } from './ical-parse.ts'
+import { toIcalUtc } from './recurrence.ts'
 
 const CRLF = '\r\n'
 // Line break between content lines (CRLF, bare CR, or LF). Output is always
@@ -25,6 +27,12 @@ const LINE_RE = /\r\n|\r|\n/u
 // short and never folded, so a single physical line is enough.
 const RECURRENCE_ID_RE = /^RECURRENCE-ID(?:;[^:]*)?:(.*)$/u
 const METHOD_RE = /^METHOD:/iu
+// An EXDATE content line, capturing the (possibly comma-separated) values after
+// the first colon. Like RECURRENCE-ID above, our own single-instant EXDATEs are
+// short and never folded, so one physical line is enough.
+const EXDATE_RE = /^EXDATE(?:;[^:]*)?:(.*)$/u
+const SEQUENCE_RE = /^SEQUENCE:/u
+const RRULE_RE = /^RRULE[:;]/iu
 
 // A top-level VCALENDAR component (VEVENT, VTIMEZONE, …) as its raw lines,
 // BEGIN/END inclusive. Nested sub-components (e.g. VALARM inside a VEVENT) stay
@@ -130,4 +138,96 @@ export const spliceOccurrenceOverride = (masterIcal: string, overrideIcal: strin
   const withMethod = [props[0] ?? 'BEGIN:VCALENDAR', 'METHOD:REQUEST', ...props.slice(1)]
 
   return [...withMethod, ...kept.flatMap((c) => c.lines), ...overrideLines, end].join(CRLF) + CRLF
+}
+
+// The master VEVENT of a recurring object carries the RRULE and is not itself an
+// override (no RECURRENCE-ID) — RFC 5545 §3.8.4.4. Both conditions matter: an
+// EXDATE only excludes instances of a component that actually has the RRULE, so
+// the target must be the rule-bearing VEVENT, never a stray or an override.
+const isMaster = (component: Component): boolean =>
+  component.name === 'VEVENT' && recurrenceIdMs(component) === null && component.lines.some((l) => RRULE_RE.test(l))
+
+// True when the master already carries an EXDATE for `targetMs`. Comparison is
+// by instant (same UTC invariant as recurrenceIdMs) so a re-cancel is detected
+// regardless of value formatting. EXDATE is multi-valued (RFC 5545 §3.8.5.1),
+// so each comma-separated instant on the line is checked.
+const masterExcludes = (master: Component, targetMs: number): boolean => {
+  for (const line of master.lines) {
+    const match = EXDATE_RE.exec(line)
+    if (!match) {
+      continue
+    }
+    for (const value of (match[1] ?? '').split(',')) {
+      const ms = Date.parse(icalDateToIso(value.trim()))
+      if (!Number.isNaN(ms) && ms === targetMs) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+// Rewrites the master's lines to exclude one instant: replace its SEQUENCE line
+// with the bumped value (or add one when the master carried none) and splice the
+// EXDATE in just before END:VEVENT. Every other line is preserved verbatim.
+const excludeInstant = (lines: string[], exdate: string, sequence: number): string[] => {
+  let sequenceSeen = false
+  const rewritten = lines.map((line) => {
+    if (SEQUENCE_RE.test(line)) {
+      sequenceSeen = true
+      return `SEQUENCE:${sequence}`
+    }
+    return line
+  })
+  // splitCalendar keeps the component BEGIN/END inclusive, so the last line is
+  // END:VEVENT; insert the new content lines before it.
+  const endIndex = rewritten.length - 1
+  const inserts = sequenceSeen ? [exdate] : [`SEQUENCE:${sequence}`, exdate]
+  return [...rewritten.slice(0, endIndex), ...inserts, ...rewritten.slice(endIndex)]
+}
+
+// Removes a single occurrence from a stored recurring object by excluding its
+// instant on the master, returning the combined VCALENDAR to PUT back. The
+// master keeps its RRULE and every unrelated occurrence verbatim (only line
+// endings normalize to CRLF); a new EXDATE names the cancelled instant and the
+// master's SEQUENCE bumps past every SEQUENCE in the object so attendee clients
+// treat the re-scheduled series as newer and re-apply it — dropping just that
+// instance (RFC 5546; Stalwart delivers the exclusion as an updated-series
+// REQUEST carrying the EXDATE, not a per-instance CANCEL); any override VEVENT
+// for the same instant is dropped so no orphan dangles beside the EXDATE; and a
+// METHOD:REQUEST is guaranteed — what triggers Stalwart's scheduling on PUT.
+//
+// Idempotent: if the master already excludes the instant (a double-cancel), the
+// input is returned unchanged so the caller can skip the PUT (no scheduling diff)
+// while still reporting success.
+export const spliceOccurrenceCancellation = (masterIcal: string, recurrenceId: string): string => {
+  const calendar = splitCalendar(masterIcal)
+  const targetMs = new Date(recurrenceId).getTime()
+
+  // The caller only reaches here after confirming the object is a recurring
+  // series, so a missing rule-bearing master is a real invariant violation.
+  // Surface it loudly rather than PUT an object with no EXDATE added and falsely
+  // report the occurrence cancelled (same fail-loud stance as overrideVevent).
+  const master = calendar.components.find(isMaster)
+  if (!master) {
+    throw new Error('spliceOccurrenceCancellation: no recurring master VEVENT (one with an RRULE) found')
+  }
+  if (masterExcludes(master, targetMs)) {
+    return masterIcal
+  }
+
+  const sequence = maxSequence(masterIcal) + 1
+  const exdate = `EXDATE:${toIcalUtc(recurrenceId)}`
+  const components = calendar.components
+    // Drop any prior override for the cancelled instant.
+    .filter((c) => !(c.name === 'VEVENT' && recurrenceIdMs(c) === targetMs))
+    // Exclude the instant on the master (identity compare — master survives the
+    // filter above, since its recurrenceIdMs is null, not targetMs).
+    .map((c) => (c === master ? { ...c, lines: excludeInstant(c.lines, exdate, sequence) } : c))
+
+  const end = calendar.header.at(-1) ?? 'END:VCALENDAR'
+  const props = calendar.header.slice(0, -1).filter((l) => !METHOD_RE.test(l))
+  const withMethod = [props[0] ?? 'BEGIN:VCALENDAR', 'METHOD:REQUEST', ...props.slice(1)]
+
+  return [...withMethod, ...components.flatMap((c) => c.lines), end].join(CRLF) + CRLF
 }
