@@ -89,9 +89,9 @@ const ISO_MILLIS_RE = /\.\d{3}Z$/u
 // A leading `RRULE:` property name on a raw rule, which ical-generator re-adds.
 const RRULE_PREFIX_RE = /^RRULE:/iu
 
-// RFC 5545 wants RRULE UNTIL as a UTC date-time (`YYYYMMDDTHHMMSSZ`) for a
-// non-floating rule. Our events are UTC, so normalize the ISO instant.
-const toIcalUtc = (iso: string): string =>
+// RFC 5545 wants a UTC date-time (`YYYYMMDDTHHMMSSZ`) for non-floating values —
+// an RRULE UNTIL, an EXDATE. Our events are UTC, so normalize the ISO instant.
+export const toIcalUtc = (iso: string): string =>
   new Date(iso).toISOString().replace(ISO_SEPARATORS_RE, '').replace(ISO_MILLIS_RE, 'Z')
 
 // Normalizes either input form to a raw RRULE string *without* the `RRULE:`

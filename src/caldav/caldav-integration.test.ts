@@ -31,6 +31,8 @@ import {
   withTrailingSlash,
 } from './client.ts'
 import { buildInvite } from './ical.ts'
+import { parseEvents } from './ical-parse.ts'
+import { spliceOccurrenceOverride } from './occurrence.ts'
 
 const BASE = process.env.CALDAV_BASE_URL
 const USER = process.env.CALDAV_USERNAME
@@ -130,6 +132,92 @@ live('caldav client against a live server', () => {
       ...(updated?.etag ? { etag: updated.etag } : {}),
     })
     expect(await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })).toBeNull()
+  })
+
+  // Cancelling one occurrence must NOT DELETE the resource: the master and the
+  // other occurrences live in the same object. Prove against the real server
+  // that the delete tool PUTs an EXDATE back (keeping the resource), that the
+  // cancelled instant is excluded, and that a whole-series delete still 404s the
+  // resource. (Radicale does no scheduling, so iMIP fan-out is out of scope
+  // here — the Stalwart e2e covers that the PUT is accepted by the scheduler.)
+  test('cancels one occurrence via EXDATE (PUT, not DELETE); whole-series delete still 404s', async () => {
+    const uid = `cancel-occurrence-${Date.now()}@mcp-it`
+    // Weekly on Tuesdays from 2026-06-16, so 2026-06-23T10:00:00Z is occurrence #2.
+    await putEvent(cfg, { calendarUrl, ical: invite(uid, 'Weekly sync', 'FREQ=WEEKLY;BYDAY=TU'), token: TOKEN, uid })
+
+    const occurrence = '2026-06-23T10:00:00Z'
+    const cancelled = await deleteCalendarEvent(makeDeleteDeps(cfg), {
+      args: { calendarUrl, recurrenceId: occurrence, uid },
+      token: TOKEN,
+    })
+    expect(cancelled.isError).toBeUndefined()
+    expect(cancelled.content[0]?.text).toContain('cancelled')
+
+    // The resource survives and now carries the EXDATE alongside the untouched
+    // master RRULE — and no override for the cancelled instant.
+    const afterCancel = await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })
+    expect(afterCancel).not.toBeNull()
+    expect(afterCancel?.data).toContain('EXDATE:20260623T100000Z')
+    expect(afterCancel?.data).toContain('RRULE:FREQ=WEEKLY;BYDAY=TU')
+    expect(afterCancel?.data).not.toContain('RECURRENCE-ID:20260623T100000Z')
+
+    // Whole-series delete (no recurrenceId) removes the resource entirely.
+    const wholeSeries = await deleteCalendarEvent(makeDeleteDeps(cfg), { args: { calendarUrl, uid }, token: TOKEN })
+    expect(wholeSeries.isError).toBeUndefined()
+    expect(await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })).toBeNull()
+  })
+
+  // The edited-then-cancelled shape: an occurrence is first overridden (a
+  // RECURRENCE-ID VEVENT spliced beside the master), then cancelled. The cancel
+  // must drop that override (so no orphan dangles beside the EXDATE) — unlike the
+  // plain-series test above, here an override genuinely exists first, so the
+  // "override is gone" assertion actually bites.
+  test('cancelling an overridden occurrence drops the override and adds an EXDATE', async () => {
+    const uid = `cancel-override-${Date.now()}@mcp-it`
+    await putEvent(cfg, { calendarUrl, ical: invite(uid, 'Weekly sync', 'FREQ=WEEKLY;BYDAY=TU'), token: TOKEN, uid })
+
+    const occurrence = '2026-06-23T10:00:00Z'
+    // Splice an override for that occurrence and PUT it back, so the stored object
+    // carries master + one RECURRENCE-ID override.
+    const series = await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })
+    const override = buildInvite({
+      attendees: ['guest@example.com'],
+      end: new Date('2026-06-23T12:00:00Z'),
+      organizer: `${user}@example.com`,
+      recurrenceId: new Date(occurrence),
+      sequence: 1,
+      start: new Date('2026-06-23T11:00:00Z'),
+      title: 'Weekly sync (moved)',
+      uid,
+    })
+    await updateEvent(cfg, {
+      ical: spliceOccurrenceOverride(series?.data ?? '', override, occurrence),
+      token: TOKEN,
+      url: series?.url ?? '',
+      ...(series?.etag ? { etag: series.etag } : {}),
+    })
+    const withOverride = await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })
+    expect(withOverride?.data).toContain('RECURRENCE-ID:20260623T100000Z')
+
+    // Cancel that occurrence: the override is dropped and an EXDATE takes its place.
+    const cancelled = await deleteCalendarEvent(makeDeleteDeps(cfg), {
+      args: { calendarUrl, recurrenceId: occurrence, uid },
+      token: TOKEN,
+    })
+    expect(cancelled.isError).toBeUndefined()
+
+    const afterCancel = await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })
+    expect(afterCancel?.data).toContain('EXDATE:20260623T100000Z')
+    expect(afterCancel?.data).not.toContain('RECURRENCE-ID:20260623T100000Z')
+    const events = parseEvents(afterCancel?.data ?? '')
+    expect(events).toHaveLength(1)
+    expect(events[0]?.recurrence).toBeDefined()
+
+    await deleteEvent(cfg, {
+      token: TOKEN,
+      url: afterCancel?.url ?? '',
+      ...(afterCancel?.etag ? { etag: afterCancel.etag } : {}),
+    })
   })
 
   test('finds and deletes an event whose filename differs from its UID (regression)', async () => {
