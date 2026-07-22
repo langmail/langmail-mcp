@@ -186,14 +186,16 @@ describe('parseEvents', () => {
     expect(parseEvents(ics)[0]?.attendees).toEqual([])
   })
 
-  test('reads an attendee address past params carrying quoted colons', () => {
+  test('reads an attendee address and PARTSTAT past params carrying quoted colons', () => {
     const ics = [
       'BEGIN:VEVENT',
       'UID:evt-q@langmail.me',
       'ATTENDEE;CN="Team: Weekly";PARTSTAT=ACCEPTED:mailto:person@example.com',
       'END:VEVENT',
     ].join('\r\n')
-    expect(parseEvents(ics)[0]?.attendees[0]?.email).toBe('person@example.com')
+    // The quoted colon in CN pushes the first-colon split into the CN value, so
+    // PARTSTAT must be recovered from the reassembled line, not the truncated params.
+    expect(parseEvents(ics)[0]?.attendees[0]).toEqual({ email: 'person@example.com', status: 'ACCEPTED' })
   })
 
   test('drops an attendee it cannot reduce to a bare address', () => {

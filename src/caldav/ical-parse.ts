@@ -188,7 +188,14 @@ const parseAttendee = (property: ParsedProperty): ParsedAttendee | undefined => 
   if (!email || email === property.value.trim() || NOT_BARE_EMAIL_RE.test(email)) {
     return
   }
-  const status = PARTSTAT_RE.exec(property.params)?.[1]?.replace(/^"|"$/gu, '')
+  // PARTSTAT can land in `value` rather than `params` when an earlier quoted
+  // parameter (e.g. CN="Team: Weekly") pushes a ':' past the first-colon split.
+  // Reassemble the property (name aside) and search the parameter section — i.e.
+  // everything before the trailing cal-address — so the mis-split doesn't hide it.
+  const reassembled = `${property.params}:${property.value}`
+  const addressAt = reassembled.toLowerCase().lastIndexOf('mailto:')
+  const paramSection = addressAt === -1 ? reassembled : reassembled.slice(0, addressAt)
+  const status = PARTSTAT_RE.exec(paramSection)?.[1]?.replace(/^"|"$/gu, '')
   return status ? { email, status } : { email }
 }
 
