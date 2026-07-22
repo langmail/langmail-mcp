@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test'
 
-import { blobDownload, blobDownloadUrl } from './blob.ts'
+import { blobDownload, blobDownloadUrl, blobUpload } from './blob.ts'
 import { JmapError } from './session.ts'
 
 const TEMPLATE = 'https://mail.example.com/jmap/download/{accountId}/{blobId}/{name}?accept={type}'
@@ -79,6 +79,62 @@ describe('blobDownload', () => {
       }).catch((error) => error)
       expect(err).toBeInstanceOf(JmapError)
       expect((err as JmapError).status).toBe(404)
+    })
+  })
+})
+
+const UPLOAD_TEMPLATE = 'https://mail.example.com/jmap/upload/{accountId}/'
+
+describe('blobUpload', () => {
+  test('POSTs the content to the expanded upload URL with the declared media type', async () => {
+    const f = mock((url: string, init?: RequestInit) => {
+      expect(url).toBe('https://mail.example.com/jmap/upload/acct/')
+      expect(init?.method).toBe('POST')
+      const headers = init?.headers as Record<string, string>
+      expect(headers.authorization).toBe('Bearer tok')
+      expect(headers['content-type']).toBe('application/sieve')
+      expect(init?.body).toBe('require ["fileinto"];')
+      return Promise.resolve(Response.json({ accountId: 'acct', blobId: 'blob-7', size: 21 }, { status: 200 }))
+    })
+    const blobId = await withFetch(f, () =>
+      blobUpload({
+        accountId: 'acct',
+        authorization: 'Bearer tok',
+        content: 'require ["fileinto"];',
+        type: 'application/sieve',
+        uploadUrl: UPLOAD_TEMPLATE,
+      })
+    )
+    expect(blobId).toBe('blob-7')
+  })
+
+  test('throws JmapError on a non-2xx upload', async () => {
+    const f = mock(() => Promise.resolve(new Response('too big', { status: 413 })))
+    await withFetch(f, async () => {
+      const err = await blobUpload({
+        accountId: 'acct',
+        authorization: 'Bearer tok',
+        content: 'x',
+        type: 'application/sieve',
+        uploadUrl: UPLOAD_TEMPLATE,
+      }).catch((error) => error)
+      expect(err).toBeInstanceOf(JmapError)
+      expect((err as JmapError).status).toBe(413)
+    })
+  })
+
+  test('throws JmapError when the response lacks a blobId', async () => {
+    const f = mock(() => Promise.resolve(Response.json({ accountId: 'acct' }, { status: 200 })))
+    await withFetch(f, async () => {
+      const err = await blobUpload({
+        accountId: 'acct',
+        authorization: 'Bearer tok',
+        content: 'x',
+        type: 'application/sieve',
+        uploadUrl: UPLOAD_TEMPLATE,
+      }).catch((error) => error)
+      expect(err).toBeInstanceOf(JmapError)
+      expect((err as JmapError).message).toContain('malformed')
     })
   })
 })

@@ -10,6 +10,7 @@ const sessionBody = {
   apiUrl: API_URL,
   downloadUrl: `${SERVER}/download/{accountId}/{blobId}/{name}/{type}`,
   primaryAccounts: { 'urn:ietf:params:jmap:mail': 'acct-1' },
+  uploadUrl: `${SERVER}/upload/{accountId}/`,
 }
 
 const accountSettingsBody = (timeZone: unknown): unknown => ({

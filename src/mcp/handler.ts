@@ -17,15 +17,18 @@ import { type JmapLive } from '@langmail/jmap'
 import { type TicketStore } from '../attachments/tickets.ts'
 import { type AuthContext } from '../auth/middleware.ts'
 import { makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
+import { makeLiveSieveIo, makeMailRulesStore } from '../rules/store.ts'
 import { makeLiveDeps as makeCreateCalendarDeps, registerCreateCalendar } from '../tools/create-calendar.ts'
 import {
   makeLiveDeps as makeCreateCalendarEventDeps,
   registerCreateCalendarEvent,
 } from '../tools/create-calendar-event.ts'
+import { registerCreateMailRule } from '../tools/create-mail-rule.ts'
 import {
   makeLiveDeps as makeDeleteCalendarEventDeps,
   registerDeleteCalendarEvent,
 } from '../tools/delete-calendar-event.ts'
+import { registerDeleteMailRule } from '../tools/delete-mail-rule.ts'
 import { makeLiveDeps as makeDownloadAttachmentDeps, registerDownloadAttachment } from '../tools/download-attachment.ts'
 import { makeLiveDeps as makeGetEmailDeps, registerGetEmail } from '../tools/get-email.ts'
 import { makeLiveDeps as makeGetThreadDeps, registerGetThread } from '../tools/get-thread.ts'
@@ -34,6 +37,7 @@ import {
   registerListCalendarEvents,
 } from '../tools/list-calendar-events.ts'
 import { makeLiveDeps as makeListCalendarsDeps, registerListCalendars } from '../tools/list-calendars.ts'
+import { registerListMailRules } from '../tools/list-mail-rules.ts'
 import { makeLiveDeps as makeRespondToEventDeps, registerRespondToEvent } from '../tools/respond-to-event.ts'
 import { makeLiveDeps as makeSearchEmailsDeps, registerSearchEmails } from '../tools/search-emails.ts'
 import {
@@ -65,6 +69,9 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   // create→update in quick succession reuses the cached AccountSettings read
   // instead of paying the JMAP round-trip twice.
   const resolveTimeZone = makeAccountTimeZoneResolver({ serverUrl: cfg.stalwartUrl })
+  // Mail rules persist as one managed Sieve script in the user's Stalwart
+  // account; the store shares the request-cycle JMAP session cache.
+  const mailRulesStore = makeMailRulesStore(makeLiveSieveIo(jmapLive))
   const listCalendarsDeps = makeListCalendarsDeps(caldavCfg)
   const createCalendarDeps = makeCreateCalendarDeps(caldavCfg)
   const listCalendarEventsDeps = makeListCalendarEventsDeps(caldavCfg)
@@ -82,6 +89,9 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     registerGetEmail(server, getEmailDeps, () => ctx.token)
     registerGetThread(server, getThreadDeps, () => ctx.token)
     registerDownloadAttachment(server, downloadAttachmentDeps, () => ctx.token)
+    registerCreateMailRule(server, mailRulesStore, () => ctx.token)
+    registerListMailRules(server, mailRulesStore, () => ctx.token)
+    registerDeleteMailRule(server, mailRulesStore, () => ctx.token)
     registerListCalendars(server, listCalendarsDeps, () => ctx.token)
     registerCreateCalendar(server, createCalendarDeps, () => ctx.token)
     registerListCalendarEvents(server, listCalendarEventsDeps, () => ctx.token)

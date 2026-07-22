@@ -135,6 +135,7 @@ describe('GET /attachments/:token', () => {
         apiUrl: `${STALWART}/jmap/`,
         downloadUrl: `${STALWART}/jmap/download/{accountId}/{blobId}/{name}?accept={type}`,
         primaryAccounts: { 'urn:ietf:params:jmap:mail': 'acct' },
+        uploadUrl: `${STALWART}/jmap/upload/{accountId}/`,
       }),
     resolveAccountId: () => Promise.resolve('acct'),
   }

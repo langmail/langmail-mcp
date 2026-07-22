@@ -34,6 +34,7 @@ describe('fetchSession', () => {
             primaryAccounts: {
               'urn:ietf:params:jmap:mail': 'acct-1',
             },
+            uploadUrl: `${STALWART}/jmap/upload/{accountId}/`,
           },
           { status: 200 }
         )
@@ -42,6 +43,7 @@ describe('fetchSession', () => {
     const s = await withFetch(f, () => fetchSession(STALWART, bearerAuthorization('tok')))
     expect(s.apiUrl).toBe(`${STALWART}/jmap/`)
     expect(s.downloadUrl).toBe(`${STALWART}/jmap/download/{accountId}/{blobId}/{name}?accept={type}`)
+    expect(s.uploadUrl).toBe(`${STALWART}/jmap/upload/{accountId}/`)
     expect(s.primaryAccounts['urn:ietf:params:jmap:mail']).toBe('acct-1')
   })
 
@@ -52,6 +54,7 @@ describe('fetchSession', () => {
           {
             apiUrl: `${STALWART}/jmap/`,
             primaryAccounts: { 'urn:ietf:params:jmap:mail': 'acct-1' },
+            uploadUrl: `${STALWART}/jmap/upload/{accountId}/`,
           },
           { status: 200 }
         )

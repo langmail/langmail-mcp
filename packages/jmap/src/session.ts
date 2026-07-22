@@ -40,16 +40,24 @@ export const fetchSession = async (stalwartBase: string, authorization: string):
   const body = (await res.json()) as Record<string, unknown>
   const { apiUrl } = body
   const { downloadUrl } = body
+  const { uploadUrl } = body
   const { primaryAccounts } = body
-  // downloadUrl is mandatory in the session resource (RFC 8620 §2) and
-  // Stalwart always sends it — a session without it is malformed.
-  if (typeof apiUrl !== 'string' || typeof downloadUrl !== 'string' || typeof primaryAccounts !== 'object') {
+  // downloadUrl and uploadUrl are mandatory in the session resource
+  // (RFC 8620 §2) and Stalwart always sends them — a session without
+  // either is malformed.
+  if (
+    typeof apiUrl !== 'string' ||
+    typeof downloadUrl !== 'string' ||
+    typeof uploadUrl !== 'string' ||
+    typeof primaryAccounts !== 'object'
+  ) {
     throw new JmapError(200, 'malformed jmap session response')
   }
   return {
     apiUrl,
     downloadUrl,
     primaryAccounts: primaryAccounts as Record<string, string>,
+    uploadUrl,
   }
 }
 
@@ -60,3 +68,9 @@ export const accountIdForMail = (session: JmapSession): string => {
   }
   return id
 }
+
+// Stalwart serves the Sieve capability (RFC 9661) on the same account as
+// mail; the fallback covers a session resource that only advertises the
+// mail primary.
+export const accountIdForSieve = (session: JmapSession): string =>
+  session.primaryAccounts['urn:ietf:params:jmap:sieve'] ?? accountIdForMail(session)

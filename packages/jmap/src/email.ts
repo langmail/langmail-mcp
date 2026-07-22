@@ -3,13 +3,12 @@
 // changes surface (Email/set patches, Email/changes, Mailbox/get by role)
 // the email-agent needs once it becomes a JMAP client (ADR 0004).
 
+import { jmapCall as call, type JmapCall, methodResponse } from './request.ts'
 import { JmapError } from './session.ts'
 import {
   type EmailChangesResult,
   type EmailDetailRecord,
   type EmailRecord,
-  type JmapRequest,
-  type JmapResponse,
   type MailboxRecord,
   type ThreadRecord,
 } from './types.ts'
@@ -60,47 +59,6 @@ const EMAIL_DETAIL_PROPERTIES = [
 // attachments (name/type/size), classify cid-inline parts, and hand back the
 // blobId retrieval handle — explicit so parts come back minimal.
 const EMAIL_BODY_PROPERTIES = ['partId', 'blobId', 'name', 'type', 'size', 'disposition', 'cid'] as const
-
-interface JmapCall {
-  apiUrl: string
-  // Full Authorization header value (`Bearer …` or `Basic …`) — the wrappers
-  // never mint or wrap credentials. MCP builds it via `bearerAuthorization`;
-  // the email-agent forwards the `Basic` value the auth service's
-  // stalwart-credential endpoint returns.
-  authorization: string
-}
-
-const call = async <T extends JmapResponse>(ctx: JmapCall, body: JmapRequest): Promise<T> => {
-  const res = await fetch(ctx.apiUrl, {
-    body: JSON.stringify(body),
-    headers: {
-      authorization: ctx.authorization,
-      'content-type': 'application/json',
-    },
-    method: 'POST',
-  })
-  if (res.status !== 200) {
-    throw new JmapError(res.status, `jmap request returned ${res.status}`)
-  }
-  return (await res.json()) as T
-}
-
-const methodResponse = <T>(resp: JmapResponse, name: string, callId: string): T => {
-  const entry = resp.methodResponses.find(([n, , id]) => n === name && id === callId)
-  if (!entry) {
-    // RFC 8620 §3.6.2: a failed method call is answered with an `error`
-    // response under the same call id. Surface its type so callers can
-    // recover from expected conditions (e.g. cannotCalculateChanges →
-    // reseed the poll cursor).
-    const err = resp.methodResponses.find(([n, , id]) => n === 'error' && id === callId)
-    if (err) {
-      const detail = err[1] as { description?: string; type?: string }
-      throw new JmapError(200, `jmap method error for ${name}/${callId}: ${detail.type ?? 'unknown'}`, detail.type)
-    }
-    throw new JmapError(200, `missing method response for ${name}/${callId}`)
-  }
-  return entry[1] as T
-}
 
 // Escape a keyword or mailbox id for use as an RFC 6901 JSON Pointer token in
 // an Email/set PatchObject: `~` and `/` are structural and MUST be escaped

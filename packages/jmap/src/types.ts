@@ -10,6 +10,9 @@ export interface JmapSession {
   // fetching raw blob bytes — attachments are downloaded through this.
   downloadUrl: string
   primaryAccounts: Record<string, string>
+  // RFC 8620 §6.1 URI template ({accountId}) for uploading blob bytes —
+  // Sieve script content is uploaded through this before SieveScript/set.
+  uploadUrl: string
 }
 
 export interface JmapRequest {

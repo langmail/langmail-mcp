@@ -39,3 +39,36 @@ export const blobDownload = async (p: BlobDownloadParams): Promise<Response> => 
   }
   return res
 }
+
+// Blob upload via the session's RFC 8620 §6.1 `uploadUrl` URI template
+// (single `{accountId}` placeholder). Returns the server-assigned blobId,
+// the handle a subsequent set call (e.g. SieveScript/set) references.
+
+export interface BlobUploadParams {
+  accountId: string
+  // Full Authorization header value — same seam as every other wrapper.
+  authorization: string
+  content: string | Uint8Array
+  // Media type of the uploaded bytes (e.g. "application/sieve").
+  type: string
+  // The session's `uploadUrl` URI template.
+  uploadUrl: string
+}
+
+export const blobUpload = async (p: BlobUploadParams): Promise<string> => {
+  const url = p.uploadUrl.replaceAll('{accountId}', encodeURIComponent(p.accountId))
+  const res = await fetch(url, {
+    body: p.content,
+    headers: { authorization: p.authorization, 'content-type': p.type },
+    method: 'POST',
+  })
+  // RFC 8620 leaves the success code to the server; Stalwart answers 200.
+  if (res.status !== 200 && res.status !== 201) {
+    throw new JmapError(res.status, `jmap blob upload returned ${res.status}`)
+  }
+  const body = (await res.json()) as { blobId?: unknown }
+  if (typeof body.blobId !== 'string') {
+    throw new JmapError(res.status, 'malformed jmap blob upload response')
+  }
+  return body.blobId
+}

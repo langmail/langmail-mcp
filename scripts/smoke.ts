@@ -203,12 +203,21 @@ const main = async () => {
   log('listTools')
   const tools = await session.client.listTools()
   const names = tools.tools.map((t) => t.name)
-  for (const required of ['search_emails', 'get_email', 'get_thread', 'download_attachment']) {
+  const requiredTools = [
+    'search_emails',
+    'get_email',
+    'get_thread',
+    'download_attachment',
+    'create_mail_rule',
+    'list_mail_rules',
+    'delete_mail_rule',
+  ]
+  for (const required of requiredTools) {
     if (!names.includes(required)) {
       fail(`${required} missing from tool list: ${names.join(', ')}`)
     }
   }
-  pass(`search_emails, get_email, get_thread, download_attachment registered (alongside: ${names.join(', ') || '—'})`)
+  pass(`${requiredTools.join(', ')} registered (alongside: ${names.join(', ') || '—'})`)
 
   // --- 2. Round-trip via the smoke tag ---------------------------------
   //

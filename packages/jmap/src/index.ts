@@ -1,5 +1,5 @@
 // biome-ignore lint/performance/noBarrelFile: package entry point requires re-exports
-export { type BlobDownloadParams, blobDownload, blobDownloadUrl } from './blob.ts'
+export { type BlobDownloadParams, type BlobUploadParams, blobDownload, blobDownloadUrl, blobUpload } from './blob.ts'
 export {
   type EmailChangesParams,
   type EmailGetDetailParams,
@@ -30,7 +30,16 @@ export {
 } from './email.ts'
 export { LABEL_KEYWORD_PREFIX, toLabelKeyword } from './keywords.ts'
 export { type JmapLive, makeJmapLive } from './live.ts'
-export { accountIdForMail, bearerAuthorization, fetchSession, JmapError } from './session.ts'
+export { accountIdForMail, accountIdForSieve, bearerAuthorization, fetchSession, JmapError } from './session.ts'
+export {
+  type SieveScriptCreateParams,
+  type SieveScriptListParams,
+  type SieveScriptRecord,
+  type SieveScriptUpdateParams,
+  sieveScriptCreate,
+  sieveScriptList,
+  sieveScriptUpdate,
+} from './sieve.ts'
 export {
   type AuthServiceConfig,
   fetchStalwartCredential,
