@@ -133,6 +133,58 @@ const buildFilter = (f: EmailQueryFilters): Record<string, unknown> => {
   return { conditions, operator: 'AND' }
 }
 
+// --- Email/query (typed filter tree) ---------------------------------------
+
+// One JMAP FilterCondition (RFC 8621 §4.4.1), narrowed to the fields the
+// mail-rules engine translates rule conditions into. Every string field is a
+// server-side substring/text match.
+export interface EmailFilterCondition {
+  body?: string
+  from?: string
+  hasAttachment?: boolean
+  inMailbox?: string
+  subject?: string
+  text?: string
+  to?: string
+}
+
+// A filter tree: a bare condition, or an AND/OR over subtrees. Mirrors the
+// RFC 8621 FilterOperator shape 1:1 so it serializes directly.
+export type EmailFilter = EmailFilterCondition | { conditions: EmailFilter[]; operator: 'AND' | 'OR' }
+
+export interface EmailQueryFilterParams extends JmapCall {
+  accountId: string
+  // RFC 8621 §4.4: one result per thread instead of per message — the cheap
+  // way to count matching conversations without fetching thread objects.
+  collapseThreads?: boolean
+  filter: EmailFilter
+  limit: number
+}
+
+// Email/query with a caller-built filter tree — for callers whose condition
+// logic (AND/OR composition) outgrows the flat `EmailQueryFilters` bag.
+export const emailQueryFilter = async (p: EmailQueryFilterParams): Promise<string[]> => {
+  const resp = await call(p, {
+    methodCalls: [
+      [
+        'Email/query',
+        {
+          accountId: p.accountId,
+          calculateTotal: false,
+          ...(p.collapseThreads ? { collapseThreads: true } : {}),
+          filter: p.filter,
+          limit: p.limit,
+          sort: [{ isAscending: false, property: 'receivedAt' }],
+        },
+        '0',
+      ],
+    ],
+    using: USING,
+  })
+  const out = methodResponse<{ ids?: string[] }>(resp, 'Email/query', '0')
+  return out.ids ?? []
+}
+
 export interface EmailQueryPerTermParams extends JmapCall {
   accountId: string
   // Scalar filters applied to every term's query; `text` is ignored here —
@@ -322,6 +374,52 @@ export const emailSet = async (p: EmailSetParams): Promise<void> => {
   throw new JmapError(200, `Email/set did not update ${p.id}: ${reason?.type ?? 'unknown'}`)
 }
 
+// --- Email/set (bulk patch) ------------------------------------------------
+
+export interface EmailSetManyParams extends JmapCall {
+  accountId: string
+  // One uniform patch applied to every id — what a mail rule's backfill does.
+  changes: EmailSetChanges
+  ids: string[]
+}
+
+export interface EmailSetManyResult {
+  notUpdated: string[]
+  updated: string[]
+}
+
+// Apply the same PatchObject to many emails in a single Email/set. Partial
+// failure is data, not an exception: the caller (rule backfill) reports
+// modified/failed counts instead of aborting on the first bad id.
+export const emailSetMany = async (p: EmailSetManyParams): Promise<EmailSetManyResult> => {
+  if (p.ids.length === 0) {
+    return { notUpdated: [], updated: [] }
+  }
+  const patch = buildSetPatch(p.changes)
+  const resp = await call(p, {
+    methodCalls: [
+      [
+        'Email/set',
+        {
+          accountId: p.accountId,
+          update: Object.fromEntries(p.ids.map((id) => [id, patch])),
+        },
+        '0',
+      ],
+    ],
+    using: USING,
+  })
+  const out = methodResponse<{
+    notUpdated?: Record<string, { type?: string }>
+    updated?: Record<string, unknown>
+  }>(resp, 'Email/set', '0')
+  const updated = new Set(Object.keys(out.updated ?? {}))
+  return {
+    notUpdated: p.ids.filter((id) => !updated.has(id)),
+    updated: p.ids.filter((id) => updated.has(id)),
+  }
+}
+
 // --- Email state ----------------------------------------------------------
 
 export interface EmailStateParams extends JmapCall {
@@ -410,6 +508,43 @@ export const threadEmailIds = async (p: ThreadEmailIdsParams): Promise<string[]>
   const out = methodResponse<{ list?: ThreadRecord[] }>(resp, 'Thread/get', '1')
   const [thread] = out.list ?? []
   return thread?.emailIds ?? []
+}
+
+export interface ThreadExpandParams extends JmapCall {
+  accountId: string
+  emailIds: string[]
+}
+
+// Expand a set of message ids to every message in their threads (deduped,
+// input-thread order). One round-trip via a Thread/get back-reference — the
+// bulk sibling of `threadEmailIds`, for the rules backfill's
+// "matching conversations" mode.
+export const threadsExpandEmailIds = async (p: ThreadExpandParams): Promise<string[]> => {
+  if (p.emailIds.length === 0) {
+    return []
+  }
+  const resp = await call(p, {
+    methodCalls: [
+      ['Email/get', { accountId: p.accountId, ids: p.emailIds, properties: ['threadId'] }, '0'],
+      [
+        'Thread/get',
+        {
+          '#ids': { name: 'Email/get', path: '/list/*/threadId', resultOf: '0' },
+          accountId: p.accountId,
+        },
+        '1',
+      ],
+    ],
+    using: USING,
+  })
+  const out = methodResponse<{ list?: ThreadRecord[] }>(resp, 'Thread/get', '1')
+  const ids = new Set<string>()
+  for (const thread of out.list ?? []) {
+    for (const id of thread.emailIds) {
+      ids.add(id)
+    }
+  }
+  return [...ids]
 }
 
 // --- Mailbox/get ---------------------------------------------------------

@@ -1,70 +1,109 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type MailRule } from '../rules/rule.ts'
-import { type MailRulesStore } from '../rules/store.ts'
 import { createMailRule, createMailRuleInput } from './create-mail-rule.ts'
-
-// A store over a mutable in-memory rule list, recording saves.
-const fakeStore = (initial: MailRule[] = []): MailRulesStore & { rules: MailRule[]; saves: number } => {
-  const store = {
-    load: () => Promise.resolve([...store.rules]),
-    rules: initial,
-    save: (_t: string, rules: MailRule[]) => {
-      store.saves += 1
-      store.rules = rules
-      return Promise.resolve()
-    },
-    saves: 0,
-  }
-  return store
-}
+import { fakeDeps, githubRule, NOW } from './mail-rule-test-fixtures.ts'
 
 const RULE_ID_RE = /^rule-[0-9a-f]{8}$/
 
 const args = {
-  actions: { moveTo: 'Archive' },
+  actions: [{ type: 'archive' as const }, { tag: 'GitHub', type: 'addTag' as const }],
   conditions: { from: 'notifications@github.com' },
-  description: 'Automatically archive all GitHub notifications',
+  match: 'all' as const,
+  name: 'Archive GitHub Notifications',
 }
 
 describe('createMailRuleInput schema', () => {
   test('requires at least one condition and one action', () => {
     expect(createMailRuleInput.safeParse(args).success).toBe(true)
     expect(createMailRuleInput.safeParse({ ...args, conditions: {} }).success).toBe(false)
-    expect(createMailRuleInput.safeParse({ ...args, actions: {} }).success).toBe(false)
+    expect(createMailRuleInput.safeParse({ ...args, actions: [] }).success).toBe(false)
   })
 
-  test('rejects a non-email forwardTo', () => {
-    expect(createMailRuleInput.safeParse({ ...args, actions: { forwardTo: 'not-an-address' } }).success).toBe(false)
+  test('accepts hasAttachment:false as "not set" instead of rejecting it', () => {
+    const parsed = createMailRuleInput.safeParse({
+      ...args,
+      conditions: { from: 'x', hasAttachment: false },
+    })
+    expect(parsed.success).toBe(true)
+  })
+
+  test('defaults match to all and rejects a non-email forward target', () => {
+    const parsed = createMailRuleInput.parse({ actions: args.actions, conditions: args.conditions })
+    expect(parsed.match).toBe('all')
+    expect(
+      createMailRuleInput.safeParse({ ...args, actions: [{ to: 'not-an-address', type: 'forward' }] }).success
+    ).toBe(false)
   })
 })
 
 describe('createMailRule', () => {
-  test('appends the rule with a fresh rule- id and confirms future-only semantics', async () => {
-    const store = fakeStore()
-    const result = await createMailRule(store, { args, token: 'tok' })
-    expect(store.saves).toBe(1)
-    expect(store.rules).toHaveLength(1)
-    const rule = store.rules[0]
+  test('appends an enabled rule with fresh id + timestamps and does not touch existing mail by default', async () => {
+    const deps = fakeDeps()
+    const result = await createMailRule(deps, { args: createMailRuleInput.parse(args), token: 'tok' })
+    expect(deps.saves).toBe(1)
+    expect(deps.applies).toHaveLength(0)
+    const rule = deps.rules[0]
     expect(rule?.id).toMatch(RULE_ID_RE)
-    expect(rule?.description).toBe(args.description)
+    expect(rule?.enabled).toBe(true)
+    expect(rule?.createdAt).toBe(NOW)
     const txt = result.content[0]?.text ?? ''
     expect(txt).toContain('future incoming messages')
+    expect(txt).toContain('existing messages are untouched')
     expect(txt).toContain(rule?.id ?? '')
-    expect(txt).toContain('move to "Archive"')
+  })
+
+  test('normalizes hasAttachment:false out of the stored conditions', async () => {
+    const deps = fakeDeps()
+    await createMailRule(deps, {
+      args: createMailRuleInput.parse({ ...args, conditions: { from: 'x', hasAttachment: false } }),
+      token: 'tok',
+    })
+    expect(deps.rules[0]?.conditions).toEqual({ from: 'x' })
+  })
+
+  test('applies to existing mail when requested and reports the summary', async () => {
+    const deps = fakeDeps()
+    const result = await createMailRule(deps, {
+      args: createMailRuleInput.parse({ ...args, existingMail: { mode: 'messages', scope: 'inbox' } }),
+      token: 'tok',
+    })
+    expect(deps.applies).toHaveLength(1)
+    expect(deps.applies[0]?.mode).toBe('messages')
+    expect(deps.applies[0]?.scope).toBe('inbox')
+    expect(deps.applies[0]?.rule).toEqual(deps.rules[0] ?? ({} as never))
+    expect(result.content[0]?.text).toContain('Applied to existing mail: 2 messages matched, 2 modified.')
+  })
+
+  test('a large backfill without confirmation creates nothing and asks to confirm', async () => {
+    const deps = fakeDeps([], { estimate: { capped: false, conversations: 300, messages: 450 } })
+    const result = await createMailRule(deps, {
+      args: createMailRuleInput.parse({ ...args, existingMail: { mode: 'messages' } }),
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('450')
+    expect(result.content[0]?.text).toContain('confirmLargeApply')
+    expect(deps.saves).toBe(0)
+    expect(deps.applies).toHaveLength(0)
+  })
+
+  test('the same large backfill goes through with confirmLargeApply: true', async () => {
+    const deps = fakeDeps([], { estimate: { capped: false, conversations: 300, messages: 450 } })
+    const result = await createMailRule(deps, {
+      args: createMailRuleInput.parse({ ...args, existingMail: { confirmLargeApply: true, mode: 'messages' } }),
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(deps.saves).toBe(1)
+    expect(deps.applies).toHaveLength(1)
   })
 
   test('keeps existing rules and assigns a distinct id', async () => {
-    const existing: MailRule = {
-      actions: { markRead: true },
-      conditions: { subject: 'calendar invitation' },
-      description: 'Mark calendar invitations as read',
-      id: 'rule-00000000',
-    }
-    const store = fakeStore([existing])
-    await createMailRule(store, { args, token: 'tok' })
-    expect(store.rules).toHaveLength(2)
-    expect(store.rules[0]).toEqual(existing)
-    expect(store.rules[1]?.id).not.toBe(existing.id)
+    const existing = githubRule()
+    const deps = fakeDeps([existing])
+    await createMailRule(deps, { args: createMailRuleInput.parse(args), token: 'tok' })
+    expect(deps.rules).toHaveLength(2)
+    expect(deps.rules[0]).toEqual(existing)
+    expect(deps.rules[1]?.id).not.toBe(existing.id)
   })
 })

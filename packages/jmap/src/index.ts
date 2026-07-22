@@ -2,20 +2,27 @@
 export { type BlobDownloadParams, type BlobUploadParams, blobDownload, blobDownloadUrl, blobUpload } from './blob.ts'
 export {
   type EmailChangesParams,
+  type EmailFilter,
+  type EmailFilterCondition,
   type EmailGetDetailParams,
   type EmailGetParams,
+  type EmailQueryFilterParams,
   type EmailQueryFilters,
   type EmailQueryParams,
   type EmailQueryPerTermParams,
   type EmailSetChanges,
+  type EmailSetManyParams,
+  type EmailSetManyResult,
   type EmailSetParams,
   type EmailStateParams,
   emailChanges,
   emailGet,
   emailGetDetail,
   emailQuery,
+  emailQueryFilter,
   emailQueryPerTerm,
   emailSet,
+  emailSetMany,
   emailState,
   type MailboxCreateParams,
   type MailboxIdByNameParams,
@@ -26,7 +33,9 @@ export {
   mailboxIdByRole,
   mailboxIdsByRoles,
   type ThreadEmailIdsParams,
+  type ThreadExpandParams,
   threadEmailIds,
+  threadsExpandEmailIds,
 } from './email.ts'
 export { LABEL_KEYWORD_PREFIX, toLabelKeyword } from './keywords.ts'
 export { type JmapLive, makeJmapLive } from './live.ts'

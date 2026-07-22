@@ -208,8 +208,10 @@ const main = async () => {
     'get_email',
     'get_thread',
     'download_attachment',
+    'preview_mail_rule',
     'create_mail_rule',
     'list_mail_rules',
+    'update_mail_rule',
     'delete_mail_rule',
   ]
   for (const required of requiredTools) {

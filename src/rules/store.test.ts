@@ -4,10 +4,12 @@ import { generateSieveScript, type MailRule } from './rule.ts'
 import { makeMailRulesStore, type SieveIo } from './store.ts'
 
 const rule: MailRule = {
-  actions: { moveTo: 'Archive' },
+  actions: [{ type: 'archive' }],
   conditions: { from: 'notifications@github.com' },
-  description: 'Automatically archive all GitHub notifications',
+  enabled: true,
   id: 'rule-1a2b3c4d',
+  match: 'all',
+  name: 'Automatically archive all GitHub notifications',
 }
 
 // An in-memory SieveIo simulating a single-script Stalwart account. Blob and
@@ -58,7 +60,7 @@ describe('makeMailRulesStore', () => {
     const store = makeMailRulesStore(io)
     await store.save('tok', [rule])
     expect(io.calls).toContain('create')
-    await store.save('tok', [rule, { ...rule, description: 'Second', id: 'rule-eeeeeeee' }])
+    await store.save('tok', [rule, { ...rule, id: 'rule-eeeeeeee', name: 'Second' }])
     expect(io.calls).toContain('update')
     expect(await store.load('tok')).toHaveLength(2)
   })

@@ -1,11 +1,11 @@
 // delete_mail_rule tool — remove a persistent rule by id. The managed Sieve
 // script is regenerated from the remaining rules, so the deleted rule stops
-// applying immediately.
+// applying immediately. Mail the rule already processed is not touched.
 
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
-import { type MailRulesStore } from '../rules/store.ts'
+import { type MailRuleToolDeps } from './mail-rule-common.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 const deleteMailRuleShape = {
@@ -22,34 +22,38 @@ export const deleteMailRuleInput = z.object(deleteMailRuleShape)
 export type DeleteMailRuleArgs = z.infer<typeof deleteMailRuleInput>
 
 export const deleteMailRule = async (
-  store: MailRulesStore,
+  deps: MailRuleToolDeps,
   ctx: { args: DeleteMailRuleArgs; token: string }
 ): Promise<ToolResult> => {
-  const rules = await store.load(ctx.token)
+  const rules = await deps.store.load(ctx.token)
   const rule = rules.find((r) => r.id === ctx.args.ruleId)
   if (!rule) {
     return errorResult(`No mail rule with id ${ctx.args.ruleId}. Use list_mail_rules to see the current rules and ids.`)
   }
-  await store.save(
+  await deps.store.save(
     ctx.token,
     rules.filter((r) => r.id !== rule.id)
   )
-  return textResult(`Deleted mail rule ${rule.id} ("${rule.description}"). It no longer applies to incoming messages.`)
+  const title = rule.name ? ` ("${rule.name}")` : ''
+  return textResult(
+    `Deleted mail rule ${rule.id}${title}. It no longer applies to incoming messages; mail it already processed is unchanged.`
+  )
 }
 
 // --- MCP registration ----------------------------------------------------
 
-export const registerDeleteMailRule = (server: McpServer, store: MailRulesStore, getToken: () => string): void => {
+export const registerDeleteMailRule = (server: McpServer, deps: MailRuleToolDeps, getToken: () => string): void => {
   server.registerTool(
     'delete_mail_rule',
     {
       description:
         'Delete a persistent mail rule by id so it stops applying to future incoming messages. ' +
-        'Find the id with list_mail_rules. To modify a rule, delete it and create a replacement ' +
-        'with create_mail_rule. Messages the rule already acted on are not reverted.',
+        'Messages the rule already acted on are not reverted. To pause a rule instead of ' +
+        'removing it, use update_mail_rule with enabled: false. Find the id with ' +
+        'list_mail_rules.',
       inputSchema: deleteMailRuleShape,
       title: 'Delete mail rule',
     },
-    (args) => deleteMailRule(store, { args: deleteMailRuleInput.parse(args), token: getToken() })
+    (args) => deleteMailRule(deps, { args: deleteMailRuleInput.parse(args), token: getToken() })
   )
 }

@@ -1,0 +1,69 @@
+// Shared plumbing for the mail-rule tool family: the rule-spec input
+// shapes (create/preview take the whole spec, update takes each part
+// optionally), the existing-mail policy shape, and the deps bundle the
+// tools run against.
+
+import { z } from 'zod'
+
+import { LARGE_APPLY_THRESHOLD, type MailRulesApplier } from '../rules/apply.ts'
+import { MATCH_VALUES, mailRuleActionsSchema, mailRuleConditionsShape } from '../rules/rule.ts'
+import { type MailRulesStore } from '../rules/store.ts'
+
+export interface MailRuleToolDeps {
+  applier: MailRulesApplier
+  // Injectable clock so unit tests get deterministic timestamps.
+  now?: () => string
+  store: MailRulesStore
+}
+
+export const ruleTimestamp = (deps: MailRuleToolDeps): string => (deps.now ?? (() => new Date().toISOString()))()
+
+// --- rule-spec input shapes -------------------------------------------------
+
+export const ruleNameField = z
+  .string()
+  .min(1)
+  .max(200)
+  .describe('Optional human-readable rule name, e.g. "Archive GitHub Notifications".')
+
+// Bare for update (where "not provided" must stay observable), defaulted
+// for create/preview.
+export const ruleMatchField = z
+  .enum(MATCH_VALUES)
+  .describe('How multiple conditions combine: "all" = every condition must match (AND), "any" = one is enough (OR).')
+
+export const ruleMatchFieldWithDefault = ruleMatchField.default('all')
+
+export const ruleConditionsField = z
+  .object(mailRuleConditionsShape)
+  .describe('When the rule fires. At least one condition is required. Matching is case-insensitive substring matching.')
+
+export const ruleActionsField = mailRuleActionsSchema.describe(
+  'What happens to a matching message — one or more actions, applied in order.'
+)
+
+// --- existing-mail policy ----------------------------------------------------
+
+// Future automation and historical application are distinct operations: the
+// rule itself only governs future deliveries; this policy opts a call into
+// also touching mail that is already in the mailbox.
+export const existingMailShape = {
+  confirmLargeApply: z
+    .boolean()
+    .optional()
+    .describe(
+      `Must be true to apply to more than ${LARGE_APPLY_THRESHOLD} existing messages. Call preview_mail_rule first, tell the user the count, and set this only after they confirm.`
+    ),
+  mode: z
+    .enum(['none', 'messages', 'conversations'])
+    .default('none')
+    .describe(
+      'What existing mail to apply the actions to: "none" (default — future mail only), "messages" (each matching message), or "conversations" (every message in a matching conversation/thread).'
+    ),
+  scope: z
+    .enum(['inbox', 'all'])
+    .default('inbox')
+    .describe('Where to look for existing matches: "inbox" (default) or "all" mail.'),
+}
+
+export const existingMailSchema = z.object(existingMailShape)

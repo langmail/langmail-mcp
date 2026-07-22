@@ -54,9 +54,15 @@ export const makeMailRulesStore = (io: SieveIo): MailRulesStore => ({
 
 // --- live wiring -------------------------------------------------------------
 
-export const makeLiveSieveIo = (live: JmapLive): SieveIo => {
+// `authorize` maps the tool-layer token to a full Authorization header —
+// Bearer in production; the Stalwart e2e suite pins a Basic app-password
+// credential through the same seam.
+export const makeLiveSieveIo = (
+  live: JmapLive,
+  authorize: (token: string) => string = bearerAuthorization
+): SieveIo => {
   const sessionAndAccount = async (token: string) => {
-    const session = await live.getSession(bearerAuthorization(token))
+    const session = await live.getSession(authorize(token))
     return { accountId: accountIdForSieve(session), session }
   }
   return {
@@ -65,7 +71,7 @@ export const makeLiveSieveIo = (live: JmapLive): SieveIo => {
       await sieveScriptCreate({
         accountId,
         apiUrl: session.apiUrl,
-        authorization: bearerAuthorization(token),
+        authorization: authorize(token),
         blobId,
         name: RULES_SCRIPT_NAME,
       })
@@ -74,7 +80,7 @@ export const makeLiveSieveIo = (live: JmapLive): SieveIo => {
       const { session, accountId } = await sessionAndAccount(token)
       const res = await blobDownload({
         accountId,
-        authorization: bearerAuthorization(token),
+        authorization: authorize(token),
         blobId,
         downloadUrl: session.downloadUrl,
         name: `${RULES_SCRIPT_NAME}.sieve`,
@@ -87,7 +93,7 @@ export const makeLiveSieveIo = (live: JmapLive): SieveIo => {
       const scripts = await sieveScriptList({
         accountId,
         apiUrl: session.apiUrl,
-        authorization: bearerAuthorization(token),
+        authorization: authorize(token),
       })
       const managed = scripts.find((s) => s.name === RULES_SCRIPT_NAME)
       return managed ? { blobId: managed.blobId, id: managed.id } : null
@@ -97,7 +103,7 @@ export const makeLiveSieveIo = (live: JmapLive): SieveIo => {
       await sieveScriptUpdate({
         accountId,
         apiUrl: session.apiUrl,
-        authorization: bearerAuthorization(token),
+        authorization: authorize(token),
         blobId,
         scriptId,
       })
@@ -106,7 +112,7 @@ export const makeLiveSieveIo = (live: JmapLive): SieveIo => {
       const { session, accountId } = await sessionAndAccount(token)
       return blobUpload({
         accountId,
-        authorization: bearerAuthorization(token),
+        authorization: authorize(token),
         content,
         type: 'application/sieve',
         uploadUrl: session.uploadUrl,

@@ -25,6 +25,11 @@ interface SetError {
   type?: string
 }
 
+// An invalidScript SetError carries the Sieve compiler diagnostic in
+// `description` — the one string that explains a rejected script.
+const setErrorDetail = (err: SetError | undefined): string =>
+  [err?.type ?? 'unknown', err?.description].filter(Boolean).join(' — ')
+
 // --- SieveScript/get -------------------------------------------------------
 
 export interface SieveScriptListParams extends JmapCall {
@@ -72,7 +77,7 @@ export const sieveScriptCreate = async (p: SieveScriptCreateParams): Promise<str
   )
   const id = out.created?.s0?.id
   if (!id) {
-    throw new JmapError(200, `SieveScript/set did not create ${p.name}: ${out.notCreated?.s0?.type ?? 'unknown'}`)
+    throw new JmapError(200, `SieveScript/set did not create ${p.name}: ${setErrorDetail(out.notCreated?.s0)}`)
   }
   return id
 }
@@ -108,7 +113,7 @@ export const sieveScriptUpdate = async (p: SieveScriptUpdateParams): Promise<voi
   if (!(out.updated && p.scriptId in out.updated)) {
     throw new JmapError(
       200,
-      `SieveScript/set did not update ${p.scriptId}: ${out.notUpdated?.[p.scriptId]?.type ?? 'unknown'}`
+      `SieveScript/set did not update ${p.scriptId}: ${setErrorDetail(out.notUpdated?.[p.scriptId])}`
     )
   }
 }
