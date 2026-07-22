@@ -2,13 +2,17 @@ import { describe, expect, test } from 'bun:test'
 
 import { buildInvite } from './ical.ts'
 import { parseEvents } from './ical-parse.ts'
-import { spliceOccurrenceOverride } from './occurrence.ts'
+import { spliceOccurrenceCancellation, spliceOccurrenceOverride } from './occurrence.ts'
 
 const UID = 'series-1@langmail.me'
 
 // RFC 5545 folds long lines at 75 octets with CRLF + space; undo that so
 // substring assertions don't trip over a folded address.
 const unfold = (ics: string): string => ics.replace(/\r\n /gu, '')
+
+// A newline not preceded by a CR — i.e. a bare LF that would violate the CRLF
+// line-ending invariant (RFC 5545 §3.1).
+const BARE_LF_RE = /[^\r]\n/u
 
 // A stored weekly master: Tuesdays 10:00Z from 2026-06-16, SEQUENCE 0.
 const masterObject = (over: Partial<Parameters<typeof buildInvite>[0]> = {}): string =>
@@ -182,5 +186,139 @@ describe('spliceOccurrenceOverride', () => {
     expect(events).toHaveLength(2)
     // Exactly one VEVENT still carries the RRULE — the master.
     expect(events.filter((e) => e.recurrence !== undefined)).toHaveLength(1)
+  })
+})
+
+const OCCURRENCE = '2026-06-23T10:00:00Z'
+
+describe('spliceOccurrenceCancellation', () => {
+  test('excludes the instant on the master with an EXDATE and a bumped SEQUENCE', () => {
+    const merged = unfold(spliceOccurrenceCancellation(masterObject({ sequence: 4 }), OCCURRENCE))
+
+    // The master is untouched apart from the exclusion: RRULE and original start
+    // survive, and the instant is now an EXDATE.
+    expect(merged).toContain('RRULE:FREQ=WEEKLY;BYDAY=TU')
+    expect(merged).toContain('DTSTART:20260616T100000Z')
+    expect(merged).toContain('EXDATE:20260623T100000Z')
+    // SEQUENCE bumps past the master's own 4 so the CANCEL supersedes it.
+    expect(merged).toContain('SEQUENCE:5')
+    expect(merged).not.toContain('SEQUENCE:4')
+    // Still a single (master) VEVENT — no override was introduced.
+    expect((merged.match(/BEGIN:VEVENT/gu) ?? []).length).toBe(1)
+  })
+
+  test('adds a SEQUENCE when the master carried none', () => {
+    // masterObject() has no SEQUENCE line → implicitly 0, so the bump lands at 1.
+    const merged = unfold(spliceOccurrenceCancellation(masterObject(), OCCURRENCE))
+    expect(merged).toContain('SEQUENCE:1')
+    expect(merged).toContain('EXDATE:20260623T100000Z')
+  })
+
+  test('drops the override for the cancelled instant', () => {
+    // A master + one override for OCCURRENCE — the edited-then-cancelled shape.
+    const stored = spliceOccurrenceOverride(masterObject({ sequence: 2 }), overrideObject(), OCCURRENCE)
+    const merged = unfold(spliceOccurrenceCancellation(stored, OCCURRENCE))
+
+    // The edited-then-cancelled occurrence must not leave an override dangling
+    // beside its EXDATE.
+    expect(merged).not.toContain('RECURRENCE-ID:20260623T100000Z')
+    expect(merged).toContain('EXDATE:20260623T100000Z')
+    expect((merged.match(/BEGIN:VEVENT/gu) ?? []).length).toBe(1)
+  })
+
+  test('bumps only the master SEQUENCE and keeps an unrelated override verbatim', () => {
+    // Master (SEQUENCE 2) + an unrelated override for 2026-06-30 (SEQUENCE 1).
+    const stored = spliceOccurrenceOverride(
+      masterObject({ sequence: 2 }),
+      overrideObject({
+        end: new Date('2026-06-30T10:30:00Z'),
+        recurrenceId: new Date('2026-06-30T10:00:00Z'),
+        sequence: 1,
+        start: new Date('2026-06-30T10:00:00Z'),
+        title: 'Weekly Sync (week 3)',
+      }),
+      '2026-06-30T10:00:00Z'
+    )
+    const merged = unfold(spliceOccurrenceCancellation(stored, OCCURRENCE))
+
+    // The 2026-06-30 override is left in place; the master bumps past the object
+    // max (2 → 3) while the override keeps its own SEQUENCE 1.
+    expect(merged).toContain('RECURRENCE-ID:20260630T100000Z')
+    expect(merged).toContain('SEQUENCE:3')
+    expect(merged).toContain('SEQUENCE:1')
+    expect((merged.match(/BEGIN:VEVENT/gu) ?? []).length).toBe(2)
+  })
+
+  test('preserves a VTIMEZONE (and its nested sub-component) verbatim', () => {
+    const stored = masterObject().replace(
+      'BEGIN:VEVENT',
+      'BEGIN:VTIMEZONE\r\nTZID:Europe/Berlin\r\n' +
+        'BEGIN:STANDARD\r\nDTSTART:19701025T030000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nEND:STANDARD\r\n' +
+        'END:VTIMEZONE\r\nBEGIN:VEVENT'
+    )
+    const merged = spliceOccurrenceCancellation(stored, OCCURRENCE)
+
+    expect(merged).toContain('TZID:Europe/Berlin')
+    // The nested STANDARD must not have ended the VTIMEZONE early or been dropped.
+    expect((merged.match(/BEGIN:VTIMEZONE/gu) ?? []).length).toBe(1)
+    expect((merged.match(/BEGIN:STANDARD/gu) ?? []).length).toBe(1)
+    expect((merged.match(/END:VTIMEZONE/gu) ?? []).length).toBe(1)
+    expect(merged).toContain('EXDATE:20260623T100000Z')
+  })
+
+  test('guarantees a single METHOD:REQUEST even when the stored object dropped it', () => {
+    const stored = masterObject().replace('METHOD:REQUEST\r\n', '')
+    expect(stored).not.toContain('METHOD:REQUEST')
+
+    const merged = spliceOccurrenceCancellation(stored, OCCURRENCE)
+    expect((merged.match(/METHOD:REQUEST/gu) ?? []).length).toBe(1)
+  })
+
+  test('is idempotent on an already-excluded instant (returns the input unchanged)', () => {
+    const once = spliceOccurrenceCancellation(masterObject(), OCCURRENCE)
+    const twice = spliceOccurrenceCancellation(once, OCCURRENCE)
+
+    // The second cancel is a no-op — same bytes back, so the tool can skip the
+    // PUT — and it never accretes a second EXDATE or re-bumps the SEQUENCE.
+    expect(twice).toBe(once)
+    expect((unfold(twice).match(/EXDATE:20260623T100000Z/gu) ?? []).length).toBe(1)
+    expect((unfold(twice).match(/SEQUENCE:1/gu) ?? []).length).toBe(1)
+  })
+
+  test('joins with CRLF and one trailing CRLF', () => {
+    const merged = spliceOccurrenceCancellation(masterObject(), OCCURRENCE)
+    expect(merged.endsWith('\r\n')).toBe(true)
+    // No bare LF: every newline is part of a CRLF pair (RFC 5545 §3.1).
+    expect(BARE_LF_RE.test(merged)).toBe(false)
+  })
+
+  test('yields a parseable calendar with the master still recurring', () => {
+    const events = parseEvents(spliceOccurrenceCancellation(masterObject(), OCCURRENCE))
+    expect(events).toHaveLength(1)
+    expect(events[0]?.recurrence).toBe('FREQ=WEEKLY;BYDAY=TU')
+  })
+
+  test('throws when the object has no rule-bearing master (invariant violation)', () => {
+    // Malformed: the only RRULE-bearing VEVENT is itself an override (carries a
+    // RECURRENCE-ID), so there is no clean master to exclude the instant on. The
+    // tool guarantees a recurring master upstream, so rather than silently emit
+    // an object with no EXDATE (and falsely report success) the splice fails loud.
+    const malformed = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//x//EN',
+      'METHOD:REQUEST',
+      'BEGIN:VEVENT',
+      `UID:${UID}`,
+      'DTSTART:20260623T100000Z',
+      'DTEND:20260623T103000Z',
+      'RECURRENCE-ID:20260623T100000Z',
+      'RRULE:FREQ=WEEKLY;BYDAY=TU',
+      'SUMMARY:Broken',
+      'END:VEVENT',
+      'END:VCALENDAR',
+      '',
+    ].join('\r\n')
+    expect(() => spliceOccurrenceCancellation(malformed, OCCURRENCE)).toThrow()
   })
 })
