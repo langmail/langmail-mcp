@@ -97,6 +97,11 @@ const HEX_RE = /=([0-9A-Fa-f]{2})/gu
 const qpDecode = (raw: string): string =>
   raw.replace(/=\r?\n/gu, '').replace(HEX_RE, (_m, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)))
 
+// Undo RFC 5545 line folding (CRLF + a leading space/tab) so a substring check
+// isn't fooled by a folded ATTENDEE address — ical-generator folds at 75 octets,
+// which splits our ~38-char generated addresses mid-value.
+const unfold = (ical: string): string => ical.replace(/\r\n[ \t]/gu, '')
+
 const mailAccountId = async (basic: string): Promise<string> => {
   const sess = (await (await fetch(`${ADMIN_URL}/jmap/session`, { headers: { authorization: basic } })).json()) as {
     primaryAccounts?: Record<string, string>
@@ -206,7 +211,9 @@ live('update_calendar_event attendee deltas against live Stalwart', () => {
       removed.push({ addr: `${goneParts[i]}@${DOMAIN}`, basic: gone.basic, mail: await mailAccountId(gone.basic) })
       remaining.push({ addr: `${stayParts[i]}@${DOMAIN}`, basic: stay.basic, mail: await mailAccountId(stay.basic) })
     }
-  })
+    // ~15 sequential JMAP round-trips against a possibly cold Stalwart; give the
+    // hook generous headroom over bun's default so setup never times out mid-provision.
+  }, 60_000)
 
   afterAll(async () => {
     if (ids.length) {
@@ -274,7 +281,7 @@ live('update_calendar_event attendee deltas against live Stalwart', () => {
     })
     expect(loud.isError).toBeUndefined()
     expect(await waitForNewMessage(stay.basic, stay.mail, stayBaseline)).not.toBeNull()
-  }, 90_000)
+  }, 120_000)
 
   test('default notify re-notifies the remaining attendee and drops the removed one from their copy', async () => {
     const gone = removed[1] as (typeof removed)[number]
@@ -295,7 +302,9 @@ live('update_calendar_event attendee deltas against live Stalwart', () => {
     // At least one delivered scheduling message for this event is the updated
     // series (RRULE intact) that no longer lists the removed attendee — the
     // initial invite still lists them, so match on the update specifically.
-    const updates = (delivered ?? []).filter((b) => b.includes('BEGIN:VCALENDAR') && b.includes(uid))
+    // Unfold first: the folded ATTENDEE address would otherwise never substring-
+    // match, making `!includes(gone.addr)` vacuously true (a false green).
+    const updates = (delivered ?? []).map(unfold).filter((b) => b.includes('BEGIN:VCALENDAR') && b.includes(uid))
     expect(updates.some((b) => b.includes('RRULE:FREQ=WEEKLY;BYDAY=TU') && !b.includes(gone.addr))).toBe(true)
-  }, 90_000)
+  }, 120_000)
 })

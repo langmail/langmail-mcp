@@ -283,6 +283,42 @@ const combinationError = (args: UpdateCalendarEventArgs, isDelta: boolean): stri
   return
 }
 
+// True when an ISO string carries an explicit clock time (…THH:MM:SS…), as
+// opposed to a date-only value (all-day event) or an empty string (an event
+// stored with DURATION and no DTEND).
+const CLOCK_TIME_RE = /T\d{2}:\d{2}:\d{2}/u
+const hasClockTime = (iso: string | undefined): boolean => iso !== undefined && CLOCK_TIME_RE.test(iso)
+
+// A delta rebuilds the event from its stored state as a single VEVENT, so refuse
+// — with a clear, actionable error — when that stored state can't be reproduced
+// faithfully, rather than silently dropping data. (The full-replacement path is
+// unaffected: the caller re-specifies everything there.)
+const deltaSafetyError = (
+  stored: ParsedEvent[],
+  storedMaster: ParsedEvent | undefined,
+  args: UpdateCalendarEventArgs
+): string | undefined => {
+  // Per-occurrence overrides (master + RECURRENCE-ID VEVENTs share the object): a
+  // whole-event rebuild would discard them.
+  if (stored.length > 1) {
+    return 'This event has individually-customized occurrences; changing its attendees as a delta would discard them. Edit the occurrence(s) directly (with `recurrenceId`), or pass the complete event.'
+  }
+  // A non-mailto attendee (e.g. an Apple `urn:uuid:` cal-address) the parser
+  // can't reduce to an email — rebuilding from the parsed list would drop them.
+  if ((storedMaster?.unparsedAttendeeCount ?? 0) > 0) {
+    return 'This event has attendee(s) in an address format the connector can’t safely edit as a delta. Pass the complete `attendees` list (a full replacement) instead.'
+  }
+  // A preserved start/end with no clock time (all-day, or DURATION-only) can't be
+  // rebuilt as a timed VEVENT.
+  if (args.start === undefined && !hasClockTime(storedMaster?.start)) {
+    return 'This event has no explicit start time (e.g. an all-day event); pass `start` and `end` to edit it.'
+  }
+  if (args.end === undefined && !hasClockTime(storedMaster?.end)) {
+    return 'This event has no explicit end time (e.g. an all-day event); pass `start` and `end` to edit it.'
+  }
+  return
+}
+
 // The effective attendee list: a delta merges add/remove onto the stored
 // attendees (read from Langmail, not re-supplied); otherwise the caller gives
 // the complete list, as before.
@@ -411,6 +447,12 @@ export const updateCalendarEvent = async (
   }
   const stored = parseEvents(existing.data)
   const storedMaster = stored.find((e) => e.recurrence !== undefined) ?? stored[0]
+
+  const unsafe = isDelta ? deltaSafetyError(stored, storedMaster, args) : undefined
+  if (unsafe) {
+    return errorResult(unsafe)
+  }
+
   const timeZone = args.timeZone ?? storedMaster?.startTzid ?? (await deps.resolveTimeZone(token)) ?? UTC_TIME_ZONE
 
   const fields = resolveEditFields(args, isDelta, storedMaster, timeZone)

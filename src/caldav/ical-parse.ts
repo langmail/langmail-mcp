@@ -41,6 +41,12 @@ export interface ParsedEvent {
   startTzid?: string
   title: string
   uid: string
+  // How many ATTENDEE lines could NOT be reduced to a bare email (a non-mailto
+  // cal-address — e.g. an Apple `urn:uuid:` with the address in an EMAIL param).
+  // Present (and > 0) only when some were dropped, so update_calendar_event can
+  // refuse a delta edit rather than silently drop those people. Absent when all
+  // attendees parsed cleanly.
+  unparsedAttendeeCount?: number
 }
 
 // RFC 5545 folds long lines with CRLF (or LF) + a single space/tab. Undo
@@ -204,6 +210,7 @@ export const parseEvents = (ical: string): ParsedEvent[] => {
     // leak it into the listed `repeats:` value.
     const recurrence = block.props.get('RRULE')?.value.trim()
     const attendees = block.attendees.map(parseAttendee).filter((a): a is ParsedAttendee => a !== undefined)
+    const unparsedAttendeeCount = block.attendees.length - attendees.length
     events.push({
       attendees,
       end: icalDateToIso(block.props.get('DTEND')?.value ?? ''),
@@ -215,6 +222,7 @@ export const parseEvents = (ical: string): ParsedEvent[] => {
       ...(organizer ? { organizer } : {}),
       ...(recurrence ? { recurrence } : {}),
       ...(startTzid ? { startTzid } : {}),
+      ...(unparsedAttendeeCount > 0 ? { unparsedAttendeeCount } : {}),
     })
   }
   return events

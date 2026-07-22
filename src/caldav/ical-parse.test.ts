@@ -207,6 +207,23 @@ describe('parseEvents', () => {
     expect(parseEvents(ics)[0]?.attendees).toEqual([{ email: 'good@example.com' }])
   })
 
+  test('counts attendees it could not parse (a non-mailto cal-address)', () => {
+    const ics = [
+      'BEGIN:VEVENT',
+      'UID:evt-urn@langmail.me',
+      'ATTENDEE;CN=Jane;EMAIL=jane@example.com:urn:uuid:1234',
+      'ATTENDEE:mailto:good@example.com',
+      'END:VEVENT',
+    ].join('\r\n')
+    const [ev] = parseEvents(ics)
+    expect(ev?.attendees).toEqual([{ email: 'good@example.com' }])
+    expect(ev?.unparsedAttendeeCount).toBe(1)
+  })
+
+  test('omits unparsedAttendeeCount when every attendee parsed cleanly', () => {
+    expect(parseEvents(sample)[0]?.unparsedAttendeeCount).toBeUndefined()
+  })
+
   test('extracts the DESCRIPTION, unescaped', () => {
     const ics = buildInvite({
       attendees: ['guest@example.com'],

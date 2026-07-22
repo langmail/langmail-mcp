@@ -623,6 +623,99 @@ describe('updateCalendarEvent — attendee delta', () => {
     expect(result.isError).toBe(true)
     expect(cap.updated).toHaveLength(0)
   })
+
+  // A whole-event rebuild would discard per-occurrence overrides, so a delta
+  // refuses rather than silently reverting a customized occurrence.
+  test('refuses a delta on a series that carries per-occurrence overrides', async () => {
+    const cap = captured()
+    const master = buildInvite({
+      attendees: ['a@x.com', 'b@x.com'],
+      end: new Date('2026-06-16T10:30:00Z'),
+      organizer: 'host@langmail.me',
+      rrule: 'FREQ=WEEKLY;BYDAY=TU',
+      sequence: 2,
+      start: new Date('2026-06-16T10:00:00Z'),
+      timeZone: 'UTC',
+      title: 'Weekly Sync',
+      uid: UID,
+    })
+    const override = buildInvite({
+      attendees: ['a@x.com', 'b@x.com'],
+      end: new Date('2026-06-23T12:00:00Z'),
+      organizer: 'host@langmail.me',
+      recurrenceId: new Date('2026-06-23T10:00:00Z'),
+      sequence: 3,
+      start: new Date('2026-06-23T11:00:00Z'),
+      timeZone: 'UTC',
+      title: 'Weekly Sync (moved)',
+      uid: UID,
+    })
+    const withOverride = storedEvent({ data: `${master}\r\n${override}` })
+    const result = await updateCalendarEvent(makeDeps(account(), withOverride, cap), {
+      args: { removedAttendees: ['a@x.com'], uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('occurrence')
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  // Non-mailto attendees can't be parsed to an email; a rebuild would drop them,
+  // so a delta refuses rather than silently uninviting them.
+  test('refuses a delta when a stored attendee can’t be parsed', async () => {
+    const cap = captured()
+    const foreign = storedEvent({
+      data: [
+        'BEGIN:VCALENDAR',
+        'BEGIN:VEVENT',
+        `UID:${UID}`,
+        'SUMMARY:Foreign',
+        'DTSTART:20260616T100000Z',
+        'DTEND:20260616T103000Z',
+        'ATTENDEE;CN=Jane;EMAIL=jane@example.com:urn:uuid:1234',
+        'ATTENDEE:mailto:guest@example.com',
+        'ORGANIZER;CN="host@langmail.me":mailto:host@langmail.me',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n'),
+    })
+    const result = await updateCalendarEvent(makeDeps(account(), foreign, cap), {
+      args: { removedAttendees: ['guest@example.com'], uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('address format')
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  // Preserving an all-day (date-only) time would throw when rebuilt as a timed
+  // VEVENT, so a delta asks for an explicit start/end instead of crashing.
+  test('refuses a delta on an all-day event without an explicit time', async () => {
+    const cap = captured()
+    const allDay = storedEvent({
+      data: [
+        'BEGIN:VCALENDAR',
+        'BEGIN:VEVENT',
+        `UID:${UID}`,
+        'SUMMARY:All day',
+        'DTSTART;VALUE=DATE:20260616',
+        'DTEND;VALUE=DATE:20260617',
+        'RRULE:FREQ=WEEKLY;BYDAY=TU',
+        'ATTENDEE:mailto:a@x.com',
+        'ATTENDEE:mailto:b@x.com',
+        'ORGANIZER;CN="host@langmail.me":mailto:host@langmail.me',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n'),
+    })
+    const result = await updateCalendarEvent(makeDeps(account(), allDay, cap), {
+      args: { removedAttendees: ['a@x.com'], uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('start')
+    expect(cap.updated).toHaveLength(0)
+  })
 })
 
 describe('updateCalendarEvent — notify', () => {
