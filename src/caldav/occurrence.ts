@@ -15,6 +15,7 @@
 import { maxSequence } from './ical.ts'
 import { icalDateToIso } from './ical-parse.ts'
 import { toIcalUtc } from './recurrence.ts'
+import { parseWallClockInZone } from './timezone.ts'
 
 const CRLF = '\r\n'
 // Line break between content lines (CRLF, bare CR, or LF). Output is always
@@ -26,7 +27,9 @@ const LINE_RE = /\r\n|\r|\n/u
 // `;TZID=…`), capturing the value after the first colon. Datetime values are
 // short and never folded, so a single physical line is enough.
 const RECURRENCE_ID_RE = /^RECURRENCE-ID(?:;[^:]*)?:(.*)$/u
+const TZID_RE = /(?:^|;)TZID=([^;:]+)/iu
 const METHOD_RE = /^METHOD:/iu
+const VTIMEZONE_TZID_RE = /^TZID:(.*)$/iu
 // An EXDATE content line, capturing the (possibly comma-separated) values after
 // the first colon. Like RECURRENCE-ID above, our own single-instant EXDATEs are
 // short and never folded, so one physical line is enough.
@@ -90,15 +93,14 @@ const splitCalendar = (ical: string): SplitCalendar => {
 
 // The RECURRENCE-ID of a component as an epoch-ms instant, or null when it has
 // none (the master) or the value can't be parsed. Comparison is by instant so
-// our own overrides dedup regardless of millisecond formatting. NOTE: a value a
-// foreign client wrote with an explicit `;TZID=` is read here as UTC (we don't
-// resolve VTIMEZONE), so dedup holds under the service's "events are UTC"
-// invariant — which is all our create/update tools ever emit.
+// overrides dedup even when serialized with `TZID` wall-clock digits.
 const recurrenceIdMs = (component: Component): number | null => {
   for (const line of component.lines) {
     const match = RECURRENCE_ID_RE.exec(line)
     if (match) {
-      const ms = Date.parse(icalDateToIso((match[1] ?? '').trim()))
+      const iso = icalDateToIso((match[1] ?? '').trim())
+      const timeZone = TZID_RE.exec(line)?.[1]?.replace(/^"|"$/gu, '')
+      const ms = timeZone && !iso.endsWith('Z') ? parseWallClockInZone(iso, timeZone).getTime() : Date.parse(iso)
       return Number.isNaN(ms) ? null : ms
     }
   }
@@ -107,12 +109,20 @@ const recurrenceIdMs = (component: Component): number | null => {
 
 // Pulls the sole VEVENT out of a freshly built override VCALENDAR (buildInvite
 // output). It always contains exactly one; anything else is a programmer error.
-const overrideVevent = (overrideIcal: string): string[] => {
-  const vevent = splitCalendar(overrideIcal).components.find((c) => c.name === 'VEVENT')
+const overrideVevent = (override: SplitCalendar): Component => {
+  const vevent = override.components.find((c) => c.name === 'VEVENT')
   if (!vevent) {
     throw new Error('override iCalendar has no VEVENT')
   }
-  return vevent.lines
+  return vevent
+}
+
+const componentKey = (component: Component): string => {
+  if (component.name === 'VTIMEZONE') {
+    const tzid = component.lines.find((line) => VTIMEZONE_TZID_RE.test(line))
+    return `VTIMEZONE:${VTIMEZONE_TZID_RE.exec(tzid ?? '')?.[1] ?? ''}`
+  }
+  return `${component.name}:${component.lines.join('\n')}`
 }
 
 // Merges `overrideIcal`'s VEVENT into the stored `masterIcal`, returning the
@@ -124,10 +134,20 @@ const overrideVevent = (overrideIcal: string): string[] => {
 // scheduling.
 export const spliceOccurrenceOverride = (masterIcal: string, overrideIcal: string, recurrenceId: string): string => {
   const master = splitCalendar(masterIcal)
-  const overrideLines = overrideVevent(overrideIcal)
+  const override = splitCalendar(overrideIcal)
+  const overrideEvent = overrideVevent(override)
   const targetMs = new Date(recurrenceId).getTime()
 
   const kept = master.components.filter((c) => !(c.name === 'VEVENT' && recurrenceIdMs(c) === targetMs))
+  const keptKeys = new Set(kept.map(componentKey))
+  const missingOverrideComponents = override.components.filter(
+    (c) => c.name !== 'VEVENT' && !keptKeys.has(componentKey(c))
+  )
+  const components = [...kept, ...missingOverrideComponents, overrideEvent]
+  const orderedComponents = [
+    ...components.filter((c) => c.name !== 'VEVENT'),
+    ...components.filter((c) => c.name === 'VEVENT'),
+  ]
 
   // The header's last line is END:VCALENDAR; everything before it is the
   // calendar-level property block we re-emit. Force METHOD:REQUEST: stored
@@ -137,7 +157,7 @@ export const spliceOccurrenceOverride = (masterIcal: string, overrideIcal: strin
   const props = master.header.slice(0, -1).filter((l) => !METHOD_RE.test(l))
   const withMethod = [props[0] ?? 'BEGIN:VCALENDAR', 'METHOD:REQUEST', ...props.slice(1)]
 
-  return [...withMethod, ...kept.flatMap((c) => c.lines), ...overrideLines, end].join(CRLF) + CRLF
+  return [...withMethod, ...orderedComponents.flatMap((c) => c.lines), end].join(CRLF) + CRLF
 }
 
 // The master VEVENT of a recurring object carries the RRULE and is not itself an

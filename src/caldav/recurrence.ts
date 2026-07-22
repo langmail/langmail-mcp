@@ -4,6 +4,7 @@
 // (friendlier to fill in field-by-field). Both normalize to a single RRULE
 // string that ical-generator serializes onto the VEVENT (see ical.ts).
 
+import { TZDate } from '@date-fns/tz'
 import { rrulestr } from 'rrule'
 import { z } from 'zod'
 
@@ -85,6 +86,7 @@ export const recurrenceDescription =
 // date/time separators, then the milliseconds.
 const ISO_SEPARATORS_RE = /[-:]/gu
 const ISO_MILLIS_RE = /\.\d{3}Z$/u
+const EVENT_TIME_ZONE_SUFFIX_RE = / ([A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)+)$/u
 
 // A leading `RRULE:` property name on a raw rule, which ical-generator re-adds.
 const RRULE_PREFIX_RE = /^RRULE:/iu
@@ -93,6 +95,18 @@ const RRULE_PREFIX_RE = /^RRULE:/iu
 // an RRULE UNTIL, an EXDATE. Our events are UTC, so normalize the ISO instant.
 export const toIcalUtc = (iso: string): string =>
   new Date(iso).toISOString().replace(ISO_SEPARATORS_RE, '').replace(ISO_MILLIS_RE, 'Z')
+
+const toIcalFloating = (iso: string): string =>
+  iso.replace(EVENT_TIME_ZONE_SUFFIX_RE, '').replace(ISO_SEPARATORS_RE, '')
+
+const instantToFloatingIsoInZone = (iso: string, timeZone: string): string => {
+  const date = TZDate.tz(timeZone, new Date(iso))
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  )
+}
 
 // Normalizes either input form to a raw RRULE string *without* the `RRULE:`
 // prefix — ical-generator re-adds it on serialization.
@@ -126,8 +140,14 @@ export const toRRule = (recurrence: Recurrence): string => {
 // Membership is tested with a single-instant `between(t, t, inclusive)` rather
 // than expanding the whole (possibly unbounded) series. Our events are UTC, so
 // both bounds are normalized to a UTC DTSTART before handing off to `rrule`.
-export const isSeriesOccurrence = (masterStart: string, rrule: string, recurrenceId: string): boolean => {
-  const rule = rrulestr(`DTSTART:${toIcalUtc(masterStart)}\nRRULE:${rrule}`)
-  const at = new Date(recurrenceId)
+export const isSeriesOccurrence = (
+  masterStart: string,
+  rrule: string,
+  recurrenceId: string,
+  timeZone?: string
+): boolean => {
+  const start = timeZone ? toIcalFloating(masterStart) : toIcalUtc(masterStart)
+  const rule = rrulestr(`DTSTART:${start}\nRRULE:${rrule}`)
+  const at = timeZone ? new Date(`${instantToFloatingIsoInZone(recurrenceId, timeZone)}Z`) : new Date(recurrenceId)
   return rule.between(at, at, true).length > 0
 }

@@ -23,6 +23,7 @@ const masterObject = (over: Partial<Parameters<typeof buildInvite>[0]> = {}): st
     organizer: 'host@langmail.me',
     rrule: 'FREQ=WEEKLY;BYDAY=TU',
     start: new Date('2026-06-16T10:00:00Z'),
+    timeZone: 'UTC',
     title: 'Weekly Sync',
     uid: UID,
     ...over,
@@ -37,6 +38,7 @@ const overrideObject = (over: Partial<Parameters<typeof buildInvite>[0]> = {}): 
     recurrenceId: new Date('2026-06-23T10:00:00Z'),
     sequence: 1,
     start: new Date('2026-06-23T11:00:00Z'),
+    timeZone: 'UTC',
     title: 'Weekly Sync',
     uid: UID,
     ...over,
@@ -107,6 +109,58 @@ describe('spliceOccurrenceOverride', () => {
     expect(merged).toContain('SUMMARY:Weekly Sync (rescheduled)')
     expect(merged).toContain('DTSTART:20260623T150000Z')
     expect(merged).not.toContain('DTSTART:20260623T110000Z')
+  })
+
+  test('replaces a prior TZID-qualified override across a DST boundary', () => {
+    const master = masterObject({
+      end: new Date('2026-03-23T09:30:00Z'),
+      rrule: 'FREQ=WEEKLY;BYDAY=MO',
+      start: new Date('2026-03-23T09:00:00Z'),
+      timeZone: 'Europe/Berlin',
+    })
+    const first = spliceOccurrenceOverride(
+      master,
+      overrideObject({
+        end: new Date('2026-03-30T10:30:00Z'),
+        recurrenceId: new Date('2026-03-30T08:00:00Z'),
+        start: new Date('2026-03-30T10:00:00Z'),
+        timeZone: 'Europe/Berlin',
+      }),
+      '2026-03-30T08:00:00Z'
+    )
+    const second = overrideObject({
+      end: new Date('2026-03-30T12:30:00Z'),
+      recurrenceId: new Date('2026-03-30T08:00:00Z'),
+      sequence: 2,
+      start: new Date('2026-03-30T12:00:00Z'),
+      timeZone: 'Europe/Berlin',
+      title: 'Weekly Sync (DST edit)',
+    })
+
+    const merged = unfold(spliceOccurrenceOverride(first, second, '2026-03-30T08:00:00Z'))
+
+    expect((merged.match(/BEGIN:VEVENT/gu) ?? []).length).toBe(2)
+    expect((merged.match(/RECURRENCE-ID/gu) ?? []).length).toBe(1)
+    expect(merged).toContain('RECURRENCE-ID;TZID=Europe/Berlin:20260330T100000')
+    expect(merged).toContain('SUMMARY:Weekly Sync (DST edit)')
+  })
+
+  test('preserves VTIMEZONE when a non-UTC override is spliced into a UTC master', () => {
+    const merged = unfold(
+      spliceOccurrenceOverride(
+        masterObject(),
+        overrideObject({
+          end: new Date('2026-06-23T13:30:00Z'),
+          start: new Date('2026-06-23T13:00:00Z'),
+          timeZone: 'Europe/Berlin',
+        }),
+        '2026-06-23T10:00:00Z'
+      )
+    )
+
+    expect(merged).toContain('BEGIN:VTIMEZONE')
+    expect(merged).toContain('TZID:Europe/Berlin')
+    expect(merged).toContain('DTSTART;TZID=Europe/Berlin:20260623T150000')
   })
 
   test('leaves an unrelated occurrence override in place', () => {

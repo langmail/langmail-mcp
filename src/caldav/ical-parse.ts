@@ -17,6 +17,12 @@ export interface ParsedEvent {
   // to update_calendar_event (which re-rules the whole series).
   recurrence?: string
   start: string
+  // IANA zone named by the DTSTART `;TZID=` param, when present. This is the
+  // event's own zone: update_calendar_event keeps it so an edit doesn't silently
+  // re-express the event elsewhere, and list rendering surfaces it. Absent for
+  // the historical UTC (`…Z`) form and for foreign floating times. `start`/`end`
+  // stay pure ISO wall-clock strings — the zone lives here, not appended to them.
+  startTzid?: string
   title: string
   uid: string
 }
@@ -28,6 +34,7 @@ const unfold = (ical: string): string => ical.replace(/\r?\n[ \t]/gu, '')
 // A content line is `NAME(;PARAM=…)*:VALUE`; the name ends at the first
 // `;` or `:`, the value is everything after the first `:`.
 const NAME_RE = /^([^;:]+)/u
+const TZID_RE = /(?:^|;)TZID=([^;:]+)/iu
 
 // Line break between content lines (CRLF or bare LF).
 const LINE_RE = /\r?\n/u
@@ -59,9 +66,14 @@ export const icalDateToIso = (value: string): string => {
 // is fine for the single-valued fields we read. Properties of nested
 // sub-components (notably VALARM, whose SUMMARY would otherwise clobber the
 // event's) are skipped.
-const eventBlocks = (ical: string): Map<string, string>[] => {
-  const blocks: Map<string, string>[] = []
-  let current: Map<string, string> | null = null
+interface ParsedProperty {
+  params: string
+  value: string
+}
+
+const eventBlocks = (ical: string): Map<string, ParsedProperty>[] => {
+  const blocks: Map<string, ParsedProperty>[] = []
+  let current: Map<string, ParsedProperty> | null = null
   // Nesting depth of sub-components inside the current VEVENT (VALARM, …).
   let nested = 0
 
@@ -103,7 +115,7 @@ const eventBlocks = (ical: string): Map<string, string>[] => {
     }
     const name = NAME_RE.exec(line.slice(0, colon))?.[1]?.toUpperCase()
     if (name) {
-      current.set(name, line.slice(colon + 1))
+      current.set(name, { params: line.slice(name.length, colon), value: line.slice(colon + 1) })
     }
   }
   return blocks
@@ -118,12 +130,17 @@ const eventBlocks = (ical: string): Map<string, string>[] => {
 // than risk callers writing garbage back into a rebuilt invite.
 const LAST_MAILTO_RE = /^.*mailto:/isu
 const NOT_BARE_EMAIL_RE = /["\s:;,]/u
-const parseOrganizerEmail = (value: string | undefined): string | undefined => {
-  if (!value) {
+const parseOrganizerEmail = (property: ParsedProperty | undefined): string | undefined => {
+  if (!property) {
     return
   }
-  const email = value.replace(LAST_MAILTO_RE, '').trim()
-  return email && email !== value.trim() && !NOT_BARE_EMAIL_RE.test(email) ? email : undefined
+  const email = property.value.replace(LAST_MAILTO_RE, '').trim()
+  return email && email !== property.value.trim() && !NOT_BARE_EMAIL_RE.test(email) ? email : undefined
+}
+
+const propertyTimeZone = (property: ParsedProperty | undefined): string | undefined => {
+  const timeZone = TZID_RE.exec(property?.params ?? '')?.[1]
+  return timeZone ? timeZone.replace(/^"|"$/gu, '') : undefined
 }
 
 // Parses every VEVENT in a VCALENDAR. Blocks without a UID are skipped —
@@ -132,22 +149,25 @@ export const parseEvents = (ical: string): ParsedEvent[] => {
   const events: ParsedEvent[] = []
   for (const block of eventBlocks(ical)) {
     const uid = block.get('UID')
-    if (!uid) {
+    if (!uid?.value) {
       continue
     }
-    const location = block.get('LOCATION')
+    const location = block.get('LOCATION')?.value
     const organizer = parseOrganizerEmail(block.get('ORGANIZER'))
+    const start = block.get('DTSTART')
+    const startTzid = propertyTimeZone(start)
     // Trim so a server that emits a trailing space (`RRULE:FREQ=WEEKLY `) doesn't
     // leak it into the listed `repeats:` value.
-    const recurrence = block.get('RRULE')?.trim()
+    const recurrence = block.get('RRULE')?.value.trim()
     events.push({
-      end: icalDateToIso(block.get('DTEND') ?? ''),
-      start: icalDateToIso(block.get('DTSTART') ?? ''),
-      title: unescapeText(block.get('SUMMARY') ?? ''),
-      uid,
+      end: icalDateToIso(block.get('DTEND')?.value ?? ''),
+      start: icalDateToIso(start?.value ?? ''),
+      title: unescapeText(block.get('SUMMARY')?.value ?? ''),
+      uid: uid.value,
       ...(location ? { location: unescapeText(location) } : {}),
       ...(organizer ? { organizer } : {}),
       ...(recurrence ? { recurrence } : {}),
+      ...(startTzid ? { startTzid } : {}),
     })
   }
   return events
