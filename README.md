@@ -176,7 +176,7 @@ Parameters:
 - `end`: string (optional) — window end (ISO 8601 with offset); must be paired with `start`
 
 Returns:
-- A list of events, each with its title, time, location (if any), repeat rule (for recurring events), and `uid`
+- A list of events, each with its title, time, location (if any), repeat rule (for recurring events), attendees (with response status, when any), and `uid`. The attendee list is the current membership `update_calendar_event` edits — read it here before adding or removing attendees.
 
 ### create_calendar_event
 
@@ -199,26 +199,38 @@ Returns:
 
 ### update_calendar_event
 
-Updates an existing event in place (identified by its `uid`) and re-sends
-iMIP notifications to the attendees. This is a full replacement — pass the
-complete event details, not just the changed fields. For a recurring event
-this edits the entire series: pass `recurrence` again to keep it recurring;
-omitting it collapses the series back to a single event. (Editing a single
-occurrence of a series is not supported.)
+Updates an existing event in place (identified by its `uid`) and, by default,
+re-sends iMIP notifications to the attendees. Two ways to change attendees:
+
+- **Attendee delta** — pass `addedAttendees` / `removedAttendees` to change
+  specific addresses against the stored list. Every field you omit (attendees,
+  `start`, `end`, `title`, `recurrence`, …) is kept as stored, so removing one
+  person from a recurring meeting never collapses the series and re-passes
+  nothing.
+- **Full replacement** — pass the complete `attendees`, `start`, `end`, and
+  `title`. For a recurring event, omitting `recurrence` collapses the series
+  back to a single event.
+
+To edit one occurrence in isolation, pass `recurrenceId` (the occurrence's
+original start); attendee deltas can't be combined with it.
 
 Parameters:
 - `uid`: string — the event's iCalendar UID, from `create_calendar_event` or `list_calendar_events`
-- `title`: string — event title (1–200 characters)
-- `start`: string — start datetime (ISO 8601 with offset)
-- `end`: string — end datetime (ISO 8601 with offset); must be after `start`
-- `attendees`: array of string — 1–50 attendee email addresses
+- `title`: string — event title (1–200 characters); optional with an attendee delta (kept as stored when omitted)
+- `start`: string — start datetime (ISO 8601 with offset); optional with an attendee delta
+- `end`: string — end datetime (ISO 8601 with offset); must be after `start`; optional with an attendee delta
+- `attendees`: array of string — 1–50 attendee email addresses (the full replacement list); optional with an attendee delta, and mutually exclusive with `addedAttendees`/`removedAttendees`
+- `addedAttendees`: array of string (optional) — email addresses to add to the stored attendee list
+- `removedAttendees`: array of string (optional) — email addresses to remove from the stored attendee list (matched case-insensitively)
+- `notify`: `all` (default) or `none` (optional) — `none` makes the edit silent (attendees on the event are not notified)
 - `calendarUrl`: string (optional) — a CalDAV URL from `list_calendars`; defaults to the user's default calendar
 - `description`: string (optional) — up to 5000 characters
 - `location`: string (optional) — up to 500 characters
-- `recurrence`: string or object (optional) — same shape as `create_calendar_event`; re-rules the whole series (omit to make it a one-off)
+- `recurrence`: string or object (optional) — same shape as `create_calendar_event`; re-rules the whole series (in a full replacement, omit to make it a one-off; in a delta, omit to keep the stored rule)
+- `recurrenceId`: string (optional) — ISO 8601 instant naming one occurrence to edit in isolation
 
 Returns:
-- A confirmation that the event was updated and notifications were sent
+- A confirmation that the event was updated, naming the notified attendees (or noting none were notified)
 
 ### delete_calendar_event
 

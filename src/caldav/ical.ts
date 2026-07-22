@@ -9,6 +9,10 @@ import ical, { ICalAttendeeRole, ICalAttendeeStatus, ICalCalendarMethod } from '
 import { toZonedDate, UTC_TIME_ZONE } from './timezone.ts'
 
 const RECURRENCE_ID_LINE_RE = /^RECURRENCE-ID(?:;[^:]*)?:.*$/mu
+// The start of each ATTENDEE content line (before its first param/value
+// delimiter); multiline + global so every attendee is matched, folded
+// continuation lines (leading space) are not.
+const ATTENDEE_LINE_START_RE = /^ATTENDEE(?=[;:])/gmu
 
 export interface InviteInput {
   attendees: string[]
@@ -30,6 +34,13 @@ export interface InviteInput {
   // the VEVENT becomes a recurring series; start/end are the first
   // occurrence. Omit for a one-off event. See caldav/recurrence.ts.
   rrule?: string
+  // RFC 6638 SCHEDULE-AGENT on each ATTENDEE. Default (omitted) leaves the
+  // attendees SERVER-scheduled, so Stalwart fans out the iMIP invite/update.
+  // 'NONE' stamps SCHEDULE-AGENT=NONE on every ATTENDEE, telling Stalwart to do
+  // no scheduling for them — the quiet path for an edit (e.g. dropping one's own
+  // duplicate address) that shouldn't re-notify the others. Verified against
+  // Stalwart 0.16: NONE suppresses delivery, and a later SERVER edit re-notifies.
+  scheduleAgent?: 'NONE' | 'SERVER'
   // iCalendar SEQUENCE. Omit (or 0) for a fresh invite; bump on every edit
   // so attendees' clients treat the re-sent REQUEST as an update, not a
   // duplicate. See update-calendar-event.ts.
@@ -92,6 +103,15 @@ export const buildInvite = (input: InviteInput): string => {
       RECURRENCE_ID_LINE_RE,
       formatRecurrenceId(input.recurrenceId, input.recurrenceTimeZone)
     )
+  }
+
+  // Suppress iMIP fan-out by stamping SCHEDULE-AGENT=NONE onto each ATTENDEE
+  // (ical-generator has no attendee-param for it). Inserted right after the
+  // property name, before ical-generator's own params — order is irrelevant in
+  // iCalendar. `^ATTENDEE` (multiline) only matches a line's starting physical
+  // line, so a folded continuation is never touched.
+  if (input.scheduleAgent === 'NONE') {
+    serialized = serialized.replace(ATTENDEE_LINE_START_RE, 'ATTENDEE;SCHEDULE-AGENT=NONE')
   }
 
   // ical-generator serializes the ATTENDEE CAL-ADDRESS scheme in uppercase

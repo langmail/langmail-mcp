@@ -41,6 +41,13 @@ export interface ListCalendarEventsContext {
   token: string
 }
 
+// `email` for an unanswered invitee, `email (accepted)` once they respond.
+// NEEDS-ACTION is the default and adds no signal, so it's left unannotated.
+const formatAttendee = (attendee: ParsedEvent['attendees'][number]): string =>
+  attendee.status && attendee.status.toUpperCase() !== 'NEEDS-ACTION'
+    ? `${attendee.email} (${attendee.status.toLowerCase()})`
+    : attendee.email
+
 const formatEvent = (idx: number, ev: ParsedEvent): string => {
   const range = ev.end ? `${ev.start} → ${ev.end}` : ev.start
   // Surface the event's own zone so a naive `…T10:00:00` (a TZID event) isn't
@@ -52,6 +59,11 @@ const formatEvent = (idx: number, ev: ParsedEvent): string => {
   }
   if (ev.recurrence) {
     lines.push(`   repeats: ${ev.recurrence}`)
+  }
+  // The attendee list is what makes an attendee edit safe: it's the current
+  // stored membership update_calendar_event mutates, read straight from Langmail.
+  if (ev.attendees.length > 0) {
+    lines.push(`   attendees: ${ev.attendees.map(formatAttendee).join(', ')}`)
   }
   lines.push(`   uid: ${ev.uid}`)
   return lines.join('\n')
@@ -116,10 +128,12 @@ export const registerListCalendarEvents = (
     {
       description:
         "Lists events in the user's calendar, returning each event's title, time, " +
-        'location, and uid. Pass the uid to update_calendar_event or ' +
-        'delete_calendar_event. Optionally bound the results with a start/end window ' +
-        '(ISO 8601 with offset); omit both to list everything. Defaults to the ' +
-        'user’s default calendar.',
+        'location, attendees (with their response status), and uid. Pass the uid to ' +
+        'update_calendar_event or delete_calendar_event; the returned attendee list is ' +
+        'the current membership those tools edit, so read it here before removing or ' +
+        'adding attendees rather than guessing. Optionally bound the results with a ' +
+        'start/end window (ISO 8601 with offset); omit both to list everything. ' +
+        'Defaults to the user’s default calendar.',
       inputSchema: listCalendarEventsInput.shape,
       title: 'List calendar events',
     },

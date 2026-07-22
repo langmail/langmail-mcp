@@ -32,7 +32,7 @@ import {
   updateEvent,
 } from '../caldav/client.ts'
 import { buildInvite, maxSequence, parseSequence } from '../caldav/ical.ts'
-import { parseEvents } from '../caldav/ical-parse.ts'
+import { type ParsedEvent, parseEvents } from '../caldav/ical-parse.ts'
 import { spliceOccurrenceOverride } from '../caldav/occurrence.ts'
 import { isSeriesOccurrence, toRRule } from '../caldav/recurrence.ts'
 import { resolveInputDateTime, UTC_TIME_ZONE } from '../caldav/timezone.ts'
@@ -48,14 +48,79 @@ const recurrenceIdDescription =
   'become the occurrence’s new time (pass the same instant here and in start to ' +
   'keep the time and change only other fields). The instant must land on an ' +
   'actual occurrence of the series. Omit to edit the whole event. Cannot be ' +
-  'combined with `recurrence`.'
+  'combined with `recurrence` or with `addedAttendees`/`removedAttendees`.'
 
-export const updateCalendarEventInput = createCalendarEventInput.extend({
+const attendeesDescription =
+  'The complete attendee list (full replacement) — every address that should be ' +
+  'invited after the edit. Required unless you pass `addedAttendees`/`removedAttendees`, ' +
+  'which change specific attendees against the stored list instead. Cannot be combined ' +
+  'with those delta fields.'
+
+const addedAttendeesDescription =
+  'Email addresses to add to the event’s current attendee list, merged on top of ' +
+  'the stored attendees — you do NOT re-supply the existing ones. Adding an address ' +
+  'already invited is a no-op. Cannot be combined with `attendees` (the full-replacement ' +
+  'list). When you pass this or `removedAttendees`, every other field you omit ' +
+  '(start, end, title, recurrence, location, description) is kept as stored, so a ' +
+  'recurring series stays recurring.'
+
+const removedAttendeesDescription =
+  'Email addresses to remove from the event’s current attendee list, applied against ' +
+  'the stored attendees (matched case-insensitively). Removing an address that isn’t ' +
+  'invited is a no-op. This is the safe way to drop one attendee from a recurring ' +
+  'meeting: you name only the address to remove and re-supply nothing else. Cannot be ' +
+  'combined with `attendees`.'
+
+const notifyDescription =
+  'Who to notify by iMIP. `all` (default) re-sends invitations/updates to the ' +
+  'attendees, as a normal edit does. `none` makes the edit silent — the attendees on ' +
+  'the event are not notified — for a trivial change (e.g. dropping your own duplicate ' +
+  'address) that shouldn’t disturb everyone. A removed attendee may still receive a ' +
+  'cancellation.'
+
+const optionalWhenDelta = (verb: string): string =>
+  ` Optional when using an attendee delta (addedAttendees/removedAttendees): omit to ${verb}. Required otherwise.`
+
+const shared = createCalendarEventInput.shape
+
+export const updateCalendarEventInput = z.object({
+  addedAttendees: z.array(z.email()).min(1).max(50).optional().describe(addedAttendeesDescription),
+  attendees: shared.attendees.optional().describe(attendeesDescription),
+  calendarUrl: shared.calendarUrl,
+  description: shared.description,
+  end: shared.end.optional().describe(`Event end as ISO 8601.${optionalWhenDelta('keep the stored end')}`),
+  location: shared.location,
+  notify: z.enum(['all', 'none']).optional().describe(notifyDescription),
+  recurrence: shared.recurrence,
   recurrenceId: z.iso.datetime({ offset: true }).optional().describe(recurrenceIdDescription),
+  removedAttendees: z.array(z.email()).min(1).max(50).optional().describe(removedAttendeesDescription),
+  start: shared.start.optional().describe(`Event start as ISO 8601.${optionalWhenDelta('keep the stored start')}`),
+  timeZone: shared.timeZone,
+  title: shared.title.optional().describe(`Event title.${optionalWhenDelta('keep the stored title')}`),
   uid: eventUidSchema,
 })
 
 export type UpdateCalendarEventArgs = z.infer<typeof updateCalendarEventInput>
+
+// Merges an attendee delta onto the stored list: start from `base`, append
+// `added`, drop everything in `removed`. All comparison is case-insensitive
+// (RFC 5545 calendar-user-addresses are), and duplicates collapse to the first
+// spelling seen — so re-adding an existing attendee or removing an absent one is
+// a harmless no-op, and the result never carries the same address twice.
+export const mergeAttendees = (base: string[], added: string[], removed: string[]): string[] => {
+  const removedSet = new Set(removed.map((email) => email.toLowerCase()))
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const email of [...base, ...added]) {
+    const key = email.toLowerCase()
+    if (removedSet.has(key) || seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    result.push(email)
+  }
+  return result
+}
 
 export interface UpdateCalendarEventDeps {
   discover: (token: string) => Promise<DiscoveredAccount>
@@ -73,17 +138,27 @@ export interface UpdateCalendarEventContext {
 }
 
 // Everything the single-occurrence path needs once the common preamble
-// (organizer + calendar + existence checks) has passed.
+// (organizer + calendar + existence checks + field resolution) has passed. The
+// mutable event fields arrive already resolved (caller value or preserved
+// stored value) rather than read off `args`, so this path and the whole-event
+// path agree on what "the edited event" is.
 interface OccurrenceUpdate {
   args: UpdateCalendarEventArgs
+  attendees: string[]
   deps: UpdateCalendarEventDeps
+  description?: string
   end: Date
   existing: CalendarObject
+  location?: string
   // Bare organizer email — already confirmed non-null by the caller.
   organizer: string
   recurrenceId: string
+  // RFC 6638 SCHEDULE-AGENT for the override's attendees; undefined = SERVER
+  // (notify), 'NONE' = silent. See buildInvite.
+  scheduleAgent?: 'NONE'
   start: Date
   timeZone: string
+  title: string
   token: string
 }
 
@@ -91,7 +166,22 @@ interface OccurrenceUpdate {
 // against the master's RRULE, build a RECURRENCE-ID override, and splice it into
 // the stored object alongside the untouched master before PUTting it back.
 const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
-  const { args, deps, end, existing, organizer, recurrenceId, start, timeZone, token } = u
+  const {
+    args,
+    attendees,
+    deps,
+    description,
+    end,
+    existing,
+    location,
+    organizer,
+    recurrenceId,
+    scheduleAgent,
+    start,
+    timeZone,
+    title,
+    token,
+  } = u
 
   // The stored object holds the master (the only VEVENT with an RRULE) plus any
   // existing overrides. The master identifies the series we validate against.
@@ -123,7 +213,7 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
   }
 
   const override = buildInvite({
-    attendees: args.attendees,
+    attendees,
     end,
     // The master's stored ORGANIZER wins over the discovered principal: an
     // event created under a previous account address (still an alias) would
@@ -137,20 +227,153 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
     sequence: maxSequence(existing.data) + 1,
     start,
     timeZone,
-    title: args.title,
+    title,
     uid: args.uid,
-    ...(args.description ? { description: args.description } : {}),
-    ...(args.location ? { location: args.location } : {}),
+    ...(description ? { description } : {}),
+    ...(location ? { location } : {}),
+    ...(scheduleAgent ? { scheduleAgent } : {}),
   })
   const ical = spliceOccurrenceOverride(existing.data, override, recurrenceId)
 
   await deps.updateEvent({ ical, token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
 
   return textResult(
-    `Occurrence of "${args.title}" on ${recurrenceId} updated and notifications sent ` +
-      `to ${args.attendees.length} attendee(s): ${args.attendees.join(', ')}. ` +
+    `Occurrence of "${title}" on ${recurrenceId} updated (${deliverySummary(attendees, scheduleAgent)}). ` +
       'The rest of the series is unchanged.'
   )
+}
+
+// One-line human summary of who the PUT notified.
+const deliverySummary = (attendees: string[], scheduleAgent?: 'NONE'): string =>
+  scheduleAgent === 'NONE'
+    ? 'no notifications sent'
+    : `notifications sent to ${attendees.length} attendee(s): ${attendees.join(', ')}`
+
+// The event fields an edit resolves to, once the caller's values and the
+// preserved stored values have been reconciled.
+interface ResolvedFields {
+  attendees: string[]
+  description?: string
+  end: Date
+  location?: string
+  scheduleAgent?: 'NONE'
+  start: Date
+  title: string
+}
+
+type FieldResolution = { error: string; ok: false } | { ok: true; value: ResolvedFields }
+
+// Rejects contradictory field combinations up front (validated here, not in the
+// schema, so registerTool can keep the plain-object `.shape`). Returns the error
+// message, or undefined when the combination is coherent.
+const combinationError = (args: UpdateCalendarEventArgs, isDelta: boolean): string | undefined => {
+  // `recurrence` re-rules the whole series; `recurrenceId` edits one occurrence.
+  if (args.recurrenceId !== undefined && args.recurrence !== undefined) {
+    return 'Pass either `recurrence` (to re-rule the whole series) or `recurrenceId` (to edit a single occurrence), not both.'
+  }
+  // A delta and a full replacement of the attendee list are contradictory.
+  if (isDelta && args.attendees !== undefined) {
+    return 'Pass either `attendees` (the full replacement list) or `addedAttendees`/`removedAttendees` (a delta against the stored list), not both.'
+  }
+  // Attendee membership is a property of the whole series; a single-occurrence
+  // scope would make it ambiguous whose list is being edited.
+  if (isDelta && args.recurrenceId !== undefined) {
+    return 'Attendee deltas (`addedAttendees`/`removedAttendees`) edit the whole event and cannot be combined with `recurrenceId`. Omit `recurrenceId` to change the series’ attendees.'
+  }
+  return
+}
+
+// The effective attendee list: a delta merges add/remove onto the stored
+// attendees (read from Langmail, not re-supplied); otherwise the caller gives
+// the complete list, as before.
+const resolveAttendees = (
+  args: UpdateCalendarEventArgs,
+  isDelta: boolean,
+  storedMaster: ParsedEvent | undefined
+): { attendees: string[] } | { error: string } => {
+  if (isDelta) {
+    const base = (storedMaster?.attendees ?? []).map((a) => a.email)
+    const attendees = mergeAttendees(base, args.addedAttendees ?? [], args.removedAttendees ?? [])
+    if (attendees.length === 0) {
+      return {
+        error:
+          'Removing those attendees would leave the event with none. Delete the event instead, or keep at least one attendee.',
+      }
+    }
+    return { attendees }
+  }
+  if (args.attendees === undefined) {
+    return {
+      error:
+        'A full update needs `attendees` (plus `start`, `end`, and `title`). To change only some attendees while keeping the rest of the event, pass `addedAttendees`/`removedAttendees` instead.',
+    }
+  }
+  return { attendees: args.attendees }
+}
+
+// Reconciles every editable field: the caller's value wins; when omitted, a
+// delta edit keeps the stored value (so a one-attendee change never collapses
+// the recurrence or drops the title/time), and a full replacement requires it.
+const resolveEditFields = (
+  args: UpdateCalendarEventArgs,
+  isDelta: boolean,
+  storedMaster: ParsedEvent | undefined,
+  timeZone: string
+): FieldResolution => {
+  const attendees = resolveAttendees(args, isDelta, storedMaster)
+  if ('error' in attendees) {
+    return { error: attendees.error, ok: false }
+  }
+
+  const title = args.title ?? (isDelta ? storedMaster?.title : undefined)
+  if (title === undefined) {
+    return { error: 'A full update needs a `title`. Pass an attendee delta to keep the stored title.', ok: false }
+  }
+  const startIso = args.start ?? (isDelta ? storedMaster?.start : undefined)
+  const endIso = args.end ?? (isDelta ? storedMaster?.end : undefined)
+  if (startIso === undefined || endIso === undefined) {
+    return {
+      error: 'A full update needs `start` and `end`. Pass an attendee delta to keep the stored time.',
+      ok: false,
+    }
+  }
+  // A caller-supplied value is read with the caller's timeZone semantics; a
+  // preserved stored value already encodes its own zone (startTzid, folded into
+  // `timeZone` above), so it is read as wall-clock in that zone.
+  const start = resolveInputDateTime(startIso, timeZone, args.start !== undefined && args.timeZone !== undefined)
+  const end = resolveInputDateTime(endIso, timeZone, args.end !== undefined && args.timeZone !== undefined)
+  if (end <= start) {
+    return { error: 'Event end must be after its start.', ok: false }
+  }
+
+  const location = args.location ?? (isDelta ? storedMaster?.location : undefined)
+  const description = args.description ?? (isDelta ? storedMaster?.description : undefined)
+  return {
+    ok: true,
+    value: {
+      attendees: attendees.attendees,
+      end,
+      start,
+      title,
+      ...(description ? { description } : {}),
+      ...(location ? { location } : {}),
+      ...(args.notify === 'none' ? { scheduleAgent: 'NONE' as const } : {}),
+    },
+  }
+}
+
+// The whole-series RRULE for a whole-event edit: an explicit `recurrence` re-rules
+// the series; a delta edit preserves the stored master's rule; a full replacement
+// that omits it drops the RRULE and collapses the series to a one-off.
+const resolveRrule = (
+  args: UpdateCalendarEventArgs,
+  isDelta: boolean,
+  storedMaster: ParsedEvent | undefined
+): string | undefined => {
+  if (args.recurrence) {
+    return toRRule(args.recurrence)
+  }
+  return isDelta ? storedMaster?.recurrence : undefined
 }
 
 export const updateCalendarEvent = async (
@@ -159,18 +382,16 @@ export const updateCalendarEvent = async (
 ): Promise<ToolResult> => {
   const { args, token } = ctx
 
-  // The two modes are contradictory: `recurrence` re-rules the whole series,
-  // `recurrenceId` edits a single occurrence. Reject the ambiguous combination
-  // rather than silently favouring one.
-  if (args.recurrenceId !== undefined && args.recurrence !== undefined) {
-    return errorResult(
-      'Pass either `recurrence` (to re-rule the whole series) or `recurrenceId` ' +
-        '(to edit a single occurrence), not both.'
-    )
+  // A delta edit names the attendees to add/remove and keeps everything else
+  // stored, rather than re-specifying the whole event.
+  const isDelta = args.addedAttendees !== undefined || args.removedAttendees !== undefined
+
+  const comboError = combinationError(args, isDelta)
+  if (comboError) {
+    return errorResult(comboError)
   }
 
   const account = await deps.discover(token)
-
   if (!account.organizer) {
     return errorResult('Could not determine an organizer address for this account.')
   }
@@ -183,63 +404,60 @@ export const updateCalendarEvent = async (
         : `Calendar not found: ${args.calendarUrl}`
     )
   }
-  const calendarUrl = resolved.url
 
-  const existing = await deps.fetchEvent({ calendarUrl, token, uid: args.uid })
+  const existing = await deps.fetchEvent({ calendarUrl: resolved.url, token, uid: args.uid })
   if (!existing) {
     return errorResult(`Event not found: ${args.uid}`)
   }
-  const storedMaster =
-    parseEvents(existing.data).find((e) => e.recurrence !== undefined) ?? parseEvents(existing.data)[0]
+  const stored = parseEvents(existing.data)
+  const storedMaster = stored.find((e) => e.recurrence !== undefined) ?? stored[0]
   const timeZone = args.timeZone ?? storedMaster?.startTzid ?? (await deps.resolveTimeZone(token)) ?? UTC_TIME_ZONE
-  const start = resolveInputDateTime(args.start, timeZone, args.timeZone !== undefined)
-  const end = resolveInputDateTime(args.end, timeZone, args.timeZone !== undefined)
-  if (end <= start) {
-    return errorResult('Event end must be after its start.')
+
+  const fields = resolveEditFields(args, isDelta, storedMaster, timeZone)
+  if (!fields.ok) {
+    return errorResult(fields.error)
   }
+  const f = fields.value
 
   if (args.recurrenceId !== undefined) {
     return updateOccurrence({
       args,
       deps,
-      end,
       existing,
       organizer: account.organizer,
       recurrenceId: args.recurrenceId,
-      start,
       timeZone,
       token,
+      ...f,
     })
   }
 
-  // Full re-specification: a recurrence given here re-rules the whole series;
-  // omitting it drops the RRULE and collapses the series to a single event.
-  const rrule = args.recurrence ? toRRule(args.recurrence) : undefined
+  const rrule = resolveRrule(args, isDelta, storedMaster)
   // Keep the stored ORGANIZER (see updateOccurrence): re-stamping the freshly
   // discovered principal onto an event created under a previous account
   // address silently changes the organizer, which Stalwart's scheduler treats
   // as an unsupported organizer replacement (RFC 6638).
-  const storedOrganizer = parseEvents(existing.data).find((e) => e.organizer)?.organizer
+  const storedOrganizer = stored.find((e) => e.organizer)?.organizer
   const ical = buildInvite({
-    attendees: args.attendees,
-    end,
+    attendees: f.attendees,
+    end: f.end,
     organizer: storedOrganizer ?? account.organizer,
     // Bump past the stored SEQUENCE so the re-sent REQUEST supersedes it.
     sequence: parseSequence(existing.data) + 1,
-    start,
+    start: f.start,
     timeZone,
-    title: args.title,
+    title: f.title,
     uid: args.uid,
-    ...(args.description ? { description: args.description } : {}),
-    ...(args.location ? { location: args.location } : {}),
+    ...(f.description ? { description: f.description } : {}),
+    ...(f.location ? { location: f.location } : {}),
     ...(rrule ? { rrule } : {}),
+    ...(f.scheduleAgent ? { scheduleAgent: f.scheduleAgent } : {}),
   })
 
   await deps.updateEvent({ ical, token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
 
   return textResult(
-    `${rrule ? 'Recurring event' : 'Event'} "${args.title}" updated and notifications sent ` +
-      `to ${args.attendees.length} attendee(s): ${args.attendees.join(', ')}.`
+    `${rrule ? 'Recurring event' : 'Event'} "${f.title}" updated (${deliverySummary(f.attendees, f.scheduleAgent)}).`
   )
 }
 
@@ -270,16 +488,20 @@ export const registerUpdateCalendarEvent = (
     {
       description:
         'Updates an existing calendar event (identified by its uid from ' +
-        'create_calendar_event) and re-sends iMIP notifications to the attendees. ' +
-        'This is a full replacement: pass the complete event details, not just the ' +
-        'changed fields. By default this edits the ENTIRE event — for a recurring ' +
-        'event that means every occurrence, so to keep it recurring pass ' +
-        '`recurrence` again; omitting it collapses the series back to a single ' +
-        'event. To instead edit ONE occurrence in isolation (e.g. a per-week agenda ' +
-        'on a recurring meeting), pass `recurrenceId` naming that occurrence by its ' +
+        'create_calendar_event or list_calendar_events) and re-sends iMIP ' +
+        'notifications to the attendees. Two ways to change attendees: (1) a delta — ' +
+        'pass `addedAttendees`/`removedAttendees` to add or drop specific addresses ' +
+        'while every field you omit (attendees, start, end, title, recurrence, ' +
+        'location) is kept as stored, so removing one person from a recurring meeting ' +
+        'needs nothing else and never collapses the series; (2) a full replacement — ' +
+        'pass the complete `attendees`, `start`, `end`, and `title`, where omitting ' +
+        '`recurrence` collapses a series back to a single event. To edit ONE ' +
+        'occurrence in isolation, pass `recurrenceId` naming that occurrence by its ' +
         'original start; the master rule and every other occurrence stay unchanged. ' +
-        'Times are ISO 8601 with offset or naive local form. Optional `timeZone` is ' +
-        'an IANA zone and, when passed, overrides embedded offsets so wall-clock digits win.',
+        'Pass `notify: "none"` to make the edit silent (no notification to the ' +
+        'attendees) — e.g. when dropping your own duplicate address. Times are ISO ' +
+        '8601 with offset or naive local form. Optional `timeZone` is an IANA zone ' +
+        'and, when passed, overrides embedded offsets so wall-clock digits win.',
       inputSchema: updateCalendarEventInput.shape,
       title: 'Update calendar event',
     },

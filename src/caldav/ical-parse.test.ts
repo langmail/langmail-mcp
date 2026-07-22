@@ -148,4 +148,80 @@ describe('parseEvents', () => {
     const ics = 'BEGIN:VEVENT\r\nUID:b@langmail.me\r\nSUMMARY:path C:\\\\new\r\nEND:VEVENT'
     expect(parseEvents(ics)[0]?.title).toBe('path C:\\new')
   })
+
+  test('extracts every attendee as a bare email, in source order', () => {
+    const ics = buildInvite({
+      attendees: ['kai@atelier.example', 'mika@example.com', 'jo@example.com'],
+      end: new Date('2026-06-12T10:30:00Z'),
+      organizer: 'host@langmail.me',
+      start: new Date('2026-06-12T10:00:00Z'),
+      title: 'Team',
+      uid: 'evt-att@langmail.me',
+    })
+    expect(parseEvents(ics)[0]?.attendees.map((a) => a.email)).toEqual([
+      'kai@atelier.example',
+      'mika@example.com',
+      'jo@example.com',
+    ])
+  })
+
+  test('reads each attendee PARTSTAT when present', () => {
+    const ics = [
+      'BEGIN:VEVENT',
+      'UID:evt-partstat@langmail.me',
+      'ATTENDEE;PARTSTAT=ACCEPTED;RSVP=TRUE:mailto:yes@example.com',
+      'ATTENDEE;PARTSTAT=DECLINED:mailto:no@example.com',
+      'ATTENDEE;RSVP=TRUE:mailto:pending@example.com',
+      'END:VEVENT',
+    ].join('\r\n')
+    expect(parseEvents(ics)[0]?.attendees).toEqual([
+      { email: 'yes@example.com', status: 'ACCEPTED' },
+      { email: 'no@example.com', status: 'DECLINED' },
+      { email: 'pending@example.com' },
+    ])
+  })
+
+  test('gives an attendee-less event an empty attendee list', () => {
+    const ics = 'BEGIN:VEVENT\r\nUID:solo@langmail.me\r\nSUMMARY:Solo\r\nEND:VEVENT'
+    expect(parseEvents(ics)[0]?.attendees).toEqual([])
+  })
+
+  test('reads an attendee address past params carrying quoted colons', () => {
+    const ics = [
+      'BEGIN:VEVENT',
+      'UID:evt-q@langmail.me',
+      'ATTENDEE;CN="Team: Weekly";PARTSTAT=ACCEPTED:mailto:person@example.com',
+      'END:VEVENT',
+    ].join('\r\n')
+    expect(parseEvents(ics)[0]?.attendees[0]?.email).toBe('person@example.com')
+  })
+
+  test('drops an attendee it cannot reduce to a bare address', () => {
+    const ics = [
+      'BEGIN:VEVENT',
+      'UID:evt-bad@langmail.me',
+      'ATTENDEE:/principals/users/someone/',
+      'ATTENDEE:mailto:good@example.com',
+      'END:VEVENT',
+    ].join('\r\n')
+    expect(parseEvents(ics)[0]?.attendees).toEqual([{ email: 'good@example.com' }])
+  })
+
+  test('extracts the DESCRIPTION, unescaped', () => {
+    const ics = buildInvite({
+      attendees: ['guest@example.com'],
+      description: 'Line one; line two',
+      end: new Date('2026-06-12T10:30:00Z'),
+      organizer: 'host@langmail.me',
+      start: new Date('2026-06-12T10:00:00Z'),
+      title: 'With notes',
+      uid: 'evt-desc@langmail.me',
+    })
+    expect(parseEvents(ics)[0]?.description).toBe('Line one; line two')
+  })
+
+  test('omits description when absent', () => {
+    const ics = 'BEGIN:VEVENT\r\nUID:nodesc@langmail.me\r\nSUMMARY:No notes\r\nEND:VEVENT'
+    expect(parseEvents(ics)[0]?.description).toBeUndefined()
+  })
 })

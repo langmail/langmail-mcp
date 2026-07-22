@@ -285,6 +285,37 @@ live('caldav client against a live server', () => {
     await deleteEvent(cfg, { token: TOKEN, url: obj?.url ?? '', ...(obj?.etag ? { etag: obj.etag } : {}) })
   })
 
+  // The read half of the attendee-edit fix: a stored event's attendees must
+  // survive the PUT and come back through the list tool, so a caller can read
+  // the current membership from Langmail instead of an external mirror. Unit
+  // tests prove we parse attendees; this proves Radicale stores and returns them.
+  test('list_calendar_events surfaces the stored attendees so they read from Langmail', async () => {
+    const uid = `attendees-${Date.now()}@mcp-it`
+    await putEvent(cfg, {
+      calendarUrl,
+      ical: buildInvite({
+        attendees: ['kai@atelier.example', 'mika.sandor@example.com', 'jo.brightwater@example.com'],
+        end: new Date('2026-06-12T10:30:00Z'),
+        organizer: `${user}@example.com`,
+        start: new Date('2026-06-12T10:00:00Z'),
+        title: 'Attendee readback',
+        uid,
+      }),
+      token: TOKEN,
+      uid,
+    })
+
+    const result = await listCalendarEvents(makeListDeps(cfg), { args: { calendarUrl }, token: TOKEN })
+    const text = result.content[0]?.text ?? ''
+    expect(text).toContain('attendees:')
+    expect(text).toContain('kai@atelier.example')
+    expect(text).toContain('mika.sandor@example.com')
+    expect(text).toContain('jo.brightwater@example.com')
+
+    const obj = await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })
+    await deleteEvent(cfg, { token: TOKEN, url: obj?.url ?? '', ...(obj?.etag ? { etag: obj.etag } : {}) })
+  })
+
   test('listing a calendar with no events returns an empty result, not an error', async () => {
     // A dedicated, never-populated collection guarantees emptiness regardless
     // of test ordering — mirrors the reported repro (delete all → list → []).

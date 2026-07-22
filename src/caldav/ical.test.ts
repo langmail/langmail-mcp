@@ -145,6 +145,31 @@ describe('buildInvite', () => {
     expect(ics).toContain('RECURRENCE-ID:20260612T100000Z')
     expect(ics).not.toContain('RRULE')
   })
+
+  // SCHEDULE-AGENT=NONE tells Stalwart to do no scheduling for the attendee, so
+  // the edit is silent. Verified against a live Stalwart (see the attendee-delta
+  // e2e): NONE suppresses iMIP delivery.
+  test('stamps SCHEDULE-AGENT=NONE on every attendee when scheduleAgent is NONE', () => {
+    const ics = unfold(
+      buildInvite({ ...baseInput, attendees: ['a@example.com', 'b@example.com'], scheduleAgent: 'NONE' })
+    )
+    const attendeeLines = ics.split('\r\n').filter((l) => l.startsWith('ATTENDEE'))
+    expect(attendeeLines).toHaveLength(2)
+    for (const line of attendeeLines) {
+      expect(line).toContain('SCHEDULE-AGENT=NONE')
+    }
+  })
+
+  test('omits SCHEDULE-AGENT by default (SERVER-scheduled, notify)', () => {
+    expect(buildInvite(baseInput)).not.toContain('SCHEDULE-AGENT')
+    expect(buildInvite({ ...baseInput, scheduleAgent: 'SERVER' })).not.toContain('SCHEDULE-AGENT')
+  })
+
+  test('does not touch the ORGANIZER when suppressing attendee scheduling', () => {
+    const ics = unfold(buildInvite({ ...baseInput, scheduleAgent: 'NONE' }))
+    expect(ics).toContain('ORGANIZER;CN="host@langmail.me":mailto:host@langmail.me')
+    expect(ics).not.toContain('ORGANIZER;SCHEDULE-AGENT')
+  })
 })
 
 describe('maxSequence', () => {

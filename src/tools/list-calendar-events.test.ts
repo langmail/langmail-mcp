@@ -104,6 +104,52 @@ describe('listCalendarEvents', () => {
     expect(captured).toHaveLength(0)
   })
 
+  test('lists each event’s attendees so an attendee edit reads from Langmail', async () => {
+    const object: CalendarObject = {
+      data: buildInvite({
+        attendees: ['kai@atelier.example', 'mika@example.com', 'jo@example.com'],
+        end: new Date('2026-06-12T10:30:00Z'),
+        organizer: 'host@langmail.me',
+        start: new Date('2026-06-12T10:00:00Z'),
+        timeZone: 'UTC',
+        title: 'Team sync',
+        uid: 'team@langmail.me',
+      }),
+      url: `${CAL}team.ics`,
+    }
+    const result = await listCalendarEvents(makeDeps(account(), [object]), { args: {}, token: 'tok' })
+    expect(result.content[0]?.text).toContain('attendees: kai@atelier.example, mika@example.com, jo@example.com')
+  })
+
+  test('annotates a non-default PARTSTAT and leaves NEEDS-ACTION bare', async () => {
+    const object: CalendarObject = {
+      data: [
+        'BEGIN:VCALENDAR',
+        'BEGIN:VEVENT',
+        'UID:rsvp@langmail.me',
+        'SUMMARY:RSVP status',
+        'DTSTART:20260612T100000Z',
+        'DTEND:20260612T103000Z',
+        'ATTENDEE;PARTSTAT=ACCEPTED:mailto:yes@example.com',
+        'ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:pending@example.com',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n'),
+      url: `${CAL}rsvp.ics`,
+    }
+    const result = await listCalendarEvents(makeDeps(account(), [object]), { args: {}, token: 'tok' })
+    expect(result.content[0]?.text).toContain('attendees: yes@example.com (accepted), pending@example.com')
+  })
+
+  test('omits the attendees line for an event with none', async () => {
+    const object: CalendarObject = {
+      data: 'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:solo@langmail.me\r\nSUMMARY:Solo\r\nDTSTART:20260612T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR',
+      url: `${CAL}solo.ics`,
+    }
+    const result = await listCalendarEvents(makeDeps(account(), [object]), { args: {}, token: 'tok' })
+    expect(result.content[0]?.text).not.toContain('attendees:')
+  })
+
   test('reports when there are no events', async () => {
     const result = await listCalendarEvents(makeDeps(account(), []), { args: {}, token: 'tok' })
     expect(result.content[0]?.text).toContain('No events found')

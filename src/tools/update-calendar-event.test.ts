@@ -3,7 +3,12 @@ import { describe, expect, test } from 'bun:test'
 import { type FetchEventParams, type UpdateEventParams } from '../caldav/client.ts'
 import { buildInvite } from '../caldav/ical.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
-import { type UpdateCalendarEventArgs, updateCalendarEvent, updateCalendarEventInput } from './update-calendar-event.ts'
+import {
+  mergeAttendees,
+  type UpdateCalendarEventArgs,
+  updateCalendarEvent,
+  updateCalendarEventInput,
+} from './update-calendar-event.ts'
 
 const CAL = 'https://m/dav/cal/u/default/'
 const UID = 'evt-1@langmail.me'
@@ -60,6 +65,38 @@ const recurringStored = (over: Partial<CalendarObject> = {}): CalendarObject => 
   ...over,
 })
 
+// A recurring master mirroring the reported "unvibe meeting": five attendees,
+// two of them the account's own addresses, weekly on Tuesdays. The @gmail.com
+// duplicate is what a delta edit drops.
+const unvibeStored = (over: Partial<CalendarObject> = {}): CalendarObject => ({
+  data: buildInvite({
+    attendees: [
+      'me@langmail.me',
+      'me@gmail.com',
+      'kai@atelier.example',
+      'mika.sandor@example.com',
+      'jo.brightwater@example.com',
+    ],
+    description: 'Weekly unvibe',
+    end: new Date('2026-06-16T10:30:00Z'),
+    location: 'Zoom',
+    organizer: 'me@langmail.me',
+    rrule: 'FREQ=WEEKLY;BYDAY=TU',
+    sequence: 2,
+    start: new Date('2026-06-16T10:00:00Z'),
+    timeZone: 'UTC',
+    title: 'unvibe meeting',
+    uid: UID,
+  }),
+  etag: '"abc"',
+  url: `${CAL}${UID}.ics`,
+  ...over,
+})
+
+// Unfolds RFC 5545 line folding so substring assertions don't trip over a
+// folded attendee address (mirrors the ical.test.ts helper).
+const unfold = (ical: string): string => ical.replace(/\r\n /gu, '')
+
 interface Captured {
   fetched: FetchEventParams[]
   updated: UpdateEventParams[]
@@ -108,6 +145,26 @@ describe('updateCalendarEventInput schema', () => {
 
   test('rejects a recurrenceId without an offset', () => {
     expect(updateCalendarEventInput.safeParse(args({ recurrenceId: '2026-06-23T10:00:00' })).success).toBe(false)
+  })
+
+  test('accepts a delta edit that names only the attendees to remove', () => {
+    expect(updateCalendarEventInput.safeParse({ removedAttendees: ['x@example.com'], uid: UID }).success).toBe(true)
+  })
+
+  test('accepts addedAttendees on their own', () => {
+    expect(updateCalendarEventInput.safeParse({ addedAttendees: ['x@example.com'], uid: UID }).success).toBe(true)
+  })
+
+  test('accepts notify: none', () => {
+    expect(updateCalendarEventInput.safeParse(args({ notify: 'none' })).success).toBe(true)
+  })
+
+  test('rejects an unknown notify value', () => {
+    expect(updateCalendarEventInput.safeParse({ ...args(), notify: 'some' }).success).toBe(false)
+  })
+
+  test('rejects a non-email in removedAttendees', () => {
+    expect(updateCalendarEventInput.safeParse({ removedAttendees: ['not-an-email'], uid: UID }).success).toBe(false)
   })
 })
 
@@ -452,5 +509,168 @@ describe('updateCalendarEvent — single occurrence (recurrenceId)', () => {
     expect(ical).toContain('DTSTART;TZID=Europe/Berlin:20260623T100000')
     expect(ical).toContain('RECURRENCE-ID;TZID=Europe/Berlin:20260623T100000')
     expect((ical.match(/BEGIN:VEVENT/gu) ?? []).length).toBe(2)
+  })
+})
+
+describe('mergeAttendees', () => {
+  test('drops a removed address and keeps the rest in order', () => {
+    expect(mergeAttendees(['a@x.com', 'b@x.com', 'c@x.com'], [], ['b@x.com'])).toEqual(['a@x.com', 'c@x.com'])
+  })
+
+  test('appends added addresses after the stored ones', () => {
+    expect(mergeAttendees(['a@x.com'], ['b@x.com'], [])).toEqual(['a@x.com', 'b@x.com'])
+  })
+
+  test('matches removals case-insensitively', () => {
+    expect(mergeAttendees(['Me@Gmail.com'], [], ['me@gmail.com'])).toEqual([])
+  })
+
+  test('is a no-op when removing an absent address or adding a present one', () => {
+    expect(mergeAttendees(['a@x.com'], ['A@x.com'], ['ghost@x.com'])).toEqual(['a@x.com'])
+  })
+})
+
+describe('updateCalendarEvent — attendee delta', () => {
+  // The acceptance scenario: drop the account's own @gmail.com duplicate from a
+  // recurring meeting, re-passing nothing else.
+  test('removes one attendee while preserving the recurrence and every other field', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account({ organizer: 'me@langmail.me' }), unvibeStored(), cap), {
+      args: { removedAttendees: ['me@gmail.com'], uid: UID },
+      token: 'tok',
+    })
+
+    expect(result.isError).toBeUndefined()
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    // The four intended attendees survive; the gmail duplicate is gone.
+    expect(ical).toContain('mailto:me@langmail.me')
+    expect(ical).toContain('mailto:kai@atelier.example')
+    expect(ical).toContain('mailto:mika.sandor@example.com')
+    expect(ical).toContain('mailto:jo.brightwater@example.com')
+    expect(ical).not.toContain('mailto:me@gmail.com')
+    // Recurrence, title, time, location, description all preserved — not collapsed
+    // or dropped by omission.
+    expect(ical).toContain('RRULE:FREQ=WEEKLY;BYDAY=TU')
+    expect(ical).toContain('SUMMARY:unvibe meeting')
+    expect(ical).toContain('DTSTART:20260616T100000Z')
+    expect(ical).toContain('LOCATION:Zoom')
+    expect(ical).toContain('DESCRIPTION:Weekly unvibe')
+    // SEQUENCE still bumps so attendee clients treat it as an update.
+    expect(ical).toContain('SEQUENCE:3')
+  })
+
+  test('adds an attendee onto the stored list', async () => {
+    const cap = captured()
+    await updateCalendarEvent(makeDeps(account({ organizer: 'me@langmail.me' }), unvibeStored(), cap), {
+      args: { addedAttendees: ['newcomer@example.com'], uid: UID },
+      token: 'tok',
+    })
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    expect(ical).toContain('mailto:newcomer@example.com')
+    expect(ical).toContain('mailto:kai@atelier.example')
+    expect(ical).toContain('RRULE:FREQ=WEEKLY;BYDAY=TU')
+  })
+
+  test('lets an explicit field override while others are preserved', async () => {
+    const cap = captured()
+    await updateCalendarEvent(makeDeps(account({ organizer: 'me@langmail.me' }), unvibeStored(), cap), {
+      args: { removedAttendees: ['me@gmail.com'], title: 'unvibe (renamed)', uid: UID },
+      token: 'tok',
+    })
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    expect(ical).toContain('SUMMARY:unvibe (renamed)')
+    expect(ical).toContain('RRULE:FREQ=WEEKLY;BYDAY=TU')
+  })
+
+  test('rejects combining a delta with a full attendees list', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), unvibeStored(), cap), {
+      args: { attendees: ['a@x.com'], removedAttendees: ['me@gmail.com'], uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('rejects combining a delta with recurrenceId', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), unvibeStored(), cap), {
+      args: { recurrenceId: '2026-06-23T10:00:00Z', removedAttendees: ['me@gmail.com'], uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('recurrenceId')
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('refuses to remove the last attendee', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), storedEvent(), cap), {
+      args: { removedAttendees: ['guest@example.com'], uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('none')
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('a full update still requires attendees/start/end/title', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), storedEvent(), cap), {
+      args: { title: 'Only a title', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(cap.updated).toHaveLength(0)
+  })
+})
+
+describe('updateCalendarEvent — notify', () => {
+  test('notify: none suppresses scheduling and says so', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), storedEvent(), cap), {
+      args: args({ notify: 'none' }),
+      token: 'tok',
+    })
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    expect(ical).toContain('SCHEDULE-AGENT=NONE')
+    expect(result.content[0]?.text).toContain('no notifications sent')
+  })
+
+  test('notify defaults to all — no SCHEDULE-AGENT, and the message names the recipients', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), storedEvent(), cap), {
+      args: args(),
+      token: 'tok',
+    })
+    expect(cap.updated[0]?.ical ?? '').not.toContain('SCHEDULE-AGENT')
+    expect(result.content[0]?.text).toContain('notifications sent to')
+  })
+
+  test('notify: none combines with a delta to make a quiet one-attendee removal', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account({ organizer: 'me@langmail.me' }), unvibeStored(), cap), {
+      args: { notify: 'none', removedAttendees: ['me@gmail.com'], uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    // Every remaining attendee is SCHEDULE-AGENT=NONE, so none are re-notified.
+    const attendeeLines = ical.split('\r\n').filter((l) => l.startsWith('ATTENDEE'))
+    expect(attendeeLines).toHaveLength(4)
+    for (const line of attendeeLines) {
+      expect(line).toContain('SCHEDULE-AGENT=NONE')
+    }
+  })
+
+  test('notify: none stamps SCHEDULE-AGENT on an occurrence override too', async () => {
+    const cap = captured()
+    await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
+      args: args({ notify: 'none', recurrenceId: '2026-06-23T10:00:00Z' }),
+      token: 'tok',
+    })
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    expect(ical).toContain('RECURRENCE-ID:20260623T100000Z')
+    expect(ical).toContain('SCHEDULE-AGENT=NONE')
   })
 })
