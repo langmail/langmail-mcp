@@ -16,6 +16,7 @@ import { type JmapLive } from '@langmail/jmap'
 
 import { type TicketStore } from '../attachments/tickets.ts'
 import { type AuthContext } from '../auth/middleware.ts'
+import { makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
 import { makeLiveDeps as makeCreateCalendarDeps, registerCreateCalendar } from '../tools/create-calendar.ts'
 import {
   makeLiveDeps as makeCreateCalendarEventDeps,
@@ -60,11 +61,15 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   // CalDAV tools discover against the same Stalwart base; tsdav follows
   // /.well-known/caldav to /dav/cal.
   const caldavCfg = { serverUrl: cfg.stalwartUrl }
+  // One resolver (one per-token zone cache) shared by create + update, so a
+  // create→update in quick succession reuses the cached AccountSettings read
+  // instead of paying the JMAP round-trip twice.
+  const resolveTimeZone = makeAccountTimeZoneResolver({ serverUrl: cfg.stalwartUrl })
   const listCalendarsDeps = makeListCalendarsDeps(caldavCfg)
   const createCalendarDeps = makeCreateCalendarDeps(caldavCfg)
   const listCalendarEventsDeps = makeListCalendarEventsDeps(caldavCfg)
-  const createCalendarEventDeps = makeCreateCalendarEventDeps(caldavCfg)
-  const updateCalendarEventDeps = makeUpdateCalendarEventDeps(caldavCfg)
+  const createCalendarEventDeps = makeCreateCalendarEventDeps(caldavCfg, resolveTimeZone)
+  const updateCalendarEventDeps = makeUpdateCalendarEventDeps(caldavCfg, resolveTimeZone)
   const deleteCalendarEventDeps = makeDeleteCalendarEventDeps(caldavCfg)
   const respondToEventDeps = makeRespondToEventDeps(caldavCfg)
 

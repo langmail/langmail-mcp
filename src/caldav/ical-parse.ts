@@ -17,7 +17,12 @@ export interface ParsedEvent {
   // to update_calendar_event (which re-rules the whole series).
   recurrence?: string
   start: string
-  timeZone?: string
+  // IANA zone named by the DTSTART `;TZID=` param, when present. This is the
+  // event's own zone: update_calendar_event keeps it so an edit doesn't silently
+  // re-express the event elsewhere, and list rendering surfaces it. Absent for
+  // the historical UTC (`…Z`) form and for foreign floating times. `start`/`end`
+  // stay pure ISO wall-clock strings — the zone lives here, not appended to them.
+  startTzid?: string
   title: string
   uid: string
 }
@@ -138,15 +143,6 @@ const propertyTimeZone = (property: ParsedProperty | undefined): string | undefi
   return timeZone ? timeZone.replace(/^"|"$/gu, '') : undefined
 }
 
-const renderDateTime = (property: ParsedProperty | undefined): string => {
-  if (!property) {
-    return ''
-  }
-  const rendered = icalDateToIso(property.value)
-  const timeZone = propertyTimeZone(property)
-  return timeZone && !rendered.endsWith('Z') ? `${rendered} ${timeZone}` : rendered
-}
-
 // Parses every VEVENT in a VCALENDAR. Blocks without a UID are skipped —
 // an event we can't address with update/delete isn't useful to list.
 export const parseEvents = (ical: string): ParsedEvent[] => {
@@ -159,19 +155,19 @@ export const parseEvents = (ical: string): ParsedEvent[] => {
     const location = block.get('LOCATION')?.value
     const organizer = parseOrganizerEmail(block.get('ORGANIZER'))
     const start = block.get('DTSTART')
-    const timeZone = propertyTimeZone(start)
+    const startTzid = propertyTimeZone(start)
     // Trim so a server that emits a trailing space (`RRULE:FREQ=WEEKLY `) doesn't
     // leak it into the listed `repeats:` value.
     const recurrence = block.get('RRULE')?.value.trim()
     events.push({
-      end: renderDateTime(block.get('DTEND')),
-      start: renderDateTime(start),
+      end: icalDateToIso(block.get('DTEND')?.value ?? ''),
+      start: icalDateToIso(start?.value ?? ''),
       title: unescapeText(block.get('SUMMARY')?.value ?? ''),
       uid: uid.value,
       ...(location ? { location: unescapeText(location) } : {}),
       ...(organizer ? { organizer } : {}),
       ...(recurrence ? { recurrence } : {}),
-      ...(timeZone ? { timeZone } : {}),
+      ...(startTzid ? { startTzid } : {}),
     })
   }
   return events

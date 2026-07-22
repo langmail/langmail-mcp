@@ -78,7 +78,7 @@ describe('listCalendarEvents', () => {
     const result = await listCalendarEvents(makeDeps(account(), [object]), { args: {}, token: 'tok' })
 
     const txt = result.content[0]?.text ?? ''
-    expect(txt).toContain('when: 2026-07-20T12:00:00 Europe/Berlin → 2026-07-20T12:30:00 Europe/Berlin')
+    expect(txt).toContain('when: 2026-07-20T12:00:00 → 2026-07-20T12:30:00 (Europe/Berlin)')
   })
 
   test('passes a time range through when both bounds are given', async () => {

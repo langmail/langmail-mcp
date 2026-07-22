@@ -21,7 +21,7 @@ const args = (over: Partial<CreateCalendarEventArgs> = {}): CreateCalendarEventA
 
 const makeDeps = (acc: DiscoveredAccount, captured: PutEventParams[] = []) => ({
   discover: () => Promise.resolve(acc),
-  getAccountTimeZone: () => Promise.resolve(null),
+  resolveTimeZone: () => Promise.resolve(null),
   putEvent: (p: PutEventParams) => {
     captured.push(p)
     return Promise.resolve()
@@ -130,7 +130,7 @@ describe('createCalendarEvent', () => {
     const captured: PutEventParams[] = []
     const deps = {
       ...makeDeps(account(), captured),
-      getAccountTimeZone: () => Promise.resolve('Europe/Berlin'),
+      resolveTimeZone: () => Promise.resolve('Europe/Berlin'),
     }
     await createCalendarEvent(deps, {
       args: args({ end: '2026-07-20T12:30:00', start: '2026-07-20T12:00:00' }),
@@ -145,7 +145,7 @@ describe('createCalendarEvent', () => {
     const captured: PutEventParams[] = []
     const deps = {
       ...makeDeps(account(), captured),
-      getAccountTimeZone: () => Promise.resolve('America/New_York'),
+      resolveTimeZone: () => Promise.resolve('America/New_York'),
     }
     await createCalendarEvent(deps, {
       args: args({ end: '2026-07-20T12:30:00+02:00', start: '2026-07-20T12:00:00+02:00' }),

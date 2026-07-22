@@ -71,7 +71,7 @@ const makeDeps = (acc: DiscoveredAccount, existing: CalendarObject | null, captu
     capturedState.fetched.push(p)
     return Promise.resolve(existing)
   },
-  getAccountTimeZone: () => Promise.resolve(null),
+  resolveTimeZone: () => Promise.resolve(null),
   updateEvent: (p: UpdateEventParams) => {
     capturedState.updated.push(p)
     return Promise.resolve()
@@ -411,5 +411,46 @@ describe('updateCalendarEvent — single occurrence (recurrenceId)', () => {
     })
     expect(result.isError).toBe(true)
     expect(cap.updated).toHaveLength(0)
+  })
+
+  // A recurring master stored in Europe/Berlin: Tuesdays 10:00 Berlin from
+  // 2026-06-16 (08:00Z in summer). Membership is validated against the master's
+  // own zone (startTzid), and the override's RECURRENCE-ID keeps that zone.
+  const berlinRecurring = (): CalendarObject => ({
+    data: buildInvite({
+      attendees: ['guest@example.com'],
+      end: new Date('2026-06-16T08:30:00Z'),
+      organizer: 'host@langmail.me',
+      rrule: 'FREQ=WEEKLY;BYDAY=TU',
+      sequence: 2,
+      start: new Date('2026-06-16T08:00:00Z'),
+      timeZone: 'Europe/Berlin',
+      title: 'Weekly Sync',
+      uid: UID,
+    }),
+    etag: '"abc"',
+    url: `${CAL}${UID}.ics`,
+  })
+
+  test('edits a zoned occurrence, keeping the master TZID on the RECURRENCE-ID', async () => {
+    const cap = captured()
+    // The occurrence's original start is 10:00 Berlin (CEST) = 08:00Z; naive
+    // start/end are read in the stored event's own zone (Europe/Berlin).
+    const result = await updateCalendarEvent(makeDeps(account(), berlinRecurring(), cap), {
+      args: args({
+        end: '2026-06-23T11:00:00',
+        recurrenceId: '2026-06-23T08:00:00Z',
+        start: '2026-06-23T10:00:00',
+        title: 'Weekly Sync — Q3 planning',
+      }),
+      token: 'tok',
+    })
+
+    expect(result.isError).toBeUndefined()
+    const ical = (cap.updated[0]?.ical ?? '').replace(/\r\n /gu, '')
+    expect(ical).toContain('RRULE:FREQ=WEEKLY;BYDAY=TU')
+    expect(ical).toContain('DTSTART;TZID=Europe/Berlin:20260623T100000')
+    expect(ical).toContain('RECURRENCE-ID;TZID=Europe/Berlin:20260623T100000')
+    expect((ical.match(/BEGIN:VEVENT/gu) ?? []).length).toBe(2)
   })
 })

@@ -21,11 +21,11 @@
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
+import { type AccountTimeZoneResolver, makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
 import {
   type CalDavConfig,
   discoverAccount,
   type FetchEventParams,
-  fetchAccountTimeZone,
   fetchEvent,
   resolveCalendarUrl,
   type UpdateEventParams,
@@ -60,7 +60,10 @@ export type UpdateCalendarEventArgs = z.infer<typeof updateCalendarEventInput>
 export interface UpdateCalendarEventDeps {
   discover: (token: string) => Promise<DiscoveredAccount>
   fetchEvent: (params: FetchEventParams) => Promise<CalendarObject | null>
-  getAccountTimeZone: (token: string) => Promise<string | null>
+  // Stored default zone (Stalwart AccountSettings.timeZone), consulted only when
+  // the caller omits `timeZone` and the stored event carries no TZID of its own.
+  // Shared across the calendar tools — see mcp/handler.ts.
+  resolveTimeZone: AccountTimeZoneResolver
   updateEvent: (params: UpdateEventParams) => Promise<void>
 }
 
@@ -105,7 +108,7 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
   // unvalidated override risks the very orphan this guard exists to prevent.
   let onOccurrence: boolean
   try {
-    onOccurrence = isSeriesOccurrence(master.start, master.recurrence, recurrenceId, master.timeZone)
+    onOccurrence = isSeriesOccurrence(master.start, master.recurrence, recurrenceId, master.startTzid)
   } catch {
     return errorResult(
       `Could not evaluate this series' recurrence rule (${master.recurrence}) to validate ` +
@@ -127,7 +130,7 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
     // otherwise get an override with a different ORGANIZER, which Stalwart
     // rejects with 412 SameOrganizerInAllComponents.
     organizer: master.organizer ?? organizer,
-    recurrenceTimeZone: master.timeZone ?? UTC_TIME_ZONE,
+    recurrenceTimeZone: master.startTzid ?? UTC_TIME_ZONE,
     recurrenceId: new Date(recurrenceId),
     // Bump past every SEQUENCE already in the object so this override supersedes
     // any prior edit of the same instance.
@@ -188,7 +191,7 @@ export const updateCalendarEvent = async (
   }
   const storedMaster =
     parseEvents(existing.data).find((e) => e.recurrence !== undefined) ?? parseEvents(existing.data)[0]
-  const timeZone = args.timeZone ?? storedMaster?.timeZone ?? (await deps.getAccountTimeZone(token)) ?? UTC_TIME_ZONE
+  const timeZone = args.timeZone ?? storedMaster?.startTzid ?? (await deps.resolveTimeZone(token)) ?? UTC_TIME_ZONE
   const start = resolveInputDateTime(args.start, timeZone, args.timeZone !== undefined)
   const end = resolveInputDateTime(args.end, timeZone, args.timeZone !== undefined)
   if (end <= start) {
@@ -242,10 +245,15 @@ export const updateCalendarEvent = async (
 
 // --- live-deps wiring ----------------------------------------------------
 
-export const makeLiveDeps = (cfg: CalDavConfig): UpdateCalendarEventDeps => ({
+export const makeLiveDeps = (
+  cfg: CalDavConfig,
+  // Shared across the calendar tools (see mcp/handler.ts) so create→update reuse
+  // one per-token cache; defaults to a fresh resolver for standalone callers.
+  resolveTimeZone: AccountTimeZoneResolver = makeAccountTimeZoneResolver({ serverUrl: cfg.serverUrl })
+): UpdateCalendarEventDeps => ({
   discover: (token) => discoverAccount(cfg, token),
   fetchEvent: (params) => fetchEvent(cfg, params),
-  getAccountTimeZone: (token) => fetchAccountTimeZone(cfg, token),
+  resolveTimeZone,
   updateEvent: (params) => updateEvent(cfg, params),
 })
 

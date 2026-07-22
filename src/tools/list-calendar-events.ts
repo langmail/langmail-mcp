@@ -42,7 +42,10 @@ export interface ListCalendarEventsContext {
 }
 
 const formatEvent = (idx: number, ev: ParsedEvent): string => {
-  const when = ev.end ? `${ev.start} → ${ev.end}` : ev.start
+  const range = ev.end ? `${ev.start} → ${ev.end}` : ev.start
+  // Surface the event's own zone so a naive `…T10:00:00` (a TZID event) isn't
+  // silently read as UTC; a UTC event carries its `Z` and needs no annotation.
+  const when = ev.startTzid ? `${range} (${ev.startTzid})` : range
   const lines = [`${idx}. ${ev.title || '(no title)'}`, `   when: ${when}`]
   if (ev.location) {
     lines.push(`   location: ${ev.location}`)

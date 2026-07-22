@@ -8,10 +8,10 @@
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
+import { type AccountTimeZoneResolver, makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
 import {
   type CalDavConfig,
   discoverAccount,
-  fetchAccountTimeZone,
   type PutEventParams,
   putEvent,
   resolveCalendarUrl,
@@ -64,8 +64,10 @@ export type CreateCalendarEventArgs = z.infer<typeof createCalendarEventInput>
 
 export interface CreateCalendarEventDeps {
   discover: (token: string) => Promise<DiscoveredAccount>
-  getAccountTimeZone: (token: string) => Promise<string | null>
   putEvent: (params: PutEventParams) => Promise<void>
+  // Stored default zone (Stalwart AccountSettings.timeZone), consulted only when
+  // the caller omits `timeZone`. Shared across the calendar tools — see mcp/handler.ts.
+  resolveTimeZone: AccountTimeZoneResolver
 }
 
 export interface CreateCalendarEventContext {
@@ -96,7 +98,7 @@ export const createCalendarEvent = async (
   }
   const calendarUrl = resolved.url
 
-  const timeZone = args.timeZone ?? (await deps.getAccountTimeZone(token)) ?? UTC_TIME_ZONE
+  const timeZone = args.timeZone ?? (await deps.resolveTimeZone(token)) ?? UTC_TIME_ZONE
   const start = resolveInputDateTime(args.start, timeZone, args.timeZone !== undefined)
   const end = resolveInputDateTime(args.end, timeZone, args.timeZone !== undefined)
   if (end <= start) {
@@ -131,10 +133,15 @@ export const createCalendarEvent = async (
 
 // --- live-deps wiring ----------------------------------------------------
 
-export const makeLiveDeps = (cfg: CalDavConfig): CreateCalendarEventDeps => ({
+export const makeLiveDeps = (
+  cfg: CalDavConfig,
+  // Shared across the calendar tools (see mcp/handler.ts) so create→update reuse
+  // one per-token cache; defaults to a fresh resolver for standalone callers.
+  resolveTimeZone: AccountTimeZoneResolver = makeAccountTimeZoneResolver({ serverUrl: cfg.serverUrl })
+): CreateCalendarEventDeps => ({
   discover: (token) => discoverAccount(cfg, token),
-  getAccountTimeZone: (token) => fetchAccountTimeZone(cfg, token),
   putEvent: (params) => putEvent(cfg, params),
+  resolveTimeZone,
 })
 
 // --- MCP registration ----------------------------------------------------
