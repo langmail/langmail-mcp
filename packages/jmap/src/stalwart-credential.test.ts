@@ -60,6 +60,17 @@ describe('fetchStalwartCredential', () => {
     expect((error as StalwartCredentialError).status).toBe(500)
   })
 
+  it('folds the status and error body into the message so telemetry can triage it', async () => {
+    mockFetch(Response.json({ error: 'credential_unavailable' }, { status: 500 }))
+
+    const error = await fetchStalwartCredential('user-uuid', config).catch((e: unknown) => e)
+
+    // The pino/Sentry serializer only ships err.message, so the status must live
+    // there — not just on the (dropped) `status` field.
+    expect((error as StalwartCredentialError).message).toContain('500')
+    expect((error as StalwartCredentialError).message).toContain('credential_unavailable')
+  })
+
   it('throws when the body has no authorization', async () => {
     mockFetch(Response.json({ address: 'a@b' }))
 
