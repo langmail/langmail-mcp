@@ -101,10 +101,7 @@ export async function fetchStalwartCredential(
     // reaches telemetry. Fold the status and the error body (which carries only
     // `{ error }`, never credential material) into the message so the recurring
     // error is actually triageable.
-    const detail = (await response.text().catch(() => ''))
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 200)
+    const detail = (await response.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 200)
     throw new StalwartCredentialError(
       `Stalwart credential endpoint returned ${response.status}${detail ? `: ${detail}` : ''}`,
       response.status
