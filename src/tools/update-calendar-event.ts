@@ -52,7 +52,8 @@ const recurrenceIdDescription =
 
 const attendeesDescription =
   'The complete attendee list (full replacement) — every address that should be ' +
-  'invited after the edit. Required unless you pass `addedAttendees`/`removedAttendees`, ' +
+  'invited after the edit. An empty array strips all attendees, turning the event ' +
+  'into a personal one. Required unless you pass `addedAttendees`/`removedAttendees`, ' +
   'which change specific attendees against the stored list instead. Cannot be combined ' +
   'with those delta fields.'
 
@@ -85,7 +86,7 @@ const shared = createCalendarEventInput.shape
 
 export const updateCalendarEventInput = z.object({
   addedAttendees: z.array(z.email()).min(1).max(50).optional().describe(addedAttendeesDescription),
-  attendees: shared.attendees.optional().describe(attendeesDescription),
+  attendees: shared.attendees.describe(attendeesDescription),
   calendarUrl: shared.calendarUrl,
   description: shared.description,
   end: shared.end.optional().describe(`Event end as ISO 8601.${optionalWhenDelta('keep the stored end')}`),
@@ -243,11 +244,17 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
   )
 }
 
-// One-line human summary of who the PUT notified.
-const deliverySummary = (attendees: string[], scheduleAgent?: 'NONE'): string =>
-  scheduleAgent === 'NONE'
+// One-line human summary of who the PUT notified. Stripping every attendee is
+// Stalwart's RFC 6638 cue to CANCEL the dropped ones, so the zero-attendee
+// branch must not claim silence.
+const deliverySummary = (attendees: string[], scheduleAgent?: 'NONE'): string => {
+  if (attendees.length === 0) {
+    return 'no attendees remain; anyone previously invited may receive a cancellation'
+  }
+  return scheduleAgent === 'NONE'
     ? 'no notifications sent'
     : `notifications sent to ${attendees.length} attendee(s): ${attendees.join(', ')}`
+}
 
 // The event fields an edit resolves to, once the caller's values and the
 // preserved stored values have been reconciled.
@@ -330,10 +337,12 @@ const resolveAttendees = (
   if (isDelta) {
     const base = (storedMaster?.attendees ?? []).map((a) => a.email)
     const attendees = mergeAttendees(base, args.addedAttendees ?? [], args.removedAttendees ?? [])
+    // A delta that empties the list is likelier a mistake than an intent; the
+    // explicit way to strip every attendee is a full replacement with `attendees: []`.
     if (attendees.length === 0) {
       return {
         error:
-          'Removing those attendees would leave the event with none. Delete the event instead, or keep at least one attendee.',
+          'Removing those attendees would leave the event with none. To keep the event without attendees, pass `attendees: []` as a full replacement (with start, end, and title); otherwise delete the event or keep at least one attendee.',
       }
     }
     return { attendees }
