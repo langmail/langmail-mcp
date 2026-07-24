@@ -82,6 +82,18 @@ describe('spliceOccurrenceOverride', () => {
     expect((merged.match(/METHOD:REQUEST/gu) ?? []).length).toBe(1)
   })
 
+  test('omits METHOD entirely when the merged object has no attendees (personal series)', () => {
+    // RFC 5546 forbids a REQUEST with zero ATTENDEEs, and there is nobody to
+    // schedule — mirror buildInvite's personal-event shape.
+    const merged = spliceOccurrenceOverride(
+      masterObject({ attendees: [] }),
+      overrideObject({ attendees: [] }),
+      '2026-06-23T10:00:00Z'
+    )
+    expect(merged).not.toContain('METHOD')
+    expect((merged.match(/BEGIN:VEVENT/gu) ?? []).length).toBe(2)
+  })
+
   test('forces METHOD:REQUEST over a stored non-REQUEST method', () => {
     // A stray METHOD:PUBLISH would stop Stalwart scheduling the iMIP update, so
     // the merge must replace it — not preserve it.
@@ -263,6 +275,12 @@ describe('spliceOccurrenceCancellation', () => {
     expect((merged.match(/BEGIN:VTIMEZONE/gu) ?? []).length).toBe(1)
     expect((merged.match(/BEGIN:STANDARD/gu) ?? []).length).toBe(1)
     expect((merged.match(/END:VTIMEZONE/gu) ?? []).length).toBe(1)
+    expect(merged).toContain('EXDATE:20260623T100000Z')
+  })
+
+  test('omits METHOD when cancelling an occurrence of an attendee-less series', () => {
+    const merged = spliceOccurrenceCancellation(masterObject({ attendees: [] }), '2026-06-23T10:00:00Z')
+    expect(merged).not.toContain('METHOD')
     expect(merged).toContain('EXDATE:20260623T100000Z')
   })
 

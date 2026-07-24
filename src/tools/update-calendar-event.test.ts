@@ -159,6 +159,10 @@ describe('updateCalendarEventInput schema', () => {
     expect(updateCalendarEventInput.safeParse(args({ notify: 'none' })).success).toBe(true)
   })
 
+  test('accepts an empty attendees array (full replacement stripping all attendees)', () => {
+    expect(updateCalendarEventInput.safeParse(args({ attendees: [] })).success).toBe(true)
+  })
+
   test('rejects an unknown notify value', () => {
     expect(updateCalendarEventInput.safeParse({ ...args(), notify: 'some' }).success).toBe(false)
   })
@@ -261,6 +265,19 @@ describe('updateCalendarEvent', () => {
     })
     await updateCalendarEvent(makeDeps(account(), recurringEvent, cap), { args: args(), token: 'tok' })
     expect(cap.updated[0]?.ical ?? '').not.toContain('RRULE')
+  })
+
+  test('a full replacement with attendees: [] strips every attendee and notifies nobody', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), storedEvent(), cap), {
+      args: args({ attendees: [] }),
+      token: 'tok',
+    })
+
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    expect(ical).not.toContain('ATTENDEE')
+    expect(result.isError).toBeUndefined()
+    expect(result.content[0]?.text).toContain('no attendees remain')
   })
 
   test('errors when the event does not exist', async () => {
@@ -569,6 +586,31 @@ describe('updateCalendarEvent — attendee delta', () => {
     expect(ical).toContain('mailto:newcomer@example.com')
     expect(ical).toContain('mailto:kai@atelier.example')
     expect(ical).toContain('RRULE:FREQ=WEEKLY;BYDAY=TU')
+  })
+
+  test('adds the first attendee onto an event created without any', async () => {
+    // The two-step blocker flow: create_calendar_event without attendees, then
+    // invite once the address is known.
+    const cap = captured()
+    const personal = storedEvent({
+      data: buildInvite({
+        attendees: [],
+        end: new Date('2026-08-03T13:00:00Z'),
+        organizer: 'host@langmail.me',
+        sequence: 0,
+        start: new Date('2026-08-03T12:00:00Z'),
+        timeZone: 'UTC',
+        title: 'Lunch',
+        uid: UID,
+      }),
+    })
+    const result = await updateCalendarEvent(makeDeps(account(), personal, cap), {
+      args: { addedAttendees: ['anna@example.com'], uid: UID },
+      token: 'tok',
+    })
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    expect(ical).toContain('mailto:anna@example.com')
+    expect(result.isError).toBeUndefined()
   })
 
   test('lets an explicit field override while others are preserved', async () => {

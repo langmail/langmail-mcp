@@ -27,6 +27,15 @@ describe('buildInvite', () => {
     expect(ics).toContain('mailto:host@langmail.me')
   })
 
+  test('omits METHOD entirely for an attendee-less (personal) event', () => {
+    // RFC 5546 REQUEST requires at least one ATTENDEE, and with nobody to
+    // schedule the object should be a plain calendar object (RFC 4791 §4.1).
+    const ics = buildInvite({ ...baseInput, attendees: [] })
+    expect(ics).not.toContain('METHOD')
+    expect(ics).not.toContain('ATTENDEE')
+    expect(ics).toContain('mailto:host@langmail.me')
+  })
+
   test('adds each attendee with RSVP and NEEDS-ACTION', () => {
     const ics = unfold(buildInvite({ ...baseInput, attendees: ['a@example.com', 'b@example.com'] }))
     expect(ics).toContain('a@example.com')

@@ -117,6 +117,24 @@ const overrideVevent = (override: SplitCalendar): Component => {
   return vevent
 }
 
+// The start of an ATTENDEE content line. Only a physical line's start matches —
+// folded continuations keep their leading space and never do.
+const ATTENDEE_LINE_RE = /^ATTENDEE[;:]/iu
+
+const hasAttendee = (components: Component[]): boolean =>
+  components.some((c) => c.name === 'VEVENT' && c.lines.some((line) => ATTENDEE_LINE_RE.test(line)))
+
+// Re-emits the calendar-level property block (everything before END:VCALENDAR).
+// METHOD:REQUEST is forced when the object still names an attendee: stored
+// objects usually carry no METHOD, and a stray METHOD:PUBLISH/CANCEL would keep
+// Stalwart from scheduling the iMIP update we're issuing. With zero ATTENDEEs
+// there is nobody to schedule — and RFC 5546 forbids a REQUEST without one — so
+// any METHOD is dropped instead (mirrors buildInvite for personal events).
+const calendarPropertyLines = (header: string[], components: Component[]): string[] => {
+  const [begin = 'BEGIN:VCALENDAR', ...rest] = header.slice(0, -1).filter((l) => !METHOD_RE.test(l))
+  return hasAttendee(components) ? [begin, 'METHOD:REQUEST', ...rest] : [begin, ...rest]
+}
+
 const componentKey = (component: Component): string => {
   if (component.name === 'VTIMEZONE') {
     const tzid = component.lines.find((line) => VTIMEZONE_TZID_RE.test(line))
@@ -130,8 +148,9 @@ const componentKey = (component: Component): string => {
 // preserved verbatim (only the line endings are normalized to CRLF); any prior
 // override for the same instant is replaced so the object never carries two
 // VEVENTs with the same RECURRENCE-ID; and a METHOD:REQUEST is guaranteed on
-// the result — stored objects may drop it, but it's what triggers Stalwart's
-// scheduling.
+// the result whenever it still names an attendee — stored objects may drop it,
+// but it's what triggers Stalwart's scheduling. An attendee-less (personal)
+// series gets no METHOD at all (see calendarPropertyLines).
 export const spliceOccurrenceOverride = (masterIcal: string, overrideIcal: string, recurrenceId: string): string => {
   const master = splitCalendar(masterIcal)
   const override = splitCalendar(overrideIcal)
@@ -150,14 +169,11 @@ export const spliceOccurrenceOverride = (masterIcal: string, overrideIcal: strin
   ]
 
   // The header's last line is END:VCALENDAR; everything before it is the
-  // calendar-level property block we re-emit. Force METHOD:REQUEST: stored
-  // objects usually carry none, and a stray METHOD:PUBLISH/CANCEL would keep
-  // Stalwart from scheduling the iMIP update we're issuing.
+  // calendar-level property block we re-emit (with METHOD handled there).
   const end = master.header.at(-1) ?? 'END:VCALENDAR'
-  const props = master.header.slice(0, -1).filter((l) => !METHOD_RE.test(l))
-  const withMethod = [props[0] ?? 'BEGIN:VCALENDAR', 'METHOD:REQUEST', ...props.slice(1)]
+  const head = calendarPropertyLines(master.header, orderedComponents)
 
-  return [...withMethod, ...orderedComponents.flatMap((c) => c.lines), end].join(CRLF) + CRLF
+  return [...head, ...orderedComponents.flatMap((c) => c.lines), end].join(CRLF) + CRLF
 }
 
 // The master VEVENT of a recurring object carries the RRULE and is not itself an
@@ -215,7 +231,9 @@ const excludeInstant = (lines: string[], exdate: string, sequence: number): stri
 // instance (RFC 5546; Stalwart delivers the exclusion as an updated-series
 // REQUEST carrying the EXDATE, not a per-instance CANCEL); any override VEVENT
 // for the same instant is dropped so no orphan dangles beside the EXDATE; and a
-// METHOD:REQUEST is guaranteed — what triggers Stalwart's scheduling on PUT.
+// METHOD:REQUEST is guaranteed whenever the object still names an attendee —
+// what triggers Stalwart's scheduling on PUT (an attendee-less personal series
+// gets no METHOD; see calendarPropertyLines).
 //
 // Idempotent: if the master already excludes the instant (a double-cancel), the
 // input is returned unchanged so the caller can skip the PUT (no scheduling diff)
@@ -246,8 +264,7 @@ export const spliceOccurrenceCancellation = (masterIcal: string, recurrenceId: s
     .map((c) => (c === master ? { ...c, lines: excludeInstant(c.lines, exdate, sequence) } : c))
 
   const end = calendar.header.at(-1) ?? 'END:VCALENDAR'
-  const props = calendar.header.slice(0, -1).filter((l) => !METHOD_RE.test(l))
-  const withMethod = [props[0] ?? 'BEGIN:VCALENDAR', 'METHOD:REQUEST', ...props.slice(1)]
+  const head = calendarPropertyLines(calendar.header, components)
 
-  return [...withMethod, ...components.flatMap((c) => c.lines), end].join(CRLF) + CRLF
+  return [...head, ...components.flatMap((c) => c.lines), end].join(CRLF) + CRLF
 }

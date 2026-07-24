@@ -29,8 +29,17 @@ const makeDeps = (acc: DiscoveredAccount, captured: PutEventParams[] = []) => ({
 })
 
 describe('createCalendarEventInput schema', () => {
-  test('requires at least one attendee', () => {
-    expect(createCalendarEventInput.safeParse({ ...args(), attendees: [] }).success).toBe(false)
+  test('accepts a missing attendees field (personal event)', () => {
+    const { attendees: _attendees, ...rest } = args()
+    expect(createCalendarEventInput.safeParse(rest).success).toBe(true)
+  })
+
+  test('accepts an empty attendees array (personal event)', () => {
+    expect(createCalendarEventInput.safeParse({ ...args(), attendees: [] }).success).toBe(true)
+  })
+
+  test('accepts notify: none', () => {
+    expect(createCalendarEventInput.safeParse({ ...args(), notify: 'none' }).success).toBe(true)
   })
 
   test('rejects a non-email attendee', () => {
@@ -95,6 +104,51 @@ describe('createCalendarEvent', () => {
     const txt = result.content[0]?.text ?? ''
     expect(txt).toContain('Sync')
     expect(txt).toContain('guest@example.com')
+  })
+
+  test('creates a personal event without attendees and sends no invitations', async () => {
+    const captured: PutEventParams[] = []
+    const result = await createCalendarEvent(makeDeps(account(), captured), {
+      args: args({ attendees: undefined, title: 'Focus block' }),
+      token: 'tok',
+    })
+
+    expect(captured).toHaveLength(1)
+    const ical = (captured[0]?.ical ?? '').replace(/\r\n /gu, '')
+    expect(ical).not.toContain('ATTENDEE')
+    // RFC 5546 REQUEST needs at least one attendee, so a personal event is a
+    // plain calendar object — no scheduling METHOD at all.
+    expect(ical).not.toContain('METHOD')
+    expect(ical).toContain('ORGANIZER')
+
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toContain('no attendees, no invitations sent')
+    expect(txt).toContain('uid: ')
+  })
+
+  test('treats an empty attendees array like a missing one', async () => {
+    const captured: PutEventParams[] = []
+    const result = await createCalendarEvent(makeDeps(account(), captured), {
+      args: args({ attendees: [] }),
+      token: 'tok',
+    })
+
+    const ical = (captured[0]?.ical ?? '').replace(/\r\n /gu, '')
+    expect(ical).not.toContain('ATTENDEE')
+    expect(result.content[0]?.text).toContain('no attendees, no invitations sent')
+  })
+
+  test('notify: none keeps the attendees but suppresses the invitations', async () => {
+    const captured: PutEventParams[] = []
+    const result = await createCalendarEvent(makeDeps(account(), captured), {
+      args: args({ notify: 'none' }),
+      token: 'tok',
+    })
+
+    const ical = (captured[0]?.ical ?? '').replace(/\r\n /gu, '')
+    expect(ical).toContain('SCHEDULE-AGENT=NONE')
+    expect(ical).toContain('guest@example.com')
+    expect(result.content[0]?.text).toContain('no invitations sent to the 1 attendee(s)')
   })
 
   test('PUTs a recurring invite and reports it as recurring', async () => {

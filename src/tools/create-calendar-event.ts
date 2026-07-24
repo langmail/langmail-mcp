@@ -1,6 +1,8 @@
 // create_calendar_event tool — builds a VEVENT (METHOD:REQUEST) with the
 // authenticated principal as ORGANIZER and PUTs it to a CalDAV calendar.
-// Stalwart then fans out DKIM-signed iMIP invitations to the attendees.
+// Stalwart then fans out DKIM-signed iMIP invitations to the attendees, if
+// any: an attendee-less VEVENT is a personal event (a block of the user's
+// own time) and triggers no scheduling at all.
 //
 // Logic sits behind a `Deps` interface (discover + putEvent) so it
 // unit-tests without live Stalwart; `makeLiveDeps` wires tsdav in.
@@ -38,8 +40,18 @@ export const eventUidSchema = z
   .max(255)
   .regex(/^[^/\\]+$/u, 'uid must not contain path separators')
 
+const attendeesDescription =
+  'Attendee email addresses; each receives an iMIP invitation. Omit (or pass an ' +
+  'empty array) to create a personal event — a block of the user’s own time, e.g. ' +
+  'a focus block or a placeholder — with no invitations sent.'
+
+const notifyDescription =
+  'Whether to send iMIP invitations to the attendees. `all` (default) sends them, ' +
+  'as a normal create does. `none` writes the event without inviting anyone — for ' +
+  'when the invitation has already been sent out of band. Irrelevant without attendees.'
+
 export const createCalendarEventInput = z.object({
-  attendees: z.array(z.email()).min(1).max(50),
+  attendees: z.array(z.email()).max(50).optional().describe(attendeesDescription),
   // Optional CalDAV URL from list_calendars; defaults to the principal's
   // discovered default calendar.
   calendarUrl: z.url().optional(),
@@ -48,6 +60,7 @@ export const createCalendarEventInput = z.object({
     'Event end as ISO 8601. With explicit `timeZone`, the clock digits are interpreted in that zone and any embedded offset is ignored. Without `timeZone`, an offset fixes the instant; a naive value uses the account timezone fallback.'
   ),
   location: z.string().max(500).optional(),
+  notify: z.enum(['all', 'none']).optional().describe(notifyDescription),
   recurrence: recurrenceSchema.describe(recurrenceDescription).optional(),
   start: dateTimeWithOptionalOffsetSchema.describe(
     'Event start as ISO 8601. With explicit `timeZone`, the clock digits are interpreted in that zone and any embedded offset is ignored. Without `timeZone`, an offset fixes the instant; a naive value uses the account timezone fallback.'
@@ -76,6 +89,16 @@ export interface CreateCalendarEventContext {
 }
 
 const domainOf = (email: string): string => email.split('@')[1] ?? 'langmail.me'
+
+// One-line human summary of who the PUT invited (create-side counterpart of
+// update-calendar-event's deliverySummary).
+const deliverySummary = (attendees: string[], notify: 'all' | 'none' | undefined): string => {
+  if (attendees.length === 0) {
+    return 'no attendees, no invitations sent'
+  }
+  const roster = `${attendees.length} attendee(s): ${attendees.join(', ')}`
+  return notify === 'none' ? `no invitations sent to the ${roster}` : `invitations sent to ${roster}`
+}
 
 export const createCalendarEvent = async (
   deps: CreateCalendarEventDeps,
@@ -106,9 +129,12 @@ export const createCalendarEvent = async (
   }
 
   const rrule = args.recurrence ? toRRule(args.recurrence) : undefined
+  // No attendees → a personal event: the VEVENT carries only the ORGANIZER, so
+  // Stalwart's scheduler has nobody to fan an iMIP invitation out to.
+  const attendees = args.attendees ?? []
   const uid = `${crypto.randomUUID()}@${domainOf(account.organizer)}`
   const ical = buildInvite({
-    attendees: args.attendees,
+    attendees,
     end,
     organizer: account.organizer,
     start,
@@ -118,13 +144,13 @@ export const createCalendarEvent = async (
     ...(args.description ? { description: args.description } : {}),
     ...(args.location ? { location: args.location } : {}),
     ...(rrule ? { rrule } : {}),
+    ...(args.notify === 'none' ? { scheduleAgent: 'NONE' as const } : {}),
   })
 
   await deps.putEvent({ calendarUrl, ical, token, uid })
 
   return textResult(
-    `${rrule ? 'Recurring event' : 'Event'} "${args.title}" created and invitations sent ` +
-      `to ${args.attendees.length} attendee(s): ${args.attendees.join(', ')}.\n` +
+    `${rrule ? 'Recurring event' : 'Event'} "${args.title}" created (${deliverySummary(attendees, args.notify)}).\n` +
       // Surface the UID + calendar so a later turn can update_calendar_event /
       // delete_calendar_event this event.
       `uid: ${uid}\ncalendarUrl: ${calendarUrl}`
@@ -156,8 +182,10 @@ export const registerCreateCalendarEvent = (
     'create_calendar_event',
     {
       description:
-        'Creates a calendar event and sends iMIP invitations to the attendees, ' +
-        'with the authenticated user as organizer. Times are ISO 8601 with offset ' +
+        'Creates a calendar event with the authenticated user as organizer. When ' +
+        '`attendees` are given, iMIP invitations are sent to them (pass ' +
+        '`notify: "none"` to suppress that); omit `attendees` for a personal event ' +
+        '— a block of the user’s own time — with no invitations. Times are ISO 8601 with offset ' +
         'or naive local form. Optional `timeZone` is an IANA zone and, when passed, ' +
         'overrides embedded offsets so wall-clock digits win. Pass `recurrence` to create a repeating series ' +
         '(e.g. a weekly team meeting) in a single call. Defaults to the user’s ' +

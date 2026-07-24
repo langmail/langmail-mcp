@@ -103,6 +103,7 @@ queries rank messages matching more terms first, otherwise newest-first — fetc
 a full message with `get_email`.
 
 Parameters (at least one of `query`, `after`, `before`, `from`, `keywords`, or `mailbox` is required):
+
 - `query`: string (optional) — free-text search over subject, body, and addresses (1–500 characters); terms are OR'd (any-term match, first 10 terms used) and messages matching more terms rank first (each hit shows `matched: X/N terms`), a double-quoted phrase requires all its words in the same field
 - `after`: string (optional) — only messages received on/after this UTC ISO-8601 timestamp (e.g. `2026-04-01T00:00:00Z`)
 - `before`: string (optional) — only messages received strictly before this UTC ISO-8601 timestamp
@@ -112,6 +113,7 @@ Parameters (at least one of `query`, `after`, `before`, `from`, `keywords`, or `
 - `limit`: number (optional) — maximum results, 1–100 (default 20)
 
 Returns:
+
 - A list of matching messages, each with its id, subject, sender, date, and tags — multi-term
   queries rank messages matching more terms first (with a `matched: X/N terms` line per hit),
   otherwise newest-first
@@ -123,9 +125,11 @@ Fetches a single message's recipients and plain-text body by id. `search_emails`
 and `get_thread` deliberately omit bodies; open a specific hit with this tool.
 
 Parameters:
+
 - `id`: string — the message id, as returned by `search_emails` or `get_thread`
 
 Returns:
+
 - The message's subject, sender, recipients, date, tags, and plain-text body
 
 ### get_thread
@@ -134,9 +138,11 @@ Lists every message in the same thread as a given message id, oldest-first, in
 the lightweight search-result shape. Fetch a body with `get_email`.
 
 Parameters:
+
 - `id`: string — a message id; every message in its thread is returned
 
 Returns:
+
 - A list of the thread's messages oldest-first, each with its id, subject, sender, date, and tags
 
 ### list_calendars
@@ -148,6 +154,7 @@ specific calendar.
 Parameters: none
 
 Returns:
+
 - A list of the user's calendars, each with its display name and CalDAV URL
 
 ### create_calendar
@@ -158,10 +165,12 @@ personal one. Returns the new calendar's CalDAV URL; pass it to
 `create_calendar_event` to add events to it.
 
 Parameters:
+
 - `name`: string — the calendar's display name (1–200 characters)
 - `color`: string (optional) — a hex display color (e.g. `#FF6600`), carried through the Apple `calendar-color` extension so the calendar is visually distinct
 
 Returns:
+
 - A confirmation including the new `calendarUrl` (pass it to `create_calendar_event`)
 
 ### list_calendar_events
@@ -171,31 +180,38 @@ Use the returned `uid` to target `update_calendar_event` or
 `delete_calendar_event`.
 
 Parameters:
+
 - `calendarUrl`: string (optional) — a CalDAV URL from `list_calendars`; defaults to the user's default calendar
 - `start`: string (optional) — window start (ISO 8601 with offset); must be paired with `end`
 - `end`: string (optional) — window end (ISO 8601 with offset); must be paired with `start`
 
 Returns:
+
 - A list of events, each with its title, time, location (if any), repeat rule (for recurring events), attendees (with response status, when any), and `uid`. The attendee list is the current membership `update_calendar_event` edits — read it here before adding or removing attendees.
 
 ### create_calendar_event
 
-Creates a calendar event and sends iMIP invitations to the attendees, with
-the authenticated user as organizer. Pass `recurrence` to create a repeating
-series in a single call.
+Creates a calendar event with the authenticated user as organizer. When
+attendees are given, iMIP invitations are sent to them; omit `attendees` (or
+pass an empty array) for a personal event — a block of the user's own time —
+with no invitations sent. Pass `recurrence` to create a repeating series in a
+single call.
 
 Parameters:
+
 - `title`: string — event title (1–200 characters)
 - `start`: string — start datetime (ISO 8601 with offset, e.g. `2026-06-12T10:00:00Z`)
 - `end`: string — end datetime (ISO 8601 with offset); must be after `start`
-- `attendees`: array of string — 1–50 attendee email addresses
+- `attendees`: array of string (optional) — up to 50 attendee email addresses; omit or pass `[]` for a personal event with no invitations
+- `notify`: `all` (default) or `none` (optional) — `none` writes the event without inviting the attendees (for invitations already sent out of band); irrelevant without attendees
 - `calendarUrl`: string (optional) — a CalDAV URL from `list_calendars`; defaults to the user's default calendar
 - `description`: string (optional) — up to 5000 characters
 - `location`: string (optional) — up to 500 characters
 - `recurrence`: string or object (optional) — turns the event into a repeating series; either a raw iCalendar RRULE (e.g. `FREQ=WEEKLY;BYDAY=TH`) or a structured object `{frequency, interval?, byDay?, until?|count?}`. `start`/`end` describe the first occurrence
 
 Returns:
-- A confirmation that the event was created and invitations were sent, including the event `uid` and `calendarUrl` (pass these to `update_calendar_event` / `delete_calendar_event`)
+
+- A confirmation that the event was created — stating whether invitations were sent, and to whom — including the event `uid` and `calendarUrl` (pass these to `update_calendar_event` / `delete_calendar_event`)
 
 ### update_calendar_event
 
@@ -215,11 +231,12 @@ To edit one occurrence in isolation, pass `recurrenceId` (the occurrence's
 original start); attendee deltas can't be combined with it.
 
 Parameters:
+
 - `uid`: string — the event's iCalendar UID, from `create_calendar_event` or `list_calendar_events`
 - `title`: string — event title (1–200 characters); optional with an attendee delta (kept as stored when omitted)
 - `start`: string — start datetime (ISO 8601 with offset); optional with an attendee delta
 - `end`: string — end datetime (ISO 8601 with offset); must be after `start`; optional with an attendee delta
-- `attendees`: array of string — 1–50 attendee email addresses (the full replacement list); optional with an attendee delta, and mutually exclusive with `addedAttendees`/`removedAttendees`
+- `attendees`: array of string — up to 50 attendee email addresses (the full replacement list); an empty array strips every attendee, turning the event into a personal one; optional with an attendee delta, and mutually exclusive with `addedAttendees`/`removedAttendees`
 - `addedAttendees`: array of string (optional) — email addresses to add to the stored attendee list
 - `removedAttendees`: array of string (optional) — email addresses to remove from the stored attendee list (matched case-insensitively)
 - `notify`: `all` (default) or `none` (optional) — `none` makes the edit silent (attendees on the event are not notified)
@@ -230,6 +247,7 @@ Parameters:
 - `recurrenceId`: string (optional) — ISO 8601 instant naming one occurrence to edit in isolation
 
 Returns:
+
 - A confirmation that the event was updated, naming the notified attendees (or noting none were notified)
 
 ### delete_calendar_event
@@ -238,10 +256,12 @@ Deletes an event (identified by its `uid`); the server sends iMIP
 cancellations to any attendees.
 
 Parameters:
+
 - `uid`: string — the event's iCalendar UID, from `create_calendar_event` or `list_calendar_events`
 - `calendarUrl`: string (optional) — a CalDAV URL from `list_calendars`; defaults to the user's default calendar
 
 Returns:
+
 - A confirmation that the event was deleted
 
 ### respond_to_event
@@ -252,9 +272,11 @@ back. The organizer is notified automatically. Use this to reply to an
 invitation you received; it does not change the event itself.
 
 Parameters:
+
 - `uid`: string — the event's iCalendar UID, from `list_calendar_events`
 - `response`: string — one of `accept`, `decline`, or `tentative`
 - `calendarUrl`: string (optional) — a CalDAV URL from `list_calendars`; defaults to the user's default calendar
 
 Returns:
+
 - A confirmation of the RSVP (including the event title when available)

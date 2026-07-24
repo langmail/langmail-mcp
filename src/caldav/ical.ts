@@ -56,11 +56,14 @@ export interface InviteInput {
 
 // Returns the serialized VCALENDAR string. METHOD:REQUEST + an ORGANIZER
 // + ATTENDEE(RSVP) is what triggers Stalwart's server-side scheduling.
+// Without attendees there is nothing to schedule — and RFC 5546 requires at
+// least one ATTENDEE on a REQUEST — so a personal event is serialized as a
+// plain calendar object with no METHOD at all.
 export const buildInvite = (input: InviteInput): string => {
   const timeZone = input.timeZone ?? UTC_TIME_ZONE
   const cal = ical({
-    method: ICalCalendarMethod.REQUEST,
     prodId: { company: 'Langmail', product: 'MCP' },
+    ...(input.attendees.length > 0 ? { method: ICalCalendarMethod.REQUEST } : {}),
   })
   if (timeZone !== UTC_TIME_ZONE) {
     cal.timezone({ generator: getVtimezoneComponent, name: timeZone })
