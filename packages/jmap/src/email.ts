@@ -624,24 +624,30 @@ const ROLE_BY_PLACE_NAME: Record<string, string> = {
 // isn't a place (an ordinary user folder, resolvable by name only).
 export const roleForPlaceName = (name: string): string | undefined => ROLE_BY_PLACE_NAME[name.trim().toLowerCase()]
 
-// Resolve a caller-supplied folder name to a mailbox id: exact (case-folded)
-// name first, then — for a place name — the mailbox carrying that role.
+// Resolve a caller-supplied folder name to a mailbox id: for a *place* name the
+// mailbox carrying that role, else (and as the fallback) an exact, case-folded
+// name match. One round-trip serves both lookups.
 //
-// Name wins deliberately. The input is an arbitrary string a user or agent
-// typed, so a folder literally called "Archive" is what they meant even when
-// some other mailbox holds the `archive` role; the role is the fallback that
-// keeps "Sent" resolving on a server that calls it "Sent Items". (The Rust
-// projection inverts this — it only ever emits places, so role-first is right
-// there.) One round-trip serves both lookups.
+// Role wins for the eight place names because the role *is* what identifies a
+// place — the same rule `services/email-sync` `ensure_place_mailbox` projects
+// under, so both halves of the system agree on what "Sent" means. Name-first
+// would be shadowable: a stray role-less folder literally named "Sent" (the
+// mail-rules `resolveMailboxByName` used to create exactly that) would swallow
+// the lookup and return zero hits instead of the account's real sent mail —
+// reproducing the very symptom this resolver exists to fix, and silently.
+//
+// Name remains the fallback, so an ordinary user folder resolves as it always
+// did, and a place name still works on a server that has no mailbox carrying
+// that role but does have one named for it.
 export const mailboxIdByNameOrRole = async (p: MailboxIdByNameParams): Promise<string | null> => {
   const mailboxes = await fetchMailboxes(p)
-  const wanted = p.name.trim().toLowerCase()
-  const byName = mailboxes.find((m) => m.name.toLowerCase() === wanted)
-  if (byName) {
-    return byName.id
-  }
   const role = roleForPlaceName(p.name)
-  return role ? (mailboxes.find((m) => m.role?.toLowerCase() === role)?.id ?? null) : null
+  const byRole = role ? mailboxes.find((m) => m.role?.toLowerCase() === role) : undefined
+  if (byRole) {
+    return byRole.id
+  }
+  const wanted = p.name.trim().toLowerCase()
+  return mailboxes.find((m) => m.name.toLowerCase() === wanted)?.id ?? null
 }
 
 // Every folder name in the account. Used to turn a failed mailbox lookup into

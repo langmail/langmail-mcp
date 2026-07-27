@@ -53,7 +53,7 @@ const searchEmailsShape = {
     .string()
     .optional()
     .describe(
-      'Restrict to a named mailbox/folder (e.g. "Inbox"). The standard places — Inbox, Sent, Archive, Drafts, Trash, Junk — resolve by their special-use role, so they work under whatever name the server gives them.'
+      'Restrict to a named mailbox/folder (e.g. "Inbox"). The standard places — Inbox, Sent, Archive, Drafts, Trash, Junk — resolve to the folder holding that role, so they work under whatever name the server gives them ("Sent" finds a mailbox called "Sent Items"). Any other value matches a folder name exactly.'
     ),
   query: z
     .string()

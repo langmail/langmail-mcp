@@ -620,9 +620,36 @@ describe('mailboxIdByNameOrRole', () => {
     expect(await resolve('Inbox')).toBe('m1')
   })
 
-  test('an exact name match wins over the role', async () => {
-    // "Sent Items" is the literal name; it must not depend on the role table.
+  test('a non-place name resolves by its literal name', async () => {
+    // "Sent Items" is not a place name, so it can only match by name.
     expect(await resolve('Sent Items')).toBe('m2')
+  })
+
+  test('a stray folder named for a place does not shadow the role mailbox', async () => {
+    // The mail-rules `resolveMailboxByName` used to create exactly this: an
+    // empty, role-less "Sent" beside the role-bearing "Sent Items". Matching it
+    // by name would return zero hits and read as "sent mail was never synced".
+    const f = mock(() =>
+      Promise.resolve(
+        jmapResponse([
+          ['Mailbox/query', { ids: ['m1', 'm2'] }, '0'],
+          [
+            'Mailbox/get',
+            {
+              list: [
+                { id: 'm1', name: 'Sent', role: null },
+                { id: 'm2', name: 'Sent Items', role: 'sent' },
+              ],
+            },
+            '1',
+          ],
+        ])
+      )
+    )
+    const id = await withFetch(f, () =>
+      mailboxIdByNameOrRole({ accountId: 'acct', apiUrl: API, authorization: 'Bearer tok', name: 'Sent' })
+    )
+    expect(id).toBe('m2')
   })
 
   test('resolves an ordinary folder by name', async () => {
@@ -633,8 +660,23 @@ describe('mailboxIdByNameOrRole', () => {
     expect(await resolve('DoesNotExist')).toBeNull()
   })
 
-  test('returns null for a place with no mailbox carrying its role', async () => {
+  test('returns null for a place with neither a role mailbox nor a matching name', async () => {
     expect(await resolve('Archive')).toBeNull()
+  })
+
+  test('a place falls back to its name when no mailbox carries the role', async () => {
+    const f = mock(() =>
+      Promise.resolve(
+        jmapResponse([
+          ['Mailbox/query', { ids: ['m1'] }, '0'],
+          ['Mailbox/get', { list: [{ id: 'm1', name: 'Archive', role: null }] }, '1'],
+        ])
+      )
+    )
+    const id = await withFetch(f, () =>
+      mailboxIdByNameOrRole({ accountId: 'acct', apiUrl: API, authorization: 'Bearer tok', name: 'Archive' })
+    )
+    expect(id).toBe('m1')
   })
 
   test('resolves both lookups from a single listing round-trip', async () => {
