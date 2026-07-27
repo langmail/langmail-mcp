@@ -10,6 +10,7 @@ const MATCHED_LINE_RE = /matched: \d/
 
 const fakeDeps = (opts: {
   accountId?: string
+  available?: string[]
   mailboxByName?: (name: string) => string | null
   queryIds?: string[]
   perTermIds?: string[][]
@@ -28,7 +29,7 @@ const fakeDeps = (opts: {
   },
   resolveAccountId: () => Promise.resolve(opts.accountId ?? 'acct'),
   resolveMailbox: (_authorization: string, name: string) =>
-    Promise.resolve(opts.mailboxByName ? opts.mailboxByName(name) : null),
+    Promise.resolve({ available: opts.available ?? [], id: opts.mailboxByName ? opts.mailboxByName(name) : null }),
 })
 
 describe('searchEmailsInput schema', () => {
@@ -423,7 +424,8 @@ describe('searchEmails', () => {
         },
         emailQueryPerTerm: () => Promise.resolve([]),
         resolveAccountId: () => Promise.resolve('acct'),
-        resolveMailbox: (_authorization, name) => Promise.resolve(name === 'Inbox' ? 'm1' : null),
+        resolveMailbox: (_authorization, name) =>
+          Promise.resolve({ available: [], id: name === 'Inbox' ? 'm1' : null }),
       },
       { args: { limit: 5, mailbox: 'Inbox', query: 'x' }, token: 'tok' }
     )
@@ -441,5 +443,16 @@ describe('searchEmails', () => {
     const txt = result.content[0]?.text ?? ''
     expect(txt.toLowerCase()).toContain('mailbox')
     expect(txt).toContain('DoesNotExist')
+  })
+
+  test('a miss names the folders that do exist', async () => {
+    // A bare "not found" on a folder the server names differently reads as
+    // "those messages were never synced"; the listing is what unsticks it.
+    const result = await searchEmails(fakeDeps({ available: ['Inbox', 'Sent Items'], mailboxByName: () => null }), {
+      args: { limit: 5, mailbox: 'Sent', query: 'x' },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text ?? '').toContain('Sent Items')
   })
 })

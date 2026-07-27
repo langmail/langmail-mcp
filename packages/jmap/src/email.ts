@@ -597,6 +597,58 @@ export const mailboxIdByRole = async (p: MailboxIdByRoleParams): Promise<string 
   return hit?.id ?? null
 }
 
+// The RFC 8621 special-use role behind each *place* name the product speaks.
+//
+// A place is addressed by name everywhere a human or an agent types one
+// ("Sent", "Archive"), but the mailbox actually holding that mail is whatever
+// carries the role — and its display name is the server's to choose. A stock
+// Stalwart account names its sent mailbox **"Sent Items"**, so a name-only
+// lookup for "Sent" misses the very folder the Gmail projection files sent mail
+// into (`services/email-sync` `ensure_place_mailbox` binds by role, not name).
+// That miss reads to the caller as "sent mail was never synced".
+//
+// Keys are lowercase; synonyms map onto the same role so the obvious spelling
+// works ("Spam" → junk, "Bin" → trash).
+const ROLE_BY_PLACE_NAME: Record<string, string> = {
+  archive: 'archive',
+  bin: 'trash',
+  drafts: 'drafts',
+  inbox: 'inbox',
+  junk: 'junk',
+  sent: 'sent',
+  spam: 'junk',
+  trash: 'trash',
+}
+
+// The special-use role a place name refers to, or `undefined` for a name that
+// isn't a place (an ordinary user folder, resolvable by name only).
+export const roleForPlaceName = (name: string): string | undefined => ROLE_BY_PLACE_NAME[name.trim().toLowerCase()]
+
+// Resolve a caller-supplied folder name to a mailbox id: exact (case-folded)
+// name first, then — for a place name — the mailbox carrying that role.
+//
+// Name wins deliberately. The input is an arbitrary string a user or agent
+// typed, so a folder literally called "Archive" is what they meant even when
+// some other mailbox holds the `archive` role; the role is the fallback that
+// keeps "Sent" resolving on a server that calls it "Sent Items". (The Rust
+// projection inverts this — it only ever emits places, so role-first is right
+// there.) One round-trip serves both lookups.
+export const mailboxIdByNameOrRole = async (p: MailboxIdByNameParams): Promise<string | null> => {
+  const mailboxes = await fetchMailboxes(p)
+  const wanted = p.name.trim().toLowerCase()
+  const byName = mailboxes.find((m) => m.name.toLowerCase() === wanted)
+  if (byName) {
+    return byName.id
+  }
+  const role = roleForPlaceName(p.name)
+  return role ? (mailboxes.find((m) => m.role?.toLowerCase() === role)?.id ?? null) : null
+}
+
+// Every folder name in the account. Used to turn a failed mailbox lookup into
+// an actionable error rather than a dead end.
+export const mailboxNames = async (p: JmapCall & { accountId: string }): Promise<string[]> =>
+  (await fetchMailboxes(p)).map((m) => m.name)
+
 export interface MailboxIdsByRolesParams extends JmapCall {
   accountId: string
   roles: string[]

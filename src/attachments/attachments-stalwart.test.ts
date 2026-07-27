@@ -267,7 +267,7 @@ live('attachments against live Stalwart — metadata, capability URL, blob strea
       emailQuery: (p) => emailQuery({ ...p, apiUrl, authorization }),
       emailQueryPerTerm: (p) => emailQueryPerTerm({ ...p, apiUrl, authorization }),
       resolveAccountId: () => Promise.resolve(accountId),
-      resolveMailbox: () => Promise.resolve(null),
+      resolveMailbox: () => Promise.resolve({ available: [], id: null }),
     }
     tickets = createTicketStore()
     dlDeps = {

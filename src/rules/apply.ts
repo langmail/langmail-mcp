@@ -19,8 +19,9 @@ import {
   emailSetMany,
   type JmapLive,
   mailboxCreate,
-  mailboxIdByName,
+  mailboxIdByNameOrRole,
   mailboxIdByRole,
+  roleForPlaceName,
   threadsExpandEmailIds,
   toLabelKeyword,
 } from '@langmail/jmap'
@@ -270,7 +271,12 @@ export const makeLiveApplyIo = (
     },
     resolveMailboxByName: async (token, name) => {
       const c = await ctx(token)
-      return (await mailboxIdByName({ ...c, name })) ?? mailboxCreate({ ...c, name })
+      // A rule naming a place ("move to Sent") must bind to the mailbox holding
+      // that role even when the server calls it something else — creating a
+      // second folder under the typed name would split the place in two, and
+      // the role-based actions (archive/delete) would keep using the original.
+      const role = roleForPlaceName(name)
+      return (await mailboxIdByNameOrRole({ ...c, name })) ?? mailboxCreate({ ...c, name, role })
     },
     resolveMailboxByRole: async (token, role, createName) => {
       const c = await ctx(token)

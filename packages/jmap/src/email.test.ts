@@ -10,8 +10,11 @@ import {
   emailState,
   mailboxCreate,
   mailboxIdByName,
+  mailboxIdByNameOrRole,
   mailboxIdByRole,
   mailboxIdsByRoles,
+  mailboxNames,
+  roleForPlaceName,
   threadEmailIds,
 } from './email.ts'
 import { JmapError } from './session.ts'
@@ -562,6 +565,110 @@ describe('mailboxIdByRole', () => {
       mailboxIdByRole({ accountId: 'acct', apiUrl: API, role: 'archive', authorization: 'Bearer tok' })
     )
     expect(id).toBeNull()
+  })
+})
+
+describe('roleForPlaceName', () => {
+  test('maps the standard places and their obvious synonyms', () => {
+    expect(roleForPlaceName('Sent')).toBe('sent')
+    expect(roleForPlaceName('  inbox ')).toBe('inbox')
+    expect(roleForPlaceName('Spam')).toBe('junk')
+    expect(roleForPlaceName('Bin')).toBe('trash')
+  })
+
+  test('an ordinary folder name is not a place', () => {
+    expect(roleForPlaceName('Receipts')).toBeUndefined()
+  })
+})
+
+describe('mailboxIdByNameOrRole', () => {
+  // The account shape that produced the bug: a stock Stalwart mailbox whose
+  // sent folder is named "Sent Items", so a name-only lookup for "Sent" misses
+  // the folder the Gmail projection actually files sent mail into.
+  const stalwartDefaults = (): ReturnType<typeof mock> =>
+    mock(() =>
+      Promise.resolve(
+        jmapResponse([
+          ['Mailbox/query', { ids: ['m1', 'm2', 'm3'] }, '0'],
+          [
+            'Mailbox/get',
+            {
+              list: [
+                { id: 'm1', name: 'Inbox', role: 'inbox' },
+                { id: 'm2', name: 'Sent Items', role: 'sent' },
+                { id: 'm3', name: 'Receipts', role: null },
+              ],
+            },
+            '1',
+          ],
+        ])
+      )
+    )
+
+  const resolve = (name: string): Promise<string | null> =>
+    withFetch(stalwartDefaults(), () =>
+      mailboxIdByNameOrRole({ accountId: 'acct', apiUrl: API, authorization: 'Bearer tok', name })
+    )
+
+  test('falls back to the role when no folder carries the place name', async () => {
+    // Regression: this returned null, and the caller reported the user's synced
+    // sent mail as a missing mailbox.
+    expect(await resolve('Sent')).toBe('m2')
+  })
+
+  test('resolves a place whose name and role agree', async () => {
+    expect(await resolve('Inbox')).toBe('m1')
+  })
+
+  test('an exact name match wins over the role', async () => {
+    // "Sent Items" is the literal name; it must not depend on the role table.
+    expect(await resolve('Sent Items')).toBe('m2')
+  })
+
+  test('resolves an ordinary folder by name', async () => {
+    expect(await resolve('receipts')).toBe('m3')
+  })
+
+  test('returns null for a name that is neither a folder nor a place', async () => {
+    expect(await resolve('DoesNotExist')).toBeNull()
+  })
+
+  test('returns null for a place with no mailbox carrying its role', async () => {
+    expect(await resolve('Archive')).toBeNull()
+  })
+
+  test('resolves both lookups from a single listing round-trip', async () => {
+    const f = stalwartDefaults()
+    await withFetch(f, () =>
+      mailboxIdByNameOrRole({ accountId: 'acct', apiUrl: API, authorization: 'Bearer tok', name: 'Sent' })
+    )
+    expect(f).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('mailboxNames', () => {
+  test('lists every folder name in the account', async () => {
+    const f = mock(() =>
+      Promise.resolve(
+        jmapResponse([
+          ['Mailbox/query', { ids: ['m1', 'm2'] }, '0'],
+          [
+            'Mailbox/get',
+            {
+              list: [
+                { id: 'm1', name: 'Inbox', role: 'inbox' },
+                { id: 'm2', name: 'Sent Items', role: 'sent' },
+              ],
+            },
+            '1',
+          ],
+        ])
+      )
+    )
+    const names = await withFetch(f, () =>
+      mailboxNames({ accountId: 'acct', apiUrl: API, authorization: 'Bearer tok' })
+    )
+    expect(names).toEqual(['Inbox', 'Sent Items'])
   })
 })
 

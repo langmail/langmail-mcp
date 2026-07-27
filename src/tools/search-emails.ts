@@ -22,7 +22,8 @@ import {
   emailQuery,
   emailQueryPerTerm,
   type JmapLive,
-  mailboxIdByName,
+  mailboxIdByNameOrRole,
+  mailboxNames,
 } from '@langmail/jmap'
 
 import { formatEmailLine, orderById } from './format.ts'
@@ -48,7 +49,12 @@ const searchEmailsShape = {
   from: z.string().min(1).max(200).optional().describe('Substring match on the sender name or address.'),
   keywords: z.array(z.enum(KEYWORD_VALUES)).min(1).optional().describe(KEYWORDS_DESCRIPTION),
   limit: z.number().int().min(1).max(100).default(20),
-  mailbox: z.string().optional().describe('Restrict to a named mailbox/folder (e.g. "Inbox").'),
+  mailbox: z
+    .string()
+    .optional()
+    .describe(
+      'Restrict to a named mailbox/folder (e.g. "Inbox"). The standard places — Inbox, Sent, Archive, Drafts, Trash, Junk — resolve by their special-use role, so they work under whatever name the server gives them.'
+    ),
   query: z
     .string()
     .min(1)
@@ -126,17 +132,44 @@ const rankByMatchCount = (lists: string[][], limit: number, window: number): Ran
   }
 }
 
+// Outcome of a mailbox-filter lookup. On a miss the account's folder names come
+// back with it so the error can name what *does* exist — a bare "not found" on
+// a folder whose server-side name differs from the place name (Stalwart calls
+// the sent mailbox "Sent Items") reads as "those messages were never synced".
+export interface MailboxLookup {
+  // Empty on a hit — the listing is only fetched when there's an error to write.
+  available: string[]
+  id: string | null
+}
+
 export interface SearchEmailsDeps {
   emailGet: (p: EmailGetParams) => Promise<EmailRecord[]>
   emailQuery: (p: EmailQueryParams) => Promise<string[]>
   emailQueryPerTerm: (p: EmailQueryPerTermParams) => Promise<string[][]>
   resolveAccountId: (authorization: string) => Promise<string>
-  resolveMailbox: (authorization: string, name: string) => Promise<string | null>
+  resolveMailbox: (authorization: string, name: string) => Promise<MailboxLookup>
 }
 
 export interface SearchEmailsContext {
   args: SearchEmailsArgs
   token: string
+}
+
+// Resolve the optional mailbox filter to an id, or an error result. The error
+// names the folders that do exist: the place name a caller types ("Sent") is
+// often not the server's name for that folder, and a bare "not found" there
+// reads as "those messages were never synced" rather than "ask by another name".
+const resolveMailboxFilter = async (
+  deps: SearchEmailsDeps,
+  authorization: string,
+  name: string
+): Promise<{ error: ToolResult } | { id: string }> => {
+  const lookup = await deps.resolveMailbox(authorization, name)
+  if (lookup.id) {
+    return { id: lookup.id }
+  }
+  const available = lookup.available.length > 0 ? ` Available folders: ${lookup.available.join(', ')}.` : ''
+  return { error: errorResult(`Mailbox not found: ${name}.${available}`) }
 }
 
 export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsContext): Promise<ToolResult> => {
@@ -156,11 +189,11 @@ export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsCont
 
   let mailboxId: string | undefined
   if (args.mailbox) {
-    const id = await deps.resolveMailbox(authorization, args.mailbox)
-    if (!id) {
-      return errorResult(`Mailbox not found: ${args.mailbox}`)
+    const resolved = await resolveMailboxFilter(deps, authorization, args.mailbox)
+    if ('error' in resolved) {
+      return resolved.error
     }
-    mailboxId = id
+    mailboxId = resolved.id
   }
 
   const filters = {
@@ -234,7 +267,10 @@ export const makeLiveDeps = (live: JmapLive): SearchEmailsDeps => ({
   resolveAccountId: live.resolveAccountId,
   resolveMailbox: async (authorization, name) => {
     const s = await live.getSession(authorization)
-    return mailboxIdByName({ accountId: accountIdForMail(s), apiUrl: s.apiUrl, authorization, name })
+    const call = { accountId: accountIdForMail(s), apiUrl: s.apiUrl, authorization }
+    const id = await mailboxIdByNameOrRole({ ...call, name })
+    // The folder listing is only worth a round-trip when the lookup missed.
+    return { available: id ? [] : await mailboxNames(call), id }
   },
 })
 
