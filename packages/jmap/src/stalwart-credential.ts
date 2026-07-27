@@ -94,17 +94,34 @@ export async function fetchStalwartCredential(
     throw new StalwartCredentialError('Stalwart credential endpoint returned an unexpected 404', 404)
   }
   if (!response.ok) {
-    throw new StalwartCredentialError('Stalwart credential endpoint returned a non-200 response', response.status)
+    // The status code is the one signal that separates a transient upstream blip
+    // (502/503 while the auth service restarts) from a persistent misconfig (401
+    // bad internal token, 500 undecryptable password) — yet the pino/Sentry
+    // serializer only ships the error *message*, so the `status` field never
+    // reaches telemetry. Fold the status and the error body (which carries only
+    // `{ error }`, never credential material) into the message so the recurring
+    // error is actually triageable.
+    const detail = (await response.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 200)
+    throw new StalwartCredentialError(
+      `Stalwart credential endpoint returned ${response.status}${detail ? `: ${detail}` : ''}`,
+      response.status
+    )
   }
 
   let payload: { address?: unknown; authorization?: unknown }
   try {
     payload = (await response.json()) as { address?: unknown; authorization?: unknown }
   } catch {
-    throw new StalwartCredentialError('Stalwart credential endpoint returned a malformed body', response.status)
+    throw new StalwartCredentialError(
+      `Stalwart credential endpoint returned a malformed body (status ${response.status})`,
+      response.status
+    )
   }
   if (typeof payload.authorization !== 'string' || !payload.authorization || typeof payload.address !== 'string') {
-    throw new StalwartCredentialError('Stalwart credential endpoint returned no credential', response.status)
+    throw new StalwartCredentialError(
+      `Stalwart credential endpoint returned no credential (status ${response.status})`,
+      response.status
+    )
   }
 
   return { address: payload.address, authorization: payload.authorization }

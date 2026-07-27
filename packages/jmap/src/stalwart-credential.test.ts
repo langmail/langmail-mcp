@@ -60,15 +60,34 @@ describe('fetchStalwartCredential', () => {
     expect((error as StalwartCredentialError).status).toBe(500)
   })
 
-  it('throws when the body has no authorization', async () => {
-    mockFetch(Response.json({ address: 'a@b' }))
+  it('folds the status and error body into the message so telemetry can triage it', async () => {
+    mockFetch(Response.json({ error: 'credential_unavailable' }, { status: 500 }))
 
-    await expect(fetchStalwartCredential('user-uuid', config)).rejects.toBeInstanceOf(StalwartCredentialError)
+    const error = await fetchStalwartCredential('user-uuid', config).catch((e: unknown) => e)
+
+    // The pino/Sentry serializer only ships err.message, so the status must live
+    // there — not just on the (dropped) `status` field.
+    expect((error as StalwartCredentialError).message).toContain('500')
+    expect((error as StalwartCredentialError).message).toContain('credential_unavailable')
   })
 
-  it('wraps a malformed (non-JSON) 200 body in StalwartCredentialError', async () => {
+  it('throws when the body has no authorization, with the status in the message', async () => {
+    mockFetch(Response.json({ address: 'a@b' }))
+
+    const error = await fetchStalwartCredential('user-uuid', config).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(StalwartCredentialError)
+    expect((error as StalwartCredentialError).status).toBe(200)
+    expect((error as StalwartCredentialError).message).toContain('200')
+  })
+
+  it('wraps a malformed (non-JSON) 200 body in StalwartCredentialError, with the status in the message', async () => {
     mockFetch(new Response('not json', { status: 200 }))
 
-    await expect(fetchStalwartCredential('user-uuid', config)).rejects.toBeInstanceOf(StalwartCredentialError)
+    const error = await fetchStalwartCredential('user-uuid', config).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(StalwartCredentialError)
+    expect((error as StalwartCredentialError).status).toBe(200)
+    expect((error as StalwartCredentialError).message).toContain('200')
   })
 })
