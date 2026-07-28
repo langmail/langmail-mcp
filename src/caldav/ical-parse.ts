@@ -23,6 +23,11 @@ export interface ParsedEvent {
   // preserve it without the caller re-supplying it.
   description?: string
   end: string
+  // Instants the series excludes (EXDATE), as stored — how delete_calendar_event
+  // cancels a single occurrence. Present (and non-empty) only when the VEVENT
+  // carries any. update_calendar_event refuses to rebuild such a master, because
+  // a rebuilt VEVENT carries no EXDATE and would resurrect the cancellation.
+  excludedDates?: string[]
   location?: string
   // Bare organizer email (mailto: stripped). Edits must reuse it instead of
   // the freshly discovered principal: an event created under a previous
@@ -107,6 +112,10 @@ interface ParsedProperty {
 // clobber all but the last, and an event's whole point can be its attendee list.
 interface ParsedBlock {
   attendees: ParsedProperty[]
+  // EXDATE is multi-valued twice over — it may repeat, and each line may carry
+  // a comma-separated list (RFC 5545 §3.8.5.1) — so it is collected like
+  // ATTENDEE rather than keyed.
+  exdates: ParsedProperty[]
   props: Map<string, ParsedProperty>
 }
 
@@ -129,6 +138,8 @@ const recordProperty = (block: ParsedBlock, line: string): void => {
   const property = { params: line.slice(name.length, colon), value: line.slice(colon + 1) }
   if (name === 'ATTENDEE') {
     block.attendees.push(property)
+  } else if (name === 'EXDATE') {
+    block.exdates.push(property)
   } else {
     block.props.set(name, property)
   }
@@ -142,7 +153,7 @@ const eventBlocks = (ical: string): ParsedBlock[] => {
 
   for (const line of unfold(ical).split(LINE_RE)) {
     if (line === 'BEGIN:VEVENT') {
-      current = { attendees: [], props: new Map() }
+      current = { attendees: [], exdates: [], props: new Map() }
       nested = 0
     } else if (line === 'END:VEVENT') {
       if (current) {
@@ -230,8 +241,43 @@ const parseAttendee = (property: ParsedProperty): ParsedAttendee | undefined => 
   return status ? { email, status } : { email }
 }
 
+// Flattens the EXDATE lines of one VEVENT into ISO values. Each line may carry
+// a comma-separated list, and the property may repeat (RFC 5545 §3.8.5.1).
+const parseExcludedDates = (exdates: ParsedProperty[]): string[] =>
+  exdates.flatMap((property) =>
+    property.value
+      .split(',')
+      .map((value) => icalDateToIso(value.trim()))
+      .filter(Boolean)
+  )
+
 // Parses every VEVENT in a VCALENDAR. Blocks without a UID are skipped —
 // an event we can't address with update/delete isn't useful to list.
+// The fields a VEVENT only carries sometimes. Split out from parseEvents so the
+// conditional-spread block doesn't dominate that function's complexity.
+const optionalFields = (block: ParsedBlock, attendees: ParsedAttendee[]): Partial<ParsedEvent> => {
+  const description = block.props.get('DESCRIPTION')?.value
+  const location = block.props.get('LOCATION')?.value
+  const organizer = parseOrganizerEmail(block.props.get('ORGANIZER'))
+  const startTzid = propertyTimeZone(block.props.get('DTSTART'))
+  // Trim so a server that emits a trailing space (`RRULE:FREQ=WEEKLY `) doesn't
+  // leak it into the listed `repeats:` value.
+  const recurrence = block.props.get('RRULE')?.value.trim()
+  const recurrenceId = parseRecurrenceInstant(block.props.get('RECURRENCE-ID'))
+  const excludedDates = parseExcludedDates(block.exdates)
+  const unparsedAttendeeCount = block.attendees.length - attendees.length
+  return {
+    ...(description ? { description: unescapeText(description) } : {}),
+    ...(excludedDates.length > 0 ? { excludedDates } : {}),
+    ...(location ? { location: unescapeText(location) } : {}),
+    ...(organizer ? { organizer } : {}),
+    ...(recurrence ? { recurrence } : {}),
+    ...(recurrenceId ? { recurrenceId } : {}),
+    ...(startTzid ? { startTzid } : {}),
+    ...(unparsedAttendeeCount > 0 ? { unparsedAttendeeCount } : {}),
+  }
+}
+
 export const parseEvents = (ical: string): ParsedEvent[] => {
   const events: ParsedEvent[] = []
   for (const block of eventBlocks(ical)) {
@@ -239,30 +285,14 @@ export const parseEvents = (ical: string): ParsedEvent[] => {
     if (!uid?.value) {
       continue
     }
-    const description = block.props.get('DESCRIPTION')?.value
-    const location = block.props.get('LOCATION')?.value
-    const organizer = parseOrganizerEmail(block.props.get('ORGANIZER'))
-    const start = block.props.get('DTSTART')
-    const startTzid = propertyTimeZone(start)
-    // Trim so a server that emits a trailing space (`RRULE:FREQ=WEEKLY `) doesn't
-    // leak it into the listed `repeats:` value.
-    const recurrence = block.props.get('RRULE')?.value.trim()
-    const recurrenceId = parseRecurrenceInstant(block.props.get('RECURRENCE-ID'))
     const attendees = block.attendees.map(parseAttendee).filter((a): a is ParsedAttendee => a !== undefined)
-    const unparsedAttendeeCount = block.attendees.length - attendees.length
     events.push({
       attendees,
       end: icalDateToIso(block.props.get('DTEND')?.value ?? ''),
-      start: icalDateToIso(start?.value ?? ''),
+      start: icalDateToIso(block.props.get('DTSTART')?.value ?? ''),
       title: unescapeText(block.props.get('SUMMARY')?.value ?? ''),
       uid: uid.value,
-      ...(description ? { description: unescapeText(description) } : {}),
-      ...(location ? { location: unescapeText(location) } : {}),
-      ...(organizer ? { organizer } : {}),
-      ...(recurrence ? { recurrence } : {}),
-      ...(recurrenceId ? { recurrenceId } : {}),
-      ...(startTzid ? { startTzid } : {}),
-      ...(unparsedAttendeeCount > 0 ? { unparsedAttendeeCount } : {}),
+      ...optionalFields(block, attendees),
     })
   }
   return events

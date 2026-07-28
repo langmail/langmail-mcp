@@ -122,7 +122,9 @@ export const mailRuleActionSchema = z.discriminatedUnion('type', [
     to: z.email().describe('Forward a copy here; the original still lands in the mailbox.'),
     type: z.literal('forward'),
   }),
-  z.object({ type: z.literal('stopProcessing') }).describe('Skip any later rules. Only useful as the last action.'),
+  z
+    .object({ type: z.literal('stopProcessing') })
+    .describe('Skip any later rules for this message. Only useful as the last action.'),
 ])
 
 export type MailRuleAction = z.infer<typeof mailRuleActionSchema>

@@ -4,6 +4,7 @@
 // (friendlier to fill in field-by-field). Both normalize to a single RRULE
 // string that ical-generator serializes onto the VEVENT (see ical.ts).
 
+import { TZDate } from '@date-fns/tz'
 import { rrulestr } from 'rrule'
 import { z } from 'zod'
 
@@ -57,7 +58,9 @@ export type Recurrence = z.infer<typeof recurrenceSchema>
 // because this string is part of what tool search ranks on.
 export const recurrenceDescription =
   'Either a raw RFC 5545 RRULE ("FREQ=WEEKLY;BYDAY=TH", "FREQ=DAILY;COUNT=10") or ' +
-  '{frequency, interval?, byDay?, until?|count?}; start/end are the first occurrence.'
+  '{frequency, interval?, byDay?, until?|count?}. Use at most one of until/count; ' +
+  'a raw UNTIL must be a UTC date-time (UNTIL=20261231T000000Z). A raw rule is only ' +
+  'lightly validated, so a malformed one fails later at the server.'
 
 // ISO `2026-12-31T00:00:00.000Z` → iCalendar `20261231T000000Z`: drop the
 // date/time separators, then the milliseconds.
@@ -97,6 +100,34 @@ export const toRRule = (recurrence: Recurrence): string => {
     parts.push(`UNTIL=${toIcalUtc(recurrence.until)}`)
   }
   return parts.join(';')
+}
+
+// BYDAY on a raw rule, and the parts of a rule that make a naive weekday check
+// unsafe: with BYSETPOS or BYMONTHDAY the listed weekdays are a filter within a
+// larger pattern rather than the days the series lands on.
+const BYDAY_RE = /(?:^|;)BYDAY=([^;]+)/iu
+const COMPLEX_RULE_RE = /(?:^|;)(?:BYSETPOS|BYMONTHDAY|BYYEARDAY|BYWEEKNO)=/iu
+// Strips an RFC 5545 ordinal prefix (`2TU`, `-1FR`) down to the weekday code.
+const BYDAY_ORDINAL_RE = /^[+-]?\d*/u
+const WEEKDAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'] as const
+
+// True when moving a series to `start` would contradict the repeat rule it is
+// keeping — e.g. `FREQ=WEEKLY;BYDAY=TU` with a Friday start, which RFC 5545
+// reads as "that Friday, plus every Tuesday" rather than "every Friday". The
+// caller has to re-rule the series explicitly instead. Only the unambiguous
+// weekday case is judged; rules whose BYDAY is a filter within a larger pattern
+// are left alone rather than risk refusing a legitimate edit.
+export const startContradictsRule = (rrule: string, start: Date, timeZone: string): boolean => {
+  if (COMPLEX_RULE_RE.test(rrule)) {
+    return false
+  }
+  const byDay = BYDAY_RE.exec(rrule)?.[1]
+  if (!byDay) {
+    return false
+  }
+  const days = byDay.split(',').map((d) => d.trim().replace(BYDAY_ORDINAL_RE, '').toUpperCase())
+  const weekday = WEEKDAY_CODES[TZDate.tz(timeZone, start).getDay()]
+  return weekday !== undefined && days.length > 0 && !days.includes(weekday)
 }
 
 // True when `recurrenceId` (an ISO 8601 instant) is the original start of an

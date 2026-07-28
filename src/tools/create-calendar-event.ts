@@ -61,7 +61,9 @@ export const createCalendarEventInput = z.object({
     .enum(['all', 'none'])
     .optional()
     .describe('Whether to send the iMIP invitations. `all` (default) sends them; `none` invites nobody.'),
-  recurrence: recurrenceSchema.describe(`Repeat rule; omit for a one-off event. ${recurrenceDescription}`).optional(),
+  recurrence: recurrenceSchema
+    .describe(`Repeat rule; omit for a one-off event. start/end are its first occurrence. ${recurrenceDescription}`)
+    .optional(),
   start: dateTimeWithOptionalOffsetSchema.describe('Event start as ISO 8601 (see `timeZone`).'),
   timeZone: timeZoneSchema
     .optional()

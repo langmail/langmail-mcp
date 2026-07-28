@@ -111,9 +111,13 @@ const seriesWithOverride = (): CalendarObject => {
     title: 'Weekly Sync',
     uid: UID,
   })
+  // Deliberately distinct from the master on every mergeable field, so a test
+  // that merges against it can't pass by accidentally reading the master.
   const override = buildInvite({
-    attendees: ['a@x.com', 'b@x.com'],
+    attendees: ['a@x.com', 'c@x.com'],
+    description: 'Occurrence agenda',
     end: new Date('2026-06-23T12:00:00Z'),
+    location: 'Room 5',
     organizer: 'host@langmail.me',
     recurrenceId: new Date(OVERRIDDEN_OCCURRENCE),
     sequence: 3,
@@ -631,6 +635,57 @@ describe('updateCalendarEvent — safety guards on preserved state', () => {
     expect(cap.updated).toHaveLength(1)
   })
 
+  test('refuses a whole-event edit of a series with a cancelled occurrence', async () => {
+    const cap = captured()
+    // delete_calendar_event cancels one occurrence with an EXDATE on the master
+    // — no second VEVENT — so a rebuild would resurrect it and re-invite
+    // everyone to the meeting they were told was off.
+    const withExdate = storedEvent({
+      data: recurringStored().data.replace('RRULE:', 'EXDATE:20260623T100000Z\r\nRRULE:'),
+    })
+    const result = await updateCalendarEvent(makeDeps(account(), withExdate, cap), {
+      args: { title: 'Weekly Sync (renamed)', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('cancelled occurrence')
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('refuses to move a fixed-weekday series onto a different weekday', async () => {
+    const cap = captured()
+    // 2026-06-19 is a Friday; the kept rule pins the series to Tuesdays, so
+    // RFC 5545 would read the result as "that Friday, plus every Tuesday".
+    const result = await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
+      args: { start: '2026-06-19T10:00:00Z', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('repeats on fixed weekdays')
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('allows moving a fixed-weekday series when recurrence is re-ruled too', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
+      args: { recurrence: 'FREQ=WEEKLY;BYDAY=FR', start: '2026-06-19T10:00:00Z', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(unfold(cap.updated[0]?.ical ?? '')).toContain('RRULE:FREQ=WEEKLY;BYDAY=FR')
+  })
+
+  test('allows moving the time of day within the same weekday', async () => {
+    const cap = captured()
+    // 2026-06-23 is a Tuesday, so the kept BYDAY=TU rule still holds.
+    const result = await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
+      args: { start: '2026-06-23T14:00:00Z', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(unfold(cap.updated[0]?.ical ?? '')).toContain('RRULE:FREQ=WEEKLY;BYDAY=TU')
+  })
+
   test('refuses a partial edit of an all-day event', async () => {
     const cap = captured()
     const result = await updateCalendarEvent(makeDeps(account(), allDayStored(), cap), {
@@ -638,7 +693,7 @@ describe('updateCalendarEvent — safety guards on preserved state', () => {
       token: 'tok',
     })
     expect(result.isError).toBe(true)
-    expect(result.content[0]?.text).toContain('start')
+    expect(result.content[0]?.text).toContain('no explicit start time')
     expect(cap.updated).toHaveLength(0)
   })
 
@@ -650,8 +705,64 @@ describe('updateCalendarEvent — safety guards on preserved state', () => {
       token: 'tok',
     })
     expect(result.isError).toBe(true)
-    expect(result.content[0]?.text).toContain('end')
+    expect(result.content[0]?.text).toContain('no explicit end time')
     expect(cap.updated).toHaveLength(0)
+  })
+})
+
+// A preserved time is wall clock in the zone it was *stored* in. An explicit
+// `timeZone` governs the caller's own values and the rebuilt event's rendering
+// — it must never re-anchor a time the caller didn't pass.
+describe('updateCalendarEvent — timeZone never moves a preserved time', () => {
+  const berlinStored = (): CalendarObject =>
+    storedEvent({
+      data: buildInvite({
+        attendees: ['guest@example.com'],
+        end: new Date('2026-07-20T09:00:00Z'),
+        organizer: 'host@langmail.me',
+        sequence: 2,
+        start: new Date('2026-07-20T08:00:00Z'),
+        timeZone: 'Europe/Berlin',
+        title: 'Sync',
+        uid: UID,
+      }),
+    })
+
+  test('a title-only edit with a foreign timeZone keeps the instant', async () => {
+    const cap = captured()
+    // Stored 10:00–11:00 Berlin = 08:00–09:00Z. Rendering may move to New York,
+    // but the instant must not: 08:00Z is 04:00 New York.
+    await updateCalendarEvent(makeDeps(account(), berlinStored(), cap), {
+      args: { timeZone: 'America/New_York', title: 'Renamed', uid: UID },
+      token: 'tok',
+    })
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    expect(ical).toContain('DTSTART;TZID=America/New_York:20260720T040000')
+    expect(ical).toContain('DTEND;TZID=America/New_York:20260720T050000')
+  })
+
+  test('an attendee delta with a foreign timeZone keeps the instant', async () => {
+    const cap = captured()
+    await updateCalendarEvent(makeDeps(account(), berlinStored(), cap), {
+      args: { addedAttendees: ['anna@example.com'], timeZone: 'UTC', uid: UID },
+      token: 'tok',
+    })
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    expect(ical).toContain('DTSTART:20260720T080000Z')
+    expect(ical).toContain('DTEND:20260720T090000Z')
+  })
+
+  test('a caller-supplied start is still read in the caller’s timeZone', async () => {
+    const cap = captured()
+    // The explicit value keeps its own semantics: 14:00 New York = 18:00Z.
+    await updateCalendarEvent(makeDeps(account(), berlinStored(), cap), {
+      args: { start: '2026-07-20T14:00:00', timeZone: 'America/New_York', uid: UID },
+      token: 'tok',
+    })
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    expect(ical).toContain('DTSTART;TZID=America/New_York:20260720T140000')
+    // Duration preserved from the stored hour.
+    expect(ical).toContain('DTEND;TZID=America/New_York:20260720T150000')
   })
 })
 
@@ -732,6 +843,10 @@ describe('updateCalendarEvent — single occurrence (recurrenceId)', () => {
     expect(ical).toContain('DTEND:20260623T120000Z')
     expect(ical).toContain('SUMMARY:Renamed again')
     expect(ical).not.toContain('SUMMARY:Weekly Sync (moved)')
+    // Every other mergeable field comes from the override, not the master.
+    expect(ical).toContain('LOCATION:Room 5')
+    expect(ical).toContain('DESCRIPTION:Occurrence agenda')
+    expect(ical).toContain('mailto:c@x.com')
     // Still master + exactly one override for the instant.
     expect((ical.match(/BEGIN:VEVENT/gu) ?? []).length).toBe(2)
   })
@@ -875,6 +990,47 @@ describe('updateCalendarEvent — single occurrence (recurrenceId)', () => {
     expect(ical).toContain('DTSTART;TZID=Europe/Berlin:20260623T100000')
     expect(ical).toContain('RECURRENCE-ID;TZID=Europe/Berlin:20260623T100000')
     expect((ical.match(/BEGIN:VEVENT/gu) ?? []).length).toBe(2)
+  })
+
+  test('re-editing an override written in another zone keeps that override’s instant', async () => {
+    const cap = captured()
+    // Call 1 moved the occurrence with an explicit America/New_York, so the
+    // override carries a TZID the master doesn't. Call 2 renames it: reading
+    // the override's wall clock in the *master's* Berlin zone would move it.
+    const master = buildInvite({
+      attendees: ['guest@example.com'],
+      end: new Date('2026-06-16T08:30:00Z'),
+      organizer: 'host@langmail.me',
+      rrule: 'FREQ=WEEKLY;BYDAY=TU',
+      sequence: 2,
+      start: new Date('2026-06-16T08:00:00Z'),
+      timeZone: 'Europe/Berlin',
+      title: 'Weekly Sync',
+      uid: UID,
+    })
+    const override = buildInvite({
+      attendees: ['guest@example.com'],
+      end: new Date('2026-06-23T14:00:00Z'),
+      organizer: 'host@langmail.me',
+      recurrenceTimeZone: 'Europe/Berlin',
+      recurrenceId: new Date('2026-06-23T08:00:00Z'),
+      sequence: 3,
+      start: new Date('2026-06-23T13:00:00Z'),
+      timeZone: 'America/New_York',
+      title: 'Weekly Sync (moved)',
+      uid: UID,
+    })
+    const result = await updateCalendarEvent(
+      makeDeps(account(), { data: `${master}\r\n${override}`, etag: '"abc"', url: `${CAL}${UID}.ics` }, cap),
+      { args: { recurrenceId: '2026-06-23T08:00:00Z', title: 'Renamed', uid: UID }, token: 'tok' }
+    )
+
+    expect(result.isError).toBeUndefined()
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    // 13:00Z, unchanged — rendered in the master's Berlin zone as 15:00.
+    expect(ical).toContain('DTSTART;TZID=Europe/Berlin:20260623T150000')
+    expect(ical).toContain('DTEND;TZID=Europe/Berlin:20260623T160000')
+    expect(ical).toContain('SUMMARY:Renamed')
   })
 
   test('a zoned occurrence edit that omits the time keeps the occurrence’s wall-clock slot', async () => {

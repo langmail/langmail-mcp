@@ -37,7 +37,13 @@ import {
 import { buildInvite, maxSequence, parseSequence } from '../caldav/ical.ts'
 import { type ParsedEvent, parseEvents } from '../caldav/ical-parse.ts'
 import { spliceOccurrenceOverride } from '../caldav/occurrence.ts'
-import { isSeriesOccurrence, recurrenceDescription, recurrenceSchema, toRRule } from '../caldav/recurrence.ts'
+import {
+  isSeriesOccurrence,
+  recurrenceDescription,
+  recurrenceSchema,
+  startContradictsRule,
+  toRRule,
+} from '../caldav/recurrence.ts'
 import { resolveInputDateTime, toWallClockIso, UTC_TIME_ZONE } from '../caldav/timezone.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
 import { createCalendarEventInput, eventUidSchema } from './create-calendar-event.ts'
@@ -85,7 +91,7 @@ export const updateCalendarEventInput = z.object({
     .optional()
     .describe(
       'To change one occurrence of a repeating series alone, its original start as an ISO 8601 instant ' +
-        '(e.g. 2026-06-16T10:00:00Z). Not combinable with `recurrence` or attendee changes.'
+        '(e.g. 2026-06-16T10:00:00Z). Not combinable with `recurrence`, `addedAttendees` or `removedAttendees`.'
     ),
   removedAttendees: z
     .array(z.email())
@@ -94,7 +100,13 @@ export const updateCalendarEventInput = z.object({
     .optional()
     .describe('Email addresses to uninvite (case-insensitive). Cannot be combined with `attendees`.'),
   start: shared.start.optional().describe('New start time, ISO 8601. Omit to keep the stored start.'),
-  timeZone: shared.timeZone,
+  // Not `shared.timeZone`: on update this zone governs the caller's own
+  // start/end and the rebuilt event's rendering, and it defaults to the stored
+  // event's own zone rather than the account's.
+  timeZone: shared.timeZone.describe(
+    'IANA zone for the start/end you pass, e.g. Europe/Berlin: their clock digits are read as wall-clock ' +
+      'time here, overriding any offset. Defaults to the event’s own stored zone. Times you omit keep theirs.'
+  ),
   title: shared.title.optional().describe('New title. Omit to keep the stored one.'),
   uid: eventUidSchema,
 })
@@ -242,16 +254,20 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
   )
 }
 
-// One-line human summary of who the PUT notified. Stripping every attendee is
-// Stalwart's RFC 6638 cue to CANCEL the dropped ones, so the zero-attendee
-// branch must not claim silence.
-const deliverySummary = (attendees: string[], scheduleAgent?: 'NONE'): string => {
+// One-line human summary of who the PUT notified. Dropping an attendee is
+// Stalwart's RFC 6638 cue to CANCEL them, and SCHEDULE-AGENT=NONE is only
+// stamped on the attendees that *remain* — so neither the zero-attendee branch
+// nor a silent edit that removed someone may claim nobody heard anything.
+const deliverySummary = (attendees: string[], scheduleAgent?: 'NONE', removedAny = false): string => {
   if (attendees.length === 0) {
     return 'no attendees remain; anyone previously invited may receive a cancellation'
   }
-  return scheduleAgent === 'NONE'
-    ? 'no notifications sent'
-    : `notifications sent to ${attendees.length} attendee(s): ${attendees.join(', ')}`
+  if (scheduleAgent === 'NONE') {
+    return removedAny
+      ? 'no notifications sent to the remaining attendees; a removed attendee may still receive a cancellation'
+      : 'no notifications sent'
+  }
+  return `notifications sent to ${attendees.length} attendee(s): ${attendees.join(', ')}`
 }
 
 // The stored state an omitted field falls back to. On the whole-event path this
@@ -265,9 +281,17 @@ interface EditBase {
   // a timezone — resolveEditFields does that once, for caller and stored values
   // alike.
   end?: string
+  // True when the stored VEVENT excludes instants (EXDATE) — cancelled
+  // occurrences a rebuild would resurrect. See mergeSafetyError.
+  hasExcludedDates: boolean
   location?: string
   recurrence?: string
   start?: string
+  // The zone `start`/`end` are wall-clock in (the stored DTSTART's TZID).
+  // Distinct from the caller's `timeZone`: a preserved value must be read in the
+  // zone it was *stored* in, while the caller's own values — and the rendering
+  // of the rebuilt VEVENT — follow `timeZone`. Absent for the UTC (`…Z`) form.
+  timeZone?: string
   title?: string
   // > 0 when some stored ATTENDEE couldn't be reduced to an email; preserving
   // the attendee list would then drop those people. See mergeSafetyError.
@@ -276,12 +300,14 @@ interface EditBase {
 
 const baseOf = (event: ParsedEvent | undefined): EditBase => ({
   attendees: (event?.attendees ?? []).map((a) => a.email),
+  hasExcludedDates: (event?.excludedDates?.length ?? 0) > 0,
   unparsedAttendeeCount: event?.unparsedAttendeeCount ?? 0,
   ...(event?.description ? { description: event.description } : {}),
   ...(event?.end ? { end: event.end } : {}),
   ...(event?.location ? { location: event.location } : {}),
   ...(event?.recurrence ? { recurrence: event.recurrence } : {}),
   ...(event?.start ? { start: event.start } : {}),
+  ...(event?.startTzid ? { timeZone: event.startTzid } : {}),
   ...(event?.title ? { title: event.title } : {}),
 })
 
@@ -364,6 +390,13 @@ const mergeSafetyError = (stored: ParsedEvent[], base: EditBase, args: UpdateCal
   if (args.recurrenceId === undefined && stored.length > 1 && !isWholeEventRespecification(args)) {
     return 'This event has individually-customized occurrences; editing the whole event would discard them. Edit the occurrence(s) directly (with `recurrenceId`), or re-specify the whole event (`start`, `end`, `title`, `attendees` and `recurrence`) to replace the series.'
   }
+  // delete_calendar_event cancels one occurrence by writing an EXDATE onto the
+  // master, not by adding a VEVENT — so `stored.length` stays 1 and the guard
+  // above can't see it. A rebuilt VEVENT carries no EXDATE, which would
+  // resurrect the cancelled instance and re-invite everyone to it.
+  if (args.recurrenceId === undefined && base.hasExcludedDates) {
+    return 'This series has cancelled occurrence(s); editing the whole event would restore them and re-invite the attendees. Edit an occurrence directly (with `recurrenceId`), or delete the event and recreate it.'
+  }
   // A non-mailto attendee (e.g. an Apple `urn:uuid:` cal-address) the parser
   // can't reduce to an email — keeping the stored list would drop them.
   if (args.attendees === undefined && base.unparsedAttendeeCount > 0) {
@@ -423,14 +456,17 @@ const resolveEditFields = (
   if (title === undefined) {
     return { error: 'This event has no readable title to keep; pass `title`.', ok: false }
   }
-  const startIso = args.start ?? base.start
-  if (startIso === undefined) {
+  if (args.start === undefined && base.start === undefined) {
     return { error: 'This event has no readable start to keep; pass `start` and `end`.', ok: false }
   }
   // A caller-supplied value is read with the caller's timeZone semantics; a
-  // preserved stored value already encodes its own zone (startTzid, folded into
-  // `timeZone` above), so it is read as wall-clock in that zone.
-  const start = resolveInputDateTime(startIso, timeZone, args.start !== undefined && args.timeZone !== undefined)
+  // preserved stored value is read as wall-clock in the zone it was *stored* in
+  // (base.timeZone), never in the caller's — an explicit `timeZone` on a
+  // title-only edit must not silently re-express the event elsewhere.
+  const start =
+    args.start === undefined
+      ? resolveStored(base.start ?? '', base, timeZone)
+      : resolveInputDateTime(args.start, timeZone, args.timeZone !== undefined)
   const end = resolveEnd(args, base, timeZone, start)
   if (end === undefined) {
     return { error: 'This event has no readable end to keep; pass `start` and `end`.', ok: false }
@@ -459,6 +495,12 @@ const resolveEditFields = (
 // keeps the event's stored *duration* — "push the standup an hour later" is a
 // one-field call and must not silently stretch the meeting — and omitting it
 // without moving `start` keeps the stored end.
+// A stored wall-clock value, read in the zone it was stored in. `timeZone` is
+// only the fallback for a floating stored time (no TZID, no `Z`), where the
+// caller's zone is the best guess we have.
+const resolveStored = (iso: string, base: EditBase, timeZone: string): Date =>
+  resolveInputDateTime(iso, base.timeZone ?? timeZone, false)
+
 const resolveEnd = (args: UpdateCalendarEventArgs, base: EditBase, timeZone: string, start: Date): Date | undefined => {
   if (args.end !== undefined) {
     return resolveInputDateTime(args.end, timeZone, args.timeZone !== undefined)
@@ -466,8 +508,8 @@ const resolveEnd = (args: UpdateCalendarEventArgs, base: EditBase, timeZone: str
   if (base.start === undefined || base.end === undefined) {
     return
   }
-  const storedStart = resolveInputDateTime(base.start, timeZone, false)
-  const storedEnd = resolveInputDateTime(base.end, timeZone, false)
+  const storedStart = resolveStored(base.start, base, timeZone)
+  const storedEnd = resolveStored(base.end, base, timeZone)
   if (args.start === undefined) {
     return storedEnd
   }
@@ -487,6 +529,25 @@ const resolveRrule = (args: UpdateCalendarEventArgs, base: EditBase): string | u
   return base.recurrence
 }
 
+// Moving a series onto a weekday its kept rule doesn't list would produce "that
+// one Friday, plus every Tuesday" (RFC 5545) while reporting success. Only a
+// *preserved* rule can contradict the caller this way — an explicit
+// `recurrence` is the caller's own statement of intent.
+const movedStartConflict = (
+  args: UpdateCalendarEventArgs,
+  rrule: string | undefined,
+  start: Date,
+  timeZone: string
+): string | undefined => {
+  if (!rrule || args.start === undefined || args.recurrence !== undefined) {
+    return
+  }
+  return startContradictsRule(rrule, start, timeZone)
+    ? `This series repeats on fixed weekdays (${rrule}), so moving its start alone would add one occurrence ` +
+        'instead of moving the series. Pass `recurrence` with the new rule as well.'
+    : undefined
+}
+
 // The stored state an occurrence edit merges against: a previously written
 // override for the same instant if there is one, otherwise a synthetic base
 // standing for the untouched occurrence — the instant `recurrenceId` names,
@@ -498,21 +559,54 @@ const occurrenceBase = (stored: ParsedEvent[], master: ParsedEvent | undefined, 
     return baseOf(existingOverride)
   }
   const base = baseOf(master)
-  if (!(hasClockTime(base.start) && hasClockTime(base.end))) {
+  if (base.start === undefined || base.end === undefined || !(hasClockTime(base.start) && hasClockTime(base.end))) {
     // All-day or DURATION-only master: leave the times as stored so
     // mergeSafetyError refuses with its actionable "pass start and end".
     return base
   }
-  // The occurrence's own start/end, expressed the way the master's are (wall
-  // clock in the master's zone) so resolveEditFields reads them identically.
-  const zone = master?.startTzid ?? UTC_TIME_ZONE
+  // The occurrence's own start/end, expressed exactly the way the master's are
+  // — wall clock in the master's zone, or the `…Z` form when it has none — so
+  // resolveEditFields reads them back identically.
+  const floating = base.timeZone === undefined
+  const zone = base.timeZone ?? UTC_TIME_ZONE
   const durationMs =
-    resolveInputDateTime(base.end ?? '', zone, false).getTime() -
-    resolveInputDateTime(base.start ?? '', zone, false).getTime()
-  const startAt = new Date(targetMs)
-  const zoned = (at: Date): string => (master?.startTzid ? toWallClockIso(at, zone) : `${toWallClockIso(at, zone)}Z`)
-  return { ...base, end: zoned(new Date(targetMs + durationMs)), start: zoned(startAt) }
+    resolveInputDateTime(base.end, zone, false).getTime() - resolveInputDateTime(base.start, zone, false).getTime()
+  const zoned = (at: Date): string => `${toWallClockIso(at, zone)}${floating ? 'Z' : ''}`
+  return { ...base, end: zoned(new Date(targetMs + durationMs)), start: zoned(new Date(targetMs)) }
 }
+
+interface RebuildEvent {
+  args: UpdateCalendarEventArgs
+  existing: CalendarObject
+  f: ResolvedFields
+  // Discovered principal — the fallback when the stored object names nobody.
+  organizer: string
+  rrule?: string
+  stored: ParsedEvent[]
+  timeZone: string
+}
+
+// Serializes the whole-event edit as a single VEVENT.
+const rebuildEvent = ({ args, existing, f, organizer, rrule, stored, timeZone }: RebuildEvent): string =>
+  buildInvite({
+    attendees: f.attendees,
+    end: f.end,
+    // Keep the stored ORGANIZER (see updateOccurrence): re-stamping the freshly
+    // discovered principal onto an event created under a previous account
+    // address silently changes the organizer, which Stalwart's scheduler treats
+    // as an unsupported organizer replacement (RFC 6638).
+    organizer: stored.find((e) => e.organizer)?.organizer ?? organizer,
+    // Bump past the stored SEQUENCE so the re-sent REQUEST supersedes it.
+    sequence: parseSequence(existing.data) + 1,
+    start: f.start,
+    timeZone,
+    title: f.title,
+    uid: args.uid,
+    ...(f.description ? { description: f.description } : {}),
+    ...(f.location ? { location: f.location } : {}),
+    ...(rrule ? { rrule } : {}),
+    ...(f.scheduleAgent ? { scheduleAgent: f.scheduleAgent } : {}),
+  })
 
 export const updateCalendarEvent = async (
   deps: UpdateCalendarEventDeps,
@@ -579,31 +673,26 @@ export const updateCalendarEvent = async (
   }
 
   const rrule = resolveRrule(args, base)
-  // Keep the stored ORGANIZER (see updateOccurrence): re-stamping the freshly
-  // discovered principal onto an event created under a previous account
-  // address silently changes the organizer, which Stalwart's scheduler treats
-  // as an unsupported organizer replacement (RFC 6638).
-  const storedOrganizer = stored.find((e) => e.organizer)?.organizer
-  const ical = buildInvite({
-    attendees: f.attendees,
-    end: f.end,
-    organizer: storedOrganizer ?? account.organizer,
-    // Bump past the stored SEQUENCE so the re-sent REQUEST supersedes it.
-    sequence: parseSequence(existing.data) + 1,
-    start: f.start,
+  const ruleConflict = movedStartConflict(args, rrule, f.start, timeZone)
+  if (ruleConflict) {
+    return errorResult(ruleConflict)
+  }
+  const ical = rebuildEvent({
+    args,
+    existing,
+    f,
+    organizer: account.organizer,
+    stored,
     timeZone,
-    title: f.title,
-    uid: args.uid,
-    ...(f.description ? { description: f.description } : {}),
-    ...(f.location ? { location: f.location } : {}),
     ...(rrule ? { rrule } : {}),
-    ...(f.scheduleAgent ? { scheduleAgent: f.scheduleAgent } : {}),
   })
 
   await deps.updateEvent({ ical, token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
 
+  const removedAny = (args.removedAttendees?.length ?? 0) > 0
   return textResult(
-    `${rrule ? 'Recurring event' : 'Event'} "${f.title}" updated (${deliverySummary(f.attendees, f.scheduleAgent)}).`
+    `${rrule ? 'Recurring event' : 'Event'} "${f.title}" updated ` +
+      `(${deliverySummary(f.attendees, f.scheduleAgent, removedAny)}).`
   )
 }
 

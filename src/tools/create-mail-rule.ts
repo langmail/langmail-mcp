@@ -34,7 +34,7 @@ const createMailRuleShape = {
     .object(existingMailShape)
     .optional()
     .describe(
-      'Optionally also apply the actions to mail already in the mailbox. Omit to affect future mail only — the safe default unless the user asked for a cleanup too.'
+      'Optionally also apply the actions to mail already in the mailbox. Omit (or mode "none") to affect future mail only — the safe default unless the user asked for a cleanup too.'
     ),
   match: ruleMatchFieldWithDefault,
   name: ruleNameField.optional(),
