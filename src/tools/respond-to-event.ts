@@ -125,8 +125,9 @@ export const registerRespondToEvent = (
     'respond_to_event',
     {
       description:
-        'RSVPs to a calendar invite on the authenticated user’s behalf: sets their ' +
-        'own attendee status to accept, decline, or tentative on the event ' +
+        'RSVP to a calendar invite or meeting invitation on the authenticated user’s behalf — accept, ' +
+        'decline, or answer tentative/maybe. Sets their ' +
+        'own attendee status on the event ' +
         '(identified by its uid from list_calendar_events) and saves it back. The ' +
         'organizer is notified automatically. Use this to reply to an invitation you ' +
         'received; it does not change the event itself. Defaults to the user’s default ' +

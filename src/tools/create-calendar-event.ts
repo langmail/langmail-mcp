@@ -40,35 +40,34 @@ export const eventUidSchema = z
   .max(255)
   .regex(/^[^/\\]+$/u, 'uid must not contain path separators')
 
-const attendeesDescription =
-  'Attendee email addresses; each receives an iMIP invitation. Omit (or pass an ' +
-  'empty array) to create a personal event — a block of the user’s own time, e.g. ' +
-  'a focus block or a placeholder — with no invitations sent.'
-
-const notifyDescription =
-  'Whether to send iMIP invitations to the attendees. `all` (default) sends them, ' +
-  'as a normal create does. `none` writes the event without inviting anyone — for ' +
-  'when the invitation has already been sent out of band. Irrelevant without attendees.'
-
 export const createCalendarEventInput = z.object({
-  attendees: z.array(z.email()).max(50).optional().describe(attendeesDescription),
+  attendees: z
+    .array(z.email())
+    .max(50)
+    .optional()
+    .describe(
+      'Email addresses to invite; each receives an iMIP invitation. Omit for a personal event — a block ' +
+        'of the user’s own time — with no invitations sent.'
+    ),
   // Optional CalDAV URL from list_calendars; defaults to the principal's
   // discovered default calendar.
   calendarUrl: z.url().optional(),
   description: z.string().max(5000).optional(),
-  end: dateTimeWithOptionalOffsetSchema.describe(
-    'Event end as ISO 8601. With explicit `timeZone`, the clock digits are interpreted in that zone and any embedded offset is ignored. Without `timeZone`, an offset fixes the instant; a naive value uses the account timezone fallback.'
-  ),
+  // The timezone rule is stated once, on `timeZone`, rather than repeated on
+  // start/end: all three strings are indexed by tool search.
+  end: dateTimeWithOptionalOffsetSchema.describe('Event end as ISO 8601 (see `timeZone`).'),
   location: z.string().max(500).optional(),
-  notify: z.enum(['all', 'none']).optional().describe(notifyDescription),
-  recurrence: recurrenceSchema.describe(recurrenceDescription).optional(),
-  start: dateTimeWithOptionalOffsetSchema.describe(
-    'Event start as ISO 8601. With explicit `timeZone`, the clock digits are interpreted in that zone and any embedded offset is ignored. Without `timeZone`, an offset fixes the instant; a naive value uses the account timezone fallback.'
-  ),
+  notify: z
+    .enum(['all', 'none'])
+    .optional()
+    .describe('Whether to send the iMIP invitations. `all` (default) sends them; `none` invites nobody.'),
+  recurrence: recurrenceSchema.describe(`Repeat rule; omit for a one-off event. ${recurrenceDescription}`).optional(),
+  start: dateTimeWithOptionalOffsetSchema.describe('Event start as ISO 8601 (see `timeZone`).'),
   timeZone: timeZoneSchema
     .optional()
     .describe(
-      'Optional IANA timezone, e.g. Europe/Berlin. Overrides offsets in start/end: the clock digits are treated as wall-clock time in this zone. Defaults to the account timezone preference, then UTC.'
+      'IANA zone for start/end, e.g. Europe/Berlin: their clock digits are read as wall-clock time here, ' +
+        'overriding any offset. Defaults to the account timezone, then UTC.'
     ),
   title: z.string().min(1).max(200),
 })
@@ -181,15 +180,16 @@ export const registerCreateCalendarEvent = (
   server.registerTool(
     'create_calendar_event',
     {
+      // Front-loaded with what a user types to want this tool ("schedule a
+      // meeting", "book", "invite", "put it on my calendar"); the specification
+      // detail lives on the docs site, because this string is indexed by tool
+      // search and length costs ranking.
       description:
-        'Creates a calendar event with the authenticated user as organizer. When ' +
-        '`attendees` are given, iMIP invitations are sent to them (pass ' +
-        '`notify: "none"` to suppress that); omit `attendees` for a personal event ' +
-        '— a block of the user’s own time — with no invitations. Times are ISO 8601 with offset ' +
-        'or naive local form. Optional `timeZone` is an IANA zone and, when passed, ' +
-        'overrides embedded offsets so wall-clock digits win. Pass `recurrence` to create a repeating series ' +
-        '(e.g. a weekly team meeting) in a single call. Defaults to the user’s ' +
-        'default calendar.',
+        'Create, schedule or book a new calendar event or meeting on the user’s calendar, with the ' +
+        'authenticated user as organizer, and invite people to it. Attendees receive iMIP invitations ' +
+        '(pass `notify: "none"` to suppress them); omit `attendees` for a personal event — a block of the ' +
+        'user’s own time. Pass `recurrence` for a repeating series (e.g. a weekly team meeting) in one ' +
+        'call. Defaults to the user’s default calendar.',
       inputSchema: createCalendarEventInput.shape,
       title: 'Create calendar event',
     },

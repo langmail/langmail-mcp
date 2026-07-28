@@ -3,6 +3,8 @@
 // the handful of fields list_calendar_events surfaces (uid, title, times,
 // location) isn't worth it — so this extracts just those, happy-path.
 
+import { parseWallClockInZone } from './timezone.ts'
+
 // One ATTENDEE of a VEVENT, reduced to what the calendar tools need: the bare
 // email (mailto: stripped) and, when the stored line carries one, the PARTSTAT
 // (ACCEPTED / DECLINED / TENTATIVE / NEEDS-ACTION). Surfaced so list_calendar_events
@@ -32,6 +34,13 @@ export interface ParsedEvent {
   // series; absent for one-off events. Surfaced so the agent can re-supply it
   // to update_calendar_event (which re-rules the whole series).
   recurrence?: string
+  // The instant this VEVENT overrides, as a UTC ISO string, when it is a
+  // per-occurrence override (RFC 5545 §3.8.4.4); absent on the master and on
+  // one-off events. Normalized to an instant — the stored RECURRENCE-ID may
+  // carry a TZID — so update_calendar_event can find the override for the
+  // occurrence it is editing and merge omitted fields against *its* stored
+  // state rather than the master's.
+  recurrenceId?: string
   start: string
   // IANA zone named by the DTSTART `;TZID=` param, when present. This is the
   // event's own zone: update_calendar_event keeps it so an edit doesn't silently
@@ -173,6 +182,28 @@ const propertyTimeZone = (property: ParsedProperty | undefined): string | undefi
   return timeZone ? timeZone.replace(/^"|"$/gu, '') : undefined
 }
 
+// A RECURRENCE-ID value reduced to a UTC ISO instant. The stored value is
+// either a UTC date-time, a date-only value, or wall-clock digits qualified by
+// a TZID param — all three have to compare equal to the caller's ISO instant,
+// so they are resolved here rather than surfaced raw. An unparsable value is
+// dropped (the VEVENT then reads as a plain event, which is the safe default).
+const parseRecurrenceInstant = (property: ParsedProperty | undefined): string | undefined => {
+  if (!property) {
+    return
+  }
+  const iso = icalDateToIso(property.value.trim())
+  const timeZone = propertyTimeZone(property)
+  let at: Date
+  try {
+    at = timeZone && !iso.endsWith('Z') ? parseWallClockInZone(iso, timeZone) : new Date(iso)
+  } catch {
+    return
+  }
+  // Re-wrap as a plain Date: parseWallClockInZone returns a TZDate, whose
+  // toISOString() keeps the zone offset instead of normalizing to UTC.
+  return Number.isNaN(at.getTime()) ? undefined : new Date(at.getTime()).toISOString()
+}
+
 // PARTSTAT on an ATTENDEE parameter list, unquoted. The value runs to the next
 // `;` (further param) or `:` (start of the value); absent on a freshly built,
 // not-yet-answered attendee only when the client omits the NEEDS-ACTION default.
@@ -216,6 +247,7 @@ export const parseEvents = (ical: string): ParsedEvent[] => {
     // Trim so a server that emits a trailing space (`RRULE:FREQ=WEEKLY `) doesn't
     // leak it into the listed `repeats:` value.
     const recurrence = block.props.get('RRULE')?.value.trim()
+    const recurrenceId = parseRecurrenceInstant(block.props.get('RECURRENCE-ID'))
     const attendees = block.attendees.map(parseAttendee).filter((a): a is ParsedAttendee => a !== undefined)
     const unparsedAttendeeCount = block.attendees.length - attendees.length
     events.push({
@@ -228,6 +260,7 @@ export const parseEvents = (ical: string): ParsedEvent[] => {
       ...(location ? { location: unescapeText(location) } : {}),
       ...(organizer ? { organizer } : {}),
       ...(recurrence ? { recurrence } : {}),
+      ...(recurrenceId ? { recurrenceId } : {}),
       ...(startTzid ? { startTzid } : {}),
       ...(unparsedAttendeeCount > 0 ? { unparsedAttendeeCount } : {}),
     })

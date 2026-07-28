@@ -243,4 +243,46 @@ describe('parseEvents', () => {
     const ics = 'BEGIN:VEVENT\r\nUID:nodesc@langmail.me\r\nSUMMARY:No notes\r\nEND:VEVENT'
     expect(parseEvents(ics)[0]?.description).toBeUndefined()
   })
+
+  test('reads a UTC RECURRENCE-ID as the overridden instant', () => {
+    const ics = [
+      'BEGIN:VEVENT',
+      'UID:series@langmail.me',
+      'SUMMARY:Moved occurrence',
+      'RECURRENCE-ID:20260623T100000Z',
+      'DTSTART:20260623T110000Z',
+      'DTEND:20260623T120000Z',
+      'END:VEVENT',
+    ].join('\r\n')
+    expect(parseEvents(ics)[0]?.recurrenceId).toBe('2026-06-23T10:00:00.000Z')
+  })
+
+  test('resolves a zoned RECURRENCE-ID against its TZID', () => {
+    // 10:00 Berlin on 2026-06-23 (CEST, UTC+2) is the 08:00Z instant.
+    const ics = [
+      'BEGIN:VEVENT',
+      'UID:series@langmail.me',
+      'SUMMARY:Moved occurrence',
+      'RECURRENCE-ID;TZID=Europe/Berlin:20260623T100000',
+      'DTSTART;TZID=Europe/Berlin:20260623T110000',
+      'DTEND;TZID=Europe/Berlin:20260623T120000',
+      'END:VEVENT',
+    ].join('\r\n')
+    expect(parseEvents(ics)[0]?.recurrenceId).toBe('2026-06-23T08:00:00.000Z')
+  })
+
+  test('omits recurrenceId on a master and on a one-off event', () => {
+    expect(parseEvents(sample)[0]?.recurrenceId).toBeUndefined()
+  })
+
+  test('drops an unparsable RECURRENCE-ID rather than surfacing garbage', () => {
+    const ics = [
+      'BEGIN:VEVENT',
+      'UID:series@langmail.me',
+      'SUMMARY:Broken override',
+      'RECURRENCE-ID:not-a-date',
+      'END:VEVENT',
+    ].join('\r\n')
+    expect(parseEvents(ics)[0]?.recurrenceId).toBeUndefined()
+  })
 })

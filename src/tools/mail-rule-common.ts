@@ -36,7 +36,7 @@ export const ruleMatchFieldWithDefault = ruleMatchField.default('all')
 
 export const ruleConditionsField = z
   .object(mailRuleConditionsShape)
-  .describe('When the rule fires. At least one condition is required. Matching is case-insensitive substring matching.')
+  .describe('When the rule fires; at least one is required. Matching is case-insensitive substring matching.')
 
 export const ruleActionsField = mailRuleActionsSchema.describe(
   'What happens to a matching message — one or more actions, applied in order.'
@@ -52,13 +52,13 @@ export const existingMailShape = {
     .boolean()
     .optional()
     .describe(
-      `Must be true to apply to more than ${LARGE_APPLY_THRESHOLD} existing messages. Call preview_mail_rule first, tell the user the count, and set this only after they confirm.`
+      `Must be true to apply to more than ${LARGE_APPLY_THRESHOLD} existing messages; preview_mail_rule first and let the user confirm the count.`
     ),
   mode: z
     .enum(['none', 'messages', 'conversations'])
     .default('none')
     .describe(
-      'What existing mail to apply the actions to: "none" (default — future mail only), "messages" (each matching message), or "conversations" (every message in a matching conversation/thread).'
+      'What existing mail to act on: "none" (default — future mail only), "messages", or "conversations" (whole threads).'
     ),
   scope: z
     .enum(['inbox', 'all'])

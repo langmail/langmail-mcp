@@ -50,6 +50,19 @@ export const parseWallClockInZone = (value: string, timeZone: string): Date => {
   )
 }
 
+// An instant re-expressed as a naive wall-clock ISO string in `timeZone` (no
+// offset suffix) — the inverse of parseWallClockInZone. Used wherever a stored
+// instant has to re-enter the wall-clock pipeline, e.g. an occurrence's original
+// start standing in for an omitted `start` on an update.
+export const toWallClockIso = (instant: Date, timeZone: string): string => {
+  const zoned = TZDate.tz(timeZone, instant)
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return (
+    `${zoned.getFullYear()}-${pad(zoned.getMonth() + 1)}-${pad(zoned.getDate())}` +
+    `T${pad(zoned.getHours())}:${pad(zoned.getMinutes())}:${pad(zoned.getSeconds())}`
+  )
+}
+
 export const resolveInputDateTime = (value: string, timeZone: string, explicitTimeZone: boolean): Date => {
   if (explicitTimeZone || !hasExplicitOffset(value)) {
     return parseWallClockInZone(value, timeZone)

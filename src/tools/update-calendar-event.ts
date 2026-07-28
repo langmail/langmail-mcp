@@ -1,19 +1,22 @@
-// update_calendar_event tool — replaces an existing VEVENT in place and
-// re-sends DKIM-signed iMIP invitations with a bumped SEQUENCE, so the
-// attendees' clients treat it as an update rather than a new invite.
+// update_calendar_event tool — edits an existing VEVENT in place and re-sends
+// DKIM-signed iMIP invitations with a bumped SEQUENCE, so the attendees' clients
+// treat it as an update rather than a new invite.
 //
-// The edit is a full re-specification of the event (title/time/attendees),
-// addressed by the stable UID returned from create_calendar_event. We fetch
-// the current object to confirm it exists, read its SEQUENCE, and PUT the
-// rebuilt iCal back to the same URL with the original ETag.
+// The edit is a *partial* one: the caller passes the stable UID returned from
+// create_calendar_event plus only the fields it wants to change, and every field
+// it omits keeps the value we read back from CalDAV. There is no full-replacement
+// mode — no caller ever has to restate what it is not changing, which is what
+// used to silently drop attendees added elsewhere and collapse recurring series.
+// Clearing therefore needs an explicit value: `attendees: []`, `location: ""`,
+// `description: ""`, `recurrence: "none"`.
 //
-// Two edit modes, chosen by `recurrenceId`:
-//   - omitted → the whole event (the entire series for a recurring one), exactly
-//     as before;
+// Two edit scopes, chosen by `recurrenceId`:
+//   - omitted → the whole event (the entire series for a recurring one);
 //   - present → a single occurrence of a recurring series, written as a
 //     RECURRENCE-ID override spliced alongside the untouched master (see
 //     caldav/occurrence.ts). Stalwart then schedules an iMIP update scoped to
-//     that instance.
+//     that instance. Omitted fields merge against that occurrence's own stored
+//     state (an existing override, else the instant the recurrenceId names).
 //
 // Logic sits behind a `Deps` interface (discover + fetchEvent + updateEvent)
 // so it unit-tests without live Stalwart; `makeLiveDeps` wires tsdav in.
@@ -34,70 +37,65 @@ import {
 import { buildInvite, maxSequence, parseSequence } from '../caldav/ical.ts'
 import { type ParsedEvent, parseEvents } from '../caldav/ical-parse.ts'
 import { spliceOccurrenceOverride } from '../caldav/occurrence.ts'
-import { isSeriesOccurrence, toRRule } from '../caldav/recurrence.ts'
-import { resolveInputDateTime, UTC_TIME_ZONE } from '../caldav/timezone.ts'
+import { isSeriesOccurrence, recurrenceDescription, recurrenceSchema, toRRule } from '../caldav/recurrence.ts'
+import { resolveInputDateTime, toWallClockIso, UTC_TIME_ZONE } from '../caldav/timezone.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
 import { createCalendarEventInput, eventUidSchema } from './create-calendar-event.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
-const recurrenceIdDescription =
-  'Optional ISO 8601 instant that scopes this edit to a single occurrence of a ' +
-  'recurring series, identified by that occurrence’s original start (e.g. ' +
-  '2026-06-16T10:00:00Z). When set, only that occurrence changes — the master ' +
-  'rule and every other occurrence stay exactly as they are — and start/end ' +
-  'become the occurrence’s new time (pass the same instant here and in start to ' +
-  'keep the time and change only other fields). The instant must land on an ' +
-  'actual occurrence of the series. Omit to edit the whole event. Cannot be ' +
-  'combined with `recurrence` or with `addedAttendees`/`removedAttendees`.'
-
-const attendeesDescription =
-  'The complete attendee list (full replacement) — every address that should be ' +
-  'invited after the edit. An empty array strips all attendees, turning the event ' +
-  'into a personal one. Required unless you pass `addedAttendees`/`removedAttendees`, ' +
-  'which change specific attendees against the stored list instead. Cannot be combined ' +
-  'with those delta fields.'
-
-const addedAttendeesDescription =
-  'Email addresses to add to the event’s current attendee list, merged on top of ' +
-  'the stored attendees — you do NOT re-supply the existing ones. Adding an address ' +
-  'already invited is a no-op. Cannot be combined with `attendees` (the full-replacement ' +
-  'list). When you pass this or `removedAttendees`, every other field you omit ' +
-  '(start, end, title, recurrence, location, description) is kept as stored, so a ' +
-  'recurring series stays recurring.'
-
-const removedAttendeesDescription =
-  'Email addresses to remove from the event’s current attendee list, applied against ' +
-  'the stored attendees (matched case-insensitively). Removing an address that isn’t ' +
-  'invited is a no-op. This is the safe way to drop one attendee from a recurring ' +
-  'meeting: you name only the address to remove and re-supply nothing else. Cannot be ' +
-  'combined with `attendees`.'
-
-const notifyDescription =
-  'Who to notify by iMIP. `all` (default) re-sends invitations/updates to the ' +
-  'attendees, as a normal edit does. `none` makes the edit silent — the attendees on ' +
-  'the event are not notified — for a trivial change (e.g. dropping your own duplicate ' +
-  'address) that shouldn’t disturb everyone. A removed attendee may still receive a ' +
-  'cancellation.'
-
-const optionalWhenDelta = (verb: string): string =>
-  ` Optional when using an attendee delta (addedAttendees/removedAttendees): omit to ${verb}. Required otherwise.`
+// `"none"` is the explicit "make this a one-off again" sentinel: it is the one
+// clearing case with no natural empty value, and omitting `recurrence` now means
+// "keep the stored rule". Listed first so it can't be read as a raw RRULE.
+const NO_RECURRENCE = 'none'
+const updateRecurrenceSchema = z.union([z.literal(NO_RECURRENCE), recurrenceSchema])
 
 const shared = createCalendarEventInput.shape
 
 export const updateCalendarEventInput = z.object({
-  addedAttendees: z.array(z.email()).min(1).max(50).optional().describe(addedAttendeesDescription),
-  attendees: shared.attendees.describe(attendeesDescription),
+  addedAttendees: z
+    .array(z.email())
+    .min(1)
+    .max(50)
+    .optional()
+    .describe('Email addresses to invite on top of the stored attendees. Cannot be combined with `attendees`.'),
+  attendees: shared.attendees.describe(
+    'The complete attendee list after the edit; `[]` uninvites everyone. Omit to keep the stored attendees, ' +
+      'or use `addedAttendees`/`removedAttendees` instead.'
+  ),
   calendarUrl: shared.calendarUrl,
-  description: shared.description,
-  end: shared.end.optional().describe(`Event end as ISO 8601.${optionalWhenDelta('keep the stored end')}`),
-  location: shared.location,
-  notify: z.enum(['all', 'none']).optional().describe(notifyDescription),
-  recurrence: shared.recurrence,
-  recurrenceId: z.iso.datetime({ offset: true }).optional().describe(recurrenceIdDescription),
-  removedAttendees: z.array(z.email()).min(1).max(50).optional().describe(removedAttendeesDescription),
-  start: shared.start.optional().describe(`Event start as ISO 8601.${optionalWhenDelta('keep the stored start')}`),
+  description: shared.description.describe('New description; `""` clears it. Omit to keep the stored one.'),
+  end: shared.end
+    .optional()
+    .describe(
+      'New end time, ISO 8601. Omit to keep the event’s duration when moving `start`, its stored end otherwise.'
+    ),
+  location: shared.location.describe('New location; `""` clears it. Omit to keep the stored one.'),
+  notify: z
+    .enum(['all', 'none'])
+    .optional()
+    .describe('`all` (default) re-notifies the attendees by iMIP; `none` edits silently.'),
+  recurrence: updateRecurrenceSchema
+    .optional()
+    .describe(
+      `New repeat rule for the whole series; "${NO_RECURRENCE}" makes it a one-off. ` +
+        `Omit to keep the stored rule. ${recurrenceDescription}`
+    ),
+  recurrenceId: z.iso
+    .datetime({ offset: true })
+    .optional()
+    .describe(
+      'To change one occurrence of a repeating series alone, its original start as an ISO 8601 instant ' +
+        '(e.g. 2026-06-16T10:00:00Z). Not combinable with `recurrence` or attendee changes.'
+    ),
+  removedAttendees: z
+    .array(z.email())
+    .min(1)
+    .max(50)
+    .optional()
+    .describe('Email addresses to uninvite (case-insensitive). Cannot be combined with `attendees`.'),
+  start: shared.start.optional().describe('New start time, ISO 8601. Omit to keep the stored start.'),
   timeZone: shared.timeZone,
-  title: shared.title.optional().describe(`Event title.${optionalWhenDelta('keep the stored title')}`),
+  title: shared.title.optional().describe('New title. Omit to keep the stored one.'),
   uid: eventUidSchema,
 })
 
@@ -256,6 +254,37 @@ const deliverySummary = (attendees: string[], scheduleAgent?: 'NONE'): string =>
     : `notifications sent to ${attendees.length} attendee(s): ${attendees.join(', ')}`
 }
 
+// The stored state an omitted field falls back to. On the whole-event path this
+// is the master VEVENT; on the single-occurrence path it is the occurrence's own
+// state, so editing an already-customized occurrence never reverts it to the
+// master's title/time.
+interface EditBase {
+  attendees: string[]
+  description?: string
+  // ISO wall-clock (or `…Z`) strings exactly as stored, not yet resolved against
+  // a timezone — resolveEditFields does that once, for caller and stored values
+  // alike.
+  end?: string
+  location?: string
+  recurrence?: string
+  start?: string
+  title?: string
+  // > 0 when some stored ATTENDEE couldn't be reduced to an email; preserving
+  // the attendee list would then drop those people. See mergeSafetyError.
+  unparsedAttendeeCount: number
+}
+
+const baseOf = (event: ParsedEvent | undefined): EditBase => ({
+  attendees: (event?.attendees ?? []).map((a) => a.email),
+  unparsedAttendeeCount: event?.unparsedAttendeeCount ?? 0,
+  ...(event?.description ? { description: event.description } : {}),
+  ...(event?.end ? { end: event.end } : {}),
+  ...(event?.location ? { location: event.location } : {}),
+  ...(event?.recurrence ? { recurrence: event.recurrence } : {}),
+  ...(event?.start ? { start: event.start } : {}),
+  ...(event?.title ? { title: event.title } : {}),
+})
+
 // The event fields an edit resolves to, once the caller's values and the
 // preserved stored values have been reconciled.
 interface ResolvedFields {
@@ -270,22 +299,39 @@ interface ResolvedFields {
 
 type FieldResolution = { error: string; ok: false } | { ok: true; value: ResolvedFields }
 
-// Rejects contradictory field combinations up front (validated here, not in the
-// schema, so registerTool can keep the plain-object `.shape`). Returns the error
-// message, or undefined when the combination is coherent.
+// The fields that actually change the event. A call naming none of them (just a
+// `uid`, or a `recurrenceId` that scopes nothing) has nothing to write.
+const MUTATING_FIELDS = [
+  'addedAttendees',
+  'attendees',
+  'description',
+  'end',
+  'location',
+  'recurrence',
+  'removedAttendees',
+  'start',
+  'title',
+] as const satisfies readonly (keyof UpdateCalendarEventArgs)[]
+
+// Rejects contradictory or empty field combinations up front (validated here,
+// not in the schema, so registerTool can keep the plain-object `.shape`).
+// Returns the error message, or undefined when the combination is coherent.
 const combinationError = (args: UpdateCalendarEventArgs, isDelta: boolean): string | undefined => {
+  if (MUTATING_FIELDS.every((field) => args[field] === undefined)) {
+    return 'Nothing to update: pass at least one field to change — `start`/`end` to reschedule, `title`, `location`, `description`, `attendees` (or `addedAttendees`/`removedAttendees`), or `recurrence`.'
+  }
   // `recurrence` re-rules the whole series; `recurrenceId` edits one occurrence.
   if (args.recurrenceId !== undefined && args.recurrence !== undefined) {
     return 'Pass either `recurrence` (to re-rule the whole series) or `recurrenceId` (to edit a single occurrence), not both.'
   }
-  // A delta and a full replacement of the attendee list are contradictory.
+  // A delta and a replacement of the attendee list are contradictory.
   if (isDelta && args.attendees !== undefined) {
-    return 'Pass either `attendees` (the full replacement list) or `addedAttendees`/`removedAttendees` (a delta against the stored list), not both.'
+    return 'Pass either `attendees` (the complete replacement list) or `addedAttendees`/`removedAttendees` (a delta against the stored list), not both.'
   }
   // Attendee membership is a property of the whole series; a single-occurrence
   // scope would make it ambiguous whose list is being edited.
   if (isDelta && args.recurrenceId !== undefined) {
-    return 'Attendee deltas (`addedAttendees`/`removedAttendees`) edit the whole event and cannot be combined with `recurrenceId`. Omit `recurrenceId` to change the series’ attendees.'
+    return 'Attendee changes (`addedAttendees`/`removedAttendees`) apply to the whole event and cannot be combined with `recurrenceId`. Omit `recurrenceId` to change the series’ attendees.'
   }
   return
 }
@@ -296,103 +342,105 @@ const combinationError = (args: UpdateCalendarEventArgs, isDelta: boolean): stri
 const CLOCK_TIME_RE = /T\d{2}:\d{2}:\d{2}/u
 const hasClockTime = (iso: string | undefined): boolean => iso !== undefined && CLOCK_TIME_RE.test(iso)
 
-// A delta rebuilds the event from its stored state as a single VEVENT, so refuse
-// — with a clear, actionable error — when that stored state can't be reproduced
-// faithfully, rather than silently dropping data. (The full-replacement path is
-// unaffected: the caller re-specifies everything there.)
-const deltaSafetyError = (
-  stored: ParsedEvent[],
-  storedMaster: ParsedEvent | undefined,
-  args: UpdateCalendarEventArgs
-): string | undefined => {
-  // Per-occurrence overrides (master + RECURRENCE-ID VEVENTs share the object): a
-  // whole-event rebuild would discard them.
-  if (stored.length > 1) {
-    return 'This event has individually-customized occurrences; changing its attendees as a delta would discard them. Edit the occurrence(s) directly (with `recurrenceId`), or pass the complete event.'
+// A caller that re-specifies the event's whole shape — its time, title, attendee
+// list and repeat rule — has said what the event should become without relying
+// on anything stored. That is the one edit allowed to flatten per-occurrence
+// customizations, because nothing is being silently carried over.
+const isWholeEventRespecification = (args: UpdateCalendarEventArgs): boolean =>
+  args.start !== undefined &&
+  args.end !== undefined &&
+  args.title !== undefined &&
+  args.attendees !== undefined &&
+  args.recurrence !== undefined
+
+// A partial edit rebuilds the event from its stored state, so refuse — with a
+// clear, actionable error — when that stored state can't be reproduced
+// faithfully, rather than silently dropping data. Each check fires only when the
+// edit actually preserves the field it protects.
+const mergeSafetyError = (stored: ParsedEvent[], base: EditBase, args: UpdateCalendarEventArgs): string | undefined => {
+  // Per-occurrence overrides (master + RECURRENCE-ID VEVENTs share the object):
+  // a whole-event rebuild collapses the object to a single VEVENT and discards
+  // them. The occurrence path splices instead of rebuilding, so it is exempt.
+  if (args.recurrenceId === undefined && stored.length > 1 && !isWholeEventRespecification(args)) {
+    return 'This event has individually-customized occurrences; editing the whole event would discard them. Edit the occurrence(s) directly (with `recurrenceId`), or re-specify the whole event (`start`, `end`, `title`, `attendees` and `recurrence`) to replace the series.'
   }
   // A non-mailto attendee (e.g. an Apple `urn:uuid:` cal-address) the parser
-  // can't reduce to an email — rebuilding from the parsed list would drop them.
-  if ((storedMaster?.unparsedAttendeeCount ?? 0) > 0) {
-    return 'This event has attendee(s) in an address format the connector can’t safely edit as a delta. Pass the complete `attendees` list (a full replacement) instead.'
+  // can't reduce to an email — keeping the stored list would drop them.
+  if (args.attendees === undefined && base.unparsedAttendeeCount > 0) {
+    return 'This event has attendee(s) in an address format the connector can’t safely preserve. Pass the complete `attendees` list instead.'
   }
-  // A preserved start/end with no clock time (all-day, or DURATION-only) can't be
+  // A preserved start with no clock time (all-day, or DURATION-only) can't be
   // rebuilt as a timed VEVENT.
-  if (args.start === undefined && !hasClockTime(storedMaster?.start)) {
+  if (args.start === undefined && !hasClockTime(base.start)) {
     return 'This event has no explicit start time (e.g. an all-day event); pass `start` and `end` to edit it.'
   }
-  if (args.end === undefined && !hasClockTime(storedMaster?.end)) {
+  // A preserved end is the stored end, or — when `start` moves — the stored
+  // duration carried over; either way both stored instants have to be readable.
+  if (args.end === undefined && !(hasClockTime(base.start) && hasClockTime(base.end))) {
     return 'This event has no explicit end time (e.g. an all-day event); pass `start` and `end` to edit it.'
   }
   return
 }
 
 // The effective attendee list: a delta merges add/remove onto the stored
-// attendees (read from Langmail, not re-supplied); otherwise the caller gives
-// the complete list, as before.
+// attendees (read from Langmail, not re-supplied), an explicit `attendees`
+// replaces them wholesale, and omitting both keeps them as stored.
 const resolveAttendees = (
   args: UpdateCalendarEventArgs,
   isDelta: boolean,
-  storedMaster: ParsedEvent | undefined
+  base: EditBase
 ): { attendees: string[] } | { error: string } => {
   if (isDelta) {
-    const base = (storedMaster?.attendees ?? []).map((a) => a.email)
-    const attendees = mergeAttendees(base, args.addedAttendees ?? [], args.removedAttendees ?? [])
+    const attendees = mergeAttendees(base.attendees, args.addedAttendees ?? [], args.removedAttendees ?? [])
     // A delta that empties the list is likelier a mistake than an intent; the
-    // explicit way to strip every attendee is a full replacement with `attendees: []`.
+    // explicit way to strip every attendee is `attendees: []`.
     if (attendees.length === 0) {
       return {
         error:
-          'Removing those attendees would leave the event with none. To keep the event without attendees, pass `attendees: []` as a full replacement (with start, end, and title); otherwise delete the event or keep at least one attendee.',
+          'Removing those attendees would leave the event with none. To keep the event without attendees, pass `attendees: []`; otherwise delete the event or keep at least one attendee.',
       }
     }
     return { attendees }
   }
-  if (args.attendees === undefined) {
-    return {
-      error:
-        'A full update needs `attendees` (plus `start`, `end`, and `title`). To change only some attendees while keeping the rest of the event, pass `addedAttendees`/`removedAttendees` instead.',
-    }
-  }
-  return { attendees: args.attendees }
+  return { attendees: args.attendees ?? base.attendees }
 }
 
-// Reconciles every editable field: the caller's value wins; when omitted, a
-// delta edit keeps the stored value (so a one-attendee change never collapses
-// the recurrence or drops the title/time), and a full replacement requires it.
+// Reconciles every editable field: the caller's value wins, and an omitted field
+// keeps the stored one. `location`/`description` accept `""` to clear (an empty
+// string is falsy, so it simply drops the property from the rebuilt VEVENT).
 const resolveEditFields = (
   args: UpdateCalendarEventArgs,
   isDelta: boolean,
-  storedMaster: ParsedEvent | undefined,
+  base: EditBase,
   timeZone: string
 ): FieldResolution => {
-  const attendees = resolveAttendees(args, isDelta, storedMaster)
+  const attendees = resolveAttendees(args, isDelta, base)
   if ('error' in attendees) {
     return { error: attendees.error, ok: false }
   }
 
-  const title = args.title ?? (isDelta ? storedMaster?.title : undefined)
+  const title = args.title ?? base.title
   if (title === undefined) {
-    return { error: 'A full update needs a `title`. Pass an attendee delta to keep the stored title.', ok: false }
+    return { error: 'This event has no readable title to keep; pass `title`.', ok: false }
   }
-  const startIso = args.start ?? (isDelta ? storedMaster?.start : undefined)
-  const endIso = args.end ?? (isDelta ? storedMaster?.end : undefined)
-  if (startIso === undefined || endIso === undefined) {
-    return {
-      error: 'A full update needs `start` and `end`. Pass an attendee delta to keep the stored time.',
-      ok: false,
-    }
+  const startIso = args.start ?? base.start
+  if (startIso === undefined) {
+    return { error: 'This event has no readable start to keep; pass `start` and `end`.', ok: false }
   }
   // A caller-supplied value is read with the caller's timeZone semantics; a
   // preserved stored value already encodes its own zone (startTzid, folded into
   // `timeZone` above), so it is read as wall-clock in that zone.
   const start = resolveInputDateTime(startIso, timeZone, args.start !== undefined && args.timeZone !== undefined)
-  const end = resolveInputDateTime(endIso, timeZone, args.end !== undefined && args.timeZone !== undefined)
+  const end = resolveEnd(args, base, timeZone, start)
+  if (end === undefined) {
+    return { error: 'This event has no readable end to keep; pass `start` and `end`.', ok: false }
+  }
   if (end <= start) {
     return { error: 'Event end must be after its start.', ok: false }
   }
 
-  const location = args.location ?? (isDelta ? storedMaster?.location : undefined)
-  const description = args.description ?? (isDelta ? storedMaster?.description : undefined)
+  const location = args.location ?? base.location
+  const description = args.description ?? base.description
   return {
     ok: true,
     value: {
@@ -407,18 +455,63 @@ const resolveEditFields = (
   }
 }
 
-// The whole-series RRULE for a whole-event edit: an explicit `recurrence` re-rules
-// the series; a delta edit preserves the stored master's rule; a full replacement
-// that omits it drops the RRULE and collapses the series to a one-off.
-const resolveRrule = (
-  args: UpdateCalendarEventArgs,
-  isDelta: boolean,
-  storedMaster: ParsedEvent | undefined
-): string | undefined => {
-  if (args.recurrence) {
+// The effective end. An explicit `end` wins. Omitting it while moving `start`
+// keeps the event's stored *duration* — "push the standup an hour later" is a
+// one-field call and must not silently stretch the meeting — and omitting it
+// without moving `start` keeps the stored end.
+const resolveEnd = (args: UpdateCalendarEventArgs, base: EditBase, timeZone: string, start: Date): Date | undefined => {
+  if (args.end !== undefined) {
+    return resolveInputDateTime(args.end, timeZone, args.timeZone !== undefined)
+  }
+  if (base.start === undefined || base.end === undefined) {
+    return
+  }
+  const storedStart = resolveInputDateTime(base.start, timeZone, false)
+  const storedEnd = resolveInputDateTime(base.end, timeZone, false)
+  if (args.start === undefined) {
+    return storedEnd
+  }
+  return new Date(start.getTime() + (storedEnd.getTime() - storedStart.getTime()))
+}
+
+// The whole-series RRULE for a whole-event edit: an explicit `recurrence`
+// re-rules the series, the `"none"` sentinel collapses it to a one-off, and
+// omitting it keeps the stored rule.
+const resolveRrule = (args: UpdateCalendarEventArgs, base: EditBase): string | undefined => {
+  if (args.recurrence === NO_RECURRENCE) {
+    return
+  }
+  if (args.recurrence !== undefined) {
     return toRRule(args.recurrence)
   }
-  return isDelta ? storedMaster?.recurrence : undefined
+  return base.recurrence
+}
+
+// The stored state an occurrence edit merges against: a previously written
+// override for the same instant if there is one, otherwise a synthetic base
+// standing for the untouched occurrence — the instant `recurrenceId` names,
+// running for the master's duration.
+const occurrenceBase = (stored: ParsedEvent[], master: ParsedEvent | undefined, recurrenceId: string): EditBase => {
+  const targetMs = Date.parse(recurrenceId)
+  const existingOverride = stored.find((e) => e.recurrenceId !== undefined && Date.parse(e.recurrenceId) === targetMs)
+  if (existingOverride) {
+    return baseOf(existingOverride)
+  }
+  const base = baseOf(master)
+  if (!(hasClockTime(base.start) && hasClockTime(base.end))) {
+    // All-day or DURATION-only master: leave the times as stored so
+    // mergeSafetyError refuses with its actionable "pass start and end".
+    return base
+  }
+  // The occurrence's own start/end, expressed the way the master's are (wall
+  // clock in the master's zone) so resolveEditFields reads them identically.
+  const zone = master?.startTzid ?? UTC_TIME_ZONE
+  const durationMs =
+    resolveInputDateTime(base.end ?? '', zone, false).getTime() -
+    resolveInputDateTime(base.start ?? '', zone, false).getTime()
+  const startAt = new Date(targetMs)
+  const zoned = (at: Date): string => (master?.startTzid ? toWallClockIso(at, zone) : `${toWallClockIso(at, zone)}Z`)
+  return { ...base, end: zoned(new Date(targetMs + durationMs)), start: zoned(startAt) }
 }
 
 export const updateCalendarEvent = async (
@@ -427,8 +520,7 @@ export const updateCalendarEvent = async (
 ): Promise<ToolResult> => {
   const { args, token } = ctx
 
-  // A delta edit names the attendees to add/remove and keeps everything else
-  // stored, rather than re-specifying the whole event.
+  // A delta edit names the attendees to add/remove instead of the whole list.
   const isDelta = args.addedAttendees !== undefined || args.removedAttendees !== undefined
 
   const comboError = combinationError(args, isDelta)
@@ -457,14 +549,17 @@ export const updateCalendarEvent = async (
   const stored = parseEvents(existing.data)
   const storedMaster = stored.find((e) => e.recurrence !== undefined) ?? stored[0]
 
-  const unsafe = isDelta ? deltaSafetyError(stored, storedMaster, args) : undefined
+  const timeZone = args.timeZone ?? storedMaster?.startTzid ?? (await deps.resolveTimeZone(token)) ?? UTC_TIME_ZONE
+
+  const base =
+    args.recurrenceId === undefined ? baseOf(storedMaster) : occurrenceBase(stored, storedMaster, args.recurrenceId)
+
+  const unsafe = mergeSafetyError(stored, base, args)
   if (unsafe) {
     return errorResult(unsafe)
   }
 
-  const timeZone = args.timeZone ?? storedMaster?.startTzid ?? (await deps.resolveTimeZone(token)) ?? UTC_TIME_ZONE
-
-  const fields = resolveEditFields(args, isDelta, storedMaster, timeZone)
+  const fields = resolveEditFields(args, isDelta, base, timeZone)
   if (!fields.ok) {
     return errorResult(fields.error)
   }
@@ -483,7 +578,7 @@ export const updateCalendarEvent = async (
     })
   }
 
-  const rrule = resolveRrule(args, isDelta, storedMaster)
+  const rrule = resolveRrule(args, base)
   // Keep the stored ORGANIZER (see updateOccurrence): re-stamping the freshly
   // discovered principal onto an event created under a previous account
   // address silently changes the organizer, which Stalwart's scheduler treats
@@ -537,22 +632,18 @@ export const registerUpdateCalendarEvent = (
   server.registerTool(
     'update_calendar_event',
     {
+      // Kept short and front-loaded with the words a user actually types
+      // ("update", "edit", "reschedule", "move", "change the time", "add
+      // attendees"): tool search ranks this string plus the argument
+      // descriptions, and BM25 penalises long documents. Edge-case semantics
+      // live in the error messages and on the docs site, not here.
       description:
-        'Updates an existing calendar event (identified by its uid from ' +
-        'create_calendar_event or list_calendar_events) and re-sends iMIP ' +
-        'notifications to the attendees. Two ways to change attendees: (1) a delta — ' +
-        'pass `addedAttendees`/`removedAttendees` to add or drop specific addresses ' +
-        'while every field you omit (attendees, start, end, title, recurrence, ' +
-        'location) is kept as stored, so removing one person from a recurring meeting ' +
-        'needs nothing else and never collapses the series; (2) a full replacement — ' +
-        'pass the complete `attendees`, `start`, `end`, and `title`, where omitting ' +
-        '`recurrence` collapses a series back to a single event. To edit ONE ' +
-        'occurrence in isolation, pass `recurrenceId` naming that occurrence by its ' +
-        'original start; the master rule and every other occurrence stay unchanged. ' +
-        'Pass `notify: "none"` to make the edit silent (no notification to the ' +
-        'attendees) — e.g. when dropping your own duplicate address. Times are ISO ' +
-        '8601 with offset or naive local form. Optional `timeZone` is an IANA zone ' +
-        'and, when passed, overrides embedded offsets so wall-clock digits win.',
+        'Update, edit or reschedule an existing calendar event or meeting: move it to a new time, ' +
+        'change the time or title, set the location, or add and remove attendees. Pass the event `uid` ' +
+        '(from list_calendar_events or create_calendar_event) plus only the fields to change — every ' +
+        'field you omit keeps its stored value, so rescheduling needs nothing but `uid` and `start`. ' +
+        'Attendees are re-notified by iMIP unless you pass `notify: "none"`. To change one occurrence ' +
+        'of a repeating series instead of the whole series, pass `recurrenceId`.',
       inputSchema: updateCalendarEventInput.shape,
       title: 'Update calendar event',
     },
