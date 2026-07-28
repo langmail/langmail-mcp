@@ -27,34 +27,19 @@ const noDeps = new Proxy(
 ) as never
 const getToken = (): string => 'measure'
 
-const toolModules = [
-  'create-calendar-event',
-  'create-calendar',
-  'create-mail-rule',
-  'delete-calendar-event',
-  'delete-mail-rule',
-  'download-attachment',
-  'get-email',
-  'get-thread',
-  'list-calendar-events',
-  'list-calendars',
-  'list-mail-rules',
-  'preview-mail-rule',
-  'respond-to-event',
-  'search-emails',
-  'update-calendar-event',
-  'update-mail-rule',
-]
-
+// Discover the tool modules from the directory rather than a hand-maintained
+// list, so a tool added to mcp/handler.ts can't be silently missing from the
+// measurement. Modules without a `register*` export (result.ts, format.ts,
+// shared fixtures, …) are not tools and drop out naturally.
 const toolsDir = new URL('../src/tools/', import.meta.url)
-for (const name of toolModules) {
-  const mod = await import(new URL(`${name}.ts`, toolsDir).pathname)
-  const register = Object.entries(mod).find(([key]) => key.startsWith('register'))?.[1] as (
-    server: McpServer,
-    deps: never,
-    getToken: () => string
-  ) => void
-  register(server, noDeps, getToken)
+const { readdir } = await import('node:fs/promises')
+const moduleFiles = (await readdir(toolsDir)).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts')).sort()
+for (const file of moduleFiles) {
+  const mod = await import(new URL(file, toolsDir).pathname)
+  const register = Object.entries(mod).find(([key]) => key.startsWith('register'))?.[1] as
+    | ((server: McpServer, deps: never, getToken: () => string) => void)
+    | undefined
+  register?.(server, noDeps, getToken)
 }
 
 interface RegisteredTool {
