@@ -10,7 +10,8 @@
     "test": "bun test",
     "test:integration": "bun test caldav-integration",
     "test:stalwart": "bun test stalwart-update-organizer stalwart-cancel-occurrence stalwart-attendee-delta attachments-stalwart mail-rules-stalwart",
-    "smoke": "bun run scripts/smoke.ts"
+    "smoke": "bun run scripts/smoke.ts",
+    "measure:tool-size": "bun run scripts/measure-indexed-size.ts"
   },
   "dependencies": {
     "@date-fns/tz": "^1.5.0",
