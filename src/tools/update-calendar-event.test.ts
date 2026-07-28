@@ -1212,6 +1212,53 @@ describe('updateCalendarEvent — notify', () => {
     }
   })
 
+  // SCHEDULE-AGENT=NONE is only stamped on the attendees that remain, so anyone
+  // dropped is cancelled regardless of `notify` — however they were dropped.
+  test('notify: none does not claim silence when a replacement list drops someone', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account({ organizer: 'me@langmail.me' }), unvibeStored(), cap), {
+      args: { attendees: ['me@langmail.me', 'kai@atelier.example'], notify: 'none', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(result.content[0]?.text).toContain('may still receive a cancellation')
+  })
+
+  test('notify: none claims silence when a replacement list drops nobody', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), storedEvent(), cap), {
+      args: { attendees: ['guest@example.com', 'anna@example.com'], notify: 'none', uid: UID },
+      token: 'tok',
+    })
+    expect(result.content[0]?.text).toContain('no notifications sent')
+    expect(result.content[0]?.text).not.toContain('cancellation')
+  })
+
+  test('a re-cased attendee is not mistaken for a removal', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), storedEvent(), cap), {
+      args: { attendees: ['GUEST@Example.com'], notify: 'none', uid: UID },
+      token: 'tok',
+    })
+    expect(result.content[0]?.text).toContain('no notifications sent')
+    expect(result.content[0]?.text).not.toContain('cancellation')
+  })
+
+  test('an occurrence edit that drops an attendee does not claim silence either', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
+      args: {
+        attendees: ['someone@example.com'],
+        notify: 'none',
+        recurrenceId: '2026-06-23T10:00:00Z',
+        uid: UID,
+      },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(result.content[0]?.text).toContain('may still receive a cancellation')
+  })
+
   test('notify: none stamps SCHEDULE-AGENT on an occurrence override too', async () => {
     const cap = captured()
     await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {

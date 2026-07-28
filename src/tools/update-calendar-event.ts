@@ -164,6 +164,9 @@ interface OccurrenceUpdate {
   // Bare organizer email — already confirmed non-null by the caller.
   organizer: string
   recurrenceId: string
+  // True when this edit drops someone the occurrence had, so the delivery
+  // summary can't claim silence: Stalwart cancels them regardless of `notify`.
+  removedAny: boolean
   // RFC 6638 SCHEDULE-AGENT for the override's attendees; undefined = SERVER
   // (notify), 'NONE' = silent. See buildInvite.
   scheduleAgent?: 'NONE'
@@ -187,6 +190,7 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
     location,
     organizer,
     recurrenceId,
+    removedAny,
     scheduleAgent,
     start,
     timeZone,
@@ -249,7 +253,7 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
   await deps.updateEvent({ ical, token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
 
   return textResult(
-    `Occurrence of "${title}" on ${recurrenceId} updated (${deliverySummary(attendees, scheduleAgent)}). ` +
+    `Occurrence of "${title}" on ${recurrenceId} updated (${deliverySummary(attendees, scheduleAgent, removedAny)}). ` +
       'The rest of the series is unchanged.'
   )
 }
@@ -258,6 +262,14 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
 // Stalwart's RFC 6638 cue to CANCEL them, and SCHEDULE-AGENT=NONE is only
 // stamped on the attendees that *remain* — so neither the zero-attendee branch
 // nor a silent edit that removed someone may claim nobody heard anything.
+// True when the edit drops anyone the stored event had — whether they were
+// named in `removedAttendees` or simply left out of a replacement `attendees`
+// list. Compared case-insensitively, like every other address comparison here.
+const dropsAttendee = (stored: string[], resolved: string[]): boolean => {
+  const kept = new Set(resolved.map((email) => email.toLowerCase()))
+  return stored.some((email) => !kept.has(email.toLowerCase()))
+}
+
 const deliverySummary = (attendees: string[], scheduleAgent?: 'NONE', removedAny = false): string => {
   if (attendees.length === 0) {
     return 'no attendees remain; anyone previously invited may receive a cancellation'
@@ -666,6 +678,7 @@ export const updateCalendarEvent = async (
       existing,
       organizer: account.organizer,
       recurrenceId: args.recurrenceId,
+      removedAny: dropsAttendee(base.attendees, f.attendees),
       timeZone,
       token,
       ...f,
@@ -689,10 +702,9 @@ export const updateCalendarEvent = async (
 
   await deps.updateEvent({ ical, token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
 
-  const removedAny = (args.removedAttendees?.length ?? 0) > 0
   return textResult(
     `${rrule ? 'Recurring event' : 'Event'} "${f.title}" updated ` +
-      `(${deliverySummary(f.attendees, f.scheduleAgent, removedAny)}).`
+      `(${deliverySummary(f.attendees, f.scheduleAgent, dropsAttendee(base.attendees, f.attendees))}).`
   )
 }
 
