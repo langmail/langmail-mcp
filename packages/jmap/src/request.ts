@@ -3,6 +3,7 @@
 // wrappers became the second consumer.
 
 import { JmapError } from './session.ts'
+import { jmapTimeoutSignal } from './timeout.ts'
 import { type JmapRequest, type JmapResponse } from './types.ts'
 
 export interface JmapCall {
@@ -22,6 +23,7 @@ export const jmapCall = async <T extends JmapResponse>(ctx: JmapCall, body: Jmap
       'content-type': 'application/json',
     },
     method: 'POST',
+    signal: jmapTimeoutSignal(),
   })
   if (res.status !== 200) {
     throw new JmapError(res.status, `jmap request returned ${res.status}`)

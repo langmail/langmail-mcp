@@ -29,11 +29,16 @@ export class UserinfoError extends Error {
 
 const DEFAULT_TTL_SECONDS = 3600
 const TRAILING_SLASHES_RE = /\/+$/u
+// Token validation guards every /mcp request, and Better Auth is expected to
+// answer fast — so this deadline is short. Without it a stalled auth service
+// hangs every request indefinitely instead of failing them visibly.
+const USERINFO_TIMEOUT_MS = 5000
 
 export const fetchUserinfo = async (authIssuer: string, token: string): Promise<UserinfoResult> => {
   const url = `${authIssuer.replace(TRAILING_SLASHES_RE, '')}/oauth2/userinfo`
   const res = await fetch(url, {
     headers: { authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(USERINFO_TIMEOUT_MS),
   })
   if (res.status !== 200) {
     throw new UserinfoError(res.status, `userinfo returned ${res.status}`)

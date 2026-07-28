@@ -6,6 +6,7 @@
 // passes a credential minted by the auth service — this module never
 // mints tokens itself.
 
+import { jmapTimeoutSignal } from './timeout.ts'
 import { type JmapSession } from './types.ts'
 
 export class JmapError extends Error {
@@ -33,6 +34,7 @@ export const fetchSession = async (stalwartBase: string, authorization: string):
   const url = `${stalwartBase.replace(TRAILING_SLASHES_RE, '')}/.well-known/jmap`
   const res = await fetch(url, {
     headers: { authorization },
+    signal: jmapTimeoutSignal(),
   })
   if (res.status !== 200) {
     throw new JmapError(res.status, `jmap session returned ${res.status}`)
