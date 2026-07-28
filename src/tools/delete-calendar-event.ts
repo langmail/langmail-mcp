@@ -188,9 +188,9 @@ export const registerDeleteCalendarEvent = (
     'delete_calendar_event',
     {
       description:
-        'Cancel, delete or remove a calendar event or meeting the user organizes (to decline an ' +
-        'invitation someone else sent, use respond_to_event instead) — identified by its uid from ' +
-        'create_calendar_event or list_calendar_events) and send iMIP cancellations to its attendees. ' +
+        'Cancel, delete or remove a calendar event or meeting the user organizes, identified by its uid ' +
+        'from create_calendar_event or list_calendar_events, and send iMIP cancellations to its attendees. ' +
+        '(To decline an invitation someone else sent, use respond_to_event instead.) ' +
         'By default this deletes the ' +
         'ENTIRE event — for a recurring event that means every occurrence. To instead ' +
         'cancel ONE occurrence of a recurring series (e.g. skip this week’s standup), ' +
