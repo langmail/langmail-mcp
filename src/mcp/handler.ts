@@ -48,6 +48,7 @@ import {
   registerUpdateCalendarEvent,
 } from '../tools/update-calendar-event.ts'
 import { registerUpdateMailRule } from '../tools/update-mail-rule.ts'
+import { instrumentToolLogging } from './tool-logging.ts'
 
 export interface McpHandlerConfig {
   // Shared with the /attachments/:token route (handler.ts) so a bearer's
@@ -93,6 +94,8 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
       name: 'langmail-mcp',
       version: '0.1.0',
     })
+    // Before any registerTool call — the wrapper only covers later registrations.
+    instrumentToolLogging(server)
     registerSearchEmails(server, searchEmailsDeps, () => ctx.token)
     registerGetEmail(server, getEmailDeps, () => ctx.token)
     registerGetThread(server, getThreadDeps, () => ctx.token)

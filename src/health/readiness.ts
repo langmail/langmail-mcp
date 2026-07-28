@@ -67,8 +67,12 @@ export const createReadiness = (
   }
 }
 
-export const readyzResponse = (result: ReadyResult): Response =>
-  new Response(JSON.stringify({ status: result.ready ? 'ready' : 'not_ready', checks: result.checks }), {
+// `details` is reported alongside the dependency checks without affecting the
+// verdict — today that is the observability-config presence pair (see
+// observability/config.ts), which the uptime monitor records with every check
+// so a secrets-less boot is visible from an incident body, not a VM login.
+export const readyzResponse = (result: ReadyResult, details: Record<string, unknown> = {}): Response =>
+  new Response(JSON.stringify({ status: result.ready ? 'ready' : 'not_ready', checks: result.checks, ...details }), {
     headers: { 'cache-control': 'no-store', 'content-type': 'application/json' },
     status: result.ready ? 200 : 503,
   })

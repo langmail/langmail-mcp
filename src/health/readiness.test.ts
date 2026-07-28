@@ -61,6 +61,13 @@ describe('readyzResponse', () => {
     expect(bad.status).toBe(503)
     expect(((await bad.json()) as { status: string }).status).toBe('not_ready')
   })
+
+  test('reports extra details alongside the checks without changing the verdict', async () => {
+    const res = readyzResponse({ ready: true, checks: { a: 'ok' } }, { observability: { logShipping: false } })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { observability: Record<string, boolean> }
+    expect(body.observability).toEqual({ logShipping: false })
+  })
 })
 
 describe('authReachable', () => {
