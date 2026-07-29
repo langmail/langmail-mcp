@@ -24,6 +24,8 @@
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
+import { hashEmail, logger } from '@langmail/logger'
+
 import { type AccountTimeZoneResolver, makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
 import {
   type CalDavConfig,
@@ -164,9 +166,9 @@ interface OccurrenceUpdate {
   // Bare organizer email — already confirmed non-null by the caller.
   organizer: string
   recurrenceId: string
-  // True when this edit drops someone the occurrence had, so the delivery
-  // summary can't claim silence: Stalwart cancels them regardless of `notify`.
-  removedAny: boolean
+  // Attendees dropped from this occurrence. Stalwart may send them a
+  // cancellation regardless of `notify`, so the audit log must retain them.
+  removedAttendees: string[]
   // RFC 6638 SCHEDULE-AGENT for the override's attendees; undefined = SERVER
   // (notify), 'NONE' = silent. See buildInvite.
   scheduleAgent?: 'NONE'
@@ -190,7 +192,7 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
     location,
     organizer,
     recurrenceId,
-    removedAny,
+    removedAttendees,
     scheduleAgent,
     start,
     timeZone,
@@ -227,6 +229,9 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
     )
   }
 
+  // Bump past every SEQUENCE already in the object so this override supersedes
+  // any prior edit of the same instance.
+  const sequence = maxSequence(existing.data) + 1
   const override = buildInvite({
     attendees,
     end,
@@ -237,9 +242,7 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
     organizer: master.organizer ?? organizer,
     recurrenceTimeZone: master.startTzid ?? UTC_TIME_ZONE,
     recurrenceId: new Date(recurrenceId),
-    // Bump past every SEQUENCE already in the object so this override supersedes
-    // any prior edit of the same instance.
-    sequence: maxSequence(existing.data) + 1,
+    sequence,
     start,
     timeZone,
     title,
@@ -251,10 +254,53 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
   const ical = spliceOccurrenceOverride(existing.data, override, recurrenceId)
 
   await deps.updateEvent({ ical, token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
+  logSchedulingHandover({
+    attendees,
+    ical,
+    recurrenceId,
+    removedAttendees,
+    scheduleAgent,
+    sequence,
+    uid: args.uid,
+  })
 
   return textResult(
-    `Occurrence of "${title}" on ${recurrenceId} updated (${deliverySummary(attendees, scheduleAgent, removedAny)}). ` +
+    `Occurrence of "${title}" on ${recurrenceId} updated ` +
+      `(${deliverySummary(attendees, scheduleAgent, removedAttendees.length > 0)}). ` +
       'The rest of the series is unchanged.'
+  )
+}
+
+// Audit line for the accepted PUT: the iMIP fan-out it triggers is otherwise
+// unobservable (Stalwart archives nothing outbound), so record enough to answer
+// "was a message due, to whom, at which revision" after the fact. Emitted only
+// after the PUT succeeds — a rejected PUT hands nothing to Stalwart and must
+// not leave an audit line claiming otherwise. Attendee addresses are logged as
+// hashes (REVIEW.md: no email addresses in logs).
+const logSchedulingHandover = (handover: {
+  attendees: string[]
+  ical: string
+  recurrenceId?: string
+  removedAttendees: string[]
+  // Deliberately non-optional (undefined = SERVER) so call sites pass their
+  // possibly-undefined value straight through instead of conditional-spreading.
+  scheduleAgent: 'NONE' | undefined
+  sequence: number
+  uid: string
+}): void => {
+  logger.info(
+    {
+      attendeeHashes: handover.attendees.map(hashEmail),
+      bytes: Buffer.byteLength(handover.ical),
+      removedAttendeeHashes: handover.removedAttendees.map(hashEmail),
+      scheduleAgent: handover.scheduleAgent ?? 'SERVER',
+      sequence: handover.sequence,
+      // Calendar UIDs are commonly email-shaped, so they need the same
+      // log-safe deterministic hashing as addresses.
+      uidHash: hashEmail(handover.uid),
+      ...(handover.recurrenceId ? { recurrenceId: handover.recurrenceId } : {}),
+    },
+    'event PUT to CalDAV; iMIP fan-out delegated to Stalwart'
   )
 }
 
@@ -265,9 +311,9 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
 // True when the edit drops anyone the stored event had — whether they were
 // named in `removedAttendees` or simply left out of a replacement `attendees`
 // list. Compared case-insensitively, like every other address comparison here.
-const dropsAttendee = (stored: string[], resolved: string[]): boolean => {
+const removedAttendees = (stored: string[], resolved: string[]): string[] => {
   const kept = new Set(resolved.map((email) => email.toLowerCase()))
-  return stored.some((email) => !kept.has(email.toLowerCase()))
+  return stored.filter((email) => !kept.has(email.toLowerCase()))
 }
 
 const deliverySummary = (attendees: string[], scheduleAgent?: 'NONE', removedAny = false): string => {
@@ -589,17 +635,17 @@ const occurrenceBase = (stored: ParsedEvent[], master: ParsedEvent | undefined, 
 
 interface RebuildEvent {
   args: UpdateCalendarEventArgs
-  existing: CalendarObject
   f: ResolvedFields
   // Discovered principal — the fallback when the stored object names nobody.
   organizer: string
   rrule?: string
+  sequence: number
   stored: ParsedEvent[]
   timeZone: string
 }
 
 // Serializes the whole-event edit as a single VEVENT.
-const rebuildEvent = ({ args, existing, f, organizer, rrule, stored, timeZone }: RebuildEvent): string =>
+const rebuildEvent = ({ args, f, organizer, rrule, sequence, stored, timeZone }: RebuildEvent): string =>
   buildInvite({
     attendees: f.attendees,
     end: f.end,
@@ -609,7 +655,7 @@ const rebuildEvent = ({ args, existing, f, organizer, rrule, stored, timeZone }:
     // as an unsupported organizer replacement (RFC 6638).
     organizer: stored.find((e) => e.organizer)?.organizer ?? organizer,
     // Bump past the stored SEQUENCE so the re-sent REQUEST supersedes it.
-    sequence: parseSequence(existing.data) + 1,
+    sequence,
     start: f.start,
     timeZone,
     title: f.title,
@@ -670,6 +716,7 @@ export const updateCalendarEvent = async (
     return errorResult(fields.error)
   }
   const f = fields.value
+  const removed = removedAttendees(base.attendees, f.attendees)
 
   if (args.recurrenceId !== undefined) {
     return updateOccurrence({
@@ -678,7 +725,7 @@ export const updateCalendarEvent = async (
       existing,
       organizer: account.organizer,
       recurrenceId: args.recurrenceId,
-      removedAny: dropsAttendee(base.attendees, f.attendees),
+      removedAttendees: removed,
       timeZone,
       token,
       ...f,
@@ -690,21 +737,30 @@ export const updateCalendarEvent = async (
   if (ruleConflict) {
     return errorResult(ruleConflict)
   }
+  const sequence = parseSequence(existing.data) + 1
   const ical = rebuildEvent({
     args,
-    existing,
     f,
     organizer: account.organizer,
+    sequence,
     stored,
     timeZone,
     ...(rrule ? { rrule } : {}),
   })
 
   await deps.updateEvent({ ical, token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
+  logSchedulingHandover({
+    attendees: f.attendees,
+    ical,
+    removedAttendees: removed,
+    scheduleAgent: f.scheduleAgent,
+    sequence,
+    uid: args.uid,
+  })
 
   return textResult(
     `${rrule ? 'Recurring event' : 'Event'} "${f.title}" updated ` +
-      `(${deliverySummary(f.attendees, f.scheduleAgent, dropsAttendee(base.attendees, f.attendees))}).`
+      `(${deliverySummary(f.attendees, f.scheduleAgent, removed.length > 0)}).`
   )
 }
 

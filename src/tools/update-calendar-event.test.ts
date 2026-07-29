@@ -1,4 +1,6 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
+
+import { logger } from '@langmail/logger'
 
 import { type FetchEventParams, type UpdateEventParams } from '../caldav/client.ts'
 import { buildInvite } from '../caldav/ical.ts'
@@ -1268,5 +1270,97 @@ describe('updateCalendarEvent — notify', () => {
     const ical = unfold(cap.updated[0]?.ical ?? '')
     expect(ical).toContain('RECURRENCE-ID:20260623T100000Z')
     expect(ical).toContain('SCHEDULE-AGENT=NONE')
+  })
+})
+
+// The handover line is the outbound-scheduling audit trail (see the
+// 2026-07-28-single-occurrence-imip proposal): it must appear exactly once per
+// accepted PUT, never for a rejected one, and never carry a raw address.
+describe('scheduling handover audit log', () => {
+  test('logs one handover line, with hashed identifiers, after a successful occurrence PUT', async () => {
+    const info = spyOn(logger, 'info').mockImplementation(() => undefined)
+    try {
+      const cap = captured()
+      const result = await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
+        args: args({
+          end: '2026-06-23T12:30:00Z',
+          recurrenceId: '2026-06-23T10:00:00Z',
+          start: '2026-06-23T12:00:00Z',
+        }),
+        token: 'tok',
+      })
+      expect(result.isError).toBeUndefined()
+      expect(info).toHaveBeenCalledTimes(1)
+      const fields = info.mock.calls[0]?.[0] as Record<string, unknown>
+      expect(fields.recurrenceId).toBe('2026-06-23T10:00:00Z')
+      expect(fields.sequence).toBe(3)
+      expect(fields.uidHash).toBe('17809b5be7d6')
+      // REVIEW.md: no email addresses in logs — only 12-hex hashes appear.
+      expect(JSON.stringify(fields)).not.toContain('guest@example.com')
+      expect(JSON.stringify(fields)).not.toContain(UID)
+      expect(fields.attendeeHashes).toEqual(['513935c4d2db'])
+      expect(fields.removedAttendeeHashes).toEqual([])
+    } finally {
+      info.mockRestore()
+    }
+  })
+
+  test('logs current and removed attendee hashes after a successful whole-event PUT', async () => {
+    const info = spyOn(logger, 'info').mockImplementation(() => undefined)
+    try {
+      const cap = captured()
+      const result = await updateCalendarEvent(makeDeps(account(), storedEvent(), cap), {
+        args: args({ attendees: ['someone@example.com'] }),
+        token: 'tok',
+      })
+      expect(result.isError).toBeUndefined()
+      expect(info).toHaveBeenCalledTimes(1)
+      const fields = info.mock.calls[0]?.[0] as Record<string, unknown>
+      expect(fields.recurrenceId).toBeUndefined()
+      expect(fields.sequence).toBe(3)
+      expect(fields.uidHash).toBe('17809b5be7d6')
+      expect(fields.attendeeHashes).toEqual(['72497f475e4f'])
+      expect(fields.removedAttendeeHashes).toEqual(['513935c4d2db'])
+      expect(JSON.stringify(fields)).not.toContain('someone@example.com')
+      expect(JSON.stringify(fields)).not.toContain('guest@example.com')
+      expect(JSON.stringify(fields)).not.toContain(UID)
+    } finally {
+      info.mockRestore()
+    }
+  })
+
+  test('logs nothing when a whole-event PUT is rejected', async () => {
+    const info = spyOn(logger, 'info').mockImplementation(() => undefined)
+    try {
+      const cap = captured()
+      const deps = {
+        ...makeDeps(account(), storedEvent(), cap),
+        updateEvent: () => Promise.reject(new Error('412 precondition failed')),
+      }
+      await expect(updateCalendarEvent(deps, { args: args(), token: 'tok' })).rejects.toThrow('412 precondition failed')
+      expect(info).not.toHaveBeenCalled()
+    } finally {
+      info.mockRestore()
+    }
+  })
+
+  test('logs nothing when an occurrence PUT is rejected', async () => {
+    const info = spyOn(logger, 'info').mockImplementation(() => undefined)
+    try {
+      const cap = captured()
+      const deps = {
+        ...makeDeps(account(), recurringStored(), cap),
+        updateEvent: () => Promise.reject(new Error('412 precondition failed')),
+      }
+      await expect(
+        updateCalendarEvent(deps, {
+          args: args({ recurrenceId: '2026-06-23T10:00:00Z' }),
+          token: 'tok',
+        })
+      ).rejects.toThrow('412 precondition failed')
+      expect(info).not.toHaveBeenCalled()
+    } finally {
+      info.mockRestore()
+    }
   })
 })
