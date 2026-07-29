@@ -34,7 +34,7 @@ const createMailRuleShape = {
     .object(existingMailShape)
     .optional()
     .describe(
-      'Optionally also apply the actions to mail already in the mailbox. Omit (or mode "none") to affect future mail only — the default and the safe choice unless the user asked for a cleanup too.'
+      'Optionally also apply the actions to mail already in the mailbox. Omit (or mode "none") to affect future mail only — the safe default unless the user asked for a cleanup too.'
     ),
   match: ruleMatchFieldWithDefault,
   name: ruleNameField.optional(),
@@ -113,16 +113,13 @@ export const registerCreateMailRule = (server: McpServer, deps: MailRuleToolDeps
     'create_mail_rule',
     {
       description:
-        'Create a persistent mail rule that automatically applies to FUTURE incoming messages ' +
-        'until it is disabled or deleted. Use ONLY when the user expresses ongoing behavior — ' +
-        '"automatically…", "from now on…", "whenever I receive…", "apply X to every future…". ' +
-        'If a request is ambiguous between a one-time action on existing mail and a standing ' +
-        'rule (e.g. "archive all GitHub notifications"), ask the user which they mean before ' +
-        'calling this. Rules run server-side on arrival, independent of any client; every rule ' +
-        'whose conditions match a message runs independently. By default existing mail is ' +
-        'untouched; pass existingMail to also apply the actions to matching existing messages ' +
-        'or conversations (use preview_mail_rule first — large backfills need explicit ' +
-        'confirmation). Returns the created rule with its id.',
+        'Create a persistent mail rule (filter) that automatically sorts, labels, archives or forwards ' +
+        'FUTURE incoming messages until it is disabled or deleted. Use ONLY when the user expresses ongoing ' +
+        'behavior — "automatically…", "from now on…", "whenever I receive…". If a request is ambiguous ' +
+        'between a one-time cleanup and a standing rule (e.g. "archive all GitHub notifications"), ask which ' +
+        'they mean first. Rules run server-side on arrival; every rule whose conditions match runs. Existing ' +
+        'mail is untouched unless you pass existingMail (preview_mail_rule first — large backfills need ' +
+        'explicit confirmation). Returns the created rule with its id.',
       inputSchema: createMailRuleShape,
       title: 'Create mail rule',
     },

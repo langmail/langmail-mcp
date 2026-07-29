@@ -16,6 +16,8 @@
 import { beforeAll, describe, expect, test } from 'bun:test'
 import { createCalendarObject } from 'tsdav'
 
+import { parseEvents } from '@langmail/ical'
+
 import { deleteCalendarEvent, makeLiveDeps as makeDeleteDeps } from '../tools/delete-calendar-event.ts'
 import { listCalendarEvents, makeLiveDeps as makeListDeps } from '../tools/list-calendar-events.ts'
 import { makeLiveDeps as makeRespondDeps, respondToEvent } from '../tools/respond-to-event.ts'
@@ -31,7 +33,6 @@ import {
   withTrailingSlash,
 } from './client.ts'
 import { buildInvite } from './ical.ts'
-import { parseEvents } from './ical-parse.ts'
 import { spliceOccurrenceOverride } from './occurrence.ts'
 
 const BASE = process.env.CALDAV_BASE_URL

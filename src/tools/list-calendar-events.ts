@@ -8,6 +8,8 @@
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
+import { type ParsedEvent, parseEvents } from '@langmail/ical'
+
 import {
   type CalDavConfig,
   discoverAccount,
@@ -15,7 +17,6 @@ import {
   fetchEvents,
   resolveCalendarUrl,
 } from '../caldav/client.ts'
-import { type ParsedEvent, parseEvents } from '../caldav/ical-parse.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
@@ -127,7 +128,8 @@ export const registerListCalendarEvents = (
     'list_calendar_events',
     {
       description:
-        "Lists events in the user's calendar, returning each event's title, time, " +
+        'Read the user’s calendar, agenda or schedule — what’s on their calendar, what meetings they ' +
+        'have, when they are busy or free. Lists events with each event’s title, time, ' +
         'location, attendees (with their response status), and uid. Pass the uid to ' +
         'update_calendar_event or delete_calendar_event; the returned attendee list is ' +
         'the current membership those tools edit, so read it here before removing or ' +

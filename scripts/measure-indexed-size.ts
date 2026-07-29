@@ -1,14 +1,24 @@
 // Measures each MCP tool's "indexed document" size — the surface a
-// BM25-based tool search ranks on: name, description, argument names, and
-// argument descriptions (approximated as description length + serialized
-// input-schema JSON, in characters).
+// BM25-based tool search ranks on. Two numbers per tool:
+//
+//   text  — the ranked *words*: name + description + argument names +
+//           argument descriptions. This is what BM25 scores terms against.
+//   total — text plus the serialized input-schema JSON, the pessimistic
+//           bound if the whole schema is indexed verbatim.
+//
+// `total` carries an irreducible floor the wording can't touch: zod emits a
+// ~380-character regex `pattern` for every `z.iso.datetime()` field, so
+// update_calendar_event's four date-time fields alone cost ~1.7k characters
+// of noise. Judge wording changes on `text`; use `total` only to compare
+// tools with similar field counts.
 //
 // Run from the repo root: bun services/mcp/scripts/measure-indexed-size.ts
 //
-// Baseline on 2026-07-28 (before the fix): update_calendar_event totals
-// 8,047 chars vs. delete_calendar_event's 1,673 and a median near 1,400.
-// The plan's acceptance target is a total under ~2,500 for every calendar
-// and mail-rule tool.
+// Baseline on 2026-07-28 (before the fix): update_calendar_event totalled
+// 8,047 chars (text 4,974) vs. delete_calendar_event's 1,673 (text 1,087)
+// and a median near 1,400 — the outlier BM25's length normalisation
+// penalises. After the fix it is 5,489 (text 2,337): no longer the largest
+// document in the catalogue, and under half its former ranked text.
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
@@ -49,14 +59,36 @@ interface RegisteredTool {
 // Private SDK field — fine for a measurement script.
 const registered = (server as unknown as { _registeredTools: Record<string, RegisteredTool> })._registeredTools
 
+// Every `description` in a JSON Schema tree, plus the property names that
+// carry them — the words a term-frequency index actually sees.
+const textOf = (schema: unknown): string => {
+  if (Array.isArray(schema)) {
+    return schema.map(textOf).join(' ')
+  }
+  if (typeof schema !== 'object' || schema === null) {
+    return ''
+  }
+  const node = schema as Record<string, unknown>
+  const properties = node.properties as Record<string, unknown> | undefined
+  return [
+    typeof node.description === 'string' ? node.description : '',
+    ...Object.keys(properties ?? {}),
+    ...Object.values(node).map(textOf),
+  ].join(' ')
+}
+
 const rows = Object.entries(registered).map(([name, tool]) => {
   const shape = 'shape' in tool.inputSchema ? (tool.inputSchema as z.ZodObject).shape : tool.inputSchema
-  const schemaJson = JSON.stringify(z.toJSONSchema(z.object(shape))).length
+  const json = z.toJSONSchema(z.object(shape))
   const description = (tool.description ?? '').length
-  return { description, name, schemaJson, total: description + schemaJson }
+  const text = `${name} ${tool.description ?? ''} ${textOf(json)}`.length
+  const schemaJson = JSON.stringify(json).length
+  return { description, name, schemaJson, text, total: description + schemaJson }
 })
 
-rows.sort((a, b) => b.total - a.total)
+rows.sort((a, b) => b.text - a.text)
 for (const row of rows) {
-  console.log(`${row.name}\tdesc=${row.description}\tschemaJson=${row.schemaJson}\ttotal=${row.total}`)
+  console.log(
+    `${row.name}\tdesc=${row.description}\ttext=${row.text}\tschemaJson=${row.schemaJson}\ttotal=${row.total}`
+  )
 }

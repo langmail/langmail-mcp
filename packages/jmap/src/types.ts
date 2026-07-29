@@ -96,6 +96,56 @@ export interface MailboxRecord {
   role?: string | null
 }
 
+// RFC 9610 AddressBook, narrowed. `name` is how the collected book is
+// located ("Collected"); `isDefault` marks the book ContactCard creates
+// land in when no book is named.
+export interface AddressBookRecord {
+  id: string
+  isDefault?: boolean | null
+  name: string
+}
+
+// JSContact EmailAddress (RFC 9553 §2.3.1). `contexts` carries the
+// work/private classification search_contacts biases on.
+export interface ContactCardEmail {
+  address: string
+  contexts?: Record<string, boolean> | null
+  [extension: `${string}:${string}`]: unknown
+}
+
+export interface ContactCardName {
+  full?: string | null
+}
+
+// RFC 9553 Note object, narrowed. Stalwart rejects vendor extension
+// properties at the Card's top level but round-trips them inside entry
+// objects — so the collected-contacts payload rides in a dedicated note
+// entry (see @langmail/contacts), typed here as the extension passthrough.
+export interface ContactCardNote {
+  note: string
+  [extension: `${string}:${string}`]: unknown
+}
+
+export interface ContactCardOrganization {
+  name?: string | null
+}
+
+// A ContactCard draft: JSContact Card (RFC 9553) narrowed to what Langmail
+// writes, before the server assigns an id.
+export interface ContactCardDraft {
+  addressBookIds: Record<string, boolean>
+  emails?: Record<string, ContactCardEmail> | null
+  name?: ContactCardName | null
+  notes?: Record<string, ContactCardNote> | null
+  organizations?: Record<string, ContactCardOrganization> | null
+  uid?: string | null
+  version?: string | null
+}
+
+export interface ContactCard extends ContactCardDraft {
+  id: string
+}
+
 // The delta returned by Email/changes between two states (RFC 8621 §5.2).
 // `newState` becomes the next poll's cursor; `hasMoreChanges` signals the
 // caller to page again from `newState` before treating the batch as drained.

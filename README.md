@@ -20,6 +20,7 @@
 - List and create the user's calendars
 - List, create, update, and delete calendar events — including recurring series — sending iMIP invitations and cancellations to attendees
 - RSVP to invitations (accept / decline / tentative), notifying the organizer automatically
+- Resolve a name, partial name, address, or organization to known contacts — collected automatically from mail headers and calendar attendees, ranked by interaction recency and frequency
 
 The public endpoint is `https://mcp.langmail.me/mcp`.
 
@@ -145,6 +146,35 @@ Returns:
 
 - A list of the thread's messages oldest-first, each with its id, subject, sender, date, and tags
 
+### search_contacts
+
+Resolves a person's name, partial name, email address, or organization to
+known contacts, ranked by interaction recency and frequency. Sources are the
+collected address book — maintained by the email-agent from mail headers in
+both directions (Sent included) and by the calendar tools from attendees and
+organizers — plus any personal address books on the account. Use it before
+`create_calendar_event` or before drafting mail when only a name is known. A
+query is required; this tool searches rather than enumerates.
+
+Parameters:
+
+- `query`: string — name, partial name, email address, or organization (1–200 characters); matched against display names, organization names, addresses, and address domains
+- `context`: string (optional) — `work`, `private`, or `any` (default `any`); biases which address is reported as best when a person has several, never filters anyone out
+- `response_format`: string (optional) — `concise` (default) or `detailed`; detailed adds all known addresses, the full interaction log with record ids for chaining into `get_email` / `list_calendar_events`, and excluded relay addresses
+- `limit`: number (optional) — maximum number of matching people, 1–25 (default 5)
+
+Returns:
+
+- A ranked list of people, each with a best address, an `address_confidence`
+  (`confirmed` / `strong` / `weak`), a computed `relationship`
+  (`active` / `occasional` / `incidental`), and the most recent interactions as
+  relative-dated prose, hydrated at query time from the record ids on the card
+- A truncation note when more people matched than `limit` allows, and a note
+  when relay addresses were excluded from the shown people
+
+Collection and grading live in `packages/contacts`; the card model and every
+threshold are documented in `docs/reference/contact-collection.md`.
+
 ### list_calendars
 
 Lists the authenticated user's calendars, returning each calendar's display
@@ -216,35 +246,38 @@ Returns:
 ### update_calendar_event
 
 Updates an existing event in place (identified by its `uid`) and, by default,
-re-sends iMIP notifications to the attendees. Two ways to change attendees:
+re-sends iMIP notifications to the attendees.
 
-- **Attendee delta** — pass `addedAttendees` / `removedAttendees` to change
-  specific addresses against the stored list. Every field you omit (attendees,
-  `start`, `end`, `title`, `recurrence`, …) is kept as stored, so removing one
-  person from a recurring meeting never collapses the series and re-passes
-  nothing.
-- **Full replacement** — pass the complete `attendees`, `start`, `end`, and
-  `title`. For a recurring event, omitting `recurrence` collapses the series
-  back to a single event.
+The update is **partial**: pass the `uid` plus only the fields to change, and
+every field you omit keeps its stored value. A reschedule is `uid` + `start`; a
+rename is `uid` + `title`. There is no full-replacement mode, so a series never
+silently collapses and attendees invited elsewhere are never silently dropped.
+Because omission means "keep", clearing needs an explicit empty value:
+`attendees: []`, `location: ""`, `description: ""`, `recurrence: "none"`. A call
+that names no changeable field is rejected.
+
+An explicit `end` always wins; omitting it while moving `start` keeps the
+event's stored **duration**, and omitting both keeps the stored time.
 
 To edit one occurrence in isolation, pass `recurrenceId` (the occurrence's
-original start); attendee deltas can't be combined with it.
+original start) — omitted fields then merge against that occurrence's own state.
+Attendee deltas can't be combined with it.
 
-Parameters:
+Parameters (all optional except `uid`):
 
 - `uid`: string — the event's iCalendar UID, from `create_calendar_event` or `list_calendar_events`
-- `title`: string — event title (1–200 characters); optional with an attendee delta (kept as stored when omitted)
-- `start`: string — start datetime (ISO 8601 with offset); optional with an attendee delta
-- `end`: string — end datetime (ISO 8601 with offset); must be after `start`; optional with an attendee delta
-- `attendees`: array of string — up to 50 attendee email addresses (the full replacement list); an empty array strips every attendee, turning the event into a personal one; optional with an attendee delta, and mutually exclusive with `addedAttendees`/`removedAttendees`
-- `addedAttendees`: array of string (optional) — email addresses to add to the stored attendee list
-- `removedAttendees`: array of string (optional) — email addresses to remove from the stored attendee list (matched case-insensitively)
-- `notify`: `all` (default) or `none` (optional) — `none` makes the edit silent (attendees on the event are not notified)
-- `calendarUrl`: string (optional) — a CalDAV URL from `list_calendars`; defaults to the user's default calendar
-- `description`: string (optional) — up to 5000 characters
-- `location`: string (optional) — up to 500 characters
-- `recurrence`: string or object (optional) — same shape as `create_calendar_event`; re-rules the whole series (in a full replacement, omit to make it a one-off; in a delta, omit to keep the stored rule)
-- `recurrenceId`: string (optional) — ISO 8601 instant naming one occurrence to edit in isolation
+- `title`: string — new event title (1–200 characters)
+- `start`: string — new start datetime (ISO 8601 with offset)
+- `end`: string — new end datetime (ISO 8601 with offset); must be after `start`
+- `attendees`: array of string — up to 50 attendee email addresses, replacing the stored list; an empty array uninvites everyone, turning the event into a personal one; mutually exclusive with `addedAttendees`/`removedAttendees`
+- `addedAttendees`: array of string — email addresses to add to the stored attendee list
+- `removedAttendees`: array of string — email addresses to remove from the stored attendee list (matched case-insensitively)
+- `notify`: `all` (default) or `none` — `none` makes the edit silent (attendees on the event are not notified)
+- `calendarUrl`: string — a CalDAV URL from `list_calendars`; defaults to the user's default calendar
+- `description`: string — up to 5000 characters; `""` clears it
+- `location`: string — up to 500 characters; `""` clears it
+- `recurrence`: string or object — same shape as `create_calendar_event`; re-rules the whole series. `"none"` collapses it to a one-off
+- `recurrenceId`: string — ISO 8601 instant naming one occurrence to edit in isolation
 
 Returns:
 

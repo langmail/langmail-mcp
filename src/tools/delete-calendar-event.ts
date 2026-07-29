@@ -28,6 +28,8 @@
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
+import { parseEvents } from '@langmail/ical'
+
 import {
   type CalDavConfig,
   type DeleteEventParams,
@@ -39,7 +41,6 @@ import {
   type UpdateEventParams,
   updateEvent,
 } from '../caldav/client.ts'
-import { parseEvents } from '../caldav/ical-parse.ts'
 import { spliceOccurrenceCancellation } from '../caldav/occurrence.ts'
 import { isSeriesOccurrence } from '../caldav/recurrence.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
@@ -188,8 +189,10 @@ export const registerDeleteCalendarEvent = (
     'delete_calendar_event',
     {
       description:
-        'Deletes a calendar event (identified by its uid from create_calendar_event) ' +
-        'and sends iMIP cancellations to its attendees. By default this deletes the ' +
+        'Cancel, delete or remove a calendar event or meeting the user organizes, identified by its uid ' +
+        'from create_calendar_event or list_calendar_events, and send iMIP cancellations to its attendees. ' +
+        '(To decline an invitation someone else sent, use respond_to_event instead.) ' +
+        'By default this deletes the ' +
         'ENTIRE event — for a recurring event that means every occurrence. To instead ' +
         'cancel ONE occurrence of a recurring series (e.g. skip this week’s standup), ' +
         'pass recurrenceId naming that occurrence by its original start; the master ' +

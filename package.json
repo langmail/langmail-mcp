@@ -9,13 +9,15 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:integration": "bun test caldav-integration",
-    "test:stalwart": "bun test stalwart-update-organizer stalwart-cancel-occurrence stalwart-attendee-delta attachments-stalwart mail-rules-stalwart",
+    "test:stalwart": "bun test stalwart-update-organizer stalwart-cancel-occurrence stalwart-attendee-delta attachments-stalwart mail-rules-stalwart search-contacts-stalwart",
     "smoke": "bun run scripts/smoke.ts",
     "measure:tool-size": "bun run scripts/measure-indexed-size.ts"
   },
   "dependencies": {
     "@date-fns/tz": "^1.5.0",
     "@langmail/agents": "*",
+    "@langmail/contacts": "*",
+    "@langmail/ical": "*",
     "@langmail/jmap": "*",
     "@langmail/logger": "*",
     "@modelcontextprotocol/sdk": "^1.0.4",

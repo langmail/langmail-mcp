@@ -213,6 +213,7 @@ const main = async () => {
     'list_mail_rules',
     'update_mail_rule',
     'delete_mail_rule',
+    'search_contacts',
   ]
   for (const required of requiredTools) {
     if (!names.includes(required)) {
@@ -463,6 +464,37 @@ const main = async () => {
       fail(`unknown-mailbox error text did not mention 'mailbox': ${text}`)
     }
     pass('unknown mailbox → user-readable MCP error')
+  }
+
+  // --- 3b. search_contacts contract ------------------------------------
+  //
+  // The collected address book's content depends on the account's history,
+  // so the deterministic checks are the contract, not specific people: a
+  // query always answers without error (either ranked matches or the
+  // instructive empty-result message — both say "matched"), and a missing
+  // query is rejected by the schema.
+  log('search_contacts: deterministic query contract')
+  {
+    const result = await callText('search_contacts', { query: `smoke-nobody-${Date.now()}` })
+    if (result.isError) {
+      fail(`search_contacts returned isError=true: ${result.text}`)
+    }
+    if (!result.text.includes('matched')) {
+      fail(`search_contacts response missing the matched/empty contract text: ${result.text}`)
+    }
+    pass('search_contacts answers a query end-to-end (JMAP for Contacts reachable)')
+  }
+
+  log('bad input: search_contacts without a query')
+  {
+    const result = (await session.client.callTool({
+      arguments: {},
+      name: 'search_contacts',
+    })) as { isError?: boolean; content?: { type?: string; text?: string }[] }
+    if (!result.isError) {
+      fail(`expected isError=true for a missing query; got: ${JSON.stringify(result)}`)
+    }
+    pass('missing query rejected with isError=true')
   }
 
   // --- 4. Refresh-token round-trip ------------------------------------

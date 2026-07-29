@@ -12,10 +12,10 @@
 // Pure string in/out (no live server), so the merge is unit-testable — the same
 // shape as rsvp.ts and ical-parse.ts.
 
+import { icalDateToIso, parseWallClockInZone } from '@langmail/ical'
+
 import { maxSequence } from './ical.ts'
-import { icalDateToIso } from './ical-parse.ts'
 import { toIcalUtc } from './recurrence.ts'
-import { parseWallClockInZone } from './timezone.ts'
 
 const CRLF = '\r\n'
 // Line break between content lines (CRLF, bare CR, or LF). Output is always

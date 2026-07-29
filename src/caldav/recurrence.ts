@@ -8,6 +8,8 @@ import { TZDate } from '@date-fns/tz'
 import { rrulestr } from 'rrule'
 import { z } from 'zod'
 
+import { toWallClockIso } from './timezone.ts'
+
 // RFC 5545 FREQ values we expose. Lowercase in the structured form for the
 // model's convenience; uppercased when emitted into the RRULE.
 const RECURRENCE_FREQUENCIES = ['daily', 'weekly', 'monthly', 'yearly'] as const
@@ -34,31 +36,11 @@ const rawRruleSchema = z
 // Structured recurrence — a friendlier shape than a raw RRULE.
 const structuredRecurrenceSchema = z
   .object({
-    byDay: z
-      .array(z.enum(RECURRENCE_WEEKDAYS))
-      .min(1)
-      .max(7)
-      .optional()
-      .describe('Weekdays the event falls on (RFC 5545 codes): MO, TU, WE, TH, FR, SA, SU.'),
-    count: z
-      .number()
-      .int()
-      .min(1)
-      .max(1000)
-      .optional()
-      .describe('Total number of occurrences. Mutually exclusive with `until`.'),
-    frequency: z.enum(RECURRENCE_FREQUENCIES).describe('How often the event repeats.'),
-    interval: z
-      .number()
-      .int()
-      .min(1)
-      .max(1000)
-      .optional()
-      .describe('Repeat every N periods (e.g. 2 with weekly = fortnightly). Defaults to 1.'),
-    until: z.iso
-      .datetime({ offset: true })
-      .optional()
-      .describe('ISO 8601 instant after which the series stops. Mutually exclusive with `count`.'),
+    byDay: z.array(z.enum(RECURRENCE_WEEKDAYS)).min(1).max(7).optional().describe('Weekdays (RFC 5545 codes MO–SU).'),
+    count: z.number().int().min(1).max(1000).optional().describe('Total occurrences; not with `until`.'),
+    frequency: z.enum(RECURRENCE_FREQUENCIES).describe('How often it repeats.'),
+    interval: z.number().int().min(1).max(1000).optional().describe('Every N periods; defaults to 1.'),
+    until: z.iso.datetime({ offset: true }).optional().describe('Stops after this instant; not with `count`.'),
   })
   .refine((r) => !(r.until !== undefined && r.count !== undefined), {
     message: 'Provide at most one of `until` or `count`, not both.',
@@ -70,17 +52,15 @@ export const recurrenceSchema = z.union([rawRruleSchema, structuredRecurrenceSch
 
 export type Recurrence = z.infer<typeof recurrenceSchema>
 
-// Human-facing description attached to the optional `recurrence` field on both
-// calendar event tools. Kept here so create/update stay in sync.
+// Human-facing description of the recurrence *shape*, attached to the
+// `recurrence` field on both calendar event tools (each prefixes its own
+// per-tool sentence). Kept here so create/update stay in sync — and kept short,
+// because this string is part of what tool search ranks on.
 export const recurrenceDescription =
-  'Optional recurrence rule that turns this into a repeating series; omit for a ' +
-  'single one-off event. Either a raw iCalendar RRULE string ' +
-  '(e.g. "FREQ=WEEKLY;BYDAY=TH" for every Thursday, "FREQ=DAILY;COUNT=10" for ten ' +
-  'days) or a structured object {frequency, interval?, byDay?, until?|count?}. ' +
-  'start/end describe the first occurrence. Use at most one of until/count; ' +
-  'in a raw RRULE express UNTIL as a UTC date-time (e.g. UNTIL=20261231T000000Z). ' +
-  'A raw RRULE is only lightly validated, so it must be valid RFC 5545 ' +
-  '(e.g. BYDAY codes MO–SU) — malformed rules surface as CalDAV server errors.'
+  'Either a raw RFC 5545 RRULE ("FREQ=WEEKLY;BYDAY=TH", "FREQ=DAILY;COUNT=10") or ' +
+  '{frequency, interval?, byDay?, until?|count?}. Use at most one of until/count; ' +
+  'a raw UNTIL must be a UTC date-time (UNTIL=20261231T000000Z). A raw rule is only ' +
+  'lightly validated, so a malformed one fails later at the server.'
 
 // ISO `2026-12-31T00:00:00.000Z` → iCalendar `20261231T000000Z`: drop the
 // date/time separators, then the milliseconds.
@@ -98,15 +78,6 @@ export const toIcalUtc = (iso: string): string =>
 
 const toIcalFloating = (iso: string): string =>
   iso.replace(EVENT_TIME_ZONE_SUFFIX_RE, '').replace(ISO_SEPARATORS_RE, '')
-
-const instantToFloatingIsoInZone = (iso: string, timeZone: string): string => {
-  const date = TZDate.tz(timeZone, new Date(iso))
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-  )
-}
 
 // Normalizes either input form to a raw RRULE string *without* the `RRULE:`
 // prefix — ical-generator re-adds it on serialization.
@@ -131,6 +102,34 @@ export const toRRule = (recurrence: Recurrence): string => {
   return parts.join(';')
 }
 
+// BYDAY on a raw rule, and the parts of a rule that make a naive weekday check
+// unsafe: with BYSETPOS or BYMONTHDAY the listed weekdays are a filter within a
+// larger pattern rather than the days the series lands on.
+const BYDAY_RE = /(?:^|;)BYDAY=([^;]+)/iu
+const COMPLEX_RULE_RE = /(?:^|;)(?:BYSETPOS|BYMONTHDAY|BYYEARDAY|BYWEEKNO)=/iu
+// Strips an RFC 5545 ordinal prefix (`2TU`, `-1FR`) down to the weekday code.
+const BYDAY_ORDINAL_RE = /^[+-]?\d*/u
+const WEEKDAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'] as const
+
+// True when moving a series to `start` would contradict the repeat rule it is
+// keeping — e.g. `FREQ=WEEKLY;BYDAY=TU` with a Friday start, which RFC 5545
+// reads as "that Friday, plus every Tuesday" rather than "every Friday". The
+// caller has to re-rule the series explicitly instead. Only the unambiguous
+// weekday case is judged; rules whose BYDAY is a filter within a larger pattern
+// are left alone rather than risk refusing a legitimate edit.
+export const startContradictsRule = (rrule: string, start: Date, timeZone: string): boolean => {
+  if (COMPLEX_RULE_RE.test(rrule)) {
+    return false
+  }
+  const byDay = BYDAY_RE.exec(rrule)?.[1]
+  if (!byDay) {
+    return false
+  }
+  const days = byDay.split(',').map((d) => d.trim().replace(BYDAY_ORDINAL_RE, '').toUpperCase())
+  const weekday = WEEKDAY_CODES[TZDate.tz(timeZone, start).getDay()]
+  return weekday !== undefined && days.length > 0 && !days.includes(weekday)
+}
+
 // True when `recurrenceId` (an ISO 8601 instant) is the original start of an
 // occurrence the series generates — i.e. expanding `rrule` from `masterStart`
 // lands exactly on it. update_calendar_event uses this to reject an occurrence
@@ -148,6 +147,6 @@ export const isSeriesOccurrence = (
 ): boolean => {
   const start = timeZone ? toIcalFloating(masterStart) : toIcalUtc(masterStart)
   const rule = rrulestr(`DTSTART:${start}\nRRULE:${rrule}`)
-  const at = timeZone ? new Date(`${instantToFloatingIsoInZone(recurrenceId, timeZone)}Z`) : new Date(recurrenceId)
+  const at = timeZone ? new Date(`${toWallClockIso(new Date(recurrenceId), timeZone)}Z`) : new Date(recurrenceId)
   return rule.between(at, at, true).length > 0
 }

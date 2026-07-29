@@ -19,6 +19,7 @@ import { type AuthContext } from '../auth/middleware.ts'
 import { makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
 import { makeLiveApplyIo, makeMailRulesApplier } from '../rules/apply.ts'
 import { makeLiveSieveIo, makeMailRulesStore } from '../rules/store.ts'
+import { makeAttendeeWriteThrough } from '../tools/contact-write-through.ts'
 import { makeLiveDeps as makeCreateCalendarDeps, registerCreateCalendar } from '../tools/create-calendar.ts'
 import {
   makeLiveDeps as makeCreateCalendarEventDeps,
@@ -42,6 +43,7 @@ import { registerListMailRules } from '../tools/list-mail-rules.ts'
 import { type MailRuleToolDeps } from '../tools/mail-rule-common.ts'
 import { registerPreviewMailRule } from '../tools/preview-mail-rule.ts'
 import { makeLiveDeps as makeRespondToEventDeps, registerRespondToEvent } from '../tools/respond-to-event.ts'
+import { makeLiveDeps as makeSearchContactsDeps, registerSearchContacts } from '../tools/search-contacts.ts'
 import { makeLiveDeps as makeSearchEmailsDeps, registerSearchEmails } from '../tools/search-emails.ts'
 import {
   makeLiveDeps as makeUpdateCalendarEventDeps,
@@ -84,10 +86,15 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   const listCalendarsDeps = makeListCalendarsDeps(caldavCfg)
   const createCalendarDeps = makeCreateCalendarDeps(caldavCfg)
   const listCalendarEventsDeps = makeListCalendarEventsDeps(caldavCfg)
-  const createCalendarEventDeps = makeCreateCalendarEventDeps(caldavCfg, resolveTimeZone)
-  const updateCalendarEventDeps = makeUpdateCalendarEventDeps(caldavCfg, resolveTimeZone)
+  // Contact write-through: scheduling actions upsert their attendees into
+  // the collected address book (the Robin case) — shared across the three
+  // event tools so they fold through one code path.
+  const collectAttendees = makeAttendeeWriteThrough(jmapLive)
+  const createCalendarEventDeps = makeCreateCalendarEventDeps(caldavCfg, resolveTimeZone, collectAttendees)
+  const updateCalendarEventDeps = makeUpdateCalendarEventDeps(caldavCfg, resolveTimeZone, collectAttendees)
   const deleteCalendarEventDeps = makeDeleteCalendarEventDeps(caldavCfg)
-  const respondToEventDeps = makeRespondToEventDeps(caldavCfg)
+  const respondToEventDeps = makeRespondToEventDeps(caldavCfg, collectAttendees)
+  const searchContactsDeps = makeSearchContactsDeps(jmapLive, caldavCfg)
 
   return async (req, ctx) => {
     const server = new McpServer({
@@ -112,6 +119,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     registerUpdateCalendarEvent(server, updateCalendarEventDeps, () => ctx.token)
     registerDeleteCalendarEvent(server, deleteCalendarEventDeps, () => ctx.token)
     registerRespondToEvent(server, respondToEventDeps, () => ctx.token)
+    registerSearchContacts(server, searchContactsDeps, () => ctx.token)
 
     // Stateless mode (sessionIdGenerator omitted). Each request stands
     // alone — initialize, tool call, and shutdown happen within the

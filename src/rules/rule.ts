@@ -41,23 +41,21 @@ const conditionString = (max: number): z.ZodString =>
 
 // --- conditions --------------------------------------------------------------
 
+// These `.describe()` strings are repeated verbatim in the indexed metadata of
+// all three mail-rule tools (create/update/preview all embed the conditions and
+// actions schema), so each one costs three times its length in tool search.
+// Keep them to a single clause.
 export const mailRuleConditionsShape = {
-  bodyContains: conditionString(200).optional().describe('Match when the message body contains this text.'),
+  bodyContains: conditionString(200).optional().describe('Message body contains this text.'),
   from: conditionString(200)
     .optional()
-    .describe(
-      'Match when the sender (From header) contains this substring — an address, a domain like "github.com", or a display name like "Acme Corp".'
-    ),
+    .describe('Sender (From) contains this — an address, a domain like "github.com", or a name like "Acme Corp".'),
   hasAttachment: z
     .boolean()
     .optional()
-    .describe(
-      'Set to true to match only messages whose structure indicates an attachment. false is treated as "not set" (absence of attachments is not matchable). Note: some signed or inline-attachment messages may not be detected.'
-    ),
-  subject: conditionString(200).optional().describe('Match when the subject line contains this substring.'),
-  to: conditionString(200)
-    .optional()
-    .describe('Match when a To/Cc recipient contains this substring (address or display name).'),
+    .describe('true matches messages that look like they carry an attachment (heuristic); false means "not set".'),
+  subject: conditionString(200).optional().describe('Subject line contains this.'),
+  to: conditionString(200).optional().describe('A To/Cc recipient contains this (address or name).'),
 }
 
 const conditionsSchema = z.object(mailRuleConditionsShape)
@@ -102,7 +100,7 @@ const mailboxString = conditionString(100)
 // entry is a discriminated object so new action types can grow fields
 // without breaking the stored shape.
 export const mailRuleActionSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('archive') }).describe('Move the message out of the Inbox into the Archive folder.'),
+  z.object({ type: z.literal('archive') }).describe('Move it out of the Inbox into Archive.'),
   z.object({
     mailbox: mailboxString.describe('Target mailbox/folder name; created if missing.'),
     type: z.literal('move'),
@@ -112,21 +110,21 @@ export const mailRuleActionSchema = z.discriminatedUnion('type', [
     type: z.literal('copy'),
   }),
   z.object({
-    tag: tagString.describe('Tag name, e.g. "GitHub". Slugified to a lowercase tag id ("Acme Corp" -> "acme-corp").'),
+    tag: tagString.describe('Tag name, e.g. "GitHub"; slugified to a tag id ("Acme Corp" -> "acme-corp").'),
     type: z.literal('addTag'),
   }),
   z.object({ tag: tagString, type: z.literal('removeTag') }),
   z.object({ type: z.literal('markRead') }),
   z.object({ type: z.literal('markUnread') }),
-  z.object({ type: z.literal('flag') }).describe('Flag/star the message.'),
-  z.object({ type: z.literal('delete') }).describe('Move the message to Trash (not a permanent erase).'),
+  z.object({ type: z.literal('flag') }).describe('Flag/star it.'),
+  z.object({ type: z.literal('delete') }).describe('Move it to Trash (not a permanent erase).'),
   z.object({
-    to: z.email().describe('Forward a copy to this address; the original still lands in the mailbox.'),
+    to: z.email().describe('Forward a copy here; the original still lands in the mailbox.'),
     type: z.literal('forward'),
   }),
   z
     .object({ type: z.literal('stopProcessing') })
-    .describe('Stop evaluating any later rules for this message. Only meaningful as the last action.'),
+    .describe('Skip any later rules for this message. Only useful as the last action.'),
 ])
 
 export type MailRuleAction = z.infer<typeof mailRuleActionSchema>

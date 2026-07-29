@@ -3,13 +3,18 @@
 // the handful of fields list_calendar_events surfaces (uid, title, times,
 // location) isn't worth it — so this extracts just those, happy-path.
 
-// One ATTENDEE of a VEVENT, reduced to what the calendar tools need: the bare
-// email (mailto: stripped) and, when the stored line carries one, the PARTSTAT
+import { parseWallClockInZone } from './timezone.ts'
+
+// One ATTENDEE of a VEVENT, reduced to what the calendar tools and contact
+// collection need: the bare email (mailto: stripped), the CN display name
+// when the stored line carries one — the pairing of a name with an address
+// is exactly what contact collection feeds on — and the PARTSTAT
 // (ACCEPTED / DECLINED / TENTATIVE / NEEDS-ACTION). Surfaced so list_calendar_events
 // can show who is invited and update_calendar_event's attendee deltas can merge
 // against the real stored list instead of a caller-supplied guess.
 export interface ParsedAttendee {
   email: string
+  name?: string
   status?: string
 }
 
@@ -21,6 +26,11 @@ export interface ParsedEvent {
   // preserve it without the caller re-supplying it.
   description?: string
   end: string
+  // Instants the series excludes (EXDATE), as stored — how delete_calendar_event
+  // cancels a single occurrence. Present (and non-empty) only when the VEVENT
+  // carries any. update_calendar_event refuses to rebuild such a master, because
+  // a rebuilt VEVENT carries no EXDATE and would resurrect the cancellation.
+  excludedDates?: string[]
   location?: string
   // Bare organizer email (mailto: stripped). Edits must reuse it instead of
   // the freshly discovered principal: an event created under a previous
@@ -32,6 +42,13 @@ export interface ParsedEvent {
   // series; absent for one-off events. Surfaced so the agent can re-supply it
   // to update_calendar_event (which re-rules the whole series).
   recurrence?: string
+  // The instant this VEVENT overrides, as a UTC ISO string, when it is a
+  // per-occurrence override (RFC 5545 §3.8.4.4); absent on the master and on
+  // one-off events. Normalized to an instant — the stored RECURRENCE-ID may
+  // carry a TZID — so update_calendar_event can find the override for the
+  // occurrence it is editing and merge omitted fields against *its* stored
+  // state rather than the master's.
+  recurrenceId?: string
   start: string
   // IANA zone named by the DTSTART `;TZID=` param, when present. This is the
   // event's own zone: update_calendar_event keeps it so an edit doesn't silently
@@ -98,6 +115,10 @@ interface ParsedProperty {
 // clobber all but the last, and an event's whole point can be its attendee list.
 interface ParsedBlock {
   attendees: ParsedProperty[]
+  // EXDATE is multi-valued twice over — it may repeat, and each line may carry
+  // a comma-separated list (RFC 5545 §3.8.5.1) — so it is collected like
+  // ATTENDEE rather than keyed.
+  exdates: ParsedProperty[]
   props: Map<string, ParsedProperty>
 }
 
@@ -120,6 +141,8 @@ const recordProperty = (block: ParsedBlock, line: string): void => {
   const property = { params: line.slice(name.length, colon), value: line.slice(colon + 1) }
   if (name === 'ATTENDEE') {
     block.attendees.push(property)
+  } else if (name === 'EXDATE') {
+    block.exdates.push(property)
   } else {
     block.props.set(name, property)
   }
@@ -133,7 +156,7 @@ const eventBlocks = (ical: string): ParsedBlock[] => {
 
   for (const line of unfold(ical).split(LINE_RE)) {
     if (line === 'BEGIN:VEVENT') {
-      current = { attendees: [], props: new Map() }
+      current = { attendees: [], exdates: [], props: new Map() }
       nested = 0
     } else if (line === 'END:VEVENT') {
       if (current) {
@@ -158,6 +181,12 @@ const eventBlocks = (ical: string): ParsedBlock[] => {
 // mailto: instead of the front. A value we can't reduce to a clean bare
 // address (non-mailto cal-address, leftover quotes/colons) is dropped rather
 // than risk callers writing garbage back into a rebuilt invite.
+// Greedy by design: the real cal-address is the LAST mailto: on the line,
+// after any params. The cost is that a param value containing the literal
+// text `mailto:` (e.g. CN="Reply to mailto:me@x.com instead") strips
+// through that occurrence and yields a wrong address — accepted, since the
+// alternative (parsing quoted params properly) is a full RFC 5545 lexer
+// for a case no server we talk to emits.
 const LAST_MAILTO_RE = /^.*mailto:/isu
 const NOT_BARE_EMAIL_RE = /["\s:;,]/u
 const parseOrganizerEmail = (property: ParsedProperty | undefined): string | undefined => {
@@ -173,22 +202,49 @@ const propertyTimeZone = (property: ParsedProperty | undefined): string | undefi
   return timeZone ? timeZone.replace(/^"|"$/gu, '') : undefined
 }
 
+// A RECURRENCE-ID value reduced to a UTC ISO instant. The stored value is
+// either a UTC date-time, a date-only value, or wall-clock digits qualified by
+// a TZID param — all three have to compare equal to the caller's ISO instant,
+// so they are resolved here rather than surfaced raw. An unparsable value is
+// dropped (the VEVENT then reads as a plain event, which is the safe default).
+const parseRecurrenceInstant = (property: ParsedProperty | undefined): string | undefined => {
+  if (!property) {
+    return
+  }
+  const iso = icalDateToIso(property.value.trim())
+  const timeZone = propertyTimeZone(property)
+  let at: Date
+  try {
+    at = timeZone && !iso.endsWith('Z') ? parseWallClockInZone(iso, timeZone) : new Date(iso)
+  } catch {
+    return
+  }
+  // Re-wrap as a plain Date: parseWallClockInZone returns a TZDate, whose
+  // toISOString() keeps the zone offset instead of normalizing to UTC.
+  return Number.isNaN(at.getTime()) ? undefined : new Date(at.getTime()).toISOString()
+}
+
 // PARTSTAT on an ATTENDEE parameter list, unquoted. The value runs to the next
 // `;` (further param) or `:` (start of the value); absent on a freshly built,
 // not-yet-answered attendee only when the client omits the NEEDS-ACTION default.
 const PARTSTAT_RE = /(?:^|;)PARTSTAT=([^;:]+)/iu
 
-// Bare attendee email + PARTSTAT from an ATTENDEE line. Same trailing-mailto
-// anchoring as parseOrganizerEmail: params can smuggle colons past the
-// first-colon split (SENT-BY, CN), so read the address off the last mailto:.
-// An ATTENDEE we can't reduce to a clean bare address is dropped rather than
-// surfaced as garbage or written back into a rebuilt invite.
+// CN on an ATTENDEE parameter list: quoted (CN="Fairweather, Robin" — commas,
+// semicolons, and colons are legal inside the quotes) or unquoted (CN=Robin,
+// value runs to the next `;` or `:`).
+const CN_RE = /(?:^|;)CN=(?:"([^"]*)"|([^;:]+))/iu
+
+// Bare attendee email + CN + PARTSTAT from an ATTENDEE line. Same
+// trailing-mailto anchoring as parseOrganizerEmail: params can smuggle colons
+// past the first-colon split (SENT-BY, CN), so read the address off the last
+// mailto:. An ATTENDEE we can't reduce to a clean bare address is dropped
+// rather than surfaced as garbage or written back into a rebuilt invite.
 const parseAttendee = (property: ParsedProperty): ParsedAttendee | undefined => {
   const email = property.value.replace(LAST_MAILTO_RE, '').trim()
   if (!email || email === property.value.trim() || NOT_BARE_EMAIL_RE.test(email)) {
     return
   }
-  // PARTSTAT can land in `value` rather than `params` when an earlier quoted
+  // Params can land in `value` rather than `params` when an earlier quoted
   // parameter (e.g. CN="Team: Weekly") pushes a ':' past the first-colon split.
   // Reassemble the property (name aside) and search the parameter section — i.e.
   // everything before the trailing cal-address — so the mis-split doesn't hide it.
@@ -196,11 +252,52 @@ const parseAttendee = (property: ParsedProperty): ParsedAttendee | undefined => 
   const addressAt = reassembled.toLowerCase().lastIndexOf('mailto:')
   const paramSection = addressAt === -1 ? reassembled : reassembled.slice(0, addressAt)
   const status = PARTSTAT_RE.exec(paramSection)?.[1]?.replace(/^"|"$/gu, '')
-  return status ? { email, status } : { email }
+  const cnMatch = CN_RE.exec(paramSection)
+  const name = (cnMatch?.[1] ?? cnMatch?.[2])?.trim()
+  return {
+    email,
+    ...(name ? { name } : {}),
+    ...(status ? { status } : {}),
+  }
 }
+
+// Flattens the EXDATE lines of one VEVENT into ISO values. Each line may carry
+// a comma-separated list, and the property may repeat (RFC 5545 §3.8.5.1).
+const parseExcludedDates = (exdates: ParsedProperty[]): string[] =>
+  exdates.flatMap((property) =>
+    property.value
+      .split(',')
+      .map((value) => icalDateToIso(value.trim()))
+      .filter(Boolean)
+  )
 
 // Parses every VEVENT in a VCALENDAR. Blocks without a UID are skipped —
 // an event we can't address with update/delete isn't useful to list.
+// The fields a VEVENT only carries sometimes. Split out from parseEvents so the
+// conditional-spread block doesn't dominate that function's complexity.
+const optionalFields = (block: ParsedBlock, attendees: ParsedAttendee[]): Partial<ParsedEvent> => {
+  const description = block.props.get('DESCRIPTION')?.value
+  const location = block.props.get('LOCATION')?.value
+  const organizer = parseOrganizerEmail(block.props.get('ORGANIZER'))
+  const startTzid = propertyTimeZone(block.props.get('DTSTART'))
+  // Trim so a server that emits a trailing space (`RRULE:FREQ=WEEKLY `) doesn't
+  // leak it into the listed `repeats:` value.
+  const recurrence = block.props.get('RRULE')?.value.trim()
+  const recurrenceId = parseRecurrenceInstant(block.props.get('RECURRENCE-ID'))
+  const excludedDates = parseExcludedDates(block.exdates)
+  const unparsedAttendeeCount = block.attendees.length - attendees.length
+  return {
+    ...(description ? { description: unescapeText(description) } : {}),
+    ...(excludedDates.length > 0 ? { excludedDates } : {}),
+    ...(location ? { location: unescapeText(location) } : {}),
+    ...(organizer ? { organizer } : {}),
+    ...(recurrence ? { recurrence } : {}),
+    ...(recurrenceId ? { recurrenceId } : {}),
+    ...(startTzid ? { startTzid } : {}),
+    ...(unparsedAttendeeCount > 0 ? { unparsedAttendeeCount } : {}),
+  }
+}
+
 export const parseEvents = (ical: string): ParsedEvent[] => {
   const events: ParsedEvent[] = []
   for (const block of eventBlocks(ical)) {
@@ -208,28 +305,14 @@ export const parseEvents = (ical: string): ParsedEvent[] => {
     if (!uid?.value) {
       continue
     }
-    const description = block.props.get('DESCRIPTION')?.value
-    const location = block.props.get('LOCATION')?.value
-    const organizer = parseOrganizerEmail(block.props.get('ORGANIZER'))
-    const start = block.props.get('DTSTART')
-    const startTzid = propertyTimeZone(start)
-    // Trim so a server that emits a trailing space (`RRULE:FREQ=WEEKLY `) doesn't
-    // leak it into the listed `repeats:` value.
-    const recurrence = block.props.get('RRULE')?.value.trim()
     const attendees = block.attendees.map(parseAttendee).filter((a): a is ParsedAttendee => a !== undefined)
-    const unparsedAttendeeCount = block.attendees.length - attendees.length
     events.push({
       attendees,
       end: icalDateToIso(block.props.get('DTEND')?.value ?? ''),
-      start: icalDateToIso(start?.value ?? ''),
+      start: icalDateToIso(block.props.get('DTSTART')?.value ?? ''),
       title: unescapeText(block.props.get('SUMMARY')?.value ?? ''),
       uid: uid.value,
-      ...(description ? { description: unescapeText(description) } : {}),
-      ...(location ? { location: unescapeText(location) } : {}),
-      ...(organizer ? { organizer } : {}),
-      ...(recurrence ? { recurrence } : {}),
-      ...(startTzid ? { startTzid } : {}),
-      ...(unparsedAttendeeCount > 0 ? { unparsedAttendeeCount } : {}),
+      ...optionalFields(block, attendees),
     })
   }
   return events

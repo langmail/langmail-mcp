@@ -272,6 +272,40 @@ export const emailGet = async (p: EmailGetParams): Promise<EmailRecord[]> => {
   return out.list ?? []
 }
 
+// --- Email/get (headers only) ----------------------------------------------
+
+// What contact collection reads off a message: addressing headers, keywords
+// (skip-filter), mailboxIds (Sent detection), receivedAt. No bodies — the
+// backfill pages thousands of messages and must stay cheap.
+const EMAIL_HEADER_PROPERTIES = ['id', 'from', 'to', 'cc', 'receivedAt', 'keywords', 'mailboxIds'] as const
+
+export interface EmailGetHeadersParams extends JmapCall {
+  accountId: string
+  ids: string[]
+}
+
+export const emailGetHeaders = async (p: EmailGetHeadersParams): Promise<EmailDetailRecord[]> => {
+  if (p.ids.length === 0) {
+    return []
+  }
+  const resp = await call(p, {
+    methodCalls: [
+      [
+        'Email/get',
+        {
+          accountId: p.accountId,
+          ids: p.ids,
+          properties: [...EMAIL_HEADER_PROPERTIES],
+        },
+        '0',
+      ],
+    ],
+    using: USING,
+  })
+  const out = methodResponse<{ list?: EmailDetailRecord[] }>(resp, 'Email/get', '0')
+  return out.list ?? []
+}
+
 // --- Email/get (detail, with body) ---------------------------------------
 
 export interface EmailGetDetailParams extends JmapCall {
