@@ -1,18 +1,41 @@
 import { describe, expect, test } from 'bun:test'
 
-import { buildInvite } from './ical.ts'
 import { parseEvents } from './ical-parse.ts'
 
-const sample = buildInvite({
-  attendees: ['guest@example.com'],
-  description: 'Quarterly review',
-  end: new Date('2026-06-12T10:30:00Z'),
-  location: 'Room 4',
-  organizer: 'host@langmail.me',
-  start: new Date('2026-06-12T10:00:00Z'),
-  title: 'Sync',
-  uid: 'evt-1@langmail.me',
-})
+// Hand-rolled VEVENT fixture. The real invite writer (ical-generator) lives
+// in services/mcp — its ical-roundtrip test covers writer↔parser fidelity —
+// so this package's tests stay dependency-free. Values are raw content
+// lines: pre-escape TEXT values (`\\;`) exactly as a server would emit them.
+interface FixtureInvite {
+  attendees?: string[]
+  description?: string
+  end?: string
+  location?: string
+  rrule?: string
+  start?: string
+  title?: string
+  uid?: string
+}
+
+const invite = (over: FixtureInvite = {}): string =>
+  [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'BEGIN:VEVENT',
+    `UID:${over.uid ?? 'evt-1@langmail.me'}`,
+    `SUMMARY:${over.title ?? 'Sync'}`,
+    `DTSTART:${over.start ?? '20260612T100000Z'}`,
+    `DTEND:${over.end ?? '20260612T103000Z'}`,
+    'ORGANIZER:mailto:host@langmail.me',
+    ...(over.attendees ?? ['guest@example.com']).map((a) => `ATTENDEE;RSVP=TRUE:mailto:${a}`),
+    ...(over.location ? [`LOCATION:${over.location}`] : []),
+    ...(over.description ? [`DESCRIPTION:${over.description}`] : []),
+    ...(over.rrule ? [`RRULE:${over.rrule}`] : []),
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n')
+
+const sample = invite({ description: 'Quarterly review', location: 'Room 4' })
 
 describe('parseEvents', () => {
   test('extracts uid, title, ISO times, and location from a built invite', () => {
@@ -26,15 +49,7 @@ describe('parseEvents', () => {
   })
 
   test('extracts the RRULE of a recurring event', () => {
-    const ics = buildInvite({
-      attendees: ['guest@example.com'],
-      end: new Date('2026-06-12T10:30:00Z'),
-      organizer: 'host@langmail.me',
-      rrule: 'FREQ=WEEKLY;BYDAY=TH',
-      start: new Date('2026-06-12T10:00:00Z'),
-      title: 'Weekly sync',
-      uid: 'evt-r@langmail.me',
-    })
+    const ics = invite({ rrule: 'FREQ=WEEKLY;BYDAY=TH', title: 'Weekly sync', uid: 'evt-r@langmail.me' })
     expect(parseEvents(ics)[0]?.recurrence).toBe('FREQ=WEEKLY;BYDAY=TH')
   })
 
@@ -48,23 +63,14 @@ describe('parseEvents', () => {
   })
 
   test('omits location when absent', () => {
-    const ics = buildInvite({
-      attendees: ['guest@example.com'],
-      end: new Date('2026-06-12T10:30:00Z'),
-      organizer: 'host@langmail.me',
-      start: new Date('2026-06-12T10:00:00Z'),
-      title: 'No place',
-      uid: 'evt-2@langmail.me',
-    })
+    const ics = invite({ title: 'No place', uid: 'evt-2@langmail.me' })
     expect(parseEvents(ics)[0]?.location).toBeUndefined()
   })
 
   test('parses multiple VEVENTs in one calendar', () => {
-    const combined = `${sample}\r\n${buildInvite({
-      attendees: ['guest@example.com'],
-      end: new Date('2026-06-13T09:30:00Z'),
-      organizer: 'host@langmail.me',
-      start: new Date('2026-06-13T09:00:00Z'),
+    const combined = `${sample}\r\n${invite({
+      end: '20260613T093000Z',
+      start: '20260613T090000Z',
       title: 'Second',
       uid: 'evt-3@langmail.me',
     })}`
@@ -150,11 +156,8 @@ describe('parseEvents', () => {
   })
 
   test('extracts every attendee as a bare email, in source order', () => {
-    const ics = buildInvite({
+    const ics = invite({
       attendees: ['kai@atelier.example', 'mika@example.com', 'jo@example.com'],
-      end: new Date('2026-06-12T10:30:00Z'),
-      organizer: 'host@langmail.me',
-      start: new Date('2026-06-12T10:00:00Z'),
       title: 'Team',
       uid: 'evt-att@langmail.me',
     })
@@ -195,7 +198,37 @@ describe('parseEvents', () => {
     ].join('\r\n')
     // The quoted colon in CN pushes the first-colon split into the CN value, so
     // PARTSTAT must be recovered from the reassembled line, not the truncated params.
-    expect(parseEvents(ics)[0]?.attendees[0]).toEqual({ email: 'person@example.com', status: 'ACCEPTED' })
+    expect(parseEvents(ics)[0]?.attendees[0]).toEqual({
+      email: 'person@example.com',
+      name: 'Team: Weekly',
+      status: 'ACCEPTED',
+    })
+  })
+
+  test('reads a quoted CN display name off an attendee', () => {
+    const ics = [
+      'BEGIN:VEVENT',
+      'UID:evt-cn@langmail.me',
+      'ATTENDEE;CN="Fairweather, Robin";PARTSTAT=NEEDS-ACTION:mailto:robin@northwind.example',
+      'END:VEVENT',
+    ].join('\r\n')
+    expect(parseEvents(ics)[0]?.attendees[0]).toEqual({
+      email: 'robin@northwind.example',
+      name: 'Fairweather, Robin',
+      status: 'NEEDS-ACTION',
+    })
+  })
+
+  test('reads an unquoted CN display name and omits name when CN is absent', () => {
+    const ics = [
+      'BEGIN:VEVENT',
+      'UID:evt-cn2@langmail.me',
+      'ATTENDEE;CN=Robin:mailto:robin@northwind.example',
+      'ATTENDEE:mailto:anon@example.com',
+      'END:VEVENT',
+    ].join('\r\n')
+    const [ev] = parseEvents(ics)
+    expect(ev?.attendees).toEqual([{ email: 'robin@northwind.example', name: 'Robin' }, { email: 'anon@example.com' }])
   })
 
   test('drops an attendee it cannot reduce to a bare address', () => {
@@ -227,12 +260,8 @@ describe('parseEvents', () => {
   })
 
   test('extracts the DESCRIPTION, unescaped', () => {
-    const ics = buildInvite({
-      attendees: ['guest@example.com'],
-      description: 'Line one; line two',
-      end: new Date('2026-06-12T10:30:00Z'),
-      organizer: 'host@langmail.me',
-      start: new Date('2026-06-12T10:00:00Z'),
+    const ics = invite({
+      description: 'Line one\\; line two',
       title: 'With notes',
       uid: 'evt-desc@langmail.me',
     })

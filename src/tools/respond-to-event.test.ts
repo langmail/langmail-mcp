@@ -150,4 +150,46 @@ describe('respondToEvent', () => {
     expect(result.content[0]?.text).toContain('not an attendee')
     expect(cap.updated).toHaveLength(0)
   })
+
+  test('write-through receives the organizer and attendees after a successful RSVP', async () => {
+    const cap = captured()
+    const collected: unknown[] = []
+    const deps = {
+      ...makeDeps(account(), storedEvent(), cap),
+      collectAttendees: (writeThrough: unknown) => {
+        collected.push(writeThrough)
+        return Promise.resolve()
+      },
+    }
+    const result = await respondToEvent(deps, { args: args(), token: 'tok' })
+    expect(result.isError).toBeUndefined()
+    expect(collected).toHaveLength(1)
+    const input = collected[0] as {
+      attendees: { email: string }[]
+      organizer?: string
+      selfAddress: string
+      uid: string
+    }
+    expect(input.organizer).toBe('organizer@example.com')
+    expect(input.selfAddress).toBe(ME)
+    expect(input.uid).toBe(UID)
+    // The user's own attendee line is in the list; extraction excludes it
+    // via the self-address set downstream.
+    expect(input.attendees.map((a) => a.email)).toContain(ME)
+  })
+
+  test('no write-through call when the RSVP fails', async () => {
+    const cap = captured()
+    const collected: unknown[] = []
+    const deps = {
+      ...makeDeps(account(), storedEvent(), cap),
+      collectAttendees: (writeThrough: unknown) => {
+        collected.push(writeThrough)
+        return Promise.resolve()
+      },
+      updateEvent: () => Promise.reject(new Error('412')),
+    }
+    await respondToEvent(deps, { args: args(), token: 'tok' }).catch(() => null)
+    expect(collected).toHaveLength(0)
+  })
 })

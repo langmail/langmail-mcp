@@ -1,8 +1,12 @@
 import { TZDate } from '@date-fns/tz'
 import { z } from 'zod'
 
+// The wall-clock parser lives in @langmail/ical, where the VEVENT parser
+// consumes it — this module keeps the zod input schemas that validate tool
+// arguments, which are the service's concern, not the package's.
+import { parseWallClockInZone } from '@langmail/ical'
+
 const OFFSET_RE = /(?:Z|[+-]\d{2}:\d{2})$/iu
-const DATE_TIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(?:Z|[+-]\d{2}:\d{2})?$/iu
 
 export const UTC_TIME_ZONE = 'UTC'
 
@@ -31,24 +35,6 @@ const hasExplicitOffset = (value: string): boolean => OFFSET_RE.test(value)
 
 export const toZonedDate = (instant: Date, timeZone: string): Date =>
   timeZone === UTC_TIME_ZONE ? instant : TZDate.tz(timeZone, instant)
-
-export const parseWallClockInZone = (value: string, timeZone: string): Date => {
-  const match = DATE_TIME_RE.exec(value)
-  if (!match) {
-    throw new Error(`invalid date-time: ${value}`)
-  }
-  const [, year, month, day, hour, minute, second, millis = '0'] = match
-  return TZDate.tz(
-    timeZone,
-    Number(year),
-    Number(month) - 1,
-    Number(day),
-    Number(hour),
-    Number(minute),
-    Number(second),
-    Number(millis.padEnd(3, '0'))
-  )
-}
 
 // An instant re-expressed as a naive wall-clock ISO string in `timeZone` (no
 // offset suffix) — the inverse of parseWallClockInZone. Used wherever a stored

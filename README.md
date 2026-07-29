@@ -20,6 +20,7 @@
 - List and create the user's calendars
 - List, create, update, and delete calendar events — including recurring series — sending iMIP invitations and cancellations to attendees
 - RSVP to invitations (accept / decline / tentative), notifying the organizer automatically
+- Resolve a name, partial name, address, or organization to known contacts — collected automatically from mail headers and calendar attendees, ranked by interaction recency and frequency
 
 The public endpoint is `https://mcp.langmail.me/mcp`.
 
@@ -144,6 +145,35 @@ Parameters:
 Returns:
 
 - A list of the thread's messages oldest-first, each with its id, subject, sender, date, and tags
+
+### search_contacts
+
+Resolves a person's name, partial name, email address, or organization to
+known contacts, ranked by interaction recency and frequency. Sources are the
+collected address book — maintained by the email-agent from mail headers in
+both directions (Sent included) and by the calendar tools from attendees and
+organizers — plus any personal address books on the account. Use it before
+`create_calendar_event` or before drafting mail when only a name is known. A
+query is required; this tool searches rather than enumerates.
+
+Parameters:
+
+- `query`: string — name, partial name, email address, or organization (1–200 characters); matched against display names, organization names, addresses, and address domains
+- `context`: string (optional) — `work`, `private`, or `any` (default `any`); biases which address is reported as best when a person has several, never filters anyone out
+- `response_format`: string (optional) — `concise` (default) or `detailed`; detailed adds all known addresses, the full interaction log with record ids for chaining into `get_email` / `list_calendar_events`, and excluded relay addresses
+- `limit`: number (optional) — maximum number of matching people, 1–25 (default 5)
+
+Returns:
+
+- A ranked list of people, each with a best address, an `address_confidence`
+  (`confirmed` / `strong` / `weak`), a computed `relationship`
+  (`active` / `occasional` / `incidental`), and the most recent interactions as
+  relative-dated prose, hydrated at query time from the record ids on the card
+- A truncation note when more people matched than `limit` allows, and a note
+  when relay addresses were excluded from the shown people
+
+Collection and grading live in `packages/contacts`; the card model and every
+threshold are documented in `docs/reference/contact-collection.md`.
 
 ### list_calendars
 

@@ -74,3 +74,9 @@ export const accountIdForMail = (session: JmapSession): string => {
 // mail primary.
 export const accountIdForSieve = (session: JmapSession): string =>
   session.primaryAccounts['urn:ietf:params:jmap:sieve'] ?? accountIdForMail(session)
+
+// Same story for the contacts capability (RFC 9610): Stalwart hosts address
+// books on the mail account, so fall back to the mail primary when the
+// session omits a contacts primary.
+export const accountIdForContacts = (session: JmapSession): string =>
+  session.primaryAccounts['urn:ietf:params:jmap:contacts'] ?? accountIdForMail(session)

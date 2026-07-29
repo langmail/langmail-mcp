@@ -8,6 +8,8 @@
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
+import { type ParsedEvent, parseEvents } from '@langmail/ical'
+
 import {
   type CalDavConfig,
   discoverAccount,
@@ -15,7 +17,6 @@ import {
   fetchEvents,
   resolveCalendarUrl,
 } from '../caldav/client.ts'
-import { type ParsedEvent, parseEvents } from '../caldav/ical-parse.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 

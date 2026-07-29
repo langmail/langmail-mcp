@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 
+import { parseEvents } from '@langmail/ical'
+
 import { buildInvite } from './ical.ts'
-import { parseEvents } from './ical-parse.ts'
 import { spliceOccurrenceCancellation, spliceOccurrenceOverride } from './occurrence.ts'
 
 const UID = 'series-1@langmail.me'

@@ -1,10 +1,27 @@
 // biome-ignore lint/performance/noBarrelFile: package entry point requires re-exports
 export { type BlobDownloadParams, type BlobUploadParams, blobDownload, blobDownloadUrl, blobUpload } from './blob.ts'
 export {
+  type AddressBookCreateParams,
+  type AddressBookListParams,
+  addressBookCreate,
+  addressBookList,
+  type ContactCardCreateParams,
+  type ContactCardFilter,
+  type ContactCardFilterCondition,
+  type ContactCardGetParams,
+  type ContactCardQueryParams,
+  type ContactCardUpdateParams,
+  contactCardCreate,
+  contactCardGet,
+  contactCardQuery,
+  contactCardUpdate,
+} from './contacts.ts'
+export {
   type EmailChangesParams,
   type EmailFilter,
   type EmailFilterCondition,
   type EmailGetDetailParams,
+  type EmailGetHeadersParams,
   type EmailGetParams,
   type EmailQueryFilterParams,
   type EmailQueryFilters,
@@ -18,6 +35,7 @@ export {
   emailChanges,
   emailGet,
   emailGetDetail,
+  emailGetHeaders,
   emailQuery,
   emailQueryFilter,
   emailQueryPerTerm,
@@ -42,7 +60,14 @@ export {
 } from './email.ts'
 export { LABEL_KEYWORD_PREFIX, toLabelKeyword } from './keywords.ts'
 export { type JmapLive, makeJmapLive } from './live.ts'
-export { accountIdForMail, accountIdForSieve, bearerAuthorization, fetchSession, JmapError } from './session.ts'
+export {
+  accountIdForContacts,
+  accountIdForMail,
+  accountIdForSieve,
+  bearerAuthorization,
+  fetchSession,
+  JmapError,
+} from './session.ts'
 export {
   type SieveScriptCreateParams,
   type SieveScriptListParams,
@@ -59,6 +84,13 @@ export {
   StalwartCredentialError,
 } from './stalwart-credential.ts'
 export type {
+  AddressBookRecord,
+  ContactCard,
+  ContactCardDraft,
+  ContactCardEmail,
+  ContactCardName,
+  ContactCardNote,
+  ContactCardOrganization,
   EmailAddress,
   EmailBodyPart,
   EmailBodyValue,

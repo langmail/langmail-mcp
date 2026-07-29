@@ -28,6 +28,8 @@
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
+import { parseEvents } from '@langmail/ical'
+
 import {
   type CalDavConfig,
   type DeleteEventParams,
@@ -39,7 +41,6 @@ import {
   type UpdateEventParams,
   updateEvent,
 } from '../caldav/client.ts'
-import { parseEvents } from '../caldav/ical-parse.ts'
 import { spliceOccurrenceCancellation } from '../caldav/occurrence.ts'
 import { isSeriesOccurrence } from '../caldav/recurrence.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'

@@ -24,6 +24,7 @@
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
+import { type ParsedAttendee, type ParsedEvent, parseEvents } from '@langmail/ical'
 import { hashEmail, logger } from '@langmail/logger'
 
 import { type AccountTimeZoneResolver, makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
@@ -37,7 +38,6 @@ import {
   updateEvent,
 } from '../caldav/client.ts'
 import { buildInvite, maxSequence, parseSequence } from '../caldav/ical.ts'
-import { type ParsedEvent, parseEvents } from '../caldav/ical-parse.ts'
 import { spliceOccurrenceOverride } from '../caldav/occurrence.ts'
 import {
   isSeriesOccurrence,
@@ -48,6 +48,7 @@ import {
 } from '../caldav/recurrence.ts'
 import { resolveInputDateTime, toWallClockIso, UTC_TIME_ZONE } from '../caldav/timezone.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
+import { type AttendeeWriteThrough } from './contact-write-through.ts'
 import { createCalendarEventInput, eventUidSchema } from './create-calendar-event.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
@@ -136,6 +137,9 @@ export const mergeAttendees = (base: string[], added: string[], removed: string[
 }
 
 export interface UpdateCalendarEventDeps {
+  // Upserts the effective attendees into the collected address book after a
+  // successful whole-event update (never throws — see contact-write-through.ts).
+  collectAttendees?: AttendeeWriteThrough
   discover: (token: string) => Promise<DiscoveredAccount>
   fetchEvent: (params: FetchEventParams) => Promise<CalendarObject | null>
   // Stored default zone (Stalwart AccountSettings.timeZone), consulted only when
@@ -261,6 +265,17 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
     removedAttendees,
     scheduleAgent,
     sequence,
+    uid: args.uid,
+  })
+
+  // An occurrence edit is a scheduling action like any other, so its
+  // attendees are collected too.
+  await deps.collectAttendees?.({
+    attendees: attendeesWithStoredNames(attendees, master),
+    organizer: master.organizer ?? organizer,
+    selfAddress: organizer,
+    start: start.toISOString(),
+    token,
     uid: args.uid,
   })
 
@@ -587,6 +602,17 @@ const resolveRrule = (args: UpdateCalendarEventArgs, base: EditBase): string | u
   return base.recurrence
 }
 
+// Names for the effective attendees of the contact write-through, recovered
+// from the stored parse where available (a CN survives the rebuild; a
+// freshly added address has none).
+const attendeesWithStoredNames = (attendees: string[], storedMaster: ParsedEvent | undefined): ParsedAttendee[] => {
+  const names = new Map((storedMaster?.attendees ?? []).map((a) => [a.email.toLowerCase(), a.name]))
+  return attendees.map((email) => {
+    const name = names.get(email.toLowerCase())
+    return { email, ...(name ? { name } : {}) }
+  })
+}
+
 // Moving a series onto a weekday its kept rule doesn't list would produce "that
 // one Friday, plus every Tuesday" (RFC 5545) while reporting success. Only a
 // *preserved* rule can contradict the caller this way — an explicit
@@ -758,6 +784,17 @@ export const updateCalendarEvent = async (
     uid: args.uid,
   })
 
+  await deps.collectAttendees?.({
+    attendees: attendeesWithStoredNames(f.attendees, storedMaster),
+    // The same stored-organizer preference rebuildEvent applies, so the
+    // collected card credits whoever actually owns the event.
+    organizer: stored.find((e) => e.organizer)?.organizer ?? account.organizer,
+    selfAddress: account.organizer,
+    start: f.start.toISOString(),
+    token,
+    uid: args.uid,
+  })
+
   return textResult(
     `${rrule ? 'Recurring event' : 'Event'} "${f.title}" updated ` +
       `(${deliverySummary(f.attendees, f.scheduleAgent, removed.length > 0)}).`
@@ -770,12 +807,14 @@ export const makeLiveDeps = (
   cfg: CalDavConfig,
   // Shared across the calendar tools (see mcp/handler.ts) so create→update reuse
   // one per-token cache; defaults to a fresh resolver for standalone callers.
-  resolveTimeZone: AccountTimeZoneResolver = makeAccountTimeZoneResolver({ serverUrl: cfg.serverUrl })
+  resolveTimeZone: AccountTimeZoneResolver = makeAccountTimeZoneResolver({ serverUrl: cfg.serverUrl }),
+  collectAttendees?: AttendeeWriteThrough
 ): UpdateCalendarEventDeps => ({
   discover: (token) => discoverAccount(cfg, token),
   fetchEvent: (params) => fetchEvent(cfg, params),
   resolveTimeZone,
   updateEvent: (params) => updateEvent(cfg, params),
+  ...(collectAttendees ? { collectAttendees } : {}),
 })
 
 // --- MCP registration ----------------------------------------------------

@@ -280,4 +280,45 @@ describe('createCalendarEvent', () => {
     expect(result.isError).toBe(true)
     expect(captured).toHaveLength(0)
   })
+
+  test('write-through receives the attendees after a successful PUT (the Robin case)', async () => {
+    const collected: unknown[] = []
+    const deps = {
+      ...makeDeps(account()),
+      collectAttendees: (writeThrough: unknown) => {
+        collected.push(writeThrough)
+        return Promise.resolve()
+      },
+    }
+    const result = await createCalendarEvent(deps, {
+      args: args({ attendees: ['robin@northwind.example'], title: 'Lunch — Kai & Robin' }),
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(collected).toHaveLength(1)
+    const input = collected[0] as {
+      attendees: { email: string }[]
+      organizer: string
+      selfAddress: string
+      uid: string
+    }
+    expect(input.attendees).toEqual([{ email: 'robin@northwind.example' }])
+    expect(input.organizer).toBe('host@langmail.me')
+    expect(input.selfAddress).toBe('host@langmail.me')
+    expect(input.uid).toContain('@langmail.me')
+  })
+
+  test('no write-through call when the PUT fails', async () => {
+    const collected: unknown[] = []
+    const deps = {
+      ...makeDeps(account()),
+      collectAttendees: (writeThrough: unknown) => {
+        collected.push(writeThrough)
+        return Promise.resolve()
+      },
+      putEvent: () => Promise.reject(new Error('412')),
+    }
+    await createCalendarEvent(deps, { args: args(), token: 'tok' }).catch(() => null)
+    expect(collected).toHaveLength(0)
+  })
 })

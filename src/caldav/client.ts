@@ -21,7 +21,8 @@ import {
   updateCalendarObject,
 } from 'tsdav'
 
-import { parseEvents } from './ical-parse.ts'
+import { parseEvents } from '@langmail/ical'
+
 import { type CalendarObject, type CalendarSummary, type DiscoveredAccount } from './types.ts'
 
 class CalDavError extends Error {

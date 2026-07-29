@@ -27,10 +27,11 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 
+import { parseEvents } from '@langmail/ical'
+
 import { deleteCalendarEvent, makeLiveDeps } from '../tools/delete-calendar-event.ts'
 import { type CalDavConfig, discoverAccount, fetchEvent, putEvent } from './client.ts'
 import { buildInvite } from './ical.ts'
-import { parseEvents } from './ical-parse.ts'
 import { toIcalUtc } from './recurrence.ts'
 
 const ADMIN_URL = process.env.STALWART_ADMIN_URL

@@ -5,13 +5,16 @@
 
 import { parseWallClockInZone } from './timezone.ts'
 
-// One ATTENDEE of a VEVENT, reduced to what the calendar tools need: the bare
-// email (mailto: stripped) and, when the stored line carries one, the PARTSTAT
+// One ATTENDEE of a VEVENT, reduced to what the calendar tools and contact
+// collection need: the bare email (mailto: stripped), the CN display name
+// when the stored line carries one — the pairing of a name with an address
+// is exactly what contact collection feeds on — and the PARTSTAT
 // (ACCEPTED / DECLINED / TENTATIVE / NEEDS-ACTION). Surfaced so list_calendar_events
 // can show who is invited and update_calendar_event's attendee deltas can merge
 // against the real stored list instead of a caller-supplied guess.
 export interface ParsedAttendee {
   email: string
+  name?: string
   status?: string
 }
 
@@ -178,6 +181,12 @@ const eventBlocks = (ical: string): ParsedBlock[] => {
 // mailto: instead of the front. A value we can't reduce to a clean bare
 // address (non-mailto cal-address, leftover quotes/colons) is dropped rather
 // than risk callers writing garbage back into a rebuilt invite.
+// Greedy by design: the real cal-address is the LAST mailto: on the line,
+// after any params. The cost is that a param value containing the literal
+// text `mailto:` (e.g. CN="Reply to mailto:me@x.com instead") strips
+// through that occurrence and yields a wrong address — accepted, since the
+// alternative (parsing quoted params properly) is a full RFC 5545 lexer
+// for a case no server we talk to emits.
 const LAST_MAILTO_RE = /^.*mailto:/isu
 const NOT_BARE_EMAIL_RE = /["\s:;,]/u
 const parseOrganizerEmail = (property: ParsedProperty | undefined): string | undefined => {
@@ -220,17 +229,22 @@ const parseRecurrenceInstant = (property: ParsedProperty | undefined): string | 
 // not-yet-answered attendee only when the client omits the NEEDS-ACTION default.
 const PARTSTAT_RE = /(?:^|;)PARTSTAT=([^;:]+)/iu
 
-// Bare attendee email + PARTSTAT from an ATTENDEE line. Same trailing-mailto
-// anchoring as parseOrganizerEmail: params can smuggle colons past the
-// first-colon split (SENT-BY, CN), so read the address off the last mailto:.
-// An ATTENDEE we can't reduce to a clean bare address is dropped rather than
-// surfaced as garbage or written back into a rebuilt invite.
+// CN on an ATTENDEE parameter list: quoted (CN="Fairweather, Robin" — commas,
+// semicolons, and colons are legal inside the quotes) or unquoted (CN=Robin,
+// value runs to the next `;` or `:`).
+const CN_RE = /(?:^|;)CN=(?:"([^"]*)"|([^;:]+))/iu
+
+// Bare attendee email + CN + PARTSTAT from an ATTENDEE line. Same
+// trailing-mailto anchoring as parseOrganizerEmail: params can smuggle colons
+// past the first-colon split (SENT-BY, CN), so read the address off the last
+// mailto:. An ATTENDEE we can't reduce to a clean bare address is dropped
+// rather than surfaced as garbage or written back into a rebuilt invite.
 const parseAttendee = (property: ParsedProperty): ParsedAttendee | undefined => {
   const email = property.value.replace(LAST_MAILTO_RE, '').trim()
   if (!email || email === property.value.trim() || NOT_BARE_EMAIL_RE.test(email)) {
     return
   }
-  // PARTSTAT can land in `value` rather than `params` when an earlier quoted
+  // Params can land in `value` rather than `params` when an earlier quoted
   // parameter (e.g. CN="Team: Weekly") pushes a ':' past the first-colon split.
   // Reassemble the property (name aside) and search the parameter section — i.e.
   // everything before the trailing cal-address — so the mis-split doesn't hide it.
@@ -238,7 +252,13 @@ const parseAttendee = (property: ParsedProperty): ParsedAttendee | undefined => 
   const addressAt = reassembled.toLowerCase().lastIndexOf('mailto:')
   const paramSection = addressAt === -1 ? reassembled : reassembled.slice(0, addressAt)
   const status = PARTSTAT_RE.exec(paramSection)?.[1]?.replace(/^"|"$/gu, '')
-  return status ? { email, status } : { email }
+  const cnMatch = CN_RE.exec(paramSection)
+  const name = (cnMatch?.[1] ?? cnMatch?.[2])?.trim()
+  return {
+    email,
+    ...(name ? { name } : {}),
+    ...(status ? { status } : {}),
+  }
 }
 
 // Flattens the EXDATE lines of one VEVENT into ISO values. Each line may carry

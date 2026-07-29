@@ -27,6 +27,7 @@ import {
   UTC_TIME_ZONE,
 } from '../caldav/timezone.ts'
 import { type DiscoveredAccount } from '../caldav/types.ts'
+import { type AttendeeWriteThrough } from './contact-write-through.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 // An event's iCalendar UID, as returned by create_calendar_event. Rejects
@@ -77,6 +78,10 @@ export const createCalendarEventInput = z.object({
 export type CreateCalendarEventArgs = z.infer<typeof createCalendarEventInput>
 
 export interface CreateCalendarEventDeps {
+  // Upserts the attendees into the collected address book after a successful
+  // PUT (never throws — see contact-write-through.ts). Optional so
+  // standalone/test callers can omit it.
+  collectAttendees?: AttendeeWriteThrough
   discover: (token: string) => Promise<DiscoveredAccount>
   putEvent: (params: PutEventParams) => Promise<void>
   // Stored default zone (Stalwart AccountSettings.timeZone), consulted only when
@@ -150,6 +155,15 @@ export const createCalendarEvent = async (
 
   await deps.putEvent({ calendarUrl, ical, token, uid })
 
+  await deps.collectAttendees?.({
+    attendees: attendees.map((email) => ({ email })),
+    organizer: account.organizer,
+    selfAddress: account.organizer,
+    start: start.toISOString(),
+    token,
+    uid,
+  })
+
   return textResult(
     `${rrule ? 'Recurring event' : 'Event'} "${args.title}" created (${deliverySummary(attendees, args.notify)}).\n` +
       // Surface the UID + calendar so a later turn can update_calendar_event /
@@ -164,11 +178,13 @@ export const makeLiveDeps = (
   cfg: CalDavConfig,
   // Shared across the calendar tools (see mcp/handler.ts) so create→update reuse
   // one per-token cache; defaults to a fresh resolver for standalone callers.
-  resolveTimeZone: AccountTimeZoneResolver = makeAccountTimeZoneResolver({ serverUrl: cfg.serverUrl })
+  resolveTimeZone: AccountTimeZoneResolver = makeAccountTimeZoneResolver({ serverUrl: cfg.serverUrl }),
+  collectAttendees?: AttendeeWriteThrough
 ): CreateCalendarEventDeps => ({
   discover: (token) => discoverAccount(cfg, token),
   putEvent: (params) => putEvent(cfg, params),
   resolveTimeZone,
+  ...(collectAttendees ? { collectAttendees } : {}),
 })
 
 // --- MCP registration ----------------------------------------------------
