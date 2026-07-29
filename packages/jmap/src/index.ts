@@ -83,6 +83,7 @@ export {
   type StalwartCredential,
   StalwartCredentialError,
 } from './stalwart-credential.ts'
+export { jmapTimeoutSignal } from './timeout.ts'
 export type {
   AddressBookRecord,
   ContactCard,

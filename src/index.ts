@@ -18,6 +18,8 @@ import { createAttachmentDownload } from './attachments/download.ts'
 import { createTicketStore } from './attachments/tickets.ts'
 import { createRoutes } from './handler.ts'
 import { createMcpHandler } from './mcp/handler.ts'
+import { logObservabilityConfig } from './observability/config.ts'
+import { describeError } from './observability/errors.ts'
 
 const TRAILING_SLASHES_RE = /\/+$/u
 
@@ -48,10 +50,23 @@ const routes = createRoutes({
 })
 
 const server = Bun.serve({
+  // Without this, an exception escaping the handler becomes Bun's default 500
+  // and no system records it (L-2 in the 2026-06-18 security review). With it,
+  // the failure reaches Better Stack error tracking through pinoIntegration's
+  // capture of `error`-level lines — no further wiring.
+  error: (error: Error): Response => {
+    logger.error(describeError(error), 'mcp unhandled request error')
+    return new Response(JSON.stringify({ error: 'internal_error' }), {
+      headers: { 'content-type': 'application/json' },
+      status: 500,
+    })
+  },
   fetch: routes.fetch,
   hostname: HOST,
   port: PORT,
 })
+
+logObservabilityConfig()
 
 logger.info(
   {

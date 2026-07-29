@@ -15,6 +15,8 @@ const makeRoutes = (opts: { cache?: TokenCache } = {}) =>
   createRoutes({
     authIssuer: AUTH,
     cache: opts.cache,
+    // Pinned so the assertion doesn't depend on the runner's environment.
+    observability: () => ({ errorTracking: true, logShipping: true }),
     publicUrl: PUBLIC,
     stalwartUrl: STALWART,
   })
@@ -114,6 +116,19 @@ describe('routes', () => {
     expect(body.status).toBe('ready')
     expect(body.checks.auth).toBe('HTTP 401')
     expect(body.checks.stalwart).toBe('HTTP 401')
+  })
+
+  test('GET /readyz reports whether log shipping and error tracking are configured', async () => {
+    // Presence booleans, never values — the uptime monitor records these with
+    // every check, so a reboot that emptied /run/secrets is visible from the
+    // incident body rather than needing a VM login.
+    const r = makeRoutes()
+    const res = await withFetch(
+      () => Promise.resolve(new Response(null, { status: 401 })),
+      () => r.fetch(new Request(`${PUBLIC}/readyz`))
+    )
+    const body = (await res.json()) as { observability: Record<string, boolean> }
+    expect(body.observability).toEqual({ errorTracking: true, logShipping: true })
   })
 
   test('GET /readyz returns 503 when a dependency is unreachable', async () => {

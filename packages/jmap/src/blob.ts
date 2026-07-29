@@ -6,6 +6,7 @@
 // unicode and media types with `/` stay one path/query segment.
 
 import { JmapError } from './session.ts'
+import { fetchWithHeadersDeadline, jmapTimeoutSignal } from './timeout.ts'
 
 export interface BlobDownloadParams {
   accountId: string
@@ -33,7 +34,9 @@ export const blobDownloadUrl = (
 // consumer (the MCP `/attachments/:token` route) without memory pressure.
 export const blobDownload = async (p: BlobDownloadParams): Promise<Response> => {
   const url = blobDownloadUrl(p.downloadUrl, p)
-  const res = await fetch(url, { headers: { authorization: p.authorization } })
+  // Headers-only deadline: the body is piped straight through to the consumer,
+  // so a whole-exchange timeout would cut a slow attachment off mid-transfer.
+  const res = await fetchWithHeadersDeadline(url, { headers: { authorization: p.authorization } })
   if (res.status !== 200) {
     throw new JmapError(res.status, `jmap blob download returned ${res.status}`)
   }
@@ -61,6 +64,7 @@ export const blobUpload = async (p: BlobUploadParams): Promise<string> => {
     body: p.content,
     headers: { authorization: p.authorization, 'content-type': p.type },
     method: 'POST',
+    signal: jmapTimeoutSignal(),
   })
   // RFC 8620 leaves the success code to the server; Stalwart answers 200.
   if (res.status !== 200 && res.status !== 201) {

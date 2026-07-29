@@ -46,6 +46,23 @@ export interface CalDavConfig {
 const DEFAULT_CAL_RE = /\/default\/?$/u
 const MAILTO_RE = /^mailto:/iu
 
+// Same order as the JMAP deadline (@langmail/jmap timeout.ts): enough for a
+// legitimately slow REPORT over a large calendar, short enough that a stalled
+// Stalwart becomes a logged error instead of a request nginx holds for an hour.
+const CALDAV_TIMEOUT_MS = 30_000
+
+// tsdav threads `fetchOptions` into every fetch it makes, including the several
+// requests a single `createAccount` discovery performs (verified against tsdav
+// 2.3.0), so one signal bounds every request it covers. It must be built per
+// use — a signal created once at module load would already be expired.
+//
+// Each exported function below builds exactly one and shares it across the
+// tsdav calls it makes, so the deadline bounds the *function*, not each
+// round-trip inside it. A tool that calls two of them in sequence (discover,
+// then write) therefore has two windows, not one: the deadline turns a stall
+// into an error, and is not a per-tool latency budget.
+const deadline = (): RequestInit => ({ signal: AbortSignal.timeout(CALDAV_TIMEOUT_MS) })
+
 const authHeaders = (cfg: CalDavConfig, credential: string): Record<string, string> =>
   cfg.authHeaders ? cfg.authHeaders(credential) : { authorization: `Bearer ${credential}` }
 
@@ -93,21 +110,29 @@ export const pickOrganizer = (addresses: string[]): string | null => {
   return mail ? mail.replace(MAILTO_RE, '') : null
 }
 
-const loadAccount = (cfg: CalDavConfig, token: string): Promise<DAVAccount> =>
+// Takes the caller's deadline so a function that discovers *and* then acts is
+// bounded once overall, rather than granting each leg a fresh window.
+const loadAccount = (cfg: CalDavConfig, token: string, fetchOptions: RequestInit): Promise<DAVAccount> =>
   createAccount({
     account: { accountType: 'caldav', serverUrl: cfg.serverUrl },
+    fetchOptions,
     headers: authHeaders(cfg, token),
     loadCollections: true,
   })
 
 export const fetchCalendarList = async (cfg: CalDavConfig, token: string): Promise<CalendarSummary[]> => {
-  const account = await loadAccount(cfg, token)
+  const account = await loadAccount(cfg, token, deadline())
   return (account.calendars ?? []).map(toSummary)
 }
 
 export const discoverAccount = async (cfg: CalDavConfig, token: string): Promise<DiscoveredAccount> => {
-  const account = await loadAccount(cfg, token)
-  const addresses = await fetchCalendarUserAddresses({ account, headers: authHeaders(cfg, token) })
+  const fetchOptions = deadline()
+  const account = await loadAccount(cfg, token, fetchOptions)
+  const addresses = await fetchCalendarUserAddresses({
+    account,
+    fetchOptions,
+    headers: authHeaders(cfg, token),
+  })
   const calendars = (account.calendars ?? []).map(toSummary)
   return {
     calendars,
@@ -131,7 +156,8 @@ export interface CreateCalendarParams {
 // UUID — the human name lives in the `displayname` prop, not the URL — so
 // retries or same-named calendars never collide on a path.
 export const createCalendar = async (cfg: CalDavConfig, p: CreateCalendarParams): Promise<string> => {
-  const account = await loadAccount(cfg, p.token)
+  const fetchOptions = deadline()
+  const account = await loadAccount(cfg, p.token, fetchOptions)
   if (!account.homeUrl) {
     throw new Error('no calendar-home-set discovered for the principal')
   }
@@ -139,6 +165,7 @@ export const createCalendar = async (cfg: CalDavConfig, p: CreateCalendarParams)
   // directly usable as create_calendar_event's `calendarUrl`.
   const url = withTrailingSlash(`${withTrailingSlash(account.homeUrl)}${crypto.randomUUID()}`)
   const res = await makeCalendar({
+    fetchOptions,
     headers: authHeaders(cfg, p.token),
     props: {
       [`${DAVNamespaceShort.DAV}:displayname`]: { _text: p.name },
@@ -168,6 +195,7 @@ export interface PutEventParams {
 export const putEvent = async (cfg: CalDavConfig, p: PutEventParams): Promise<void> => {
   const res = await createCalendarObject({
     calendar: { url: withTrailingSlash(p.calendarUrl) },
+    fetchOptions: deadline(),
     filename: `${p.uid}.ics`,
     headers: authHeaders(cfg, p.token),
     iCalString: p.ical,
@@ -218,6 +246,7 @@ export const fetchEvents = async (cfg: CalDavConfig, p: FetchEventsParams): Prom
   try {
     objects = await fetchCalendarObjects({
       calendar: { url: withTrailingSlash(p.calendarUrl) },
+      fetchOptions: deadline(),
       headers: authHeaders(cfg, p.token),
       ...(p.timeRange ? { timeRange: p.timeRange } : {}),
     })
@@ -262,6 +291,7 @@ export interface UpdateEventParams {
 export const updateEvent = async (cfg: CalDavConfig, p: UpdateEventParams): Promise<void> => {
   const res = await updateCalendarObject({
     calendarObject: { data: p.ical, etag: p.etag, url: p.url },
+    fetchOptions: deadline(),
     headers: authHeaders(cfg, p.token),
   })
   if (!res.ok) {
@@ -278,6 +308,7 @@ export interface DeleteEventParams {
 export const deleteEvent = async (cfg: CalDavConfig, p: DeleteEventParams): Promise<void> => {
   const res = await deleteCalendarObject({
     calendarObject: { data: '', etag: p.etag, url: p.url },
+    fetchOptions: deadline(),
     headers: authHeaders(cfg, p.token),
   })
   if (!res.ok) {

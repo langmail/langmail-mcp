@@ -4,6 +4,8 @@
 // without spinning up Bun.serve. `index.ts` does config + transport
 // wiring; this file owns routing.
 
+import { logger } from '@langmail/logger'
+
 import { type AttachmentDownload } from './attachments/download.ts'
 import { type AuthContext, type AuthMiddleware, createAuthMiddleware } from './auth/middleware.ts'
 import { TokenCache } from './auth/token-cache.ts'
@@ -14,6 +16,7 @@ import {
   readyzResponse,
   stalwartReachable,
 } from './health/readiness.ts'
+import { type ObservabilityStatus, observabilityConfig } from './observability/config.ts'
 
 export interface HandlerConfig {
   // Redeems a minted attachment ticket (GET /attachments/:token). No bearer
@@ -28,6 +31,9 @@ export interface HandlerConfig {
   // Authenticated MCP handler. Phase 1 leaves this stubbed to 501;
   // phase 2 wires StreamableHTTPServerTransport in here.
   mcpHandler?: (req: Request, ctx: AuthContext) => Promise<Response>
+  // Reports whether log shipping / error tracking are configured; surfaced on
+  // /readyz. Injectable so tests don't depend on the process environment.
+  observability?: ObservabilityStatus
   publicUrl: string
   // Readiness checker. Defaults to probing Better Auth (token validation) and
   // Stalwart (JMAP/DAV egress); injectable so tests can supply a fake.
@@ -49,6 +55,25 @@ const attachmentsRoute = (req: Request, pathname: string, download?: AttachmentD
     return download(token)
   }
   return Promise.resolve(new Response('not found\n', { status: 404 }))
+}
+
+// One structured line per /mcp request: what it was, how it ended, how long it
+// took. Method + route + status + duration carry no PII (REVIEW.md), and this
+// is the record that answers "were requests arriving, and where did they stop"
+// after an incident. Health and well-known routes are deliberately unlogged —
+// the uptime monitor polls them every three minutes and would drown the rest.
+//
+// Note this only fires on *completion*: a request still hung on an upstream has
+// logged nothing yet. nginx's access log in journald is the arrival signal (see
+// infra/RUNBOOK.md).
+const logRequest = async (req: Request, route: string, handle: () => Promise<Response>): Promise<Response> => {
+  const startedAt = performance.now()
+  const res = await handle()
+  logger.info(
+    { durationMs: Math.round(performance.now() - startedAt), method: req.method, route, status: res.status },
+    'mcp request'
+  )
+  return res
 }
 
 const json = (body: unknown, init: ResponseInit = {}): Response =>
@@ -74,6 +99,7 @@ export const createRoutes = (cfg: HandlerConfig): Routes => {
       auth: authReachable(cfg.authIssuer),
       stalwart: stalwartReachable(cfg.stalwartUrl),
     })
+  const observability = cfg.observability ?? observabilityConfig
 
   const fetchHandler = async (req: Request): Promise<Response> => {
     const url = new URL(req.url)
@@ -85,7 +111,7 @@ export const createRoutes = (cfg: HandlerConfig): Routes => {
     }
 
     if (url.pathname === '/readyz') {
-      return readyzResponse(await readiness())
+      return readyzResponse(await readiness(), { observability: observability() })
     }
 
     if (url.pathname === '/.well-known/oauth-authorization-server') {
@@ -139,21 +165,25 @@ export const createRoutes = (cfg: HandlerConfig): Routes => {
     }
 
     if (url.pathname === '/mcp' || url.pathname.startsWith('/mcp/')) {
-      const result = await authenticate(req)
-      if (result instanceof Response) {
-        return result
-      }
-      if (cfg.mcpHandler) {
-        return cfg.mcpHandler(req, result)
-      }
-      return json(
-        {
-          detail: 'MCP transport lands in phase 2',
-          error: 'not_implemented',
-          principal: result.principal,
-        },
-        { status: 501 }
-      )
+      // Route label is the branch, not the pathname: /mcp/<anything> is the
+      // same handler, and a raw pathname would be unbounded cardinality.
+      return logRequest(req, '/mcp', async () => {
+        const result = await authenticate(req)
+        if (result instanceof Response) {
+          return result
+        }
+        if (cfg.mcpHandler) {
+          return cfg.mcpHandler(req, result)
+        }
+        return json(
+          {
+            detail: 'MCP transport lands in phase 2',
+            error: 'not_implemented',
+            principal: result.principal,
+          },
+          { status: 501 }
+        )
+      })
     }
 
     return new Response('not found\n', { status: 404 })

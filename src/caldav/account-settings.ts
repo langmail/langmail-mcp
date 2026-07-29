@@ -13,7 +13,7 @@
 // caller falls through to UTC. Failing open keeps event creation working even if
 // this read breaks — the only cost is the historical UTC rendering.
 
-import { accountIdForMail, bearerAuthorization, fetchSession } from '@langmail/jmap'
+import { accountIdForMail, bearerAuthorization, fetchSession, jmapTimeoutSignal } from '@langmail/jmap'
 import { logger } from '@langmail/logger'
 
 import { isValidTimeZone } from './timezone.ts'
@@ -46,6 +46,9 @@ const fetchAccountTimeZone = async (cfg: AccountSettingsConfig, token: string): 
     }),
     headers: { authorization, 'content-type': 'application/json' },
     method: 'POST',
+    // Bounded like every other JMAP call: this read fails open, but only if it
+    // fails — an unbounded one would hang event creation behind a stalled Stalwart.
+    signal: jmapTimeoutSignal(),
   })
   if (res.status !== 200) {
     throw new Error(`x:AccountSettings/get returned ${res.status}`)
