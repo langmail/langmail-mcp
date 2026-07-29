@@ -1,17 +1,9 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
-// Capture the log lines instead of shipping them. Installed before importing
-// the module under test (Bun evaluates mock.module eagerly). The double carries
-// every level because mock.module replaces the module for the whole test run,
-// including files that only log in passing.
-const info = mock((_fields: Record<string, unknown>, _msg: string) => undefined)
-const error = mock((_fields: Record<string, unknown>, _msg: string) => undefined)
-const noop = (): undefined => undefined
-const logger = { child: () => logger, debug: noop, error, fatal: noop, info, trace: noop, warn: noop }
-mock.module('@langmail/logger', () => ({ logger }))
+import { logger } from '@langmail/logger'
 
-const { instrumentToolLogging } = await import('./tool-logging.ts')
+import { instrumentToolLogging } from './tool-logging.ts'
 
 type Registered = (args: unknown, extra: unknown) => Promise<unknown>
 
@@ -35,57 +27,76 @@ const register = (server: McpServer, name: string, cb: () => unknown): void => {
   ;(server.registerTool as unknown as (n: string, c: unknown, f: () => unknown) => unknown)(name, {}, cb)
 }
 
+// Spy on the shared logger rather than replacing the module: mock.module is
+// process-wide for the whole test run, and a stale replacement would follow
+// every other file that logs (see update-calendar-event.test.ts).
+const withLogSpies = async (
+  fn: (spies: { error: ReturnType<typeof spyOn>; info: ReturnType<typeof spyOn> }) => Promise<void>
+): Promise<void> => {
+  const info = spyOn(logger, 'info').mockImplementation(() => undefined)
+  const error = spyOn(logger, 'error').mockImplementation(() => undefined)
+  try {
+    await fn({ error, info })
+  } finally {
+    info.mockRestore()
+    error.mockRestore()
+  }
+}
+
 describe('instrumentToolLogging', () => {
-  beforeEach(() => {
-    info.mockClear()
-    error.mockClear()
-  })
-
   test('logs name, duration and outcome for a successful call', async () => {
-    const { registered, server } = makeServer()
-    register(server, 'list_calendars', () => ({ content: [{ text: '2 calendars', type: 'text' }] }))
+    await withLogSpies(async ({ error, info }) => {
+      const { registered, server } = makeServer()
+      register(server, 'list_calendars', () => ({ content: [{ text: '2 calendars', type: 'text' }] }))
 
-    const result = await registered.get('list_calendars')?.({}, {})
+      const result = await registered.get('list_calendars')?.({}, {})
 
-    expect(result).toEqual({ content: [{ text: '2 calendars', type: 'text' }] })
-    expect(error).not.toHaveBeenCalled()
-    const [fields] = info.mock.calls[0] ?? []
-    expect(fields?.tool).toBe('list_calendars')
-    expect(fields?.outcome).toBe('success')
-    expect(typeof fields?.durationMs).toBe('number')
+      expect(result).toEqual({ content: [{ text: '2 calendars', type: 'text' }] })
+      expect(error).not.toHaveBeenCalled()
+      expect(info).toHaveBeenCalledTimes(1)
+      const fields = info.mock.calls[0]?.[0] as Record<string, unknown>
+      expect(fields.tool).toBe('list_calendars')
+      expect(fields.outcome).toBe('success')
+      expect(typeof fields.durationMs).toBe('number')
+    })
   })
 
   test('counts an isError result as a failure without quoting its text', async () => {
-    const { registered, server } = makeServer()
-    register(server, 'create_calendar_event', () => ({
-      content: [{ text: 'Conflicts with lunch with bob@langmail.me', type: 'text' }],
-      isError: true,
-    }))
+    await withLogSpies(async ({ error, info }) => {
+      const { registered, server } = makeServer()
+      register(server, 'create_calendar_event', () => ({
+        content: [{ text: 'Conflicts with lunch with bob@langmail.me', type: 'text' }],
+        isError: true,
+      }))
 
-    await registered.get('create_calendar_event')?.({}, {})
+      await registered.get('create_calendar_event')?.({}, {})
 
-    expect(info).not.toHaveBeenCalled()
-    const [fields] = error.mock.calls[0] ?? []
-    expect(fields?.tool).toBe('create_calendar_event')
-    expect(fields?.outcome).toBe('tool_error')
-    expect(JSON.stringify(fields)).not.toContain('bob@langmail.me')
+      expect(info).not.toHaveBeenCalled()
+      expect(error).toHaveBeenCalledTimes(1)
+      const fields = error.mock.calls[0]?.[0] as Record<string, unknown>
+      expect(fields.tool).toBe('create_calendar_event')
+      expect(fields.outcome).toBe('tool_error')
+      expect(JSON.stringify(fields)).not.toContain('bob@langmail.me')
+    })
   })
 
   test('logs a thrown error by class and rethrows it', async () => {
-    const { registered, server } = makeServer()
-    register(server, 'search_emails', () => {
-      throw new TypeError('fetch failed for alice@langmail.me')
+    await withLogSpies(async ({ error }) => {
+      const { registered, server } = makeServer()
+      register(server, 'search_emails', () => {
+        throw new TypeError('fetch failed for alice@langmail.me')
+      })
+
+      const thrown = await registered
+        .get('search_emails')?.({}, {})
+        .catch((err: unknown) => err)
+
+      expect(thrown).toBeInstanceOf(TypeError)
+      const fields = error.mock.calls[0]?.[0] as Record<string, unknown>
+      expect(fields.tool).toBe('search_emails')
+      expect(fields.outcome).toBe('exception')
+      expect(fields.errorClass).toBe('TypeError')
+      expect(fields.errorMessage).toBe('fetch failed for [email]')
     })
-
-    const thrown = await registered
-      .get('search_emails')?.({}, {})
-      .catch((err: unknown) => err)
-
-    expect(thrown).toBeInstanceOf(TypeError)
-    const [fields] = error.mock.calls[0] ?? []
-    expect(fields?.tool).toBe('search_emails')
-    expect(fields?.outcome).toBe('exception')
-    expect(fields?.errorClass).toBe('TypeError')
-    expect(fields?.errorMessage).toBe('fetch failed for [email]')
   })
 })

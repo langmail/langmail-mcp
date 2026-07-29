@@ -1,20 +1,9 @@
-// Request-completion logging lives in its own file because asserting it means
-// replacing @langmail/logger, and mock.module must run before the module under
-// test is imported.
+import { describe, expect, spyOn, test } from 'bun:test'
 
-import { describe, expect, mock, test } from 'bun:test'
+import { logger } from '@langmail/logger'
 
 import { TokenCache } from './auth/token-cache.ts'
-
-// The double carries every level because mock.module replaces the module for
-// the whole test run, including files that only log in passing.
-const info = mock((_fields: Record<string, unknown>, _msg: string) => undefined)
-const error = mock((_fields: Record<string, unknown>, _msg: string) => undefined)
-const noop = (): undefined => undefined
-const logger = { child: () => logger, debug: noop, error, fatal: noop, info, trace: noop, warn: noop }
-mock.module('@langmail/logger', () => ({ logger }))
-
-const { createRoutes } = await import('./handler.ts')
+import { createRoutes } from './handler.ts'
 
 const PUBLIC = 'https://mcp.example.com'
 
@@ -27,20 +16,33 @@ const makeRoutes = (cache?: TokenCache) =>
     stalwartUrl: 'https://mail.example.com',
   })
 
-const requestLines = (): Record<string, unknown>[] =>
-  info.mock.calls.filter(([, msg]) => msg === 'mcp request').map(([fields]) => fields)
+// Spy on the shared logger rather than replacing the module: mock.module is
+// process-wide for the whole test run, and a stale replacement would follow
+// every other file that logs (see update-calendar-event.test.ts).
+const requestLines = async (fn: () => Promise<unknown>): Promise<Record<string, unknown>[]> => {
+  const info = spyOn(logger, 'info').mockImplementation(() => undefined)
+  try {
+    await fn()
+    return info.mock.calls
+      .filter(([, msg]) => msg === 'mcp request')
+      .map(([fields]) => fields as Record<string, unknown>)
+  } finally {
+    info.mockRestore()
+  }
+}
 
 describe('/mcp request logging', () => {
   test('records method, route, status and duration for an authenticated request', async () => {
-    info.mockClear()
     const cache = new TokenCache()
     cache.set('good', { exp: Math.floor(Date.now() / 1000) + 60, principal: 'alice@langmail.me' })
 
-    await makeRoutes(cache).fetch(
-      new Request(`${PUBLIC}/mcp`, { headers: { authorization: 'Bearer good' }, method: 'POST' })
+    const lines = await requestLines(() =>
+      makeRoutes(cache).fetch(
+        new Request(`${PUBLIC}/mcp`, { headers: { authorization: 'Bearer good' }, method: 'POST' })
+      )
     )
 
-    const [line] = requestLines()
+    const [line] = lines
     expect(line?.method).toBe('POST')
     expect(line?.route).toBe('/mcp')
     // The phase-1 stub answers 501; what matters is that the outcome is recorded.
@@ -51,20 +53,19 @@ describe('/mcp request logging', () => {
   })
 
   test('records a rejected request too — a 401 is an outcome, not a non-event', async () => {
-    info.mockClear()
+    const lines = await requestLines(() => makeRoutes().fetch(new Request(`${PUBLIC}/mcp`, { method: 'POST' })))
 
-    await makeRoutes().fetch(new Request(`${PUBLIC}/mcp`, { method: 'POST' }))
-
-    expect(requestLines()[0]?.status).toBe(401)
+    expect(lines[0]?.status).toBe(401)
   })
 
   test('leaves health and well-known routes unlogged', async () => {
-    info.mockClear()
     const routes = makeRoutes()
 
-    await routes.fetch(new Request(`${PUBLIC}/healthz`))
-    await routes.fetch(new Request(`${PUBLIC}/.well-known/oauth-protected-resource`))
+    const lines = await requestLines(async () => {
+      await routes.fetch(new Request(`${PUBLIC}/healthz`))
+      await routes.fetch(new Request(`${PUBLIC}/.well-known/oauth-protected-resource`))
+    })
 
-    expect(requestLines()).toHaveLength(0)
+    expect(lines).toHaveLength(0)
   })
 })
