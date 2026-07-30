@@ -187,6 +187,20 @@ const loadSendableDraft = async (
       ),
     }
   }
+  // create_draft refuses a recipientless draft at staging time, but this tool
+  // sends any draft in the folder — including one the user composed in Langmail
+  // and left unaddressed. Without this, the empty roster reaches the server as a
+  // submission with nothing to derive an envelope from, and the agent gets a raw
+  // JMAP error instead of the one fact it can act on.
+  const recipientCount = (record.to?.length ?? 0) + (record.cc?.length ?? 0) + (record.bcc?.length ?? 0)
+  if (recipientCount === 0) {
+    return {
+      error: errorResult(
+        `Draft ${p.draftId} has no recipients, so it cannot be sent. Nothing was sent. Add them with ` +
+          'update_draft, then send the draftId it returns.'
+      ),
+    }
+  }
   return { record }
 }
 
