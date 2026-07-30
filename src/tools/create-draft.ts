@@ -17,6 +17,7 @@ import { bearerAuthorization, type EmailDraft } from '@langmail/jmap'
 import { type IdempotencyStore } from '../drafts/idempotency.ts'
 import { ACCOUNT_WRITE } from './annotations.ts'
 import {
+  countRecipients,
   type DraftToolDeps,
   formatDraft,
   parseRecipients,
@@ -188,9 +189,7 @@ export const createDraft = async (
   if (conflict) {
     return errorResult(`${conflict} Nothing was staged.`)
   }
-  // Counted across all three fields, not just "was `to` supplied": `to: []` is
-  // present but empty, and would stage a draft with no recipients at all.
-  const namedRecipients = (args.to?.length ?? 0) + (args.cc?.length ?? 0) + (args.bcc?.length ?? 0)
+  const namedRecipients = countRecipients(args)
   if (namedRecipients === 0 && args.inReplyTo === undefined) {
     return errorResult(
       'Provide recipients: `to` (or `cc`/`bcc`), or `inReplyTo` to derive them from the message being ' +
