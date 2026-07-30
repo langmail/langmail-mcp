@@ -18,6 +18,7 @@ import {
   resolveCalendarUrl,
 } from '../caldav/client.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
+import { READ_ONLY } from './annotations.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 export const listCalendarEventsInput = z.object({
@@ -127,6 +128,7 @@ export const registerListCalendarEvents = (
   server.registerTool(
     'list_calendar_events',
     {
+      annotations: READ_ONLY,
       description:
         'Read the user’s calendar, agenda or schedule — what’s on their calendar, what meetings they ' +
         'have, when they are busy or free. Lists events with each event’s title, time, ' +

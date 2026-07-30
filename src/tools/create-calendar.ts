@@ -13,6 +13,7 @@ import {
   type CreateCalendarParams,
   createCalendar as createCalendarCollection,
 } from '../caldav/client.ts'
+import { ACCOUNT_WRITE } from './annotations.ts'
 import { type ToolResult, textResult } from './result.ts'
 
 // A hex color for the Apple `calendar-color` extension, e.g. "#FF6600" or
@@ -69,6 +70,7 @@ export const registerCreateCalendar = (
   server.registerTool(
     'create_calendar',
     {
+      annotations: ACCOUNT_WRITE,
       description:
         'Creates a new calendar for the authenticated user and returns its CalDAV URL ' +
         '(pass that URL to create_calendar_event to add events to it). Use this when the ' +

@@ -82,3 +82,8 @@ export const accountIdForSieve = (session: JmapSession): string =>
 // session omits a contacts primary.
 export const accountIdForContacts = (session: JmapSession): string =>
   session.primaryAccounts['urn:ietf:params:jmap:contacts'] ?? accountIdForMail(session)
+
+// And for submission (RFC 8621 §7): identities and submissions live on the
+// account that owns the mail, so the mail primary is the fallback.
+export const accountIdForSubmission = (session: JmapSession): string =>
+  session.primaryAccounts['urn:ietf:params:jmap:submission'] ?? accountIdForMail(session)

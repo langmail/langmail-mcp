@@ -9,6 +9,7 @@ import { z } from 'zod'
 
 import { type CalDavConfig, fetchCalendarList } from '../caldav/client.ts'
 import { type CalendarSummary } from '../caldav/types.ts'
+import { READ_ONLY } from './annotations.ts'
 import { type ToolResult, textResult } from './result.ts'
 
 // No inputs: the principal is implied by the bearer.
@@ -51,6 +52,7 @@ export const registerListCalendars = (
   server.registerTool(
     'list_calendars',
     {
+      annotations: READ_ONLY,
       description:
         "Lists the authenticated user's calendars. Returns each calendar's " +
         'display name and CalDAV URL (the URL is what create_calendar_event takes).',

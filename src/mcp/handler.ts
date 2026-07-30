@@ -17,6 +17,7 @@ import { type JmapLive } from '@langmail/jmap'
 import { type TicketStore } from '../attachments/tickets.ts'
 import { type AuthContext } from '../auth/middleware.ts'
 import { makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
+import { createIdempotencyStore } from '../drafts/idempotency.ts'
 import { makeLiveApplyIo, makeMailRulesApplier } from '../rules/apply.ts'
 import { makeLiveSieveIo, makeMailRulesStore } from '../rules/store.ts'
 import { makeAttendeeWriteThrough } from '../tools/contact-write-through.ts'
@@ -25,6 +26,7 @@ import {
   makeLiveDeps as makeCreateCalendarEventDeps,
   registerCreateCalendarEvent,
 } from '../tools/create-calendar-event.ts'
+import { registerCreateDraft } from '../tools/create-draft.ts'
 import { registerCreateMailRule } from '../tools/create-mail-rule.ts'
 import {
   makeLiveDeps as makeDeleteCalendarEventDeps,
@@ -32,6 +34,8 @@ import {
 } from '../tools/delete-calendar-event.ts'
 import { registerDeleteMailRule } from '../tools/delete-mail-rule.ts'
 import { makeLiveDeps as makeDownloadAttachmentDeps, registerDownloadAttachment } from '../tools/download-attachment.ts'
+import { makeLiveDeps as makeDraftDeps } from '../tools/draft-common.ts'
+import { registerGetDraft } from '../tools/get-draft.ts'
 import { makeLiveDeps as makeGetEmailDeps, registerGetEmail } from '../tools/get-email.ts'
 import { makeLiveDeps as makeGetThreadDeps, registerGetThread } from '../tools/get-thread.ts'
 import {
@@ -42,13 +46,16 @@ import { makeLiveDeps as makeListCalendarsDeps, registerListCalendars } from '..
 import { registerListMailRules } from '../tools/list-mail-rules.ts'
 import { type MailRuleToolDeps } from '../tools/mail-rule-common.ts'
 import { registerPreviewMailRule } from '../tools/preview-mail-rule.ts'
+import { registerReplyToMessage } from '../tools/reply-to-message.ts'
 import { makeLiveDeps as makeRespondToEventDeps, registerRespondToEvent } from '../tools/respond-to-event.ts'
 import { makeLiveDeps as makeSearchContactsDeps, registerSearchContacts } from '../tools/search-contacts.ts'
 import { makeLiveDeps as makeSearchEmailsDeps, registerSearchEmails } from '../tools/search-emails.ts'
+import { registerSendDraft } from '../tools/send-draft.ts'
 import {
   makeLiveDeps as makeUpdateCalendarEventDeps,
   registerUpdateCalendarEvent,
 } from '../tools/update-calendar-event.ts'
+import { registerUpdateDraft } from '../tools/update-draft.ts'
 import { registerUpdateMailRule } from '../tools/update-mail-rule.ts'
 import { instrumentToolLogging } from './tool-logging.ts'
 
@@ -95,6 +102,12 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   const deleteCalendarEventDeps = makeDeleteCalendarEventDeps(caldavCfg)
   const respondToEventDeps = makeRespondToEventDeps(caldavCfg, collectAttendees)
   const searchContactsDeps = makeSearchContactsDeps(jmapLive, caldavCfg)
+  // Composition: one deps bundle for the whole draft/send surface (they share
+  // every seam), plus one process-lifetime replay cache so a client that
+  // retries a send whose response it never saw gets the first answer back
+  // instead of a second delivery.
+  const draftDeps = makeDraftDeps(jmapLive)
+  const composeReplays = createIdempotencyStore<string>()
 
   return async (req, ctx) => {
     const server = new McpServer({
@@ -120,6 +133,29 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     registerDeleteCalendarEvent(server, deleteCalendarEventDeps, () => ctx.token)
     registerRespondToEvent(server, respondToEventDeps, () => ctx.token)
     registerSearchContacts(server, searchContactsDeps, () => ctx.token)
+    registerCreateDraft(
+      server,
+      draftDeps,
+      composeReplays,
+      () => ctx.token,
+      () => ctx.principal
+    )
+    registerGetDraft(server, draftDeps, () => ctx.token)
+    registerUpdateDraft(server, draftDeps, () => ctx.token)
+    registerSendDraft(
+      server,
+      draftDeps,
+      composeReplays,
+      () => ctx.token,
+      () => ctx.principal
+    )
+    registerReplyToMessage(
+      server,
+      draftDeps,
+      composeReplays,
+      () => ctx.token,
+      () => ctx.principal
+    )
 
     // Stateless mode (sessionIdGenerator omitted). Each request stands
     // alone — initialize, tool call, and shutdown happen within the

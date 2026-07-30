@@ -9,6 +9,7 @@ import { z } from 'zod'
 
 import { skippedActionTypes } from '../rules/apply.ts'
 import { hasAnyCondition, type MailRule, normalizeConditions } from '../rules/rule.ts'
+import { READ_ONLY } from './annotations.ts'
 import {
   existingMailSchema,
   existingMailShape,
@@ -96,6 +97,7 @@ export const registerPreviewMailRule = (server: McpServer, deps: MailRuleToolDep
   server.registerTool(
     'preview_mail_rule',
     {
+      annotations: READ_ONLY,
       description:
         'Validate a proposed mail rule and estimate its effect WITHOUT creating or changing ' +
         'anything — returns whether the rule is valid, warnings, how many existing messages ' +

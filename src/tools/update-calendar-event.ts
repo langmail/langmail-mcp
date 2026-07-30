@@ -48,6 +48,7 @@ import {
 } from '../caldav/recurrence.ts'
 import { resolveInputDateTime, toWallClockIso, UTC_TIME_ZONE } from '../caldav/timezone.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
+import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import { type AttendeeWriteThrough } from './contact-write-through.ts'
 import { createCalendarEventInput, eventUidSchema } from './create-calendar-event.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
@@ -828,6 +829,7 @@ export const registerUpdateCalendarEvent = (
   server.registerTool(
     'update_calendar_event',
     {
+      annotations: OUTWARD_DESTRUCTIVE,
       // Kept short and front-loaded with the words a user actually types
       // ("update", "edit", "reschedule", "move", "change the time", "add
       // attendees"): tool search ranks this string plus the argument

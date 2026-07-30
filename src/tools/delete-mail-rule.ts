@@ -5,6 +5,7 @@
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
+import { ACCOUNT_DESTRUCTIVE } from './annotations.ts'
 import { type MailRuleToolDeps } from './mail-rule-common.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
@@ -46,6 +47,7 @@ export const registerDeleteMailRule = (server: McpServer, deps: MailRuleToolDeps
   server.registerTool(
     'delete_mail_rule',
     {
+      annotations: ACCOUNT_DESTRUCTIVE,
       description:
         'Delete a persistent mail rule by id so it stops applying to future incoming messages. ' +
         'Messages the rule already acted on are not reverted. To pause a rule instead of ' +

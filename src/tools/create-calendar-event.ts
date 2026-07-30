@@ -27,6 +27,7 @@ import {
   UTC_TIME_ZONE,
 } from '../caldav/timezone.ts'
 import { type DiscoveredAccount } from '../caldav/types.ts'
+import { OUTWARD_WRITE } from './annotations.ts'
 import { type AttendeeWriteThrough } from './contact-write-through.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
@@ -198,6 +199,7 @@ export const registerCreateCalendarEvent = (
   server.registerTool(
     'create_calendar_event',
     {
+      annotations: OUTWARD_WRITE,
       // Front-loaded with what a user types to want this tool ("schedule a
       // meeting", "book", "invite", "put it on my calendar"); the specification
       // detail lives on the docs site, because this string is indexed by tool

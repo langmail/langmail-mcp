@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:integration": "bun test caldav-integration",
-    "test:stalwart": "bun test stalwart-update-organizer stalwart-cancel-occurrence stalwart-attendee-delta attachments-stalwart mail-rules-stalwart search-contacts-stalwart",
+    "test:stalwart": "bun test stalwart-update-organizer stalwart-cancel-occurrence stalwart-attendee-delta attachments-stalwart mail-rules-stalwart search-contacts-stalwart drafts-stalwart",
     "smoke": "bun run scripts/smoke.ts",
     "measure:tool-size": "bun run scripts/measure-indexed-size.ts"
   },

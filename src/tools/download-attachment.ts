@@ -17,6 +17,7 @@ import {
 } from '@langmail/jmap'
 
 import { TICKET_TTL_MINUTES, type TicketInput, type TicketStore } from '../attachments/tickets.ts'
+import { READ_ONLY } from './annotations.ts'
 import { formatSize } from './format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
@@ -120,6 +121,7 @@ export const registerDownloadAttachment = (
   server.registerTool(
     'download_attachment',
     {
+      annotations: READ_ONLY,
       description:
         'Get a short-lived download URL for one email attachment, identified ' +
         'by the emailId + blobId that search_emails, get_thread, or get_email lists. The result is metadata ' +

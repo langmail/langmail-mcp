@@ -44,6 +44,7 @@ import {
 import { spliceOccurrenceCancellation } from '../caldav/occurrence.ts'
 import { isSeriesOccurrence } from '../caldav/recurrence.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
+import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import { eventUidSchema } from './create-calendar-event.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
@@ -188,6 +189,7 @@ export const registerDeleteCalendarEvent = (
   server.registerTool(
     'delete_calendar_event',
     {
+      annotations: OUTWARD_DESTRUCTIVE,
       description:
         'Cancel, delete or remove a calendar event or meeting the user organizes, identified by its uid ' +
         'from create_calendar_event or list_calendar_events, and send iMIP cancellations to its attendees. ' +

@@ -26,6 +26,7 @@ import {
 } from '../caldav/client.ts'
 import { type Partstat, setAttendeePartstat } from '../caldav/rsvp.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
+import { OUTWARD_WRITE } from './annotations.ts'
 import { type AttendeeWriteThrough } from './contact-write-through.ts'
 import { eventUidSchema } from './create-calendar-event.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
@@ -144,6 +145,7 @@ export const registerRespondToEvent = (
   server.registerTool(
     'respond_to_event',
     {
+      annotations: OUTWARD_WRITE,
       description:
         'RSVP to a calendar invite or meeting invitation on the authenticated user’s behalf — accept, ' +
         'decline, or answer tentative/maybe. Sets their ' +

@@ -9,6 +9,7 @@ import { z } from 'zod'
 
 import { LARGE_APPLY_THRESHOLD } from '../rules/apply.ts'
 import { hasAnyCondition, type MailRule, normalizeConditions } from '../rules/rule.ts'
+import { ACCOUNT_WRITE } from './annotations.ts'
 import {
   existingMailSchema,
   existingMailShape,
@@ -108,6 +109,7 @@ export const registerUpdateMailRule = (server: McpServer, deps: MailRuleToolDeps
   server.registerTool(
     'update_mail_rule',
     {
+      annotations: ACCOUNT_WRITE,
       description:
         'Update an existing mail rule while keeping its id and history: rename it, enable or ' +
         'disable it, change how conditions combine (match), or replace its conditions or ' +

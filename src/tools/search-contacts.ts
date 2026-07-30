@@ -37,6 +37,7 @@ import {
 } from '@langmail/jmap'
 
 import { type CalDavConfig, discoverAccount, fetchEvents } from '../caldav/client.ts'
+import { READ_ONLY } from './annotations.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 const searchContactsShape = {
@@ -336,6 +337,7 @@ export const registerSearchContacts = (
   server.registerTool(
     'search_contacts',
     {
+      annotations: READ_ONLY,
       description:
         "Resolve a person's name, partial name, email address, or organization to " +
         'known contacts, ranked by interaction recency and frequency. Sources ' +

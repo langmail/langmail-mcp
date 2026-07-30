@@ -82,6 +82,40 @@ export interface EmailDetailRecord extends EmailRecord {
   to?: EmailAddress[] | null
 }
 
+// What a staged draft has to round-trip: the detail shape plus the recipient
+// and threading properties only composition cares about. `bcc` never appears
+// on a received message, and `inReplyTo`/`references` are the RFC 5322
+// threading headers in RFC 8621's "asMessageIds" form (bare ids, no angle
+// brackets) — reading them back is what lets update_draft rebuild a reply
+// without re-deriving the thread.
+export interface EmailComposeRecord extends EmailDetailRecord {
+  bcc?: EmailAddress[] | null
+  htmlBody?: EmailBodyPart[] | null
+  inReplyTo?: string[] | null
+  references?: string[] | null
+  replyTo?: EmailAddress[] | null
+}
+
+// RFC 8621 §6 Identity — one address the account is allowed to send as.
+// `id` is what EmailSubmission/set requires; `email` is how a caller-supplied
+// `from` is matched against the account's aliases.
+export interface IdentityRecord {
+  email: string
+  id: string
+  name?: string | null
+  replyTo?: EmailAddress[] | null
+}
+
+// RFC 8621 §7 EmailSubmission, narrowed to what a send reports back.
+// `undoStatus` is `pending` while the submission can still be canceled,
+// `final` once it can't; `sendAt` is when the server released (or will
+// release) the message.
+export interface EmailSubmissionRecord {
+  id: string
+  sendAt?: string | null
+  undoStatus?: string | null
+}
+
 export interface ThreadRecord {
   emailIds: string[]
   id: string

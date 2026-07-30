@@ -5,6 +5,7 @@
 
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
+import { READ_ONLY } from './annotations.ts'
 import { type MailRuleToolDeps } from './mail-rule-common.ts'
 import { formatMailRule } from './mail-rule-format.ts'
 import { type ToolResult, textResult } from './result.ts'
@@ -28,6 +29,7 @@ export const registerListMailRules = (server: McpServer, deps: MailRuleToolDeps,
   server.registerTool(
     'list_mail_rules',
     {
+      annotations: READ_ONLY,
       description:
         'List the persistent mail rules with their ids, names, enabled state, conditions, ' +
         'actions, and creation/modification times. Use this to answer "what rules do I ' +

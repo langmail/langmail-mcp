@@ -3,6 +3,7 @@
 // changes surface (Email/set patches, Email/changes, Mailbox/get by role)
 // the email-agent needs once it becomes a JMAP client (ADR 0004).
 
+import { buildEmailSetPatch, type EmailSetChanges } from './patch.ts'
 import { jmapCall as call, type JmapCall, methodResponse } from './request.ts'
 import { JmapError } from './session.ts'
 import {
@@ -60,13 +61,10 @@ const EMAIL_DETAIL_PROPERTIES = [
 // blobId retrieval handle — explicit so parts come back minimal.
 const EMAIL_BODY_PROPERTIES = ['partId', 'blobId', 'name', 'type', 'size', 'disposition', 'cid'] as const
 
-// Escape a keyword or mailbox id for use as an RFC 6901 JSON Pointer token in
-// an Email/set PatchObject: `~` and `/` are structural and MUST be escaped
-// (`~`→`~0`, `/`→`~1`), order matters (escape `~` first). Mirrors the Rust
-// mirror in email-sync's `set_keywords`. Agent `$label:` keywords contain
-// neither char, but keeping the escape correct means the same wrapper is safe
-// for nested-label keywords too.
-const jsonPointerEscape = (token: string): string => token.replaceAll('~', '~0').replaceAll('/', '~1')
+// The keyword/mailbox PatchObject shape is shared with EmailSubmission's
+// `onSuccessUpdateEmail` (see patch.ts) and re-exported here so the Email/set
+// callers keep importing it from the capability they're using.
+export type { EmailSetChanges } from './patch.ts'
 
 // --- Email/query ---------------------------------------------------------
 
@@ -343,39 +341,10 @@ export const emailGetDetail = async (p: EmailGetDetailParams): Promise<EmailDeta
 
 // --- Email/set (patch) ---------------------------------------------------
 
-// Targeted membership changes for one email: `true` adds, `false` removes. Keys
-// are the full JMAP keyword string (`$label:receipt`) or the mailbox id; both
-// are JSON-pointer-escaped before hitting the wire. The two maps translate onto
-// the wire differently (see `buildSetPatch`): keyword removal follows
-// email-sync's production-proven `false` convention, mailbox removal follows the
-// RFC 8620 canonical `null`.
-export interface EmailSetChanges {
-  keywords?: Record<string, boolean>
-  mailboxIds?: Record<string, boolean>
-}
-
 export interface EmailSetParams extends JmapCall {
   accountId: string
   changes: EmailSetChanges
   id: string
-}
-
-const buildSetPatch = (changes: EmailSetChanges): Record<string, boolean | null> => {
-  const patch: Record<string, boolean | null> = {}
-  // Keywords: boolean value, `false` removes. This mirrors email-sync's Rust
-  // `set_keywords` byte-for-byte and is production-proven against Stalwart
-  // (read-state + label mirroring both drive the `false`=remove path).
-  for (const [keyword, value] of Object.entries(changes.keywords ?? {})) {
-    patch[`keywords/${jsonPointerEscape(keyword)}`] = value
-  }
-  // MailboxIds: `true` adds, `null` removes. RFC 8621 requires mailboxIds map
-  // values be `true`, so removal uses the RFC 8620 canonical PatchObject `null`
-  // rather than `false` — and unlike keywords there's no proven `false`-removal
-  // precedent for mailboxes (Rust only ever replaces the set wholesale).
-  for (const [mailboxId, value] of Object.entries(changes.mailboxIds ?? {})) {
-    patch[`mailboxIds/${jsonPointerEscape(mailboxId)}`] = value ? true : null
-  }
-  return patch
 }
 
 // Patch keywords and/or mailbox membership on a single email via an Email/set
@@ -390,7 +359,7 @@ export const emailSet = async (p: EmailSetParams): Promise<void> => {
         'Email/set',
         {
           accountId: p.accountId,
-          update: { [p.id]: buildSetPatch(p.changes) },
+          update: { [p.id]: buildEmailSetPatch(p.changes) },
         },
         '0',
       ],
@@ -429,7 +398,7 @@ export const emailSetMany = async (p: EmailSetManyParams): Promise<EmailSetManyR
   if (p.ids.length === 0) {
     return { notUpdated: [], updated: [] }
   }
-  const patch = buildSetPatch(p.changes)
+  const patch = buildEmailSetPatch(p.changes)
   const resp = await call(p, {
     methodCalls: [
       [

@@ -17,6 +17,15 @@ export {
   contactCardUpdate,
 } from './contacts.ts'
 export {
+  DRAFT_KEYWORD,
+  type DraftCreateParams,
+  type DraftCreateResult,
+  draftCreate,
+  type EmailComposeGetParams,
+  type EmailDraft,
+  emailComposeGet,
+} from './drafts.ts'
+export {
   type EmailChangesParams,
   type EmailFilter,
   type EmailFilterCondition,
@@ -64,6 +73,7 @@ export {
   accountIdForContacts,
   accountIdForMail,
   accountIdForSieve,
+  accountIdForSubmission,
   bearerAuthorization,
   fetchSession,
   JmapError,
@@ -83,6 +93,12 @@ export {
   type StalwartCredential,
   StalwartCredentialError,
 } from './stalwart-credential.ts'
+export {
+  type EmailSubmissionCreateParams,
+  emailSubmissionCreate,
+  type IdentityGetParams,
+  identityGet,
+} from './submission.ts'
 export { jmapTimeoutSignal } from './timeout.ts'
 export type {
   AddressBookRecord,
@@ -96,8 +112,11 @@ export type {
   EmailBodyPart,
   EmailBodyValue,
   EmailChangesResult,
+  EmailComposeRecord,
   EmailDetailRecord,
   EmailRecord,
+  EmailSubmissionRecord,
+  IdentityRecord,
   JmapSession,
   MailboxRecord,
   ThreadRecord,
