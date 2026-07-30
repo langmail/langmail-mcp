@@ -9,6 +9,9 @@ import { sendDraft, sendDraftInput } from './send-draft.ts'
 
 const store = () => createIdempotencyStore<string>()
 
+// What send_draft reserves against: its own tool name plus the draft id.
+const SUBJECT = { key: 'd1', tool: 'send_draft' }
+
 const run = async (args: Record<string, unknown>, opts: DraftDepsOptions = {}) => {
   const result = await sendDraft(draftDeps(opts), store(), createSendGuard(), {
     args: sendDraftInput.parse(args),
@@ -169,20 +172,20 @@ describe('sendDraft', () => {
     const ctx = { args: sendDraftInput.parse({ draftId: 'd1' }), principal: TEST_PRINCIPAL, token: 'tok' }
     await expect(sendDraft(refusing, store(), refusingGuard, ctx)).rejects.toThrow('forbiddenFrom')
     // The server answered "no", so nothing went out and the draft is free again.
-    expect(refusingGuard.reserve(TEST_PRINCIPAL, 'd1')).toBeNull()
+    expect(refusingGuard.reserve(TEST_PRINCIPAL, SUBJECT)).toBeNull()
 
     const lostGuard = createSendGuard()
     const lost = draftDeps({ records: { d1: stagedDraft() }, submitError: new Error('socket hang up') })
     await expect(sendDraft(lost, store(), lostGuard, ctx)).rejects.toThrow('socket hang up')
     // A lost answer might mean "delivered". Blocking is the safe direction.
-    expect(lostGuard.reserve(TEST_PRINCIPAL, 'd1')).toEqual({ state: 'unknown' })
+    expect(lostGuard.reserve(TEST_PRINCIPAL, SUBJECT)).toEqual({ state: 'unknown' })
   })
 
   test('a send whose outcome is unknown is refused rather than retried', async () => {
     const submissions: EmailSubmissionCreateParams[] = []
     const guard = createSendGuard()
-    guard.reserve(TEST_PRINCIPAL, 'd1')
-    guard.markUnknown(TEST_PRINCIPAL, 'd1')
+    guard.reserve(TEST_PRINCIPAL, SUBJECT)
+    guard.markUnknown(TEST_PRINCIPAL, SUBJECT)
     const result = await sendDraft(draftDeps({ records: { d1: stagedDraft() }, submissions }), store(), guard, {
       args: sendDraftInput.parse({ draftId: 'd1' }),
       principal: TEST_PRINCIPAL,
@@ -191,6 +194,35 @@ describe('sendDraft', () => {
     expect(result.isError).toBe(true)
     expect(result.content[0]?.text ?? '').toContain('could deliver a duplicate')
     expect(submissions).toEqual([])
+  })
+
+  test('releases the reservation once the message is marked no longer a draft', async () => {
+    const guard = createSendGuard()
+    await sendDraft(draftDeps({ records: { d1: stagedDraft() } }), store(), guard, {
+      args: sendDraftInput.parse({ draftId: 'd1' }),
+      principal: TEST_PRINCIPAL,
+      token: 'tok',
+    })
+    // The server-side $draft flag now does the blocking, so the reservation has
+    // nothing left to protect.
+    expect(guard.reserve(TEST_PRINCIPAL, SUBJECT)).toBeNull()
+  })
+
+  test('holds the reservation when the message was delivered but not marked sent', async () => {
+    const guard = createSendGuard()
+    await sendDraft(
+      draftDeps({ records: { d1: stagedDraft() }, submission: { filed: false, id: 's1' } }),
+      store(),
+      guard,
+      {
+        args: sendDraftInput.parse({ draftId: 'd1' }),
+        principal: TEST_PRINCIPAL,
+        token: 'tok',
+      }
+    )
+    // The structural guard is absent here — the message still reads as a draft —
+    // so the reservation has to stay and refuse a retry.
+    expect(guard.reserve(TEST_PRINCIPAL, SUBJECT)).toEqual({ state: 'unknown' })
   })
 
   test('does not record a replay when the submission itself fails', async () => {

@@ -216,15 +216,31 @@ export const replyToMessage = async (
     draft: reply,
     mailboxId: mailboxes.drafts,
   })
-  const outcome = await submitDraft(deps, {
-    authorization,
-    draftId: staged.id,
-    draftsMailboxId: mailboxes.drafts,
-    guard,
-    identityId: identity.identityId,
-    principal,
-    ...(mailboxes.sent ? { sentMailboxId: mailboxes.sent } : {}),
-  })
+  // The reservation is taken against the message being answered, not the draft
+  // just staged: a retry of this call mints a *different* draft, so a draft-keyed
+  // reservation would guard nothing. Two concurrent replies to one message are a
+  // duplicate, not two intentions.
+  let outcome: Awaited<ReturnType<typeof submitDraft>>
+  try {
+    outcome = await submitDraft(deps, {
+      authorization,
+      draftId: staged.id,
+      draftsMailboxId: mailboxes.drafts,
+      guard,
+      identityId: identity.identityId,
+      principal,
+      subject: { key: args.messageId, tool: TOOL_NAME },
+      ...(mailboxes.sent ? { sentMailboxId: mailboxes.sent } : {}),
+    })
+  } catch (error) {
+    // The reply exists as a draft even though the send failed. Naming it is the
+    // difference between a recoverable message and a lost one.
+    const detail = error instanceof Error ? error.message : 'unknown error'
+    return errorResult(
+      `The reply was composed but could not be sent (${detail}). It is staged as draft ${staged.id} — send it ` +
+        'with send_draft once the cause is resolved, or delete it.'
+    )
+  }
   if (typeof outcome !== 'string') {
     // The reply is staged but unsent. Say where it is, so it isn't lost.
     return errorResult(`${outcome.error} The reply is staged as draft ${staged.id}.`)

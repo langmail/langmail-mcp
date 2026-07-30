@@ -38,24 +38,31 @@ export interface DraftDepsOptions {
   submitError?: Error
 }
 
-export const draftDeps = (opts: DraftDepsOptions = {}): DraftToolDeps => ({
-  draftCreate: (p) => {
-    opts.creates?.push(p)
-    return Promise.resolve(opts.created ?? { id: 'dNew', threadId: 'tNew' })
-  },
-  emailComposeGet: (p) => Promise.resolve(opts.records?.[p.id] ?? null),
-  emailSubmissionCreate: (p) => {
-    opts.submissions?.push(p)
-    if (opts.submitError) {
-      return Promise.reject(opts.submitError)
-    }
-    return Promise.resolve(opts.submission ?? { filed: true, id: 's1', undoStatus: 'final' })
-  },
-  identityGet: () => Promise.resolve(opts.identities ?? TEST_IDENTITIES),
-  resolveAccountId: () => Promise.resolve('acct'),
-  resolveComposeMailboxes: () => Promise.resolve(opts.mailboxes ?? TEST_MAILBOXES),
-  resolveSubmissionAccountId: () => Promise.resolve('acct'),
-})
+export const draftDeps = (opts: DraftDepsOptions = {}): DraftToolDeps => {
+  // A fresh id per create, like a real server. A fixture that returned the same
+  // id every time would make two independent drafts look like one — which is
+  // exactly how a duplicate-send bug hides from its own test.
+  let nextDraft = 0
+  return {
+    draftCreate: (p) => {
+      opts.creates?.push(p)
+      nextDraft += 1
+      return Promise.resolve(opts.created ?? { id: `dNew${nextDraft}`, threadId: 'tNew' })
+    },
+    emailComposeGet: (p) => Promise.resolve(opts.records?.[p.id] ?? null),
+    emailSubmissionCreate: (p) => {
+      opts.submissions?.push(p)
+      if (opts.submitError) {
+        return Promise.reject(opts.submitError)
+      }
+      return Promise.resolve(opts.submission ?? { filed: true, id: 's1', undoStatus: 'final' })
+    },
+    identityGet: () => Promise.resolve(opts.identities ?? TEST_IDENTITIES),
+    resolveAccountId: () => Promise.resolve('acct'),
+    resolveComposeMailboxes: () => Promise.resolve(opts.mailboxes ?? TEST_MAILBOXES),
+    resolveSubmissionAccountId: () => Promise.resolve('acct'),
+  }
+}
 
 // A received message, as the reply paths see it.
 export const receivedMessage = (overrides: Partial<EmailComposeRecord> = {}): EmailComposeRecord => ({

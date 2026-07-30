@@ -8,10 +8,23 @@
 // "draft", because Stalwart hasn't applied the follow-up patch. Both calls
 // submit, and the recipient gets two copies.
 //
-// So a send reserves before it submits. The reservation is keyed on the draft
-// itself, not on the caller's key, which means it also covers a concurrent retry
-// that passed no key at all — the more likely shape, since a client retrying
-// blind is a client not thinking about idempotency.
+// So a send reserves before it submits, and the reservation is keyed on
+// something that is *the same on a retry* rather than on the caller's optional
+// key — which is what makes it cover a client retrying blind, the likelier shape,
+// since a client retrying without a key is a client not thinking about
+// idempotency.
+//
+// What that stable thing is differs per tool, which is why the key is a
+// parameter and not a draft id:
+//
+//   - send_draft is given a draftId, and a retry passes the same one.
+//   - reply_to_message is given the id of the message being answered, and mints
+//     a *fresh* draft on every call. Keying on the draft it just created would
+//     reserve a different key each time and guard nothing at all, so it reserves
+//     against the message it is replying to instead.
+//
+// The tool name is part of the key: both ids come from the same Email id space,
+// so replying to message X and sending draft X must not collide.
 //
 // What happens when a submission *throws* is the interesting half, because the
 // throw does not say whether the mail went out:
@@ -38,17 +51,25 @@ export type SendReservation =
   // A send for this draft failed in a way that leaves delivery unknown.
   | { state: 'unknown' }
 
-export interface SendGuard {
-  // Keeps the reservation, marking delivery as unknown rather than in-flight.
-  markUnknown: (principal: string, draftId: string) => void
-  // Drops the reservation — the submission definitively did not happen.
-  release: (principal: string, draftId: string) => void
-  // Marks a send as running. Returns null when the caller may proceed, or the
-  // existing reservation when it must not.
-  reserve: (principal: string, draftId: string) => SendReservation | null
+// What a send reserves against: the tool, and an id that is identical on a retry
+// of the same logical send.
+export interface SendSubject {
+  key: string
+  tool: string
 }
 
-const scopedKey = (principal: string, draftId: string): string => `${principal.length}:${principal}${draftId}`
+export interface SendGuard {
+  // Keeps the reservation, marking delivery as unknown rather than in-flight.
+  markUnknown: (principal: string, subject: SendSubject) => void
+  // Drops the reservation — a further attempt is safe.
+  release: (principal: string, subject: SendSubject) => void
+  // Marks a send as running. Returns null when the caller may proceed, or the
+  // existing reservation when it must not.
+  reserve: (principal: string, subject: SendSubject) => SendReservation | null
+}
+
+const scopedKey = (principal: string, subject: SendSubject): string =>
+  `${subject.tool.length}:${subject.tool}${principal.length}:${principal}${subject.key}`
 
 export const createSendGuard = (now: () => number = Date.now): SendGuard => {
   const entries = new Map<string, { expiresAt: number; state: SendReservation['state'] }>()
@@ -63,15 +84,15 @@ export const createSendGuard = (now: () => number = Date.now): SendGuard => {
   }
 
   return {
-    markUnknown: (principal, draftId) => {
-      entries.set(scopedKey(principal, draftId), { expiresAt: now() + SEND_RESERVATION_TTL_MS, state: 'unknown' })
+    markUnknown: (principal, subject) => {
+      entries.set(scopedKey(principal, subject), { expiresAt: now() + SEND_RESERVATION_TTL_MS, state: 'unknown' })
     },
-    release: (principal, draftId) => {
-      entries.delete(scopedKey(principal, draftId))
+    release: (principal, subject) => {
+      entries.delete(scopedKey(principal, subject))
     },
-    reserve: (principal, draftId) => {
+    reserve: (principal, subject) => {
       sweep()
-      const key = scopedKey(principal, draftId)
+      const key = scopedKey(principal, subject)
       const held = entries.get(key)
       if (held) {
         return { state: held.state }

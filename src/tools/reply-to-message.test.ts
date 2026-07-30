@@ -55,9 +55,9 @@ describe('replyToMessage', () => {
     expect(draft?.from).toEqual([{ email: TEST_PRINCIPAL, name: 'Dana Okonjo' }])
 
     expect(submissions).toHaveLength(1)
-    expect(submissions[0]?.emailId).toBe('dNew')
+    expect(submissions[0]?.emailId).toBe('dNew1')
     expect(text).toContain('Reply sent.')
-    expect(text).toContain('messageId: dNew')
+    expect(text).toContain('messageId: dNew1')
   })
 
   test('reply-all includes the original roster minus the user', async () => {
@@ -117,6 +117,45 @@ describe('replyToMessage', () => {
     expect(second.content[0]?.text).toContain('no second reply was sent')
   })
 
+  test('names the staged draft when the submission throws, so the reply is not lost', async () => {
+    const creates: DraftCreateParams[] = []
+    const deps = draftDeps({
+      creates,
+      records: { e1: receivedMessage() },
+      submitError: new Error('socket hang up'),
+    })
+    const result = await replyToMessage(deps, store(), createSendGuard(), {
+      args: replyToMessageInput.parse({ messageId: 'e1', text: 'hi' }),
+      principal: TEST_PRINCIPAL,
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    const text = result.content[0]?.text ?? ''
+    // The reply exists even though the send failed; naming it is the difference
+    // between a recoverable message and a lost one.
+    expect(text).toContain(`staged as draft ${creates[0] ? 'dNew1' : ''}`)
+    expect(text).toContain('send_draft')
+  })
+
+  test('a blind retry after a lost response is refused rather than sending a second reply', async () => {
+    const submissions: EmailSubmissionCreateParams[] = []
+    const guard = createSendGuard()
+    const args = replyToMessageInput.parse({ messageId: 'e1', text: 'hi' })
+    const ctx = { args, principal: TEST_PRINCIPAL, token: 'tok' }
+
+    // First attempt: the answer is lost, so delivery is unknown.
+    const lost = draftDeps({ records: { e1: receivedMessage() }, submitError: new Error('socket hang up') })
+    await replyToMessage(lost, store(), guard, ctx)
+
+    // The retry mints a *different* draft, so only a reservation keyed on the
+    // message being answered can catch it.
+    const retry = draftDeps({ records: { e1: receivedMessage() }, submissions })
+    const second = await replyToMessage(retry, store(), guard, ctx)
+    expect(second.isError).toBe(true)
+    expect(second.content[0]?.text ?? '').toContain('could deliver a duplicate')
+    expect(submissions).toEqual([])
+  })
+
   test('a concurrent duplicate reply is staged but not sent twice', async () => {
     const creates: DraftCreateParams[] = []
     const submissions: EmailSubmissionCreateParams[] = []
@@ -127,8 +166,9 @@ describe('replyToMessage', () => {
       principal: TEST_PRINCIPAL,
       token: 'tok',
     }
-    // Each reply stages its own draft, so the guard can only fire when both
-    // land on the same draft id — which the fixture's fixed id reproduces.
+    // Each call stages its own draft with its own id, so a draft-keyed
+    // reservation would guard nothing — this only holds because the reservation
+    // is keyed on the message being answered.
     const results = await Promise.all([
       replyToMessage(deps, store(), guard, ctx),
       replyToMessage(deps, store(), guard, ctx),

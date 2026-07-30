@@ -156,9 +156,6 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
   })
 
   // A create that landed while the destroy didn't leaves the superseded draft in
-  // the folder. Saying so beats the user finding two drafts and neither tool
-  // admitting to it.
-  // A create that landed while the destroy didn't leaves the superseded draft in
   // the folder — still sendable, and still holding the *pre-edit* content. That
   // makes it actively dangerous, not just untidy, so the note says which id to
   // send and which to leave alone.

@@ -18,7 +18,7 @@ import { z } from 'zod'
 import { bearerAuthorization, type EmailComposeRecord, type EmailDraft, JmapError } from '@langmail/jmap'
 
 import { type IdempotencyStore } from '../drafts/idempotency.ts'
-import { type SendGuard } from '../drafts/send-guard.ts'
+import { type SendGuard, type SendSubject } from '../drafts/send-guard.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import {
   type DraftToolDeps,
@@ -71,22 +71,25 @@ export interface SubmitParams {
   principal: string
   // The account's Sent mailbox, when it has one.
   sentMailboxId?: string
+  // What the reservation is taken against — must be identical on a retry of the
+  // same logical send, which is not always the draft id. See send-guard.ts.
+  subject: SendSubject
 }
 
 // Submit a staged draft and report where the message ended up. Shared with
 // reply_to_message, which stages its own draft first and then lands here — the
 // send half must be identical on both paths or one of them drifts.
 export const submitDraft = async (deps: DraftToolDeps, p: SubmitParams): Promise<{ error: string } | string> => {
-  const held = p.guard.reserve(p.principal, p.draftId)
+  const held = p.guard.reserve(p.principal, p.subject)
   if (held) {
     return {
       error:
         held.state === 'in_flight'
-          ? `A send of ${p.draftId} is already in progress. Nothing was sent by this call. Wait, then read the ` +
-            'message back with get_email to see whether it went out.'
-          : `An earlier send of ${p.draftId} failed without saying whether the message went out, so it was NOT ` +
-            'sent again — a second attempt could deliver a duplicate. Read it back with get_email, or check the ' +
-            "user's Sent folder, before deciding.",
+          ? `A send of ${p.subject.key} is already in progress. Nothing was sent by this call. Wait, then read ` +
+            'the message back with get_email to see whether it went out.'
+          : `An earlier send of ${p.subject.key} failed without saying whether the message went out, so it was ` +
+            'NOT sent again — a second attempt could deliver a duplicate. Read it back with get_email, or check ' +
+            "the user's Sent folder, before deciding.",
     }
   }
 
@@ -106,9 +109,9 @@ export const submitDraft = async (deps: DraftToolDeps, p: SubmitParams): Promise
     // nothing was sent and this stays retryable. Anything else (timeout, reset)
     // may have been accepted with the answer lost: hold the reservation.
     if (error instanceof JmapError && error.errorType !== undefined) {
-      p.guard.release(p.principal, p.draftId)
+      p.guard.release(p.principal, p.subject)
     } else {
-      p.guard.markUnknown(p.principal, p.draftId)
+      p.guard.markUnknown(p.principal, p.subject)
     }
     throw error
   }
@@ -117,6 +120,10 @@ export const submitDraft = async (deps: DraftToolDeps, p: SubmitParams): Promise
     lines.push(`sendAt: ${submission.sendAt}`)
   }
   if (submission.filed) {
+    // The message is marked as no longer a draft, so that server-side flag now
+    // does the blocking and the reservation has nothing left to protect —
+    // releasing it keeps a deliberate later send of another draft unaffected.
+    p.guard.release(p.principal, p.subject)
     lines.push(
       p.sentMailboxId
         ? 'The message is in Sent — read it back with get_email using the messageId above.'
@@ -126,9 +133,11 @@ export const submitDraft = async (deps: DraftToolDeps, p: SubmitParams): Promise
     return lines.join('\n')
   }
   // Delivered, but the server did not apply the follow-up patch, so the message
-  // still looks like an unsent draft. Say so loudly: this is the one state where
-  // the usual "it's still a draft, so it can't have been sent" reasoning is
-  // wrong, and acting on it would deliver the message twice.
+  // still looks like an unsent draft. The structural guard is therefore absent:
+  // hold the reservation so a retry is refused rather than delivering a second
+  // copy, and say so loudly — this is the one state where the usual "it's still a
+  // draft, so it can't have been sent" reasoning is wrong.
+  p.guard.markUnknown(p.principal, p.subject)
   lines.push(
     'WARNING: the message WAS sent, but the mailbox could not be updated, so it still appears in Drafts and ' +
       'still looks unsent. Do NOT send it again — that would deliver a second copy. Tell the user it went out ' +
@@ -234,6 +243,8 @@ export const sendDraft = async (
     guard,
     identityId: identity.identityId,
     principal,
+    // A retry passes the same draftId, so it is the stable subject here.
+    subject: { key: args.draftId, tool: TOOL_NAME },
     ...(mailboxes.sent ? { sentMailboxId: mailboxes.sent } : {}),
   })
   if (typeof outcome !== 'string') {
