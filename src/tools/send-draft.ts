@@ -21,6 +21,7 @@ import { type IdempotencyStore } from '../drafts/idempotency.ts'
 import { type SendGuard, type SendSubject } from '../drafts/send-guard.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import {
+  countRecipients,
   type DraftToolDeps,
   draftFromRecord,
   formatDraft,
@@ -185,6 +186,23 @@ const loadSendableDraft = async (
         `${p.draftId} is no longer a draft — it has already been sent. Nothing was sent again. ` +
           'Read it back with get_email.'
       ),
+    }
+  }
+  // create_draft refuses a recipientless draft at staging time, but this tool
+  // sends any draft in the folder — including one the user composed in Langmail
+  // and left unaddressed. Without this, the empty roster reaches the server as a
+  // submission with nothing to derive an envelope from, and the agent gets a raw
+  // JMAP error instead of the one fact it can act on.
+  if (countRecipients(record) === 0) {
+    // Which remedy to name depends on the attachments: update_draft refuses an
+    // attached draft outright, so pointing there would send the agent into a
+    // call that cannot succeed.
+    const remedy =
+      (record.attachments ?? []).length > 0
+        ? 'This draft has attachments, so it has to be addressed in Langmail — update_draft cannot edit it.'
+        : 'Add them with update_draft, then send the draftId it returns.'
+    return {
+      error: errorResult(`Draft ${p.draftId} has no recipients, so it cannot be sent. Nothing was sent. ${remedy}`),
     }
   }
   return { record }

@@ -52,6 +52,39 @@ describe('sendDraft', () => {
     expect(submissions).toEqual([])
   })
 
+  test('refuses a draft nobody is addressed on, rather than letting the server reject it', async () => {
+    const submissions: EmailSubmissionCreateParams[] = []
+    // A draft the user started in Langmail and never addressed. create_draft
+    // guards this at staging time, but this tool sends drafts it did not write.
+    const unaddressed = stagedDraft({ bcc: [], cc: [], to: [] })
+    const { result, text } = await run({ draftId: 'd1' }, { records: { d1: unaddressed }, submissions })
+    expect(result.isError).toBe(true)
+    expect(text).toContain('has no recipients')
+    expect(text).toContain('Nothing was sent')
+    expect(submissions).toEqual([])
+  })
+
+  test('points an unaddressed attached draft at Langmail, not at a call that would refuse it', async () => {
+    const submissions: EmailSubmissionCreateParams[] = []
+    // update_draft refuses attached drafts outright, so naming it here would
+    // send the agent into a call that cannot succeed.
+    const attached = stagedDraft({ attachments: [{ partId: '2', type: 'application/pdf' }], to: [] })
+    const { result, text } = await run({ draftId: 'd1' }, { records: { d1: attached }, submissions })
+    expect(result.isError).toBe(true)
+    expect(text).toContain('has no recipients')
+    expect(text).toContain('Langmail')
+    expect(text).not.toContain('send the draftId it returns')
+    expect(submissions).toEqual([])
+  })
+
+  test('counts cc and bcc as recipients, so a to-less draft still sends', async () => {
+    const submissions: EmailSubmissionCreateParams[] = []
+    const bccOnly = stagedDraft({ bcc: [{ email: 'nadia@example.org' }], to: [] })
+    const { result } = await run({ draftId: 'd1' }, { records: { d1: bccOnly }, submissions })
+    expect(result.isError).toBeUndefined()
+    expect(submissions).toHaveLength(1)
+  })
+
   test('refuses a message that is no longer a draft rather than sending it twice', async () => {
     const submissions: EmailSubmissionCreateParams[] = []
     // What the mailbox looks like after a successful send: out of Drafts, no

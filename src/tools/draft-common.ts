@@ -143,6 +143,17 @@ export interface ParsedRecipients {
   to?: EmailAddress[]
 }
 
+// How many people a message is addressed to, across all three fields. Counting
+// beats "was `to` supplied", because `to: []` is present but empty and addresses
+// nobody. Deliberately blind to the element type so the staging check (raw
+// strings from the caller) and the send check (parsed addresses off the record)
+// cannot drift apart — they already did once, which is why this is shared.
+export const countRecipients = (fields: {
+  bcc?: unknown[] | null
+  cc?: unknown[] | null
+  to?: unknown[] | null
+}): number => (fields.to?.length ?? 0) + (fields.cc?.length ?? 0) + (fields.bcc?.length ?? 0)
+
 export const parseRecipients = (fields: RecipientFields): { error: string } | ParsedRecipients => {
   const to = parseAddressList(fields.to)
   const cc = parseAddressList(fields.cc)
