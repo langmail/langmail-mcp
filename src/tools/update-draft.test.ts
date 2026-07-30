@@ -115,6 +115,39 @@ describe('updateDraft', () => {
     expect(creates).toEqual([])
   })
 
+  test('refuses an html edit that would leave a text-only draft carrying the old text', async () => {
+    const creates: DraftCreateParams[] = []
+    const textOnly = stagedDraft({
+      bodyValues: { '1': { value: 'OLD price is 5000' } },
+      htmlBody: [],
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    // The mirror of the html-only case: topping a single-part draft up with the
+    // other part leaves the untouched one stale either way round.
+    const { result, text } = await run(
+      { draftId: 'd1', html: '<p>NEW price is 4000</p>' },
+      { creates, records: { d1: textOnly } }
+    )
+    expect(result.isError).toBe(true)
+    expect(text).toContain('only `html` was given')
+    expect(creates).toEqual([])
+  })
+
+  test('allows a single-part draft to be edited in place with the same part', async () => {
+    const creates: DraftCreateParams[] = []
+    const textOnly = stagedDraft({
+      bodyValues: { '1': { value: 'old' } },
+      htmlBody: [],
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    // Nothing stale here — the draft stays single-part, so the guard must not
+    // fire and block an ordinary edit.
+    const { result } = await run({ draftId: 'd1', text: 'new' }, { creates, records: { d1: textOnly } })
+    expect(result.isError).toBeUndefined()
+    expect(creates[0]?.draft.text).toBe('new')
+    expect(creates[0]?.draft.html).toBeUndefined()
+  })
+
   test('refuses to edit a draft with attachments rather than dropping them', async () => {
     const creates: DraftCreateParams[] = []
     const withFile = stagedDraft({
