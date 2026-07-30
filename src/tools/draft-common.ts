@@ -24,22 +24,30 @@ import {
   type EmailComposeRecord,
   type EmailDraft,
   type EmailSubmissionCreateParams,
-  type EmailSubmissionRecord,
+  type EmailSubmissionResult,
   emailComposeGet,
   emailSubmissionCreate,
   type IdentityGetParams,
   type IdentityRecord,
   identityGet,
   type JmapLive,
+  LABEL_KEYWORD_PREFIX,
   mailboxIdsByRoles,
 } from '@langmail/jmap'
 
 import { formatAddressList } from './format.ts'
 
-// Matches MAX_BODY_VALUE_BYTES in get-email.ts: a draft's own body is bounded
-// by what the caller staged, but reading one back has to stay token-bounded
-// for the same reason opening a newsletter does.
-export const MAX_DRAFT_BODY_VALUE_BYTES = 100_000
+// The read-back budget for a draft's body values, in *octets* (RFC 8621 §4.2) —
+// four times the 100_000-*character* cap the composition tools accept, because a
+// character can cost up to four octets in UTF-8.
+//
+// The multiplier is the whole point. At 1× a perfectly legal draft of 100_000
+// characters containing anything non-ASCII — an em dash, an accented name, an
+// emoji — reads back truncated, and update_draft would re-stage the truncated
+// text and destroy the original: a subject-only edit would silently amputate the
+// message. Headroom makes that unreachable for any body this surface accepted;
+// `bodyTruncated` catches a body some other client staged.
+export const MAX_DRAFT_BODY_VALUE_BYTES = 400_000
 
 // Enough of the body for a human to recognise what was staged without paying
 // for the whole thing twice (the agent wrote it — it already has the text).
@@ -56,7 +64,7 @@ export interface ComposeMailboxes {
 export interface DraftToolDeps {
   draftCreate: (p: DraftCreateParams) => Promise<DraftCreateResult>
   emailComposeGet: (p: EmailComposeGetParams) => Promise<EmailComposeRecord | null>
-  emailSubmissionCreate: (p: EmailSubmissionCreateParams) => Promise<EmailSubmissionRecord>
+  emailSubmissionCreate: (p: EmailSubmissionCreateParams) => Promise<EmailSubmissionResult>
   identityGet: (p: IdentityGetParams) => Promise<IdentityRecord[]>
   resolveAccountId: (authorization: string) => Promise<string>
   resolveComposeMailboxes: (authorization: string) => Promise<ComposeMailboxes>
@@ -68,8 +76,15 @@ export interface DraftToolDeps {
 
 // --- addresses -------------------------------------------------------------
 
-// `Display Name <local@domain>`, with the display name optionally quoted.
-const NAMED_ADDRESS_RE = /^\s*(?:"([^"]*)"|([^"<]*?))\s*<([^<>\s]+)>\s*$/u
+// `Display Name <local@domain>`. The name is whatever precedes the bracketed
+// address, quotes and all — anchoring on the brackets rather than on a quoting
+// convention means a nickname (`Nadia "Nads" Bram <n@example.org>`) parses
+// instead of being bounced back at the caller.
+const NAMED_ADDRESS_RE = /^\s*(.*?)\s*<([^<>\s]+)>\s*$/u
+
+// Surrounding quotes on a display name are RFC 5322 syntax, not part of the
+// name.
+const WRAPPING_QUOTES_RE = /^"(.*)"$/u
 
 // Deliberately permissive: one `@`, no whitespace or angle brackets, something
 // either side. Stalwart is the authority on deliverability, and a stricter
@@ -83,11 +98,12 @@ const BARE_ADDRESS_RE = /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/u
 export const parseAddress = (input: string): EmailAddress | null => {
   const named = NAMED_ADDRESS_RE.exec(input)
   if (named) {
-    const address = named[3] ?? ''
+    const address = named[2] ?? ''
     if (!BARE_ADDRESS_RE.test(address)) {
       return null
     }
-    const name = (named[1] ?? named[2] ?? '').trim()
+    const raw = (named[1] ?? '').trim()
+    const name = (WRAPPING_QUOTES_RE.exec(raw)?.[1] ?? raw).trim()
     return name ? { email: address, name } : { email: address }
   }
   const bare = input.trim()
@@ -139,10 +155,13 @@ export const parseRecipients = (fields: RecipientFields): { error: string } | Pa
         'Pass a bare address (person@example.com) or the "Name <person@example.com>" form.',
     }
   }
+  // Deduped for the same reason the derived reply recipients are: the same
+  // person twice on one line is a visible oddity in the recipient's client, and
+  // an agent that resolved a contact twice shouldn't produce it.
   return {
-    ...(fields.to ? { to: to.addresses } : {}),
-    ...(fields.cc ? { cc: cc.addresses } : {}),
-    ...(fields.bcc ? { bcc: bcc.addresses } : {}),
+    ...(fields.to ? { to: dedupeAddresses(to.addresses, []) } : {}),
+    ...(fields.cc ? { cc: dedupeAddresses(cc.addresses, []) } : {}),
+    ...(fields.bcc ? { bcc: dedupeAddresses(bcc.addresses, []) } : {}),
   }
 }
 
@@ -168,6 +187,11 @@ const dedupeAddresses = (addresses: EmailAddress[], exclude: string[]): EmailAdd
 export interface ResolvedIdentity {
   address: EmailAddress
   identityId: string
+  // Every address this account can send as, plus the authenticated principal —
+  // i.e. every address that is "the user". A reply must exclude all of them, not
+  // just the one it happens to be going out as, or an alias the original was
+  // addressed to ends up receiving the user's own reply.
+  selfAddresses: string[]
 }
 
 export interface IdentityResolution {
@@ -182,6 +206,12 @@ export interface IdentityResolution {
 // The account's configured display name wins over one the caller typed: it's
 // what the user's other mail goes out as, and a draft that reads differently
 // from the rest of their Sent folder is the tell that an agent wrote it.
+//
+// On Stalwart that name is the account's `description`, falling back to its
+// `name` — and Langmail's provisioning (services/auth `createAccount`) sets no
+// description, so today it resolves to the mailbox local part rather than a
+// human name. That's a provisioning gap, not one to paper over here: webmail
+// sends under the same Identity, so whatever it says, both surfaces agree.
 const identityAddress = (identity: IdentityRecord, requestedName?: string): EmailAddress => {
   const name = identity.name?.trim() || requestedName
   return name ? { email: identity.email, name } : { email: identity.email }
@@ -203,6 +233,7 @@ export const resolveIdentity = async (
   if (identities.length === 0) {
     return { error: 'This account has no sending identity configured, so nothing can be composed or sent.' }
   }
+  const selfAddresses = [p.principal, ...identities.map((identity) => identity.email)]
 
   let wanted = p.principal
   let requestedName: string | undefined
@@ -224,36 +255,47 @@ export const resolveIdentity = async (
           `${identities.map((identity) => identity.email).join(', ')}.`,
       }
     }
-    // The principal isn't among the identities — an aliased login, say. The
-    // account's first identity is the only defensible sender left, and it's
-    // still an address the server has vouched for.
-    const [fallback] = identities
-    if (!fallback) {
-      return { error: 'This account has no sending identity configured, so nothing can be composed or sent.' }
+    // The principal isn't among the identities — an aliased login, say. With a
+    // single identity there is only one address this account could possibly
+    // send as, so use it. With several, picking one would be a guess at which
+    // of the user's addresses they meant, and Identity/get guarantees no
+    // ordering to make that guess with — so ask instead of silently choosing.
+    const [only] = identities
+    if (identities.length > 1 || !only) {
+      return {
+        error:
+          `Could not tell which address to send as: the signed-in address is not one of this account's ` +
+          `sending identities. Pass \`from\` with one of: ${identities.map((i) => i.email).join(', ')}.`,
+      }
     }
-    return { address: identityAddress(fallback), identityId: fallback.id }
+    return { address: identityAddress(only), identityId: only.id, selfAddresses }
   }
-  return { address: identityAddress(hit, requestedName), identityId: hit.id }
+  return { address: identityAddress(hit, requestedName), identityId: hit.id, selfAddresses }
 }
 
 // --- replies ---------------------------------------------------------------
 
 // The reply's recipients, derived from the message being answered. `Reply-To`
 // wins over `From` when the sender set it (RFC 5322 §3.6.2 — that's what it's
-// for); reply-all folds the original To and Cc into Cc, minus the account's own
-// address, so the user doesn't mail themselves.
+// for); reply-all folds the original To and Cc into Cc.
+//
+// `self` is every address that is the user (see `ResolvedIdentity.selfAddresses`)
+// and all of them are excluded, not just the sending one: a message addressed to
+// one of the user's aliases would otherwise put that alias on the reply's Cc,
+// delivering the user their own reply — and, once mail rules or an auto-responder
+// exist on that alias, doing it in a loop.
 export const replyRecipients = (
   original: EmailComposeRecord,
-  self: string,
+  self: string[],
   replyAll: boolean
 ): { cc: EmailAddress[]; to: EmailAddress[] } => {
   const replyTo = original.replyTo ?? []
-  const to = dedupeAddresses(replyTo.length > 0 ? replyTo : (original.from ?? []), [self])
+  const to = dedupeAddresses(replyTo.length > 0 ? replyTo : (original.from ?? []), self)
   if (!replyAll) {
     return { cc: [], to }
   }
   const others = [...(original.to ?? []), ...(original.cc ?? [])]
-  return { cc: dedupeAddresses(others, [self, ...to.map((a) => a.email)]), to }
+  return { cc: dedupeAddresses(others, [...self, ...to.map((a) => a.email)]), to }
 }
 
 const RE_PREFIX_RE = /^re\s*:/iu
@@ -278,6 +320,33 @@ export const replyThreading = (original: EmailComposeRecord): { inReplyTo: strin
   }
 }
 
+// The one rule both reply paths enforce, in one place so they cannot disagree
+// about it: `replyAll` and explicit recipients are mutually exclusive.
+//
+// "Reply to everyone, but only these people" has no defensible reading, and
+// resolving it silently is worse than refusing. Per-field precedence looks
+// harmless and isn't: with `replyAll` plus an explicit `to`, the derived Cc
+// excludes the *derived* To, so the person actually being answered lands in
+// neither list and the reply goes only to the bystanders. With `replyAll` plus
+// an explicit `cc`, `replyAll` becomes a silent no-op.
+export const replyConflictError = (p: {
+  bcc?: unknown
+  cc?: unknown
+  replyAll?: boolean
+  to?: unknown
+}): string | null => {
+  if (p.replyAll !== true) {
+    return null
+  }
+  if (p.to !== undefined || p.cc !== undefined || p.bcc !== undefined) {
+    return (
+      'replyAll cannot be combined with to/cc/bcc. Either reply to everyone on the original, or name the ' +
+      'recipients explicitly — not both.'
+    )
+  }
+  return null
+}
+
 // --- draft round-tripping --------------------------------------------------
 
 // Concatenate the fetched values of the body parts of one media type. Filtering
@@ -294,11 +363,16 @@ const bodyOfType = (
   if (matching.length === 0) {
     return
   }
-  return matching
-    .map((part) => (part.partId ? (values[part.partId]?.value ?? '') : ''))
-    .join('\n')
-    .trim()
+  // Not trimmed: this value is re-staged verbatim by update_draft, and trimming
+  // would silently edit a body the caller didn't touch.
+  return matching.map((part) => (part.partId ? (values[part.partId]?.value ?? '') : '')).join('\n')
 }
+
+// Whether any body value came back truncated. A truncated read is fine to
+// *display* and unsafe to *re-stage*, so this is the signal update_draft refuses
+// on rather than quietly shortening the user's message.
+export const bodyTruncated = (record: EmailComposeRecord): boolean =>
+  Object.values(record.bodyValues ?? {}).some((value) => value.isTruncated === true)
 
 // Read a stored draft back into the composable shape, so update_draft can merge
 // changes onto it and re-create the message (RFC 8621 makes an Email's content
@@ -321,6 +395,14 @@ export const draftFromRecord = (record: EmailComposeRecord): EmailDraft => {
 }
 
 export const isDraft = (record: EmailComposeRecord): boolean => Boolean(record.keywords?.[DRAFT_KEYWORD])
+
+// The user-facing `$label:` tags on a message. Carried onto the replacement when
+// a draft is edited: an edit rewrites the message, so without this a draft the
+// user had filed under a label would come back untagged.
+export const draftLabelKeywords = (record: EmailComposeRecord): string[] =>
+  Object.entries(record.keywords ?? {})
+    .filter(([keyword, set]) => set && keyword.startsWith(LABEL_KEYWORD_PREFIX))
+    .map(([keyword]) => keyword)
 
 // --- formatting ------------------------------------------------------------
 

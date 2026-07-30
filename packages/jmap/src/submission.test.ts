@@ -20,6 +20,7 @@ const jmapResponse = (methodResponses: unknown[]) => Response.json({ methodRespo
 const call = { accountId: 'acct', apiUrl: API, authorization: 'Bearer tok' }
 
 const FORBIDDEN_FROM_RE = /forbiddenFrom/u
+const UNKNOWN_RE = /unknown/u
 
 describe('identityGet', () => {
   test('declares the submission capability and asks for every identity', async () => {
@@ -71,6 +72,9 @@ describe('emailSubmissionCreate', () => {
             { created: { send: { id: 's1', sendAt: '2026-07-30T09:00:00Z', undoStatus: 'final' } } },
             '0',
           ],
+          // RFC 8621 §7.5: onSuccessUpdateEmail is a separate implicit Email/set,
+          // answered under the same call id.
+          ['Email/set', { updated: { d1: null } }, '0'],
         ])
       )
     })
@@ -83,18 +87,77 @@ describe('emailSubmissionCreate', () => {
         sentMailboxId: 'mbSent',
       })
     )
-    expect(submission).toEqual({ id: 's1', sendAt: '2026-07-30T09:00:00Z', undoStatus: 'final' })
+    expect(submission).toEqual({ filed: true, id: 's1', sendAt: '2026-07-30T09:00:00Z', undoStatus: 'final' })
   })
 
-  test('omits the mailbox move when the account has no Sent folder', async () => {
+  test('still clears $draft when the account has no Sent folder', async () => {
     const f = mock((_url: string, init?: RequestInit) => {
       const params = JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1]
-      expect(params.onSuccessUpdateEmail).toBeUndefined()
-      return Promise.resolve(jmapResponse([['EmailSubmission/set', { created: { send: { id: 's1' } } }, '0']]))
+      // Only the mailbox move is conditional. Dropping the whole patch would
+      // leave the sent message flagged `$draft` forever — and a retry would then
+      // deliver it a second time, because that flag IS the duplicate-send guard.
+      expect(params.onSuccessUpdateEmail['#send']).toEqual({ 'keywords/$draft': false })
+      return Promise.resolve(
+        jmapResponse([
+          ['EmailSubmission/set', { created: { send: { id: 's1' } } }, '0'],
+          ['Email/set', { updated: { d1: null } }, '0'],
+        ])
+      )
     })
-    await withFetch(f, () =>
+    const submission = await withFetch(f, () =>
       emailSubmissionCreate({ ...call, draftsMailboxId: 'mbDrafts', emailId: 'd1', identityId: 'i1' })
     )
+    expect(submission.filed).toBe(true)
+  })
+
+  test('reports filed: false when the implicit Email/set rejected the patch', async () => {
+    const f = mock(() =>
+      Promise.resolve(
+        jmapResponse([
+          ['EmailSubmission/set', { created: { send: { id: 's1' } } }, '0'],
+          ['Email/set', { notUpdated: { d1: { type: 'invalidProperties' } } }, '0'],
+        ])
+      )
+    )
+    // The mail went out, but the message still says `$draft`. The caller has to
+    // know: treating this as a clean send makes a retry a second delivery.
+    const submission = await withFetch(f, () =>
+      emailSubmissionCreate({
+        ...call,
+        draftsMailboxId: 'mbDrafts',
+        emailId: 'd1',
+        identityId: 'i1',
+        sentMailboxId: 'mbSent',
+      })
+    )
+    expect(submission.id).toBe('s1')
+    expect(submission.filed).toBe(false)
+  })
+
+  test('reports filed: false when the server performed no implicit Email/set at all', async () => {
+    const f = mock(() =>
+      Promise.resolve(jmapResponse([['EmailSubmission/set', { created: { send: { id: 's1' } } }, '0']]))
+    )
+    const submission = await withFetch(f, () =>
+      emailSubmissionCreate({
+        ...call,
+        draftsMailboxId: 'mbDrafts',
+        emailId: 'd1',
+        identityId: 'i1',
+        sentMailboxId: 'mbSent',
+      })
+    )
+    // No evidence the flag changed is not the same as evidence it did.
+    expect(submission.filed).toBe(false)
+  })
+
+  test('rejects a created entry with no submission id', async () => {
+    const f = mock(() => Promise.resolve(jmapResponse([['EmailSubmission/set', { created: { send: {} } }, '0']])))
+    await withFetch(f, async () => {
+      await expect(
+        emailSubmissionCreate({ ...call, draftsMailboxId: 'mbDrafts', emailId: 'd1', identityId: 'i1' })
+      ).rejects.toThrow(UNKNOWN_RE)
+    })
   })
 
   test('throws with the JMAP error type when the submission is refused', async () => {

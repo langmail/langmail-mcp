@@ -21,6 +21,7 @@ const jmapResponse = (methodResponses: unknown[]) => Response.json({ methodRespo
 const call = { accountId: 'acct', apiUrl: API, authorization: 'Bearer tok' }
 
 const INVALID_PROPERTIES_RE = /invalidProperties/u
+const OVER_QUOTA_RE = /overQuota/u
 
 describe('draftCreate', () => {
   test('files a text draft into the given mailbox with the $draft keyword', async () => {
@@ -99,15 +100,15 @@ describe('draftCreate', () => {
     )
   })
 
-  test('replaces a draft by creating and destroying in one Email/set', async () => {
+  test('destroys the replaced draft only after the new one exists', async () => {
+    const calls: Record<string, unknown>[] = []
     const f = mock((_url: string, init?: RequestInit) => {
       const params = JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1]
-      // One call — RFC 8620 orders create before destroy, so the edit is never
-      // visible as two drafts and can't lose the old one on a failed create.
-      expect(params.create.draft).toBeDefined()
-      expect(params.destroy).toEqual(['d0'])
+      calls.push(params)
       return Promise.resolve(
-        jmapResponse([['Email/set', { created: { draft: { id: 'd1' } }, destroyed: ['d0'] }, '0']])
+        params.create
+          ? jmapResponse([['Email/set', { created: { draft: { id: 'd1' } } }, '0']])
+          : jmapResponse([['Email/set', { destroyed: ['d0'] }, '0']])
       )
     })
     const result = await withFetch(f, () =>
@@ -118,13 +119,45 @@ describe('draftCreate', () => {
         replaces: 'd0',
       })
     )
+    // Two round trips, in this order. Batching them would let a rejected create
+    // destroy the draft anyway — Foo/set is not a transaction (RFC 8620 §5.3).
+    expect(calls).toHaveLength(2)
+    expect(calls[0]?.create).toBeDefined()
+    expect(calls[0]?.destroy).toBeUndefined()
+    expect(calls[1]?.destroy).toEqual(['d0'])
     expect(result).toEqual({ id: 'd1', replacedDestroyed: true, threadId: null })
   })
 
+  test('leaves the replaced draft alone when the create is refused', async () => {
+    const calls: Record<string, unknown>[] = []
+    const f = mock((_url: string, init?: RequestInit) => {
+      calls.push(JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1])
+      return Promise.resolve(jmapResponse([['Email/set', { notCreated: { draft: { type: 'overQuota' } } }, '0']]))
+    })
+    await withFetch(f, async () => {
+      await expect(
+        draftCreate({
+          ...call,
+          draft: { from: [{ email: 'me@example.com' }], text: 'edited' },
+          mailboxId: 'mbDrafts',
+          replaces: 'd0',
+        })
+      ).rejects.toThrow(OVER_QUOTA_RE)
+    })
+    // The user's staged message must survive a failed edit — no destroy was sent.
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.destroy).toBeUndefined()
+  })
+
   test('reports a replacement whose destroy did not land', async () => {
-    const f = mock(() =>
-      Promise.resolve(jmapResponse([['Email/set', { created: { draft: { id: 'd1' } }, destroyed: [] }, '0']]))
-    )
+    const f = mock((_url: string, init?: RequestInit) => {
+      const params = JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1]
+      return Promise.resolve(
+        params.create
+          ? jmapResponse([['Email/set', { created: { draft: { id: 'd1' } } }, '0']])
+          : jmapResponse([['Email/set', { destroyed: [] }, '0']])
+      )
+    })
     const result = await withFetch(f, () =>
       draftCreate({
         ...call,

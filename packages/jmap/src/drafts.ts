@@ -9,9 +9,17 @@
 // Editing a draft is create-then-destroy, not an update. RFC 8621 §4.6 makes
 // every Email property except `keywords` and `mailboxIds` immutable — a
 // message's content is its blob — so "change the subject" means writing a new
-// Email and destroying the old one. Both halves ride in a single Email/set,
-// which RFC 8620 §5.3 orders create-before-destroy, so an edit is never
-// visible as two drafts and never loses the old one on a failed create.
+// Email and destroying the old one.
+//
+// The two halves are two round trips, deliberately, and not one Email/set with
+// both a `create` and a `destroy`. `Foo/set` is explicitly not a transaction
+// (RFC 8620 §5.3: each create/update/destroy is an independent atomic unit, a
+// rejected one is reported under `notCreated`/`notDestroyed` and the server
+// carries on) — so batching them means a create Stalwart refuses, for quota or
+// any other reason, destroys the draft anyway and the user's staged message is
+// gone from everywhere. Sequencing costs a round trip and a transient window in
+// which both drafts exist; losing the content costs the content. `Email/set` has
+// no `onSuccessDestroy`, so one call cannot express the dependency at all.
 
 import { buildEmailSetPatch } from './patch.ts'
 import { jmapCall as call, type JmapCall, methodResponse } from './request.ts'
@@ -87,11 +95,14 @@ export interface EmailDraft {
 export interface DraftCreateParams extends JmapCall {
   accountId: string
   draft: EmailDraft
+  // Extra keywords to carry onto the new message, alongside `$draft`/`$seen` —
+  // the `$label:` tags an edited draft already had, so an edit doesn't untag it.
+  keywords?: string[]
   // The account's Drafts mailbox — resolved by role, not name (see
   // `mailboxIdByNameOrRole`).
   mailboxId: string
-  // Draft this one replaces, destroyed in the same Email/set. Omit for a fresh
-  // draft.
+  // Draft this one replaces. Destroyed only after the new one exists — see the
+  // header. Omit for a fresh draft.
   replaces?: string
 }
 
@@ -109,12 +120,17 @@ export interface DraftCreateResult {
 // properties the caller actually set are emitted: JMAP distinguishes an absent
 // property from an explicitly null one, and sending `cc: null` on a create is
 // noise at best.
-const draftProperties = (draft: EmailDraft, mailboxId: string): Record<string, unknown> => {
+const draftProperties = (p: DraftCreateParams): Record<string, unknown> => {
+  const draft = p.draft
   const bodyValues: Record<string, { value: string }> = {}
   const props: Record<string, unknown> = {
     from: draft.from,
-    keywords: { [DRAFT_KEYWORD]: true, [SEEN_KEYWORD]: true },
-    mailboxIds: { [mailboxId]: true },
+    keywords: {
+      [DRAFT_KEYWORD]: true,
+      [SEEN_KEYWORD]: true,
+      ...Object.fromEntries((p.keywords ?? []).map((keyword) => [keyword, true])),
+    },
+    mailboxIds: { [p.mailboxId]: true },
   }
   // Empty recipient lists are omitted, not sent as `[]`: every draft is written
   // by a create (an edit included — see the header), so "no cc" and "cc
@@ -147,30 +163,40 @@ const draftProperties = (draft: EmailDraft, mailboxId: string): Record<string, u
     bodyValues[HTML_PART_ID] = { value: draft.html }
     props.htmlBody = [{ partId: HTML_PART_ID, type: 'text/html' }]
   }
-  props.bodyValues = bodyValues
+  // Omitted rather than sent as `{}` when the draft has no body at all —
+  // reachable by editing a bodiless draft.
+  if (Object.keys(bodyValues).length > 0) {
+    props.bodyValues = bodyValues
+  }
   return props
 }
 
-// Stage a draft (optionally replacing an existing one) and return its id.
-// Throws JmapError when Stalwart reports the create under `notCreated`.
+// Destroy one draft. Returns whether the server actually destroyed it, rather
+// than throwing: the only caller is the second half of an edit, where the new
+// draft already exists and a leftover old one is a thing to report, not a
+// failure to abort on.
+const destroyDraft = async (p: JmapCall & { accountId: string; id: string }): Promise<boolean> => {
+  const resp = await call(p, {
+    methodCalls: [['Email/set', { accountId: p.accountId, destroy: [p.id] }, '0']],
+    using: USING,
+  })
+  const out = methodResponse<{ destroyed?: string[] }>(resp, 'Email/set', '0')
+  return (out.destroyed ?? []).includes(p.id)
+}
+
+// Stage a draft and return its id. When `replaces` is given, the superseded
+// draft is destroyed only after the new one exists — see the header for why that
+// is a second round trip and not one batched Email/set.
+//
+// Throws JmapError when Stalwart reports the create under `notCreated`; the
+// draft being replaced is then untouched, so nothing has been lost.
 export const draftCreate = async (p: DraftCreateParams): Promise<DraftCreateResult> => {
   const resp = await call(p, {
-    methodCalls: [
-      [
-        'Email/set',
-        {
-          accountId: p.accountId,
-          create: { [CREATE_ID]: draftProperties(p.draft, p.mailboxId) },
-          ...(p.replaces ? { destroy: [p.replaces] } : {}),
-        },
-        '0',
-      ],
-    ],
+    methodCalls: [['Email/set', { accountId: p.accountId, create: { [CREATE_ID]: draftProperties(p) } }, '0']],
     using: USING,
   })
   const out = methodResponse<{
     created?: Record<string, { id?: string; threadId?: string }>
-    destroyed?: string[]
     notCreated?: Record<string, { description?: string; type?: string }>
   }>(resp, 'Email/set', '0')
   const created = out.created?.[CREATE_ID]
@@ -180,7 +206,7 @@ export const draftCreate = async (p: DraftCreateParams): Promise<DraftCreateResu
   return {
     id: created.id,
     threadId: created.threadId ?? null,
-    ...(p.replaces ? { replacedDestroyed: (out.destroyed ?? []).includes(p.replaces) } : {}),
+    ...(p.replaces ? { replacedDestroyed: await destroyDraft({ ...p, id: p.replaces }) } : {}),
   }
 }
 
@@ -218,11 +244,18 @@ export const emailComposeGet = async (p: EmailComposeGetParams): Promise<EmailCo
   return out.list?.[0] ?? null
 }
 
-// The mailbox/keyword patch that turns a sent draft into sent mail: out of
-// Drafts, into Sent, `$draft` cleared. Exported for EmailSubmission's
+// The mailbox/keyword patch that turns a sent draft into sent mail: `$draft`
+// cleared, and out of Drafts into Sent. Exported for EmailSubmission's
 // `onSuccessUpdateEmail`, which applies it server-side iff the send succeeds.
-export const sentEmailPatch = (draftsMailboxId: string, sentMailboxId: string): Record<string, boolean | null> =>
+//
+// Clearing `$draft` is unconditional, and that is the load-bearing half. It is
+// what makes "this message is no longer a draft" the server-side record that a
+// send already happened — the guard a second send call trips over. Only the
+// mailbox move depends on the account having a Sent mailbox; skipping the whole
+// patch when it doesn't would leave the message looking unsent forever, so a
+// retried call would deliver it again.
+export const sentEmailPatch = (draftsMailboxId: string, sentMailboxId?: string): Record<string, boolean | null> =>
   buildEmailSetPatch({
     keywords: { [DRAFT_KEYWORD]: false },
-    mailboxIds: { [draftsMailboxId]: false, [sentMailboxId]: true },
+    ...(sentMailboxId ? { mailboxIds: { [draftsMailboxId]: false, [sentMailboxId]: true } } : {}),
   })

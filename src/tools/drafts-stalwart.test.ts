@@ -45,6 +45,7 @@ import {
 } from '@langmail/jmap'
 
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
+import { createSendGuard } from '../drafts/send-guard.ts'
 import { createDraft, createDraftInput } from './create-draft.ts'
 import { type DraftToolDeps } from './draft-common.ts'
 import { getDraft, getDraftInput } from './get-draft.ts'
@@ -111,6 +112,7 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
   let originalId: string
 
   const replays = createIdempotencyStore<string>()
+  const guard = createSendGuard()
   const ctx = () => ({ accountId, apiUrl, authorization })
   const toolCtx = { principal: '', token: TOKEN }
 
@@ -150,6 +152,20 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
   }
 
   const idsIn = (mailboxId: string): Promise<string[]> => emailQuery({ ...ctx(), filters: { mailboxId }, limit: 50 })
+
+  // Local delivery is asynchronous — the submission returns once the message is
+  // queued, not once it has landed. Poll rather than assume, so the test fails on
+  // a real regression instead of on timing.
+  const awaitDelivery = async (mailboxId: string, before: string[]): Promise<string[]> => {
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const fresh = (await idsIn(mailboxId)).filter((id) => !before.includes(id))
+      if (fresh.length > 0) {
+        return fresh
+      }
+      await Bun.sleep(100)
+    }
+    return []
+  }
 
   beforeAll(async () => {
     const domainQuery = await adminCall('x:Domain/query', { filter: { name: DOMAIN } })
@@ -331,7 +347,7 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
     const draftId = DRAFT_ID_RE.exec(staged.content[0]?.text ?? '')?.[1] ?? ''
     expect(draftId).not.toBe('')
 
-    const result = await sendDraft(deps, replays, { ...toolCtx, args: sendDraftInput.parse({ draftId }) })
+    const result = await sendDraft(deps, replays, guard, { ...toolCtx, args: sendDraftInput.parse({ draftId }) })
     expect(result.isError).toBeUndefined()
     const text = result.content[0]?.text ?? ''
     expect(text).toContain('Sent.')
@@ -352,6 +368,44 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
     const body = read.content[0]?.text ?? ''
     expect(body).toContain('Subject: Self test')
     expect(body).toContain('Body of the sent message.')
+
+    // Stalwart generated a Message-ID for the message it assembled. Without one,
+    // a reply to this message would derive empty threading headers and silently
+    // start a new conversation (`replyThreading` reads `messageId`).
+    expect(record?.messageId?.[0]).toBeTruthy()
+  })
+
+  test('a bcc recipient is delivered but does not appear in the delivered message', async () => {
+    // The claim this pins down is Stalwart's, not the RFC's: omitting the
+    // envelope has the server derive rcptTo from To/Cc/Bcc, and stripping the
+    // Bcc header from the transmitted copy is then up to the server. If it
+    // didn't, every To recipient would see the blind ones — so assert it rather
+    // than assume it.
+    const before = await idsIn(inboxId)
+    const staged = await createDraft(deps, replays, {
+      ...toolCtx,
+      args: createDraftInput.parse({
+        bcc: [address],
+        subject: 'Bcc test',
+        text: 'Body with a blind recipient.',
+        to: [address],
+      }),
+    })
+    const draftId = DRAFT_ID_RE.exec(staged.content[0]?.text ?? '')?.[1] ?? ''
+    const sent = await sendDraft(deps, replays, guard, { ...toolCtx, args: sendDraftInput.parse({ draftId }) })
+    expect(sent.isError).toBeUndefined()
+
+    // The Sent copy keeps bcc — that copy is the user's own record.
+    const sentCopy = await emailComposeGet({ ...ctx(), id: draftId, maxBodyValueBytes: 10_000 })
+    expect(sentCopy?.bcc?.[0]?.email).toBe(address)
+
+    // The delivered copy is a different Email; it must carry no bcc at all.
+    const delivered = await awaitDelivery(inboxId, before)
+    expect(delivered.length).toBeGreaterThan(0)
+    for (const id of delivered) {
+      const record = await emailComposeGet({ ...ctx(), id, maxBodyValueBytes: 10 })
+      expect(record?.bcc ?? null).toBeNull()
+    }
   })
 
   test('send_draft refuses to send the same draft twice', async () => {
@@ -361,18 +415,18 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
     })
     const draftId = DRAFT_ID_RE.exec(staged.content[0]?.text ?? '')?.[1] ?? ''
 
-    const first = await sendDraft(deps, replays, { ...toolCtx, args: sendDraftInput.parse({ draftId }) })
+    const first = await sendDraft(deps, replays, guard, { ...toolCtx, args: sendDraftInput.parse({ draftId }) })
     expect(first.isError).toBeUndefined()
 
     // No idempotency key involved: the guard is that the message is no longer a
     // draft, which is state Stalwart holds.
-    const second = await sendDraft(deps, replays, { ...toolCtx, args: sendDraftInput.parse({ draftId }) })
+    const second = await sendDraft(deps, replays, guard, { ...toolCtx, args: sendDraftInput.parse({ draftId }) })
     expect(second.isError).toBe(true)
     expect(second.content[0]?.text ?? '').toContain('already been sent')
   })
 
   test('reply_to_message sends a threaded reply in one call', async () => {
-    const result = await replyToMessage(deps, replays, {
+    const result = await replyToMessage(deps, replays, guard, {
       ...toolCtx,
       // Replies to the account's own sent message, so the reply is delivered
       // locally and the whole path stays inside the dev server.
@@ -392,7 +446,7 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
 
   test('reply_to_message refuses replyAll combined with explicit recipients, sending nothing', async () => {
     const before = await idsIn(sentId)
-    const result = await replyToMessage(deps, replays, {
+    const result = await replyToMessage(deps, replays, guard, {
       ...toolCtx,
       args: replyToMessageInput.parse({ messageId: originalId, replyAll: true, text: 'nope', to: [address] }),
     })

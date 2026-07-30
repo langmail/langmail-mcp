@@ -18,6 +18,7 @@ import { type TicketStore } from '../attachments/tickets.ts'
 import { type AuthContext } from '../auth/middleware.ts'
 import { makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
+import { createSendGuard } from '../drafts/send-guard.ts'
 import { makeLiveApplyIo, makeMailRulesApplier } from '../rules/apply.ts'
 import { makeLiveSieveIo, makeMailRulesStore } from '../rules/store.ts'
 import { makeAttendeeWriteThrough } from '../tools/contact-write-through.ts'
@@ -108,6 +109,9 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   // instead of a second delivery.
   const draftDeps = makeDraftDeps(jmapLive)
   const composeReplays = createIdempotencyStore<string>()
+  // Reserves a draft while its send is in flight, so a client that retries
+  // before the first call answers can't deliver a second copy.
+  const sendGuard = createSendGuard()
 
   return async (req, ctx) => {
     const server = new McpServer({
@@ -146,6 +150,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
       server,
       draftDeps,
       composeReplays,
+      sendGuard,
       () => ctx.token,
       () => ctx.principal
     )
@@ -153,6 +158,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
       server,
       draftDeps,
       composeReplays,
+      sendGuard,
       () => ctx.token,
       () => ctx.principal
     )

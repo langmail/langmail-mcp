@@ -1,15 +1,16 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type EmailSubmissionCreateParams } from '@langmail/jmap'
+import { type EmailSubmissionCreateParams, JmapError } from '@langmail/jmap'
 
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
+import { createSendGuard } from '../drafts/send-guard.ts'
 import { type DraftDepsOptions, draftDeps, stagedDraft, TEST_PRINCIPAL } from './draft-test-fixtures.ts'
 import { sendDraft, sendDraftInput } from './send-draft.ts'
 
 const store = () => createIdempotencyStore<string>()
 
 const run = async (args: Record<string, unknown>, opts: DraftDepsOptions = {}) => {
-  const result = await sendDraft(draftDeps(opts), store(), {
+  const result = await sendDraft(draftDeps(opts), store(), createSendGuard(), {
     args: sendDraftInput.parse(args),
     principal: TEST_PRINCIPAL,
     token: 'tok',
@@ -63,6 +64,7 @@ describe('sendDraft', () => {
   test('replays the first answer for a repeated idempotencyKey and does not resend', async () => {
     const submissions: EmailSubmissionCreateParams[] = []
     const replays = store()
+    const guard = createSendGuard()
     // The record stays a draft, so only the key can stop the second send.
     const deps = draftDeps({ records: { d1: stagedDraft() }, submissions })
     const ctx = {
@@ -71,8 +73,8 @@ describe('sendDraft', () => {
       token: 'tok',
     }
 
-    const first = await sendDraft(deps, replays, ctx)
-    const second = await sendDraft(deps, replays, ctx)
+    const first = await sendDraft(deps, replays, guard, ctx)
+    const second = await sendDraft(deps, replays, guard, ctx)
 
     expect(submissions).toHaveLength(1)
     expect(first.content[0]?.text).toContain('messageId: d1')
@@ -91,7 +93,7 @@ describe('sendDraft', () => {
   test('surfaces the release time when the server reports one', async () => {
     const { text } = await run(
       { draftId: 'd1' },
-      { records: { d1: stagedDraft() }, submission: { id: 's1', sendAt: '2026-07-30T09:00:00Z' } }
+      { records: { d1: stagedDraft() }, submission: { filed: true, id: 's1', sendAt: '2026-07-30T09:00:00Z' } }
     )
     expect(text).toContain('sendAt: 2026-07-30T09:00:00Z')
   })
@@ -115,16 +117,93 @@ describe('sendDraft', () => {
     expect(submissions).toEqual([])
   })
 
+  test('warns loudly when the mail went out but the mailbox was not updated', async () => {
+    const { result, text } = await run(
+      { draftId: 'd1' },
+      { records: { d1: stagedDraft() }, submission: { filed: false, id: 's1' } }
+    )
+    // The message is delivered but still flagged $draft, so the usual "still a
+    // draft, so it can't have been sent" reasoning is wrong here.
+    expect(result.isError).toBeUndefined()
+    expect(text).toContain('WAS sent')
+    expect(text).toContain('Do NOT send it again')
+  })
+
+  test('two concurrent sends of the same draft deliver once', async () => {
+    const submissions: EmailSubmissionCreateParams[] = []
+    const replays = store()
+    const guard = createSendGuard()
+    const deps = draftDeps({ records: { d1: stagedDraft() }, submissions })
+    const ctx = {
+      args: sendDraftInput.parse({ draftId: 'd1', idempotencyKey: 'k1' }),
+      principal: TEST_PRINCIPAL,
+      token: 'tok',
+    }
+
+    // The retry-while-in-flight shape the idempotencyKey exists for: neither
+    // call has recorded a replay yet, and the draft still reads as a draft
+    // because the server has not applied the follow-up patch.
+    const [a, b] = await Promise.all([sendDraft(deps, replays, guard, ctx), sendDraft(deps, replays, guard, ctx)])
+
+    expect(submissions).toHaveLength(1)
+    const outcomes = [a, b].map((r) => r.content[0]?.text ?? '')
+    expect(outcomes.filter((t) => t.includes('Sent.'))).toHaveLength(1)
+    expect(outcomes.filter((t) => t.includes('already in progress'))).toHaveLength(1)
+  })
+
+  test('a keyless concurrent retry is blocked too', async () => {
+    const submissions: EmailSubmissionCreateParams[] = []
+    const guard = createSendGuard()
+    const deps = draftDeps({ records: { d1: stagedDraft() }, submissions })
+    const ctx = { args: sendDraftInput.parse({ draftId: 'd1' }), principal: TEST_PRINCIPAL, token: 'tok' }
+    // The reservation is keyed on the draft, not the caller's key, so a client
+    // retrying blind — the likelier shape — is covered as well.
+    await Promise.all([sendDraft(deps, store(), guard, ctx), sendDraft(deps, store(), guard, ctx)])
+    expect(submissions).toHaveLength(1)
+  })
+
+  test('a server refusal stays retryable; a transport failure does not', async () => {
+    const jmapRefusal = new JmapError(200, 'EmailSubmission/set did not send d1: forbiddenFrom', 'forbiddenFrom')
+    const refusingGuard = createSendGuard()
+    const refusing = draftDeps({ records: { d1: stagedDraft() }, submitError: jmapRefusal })
+    const ctx = { args: sendDraftInput.parse({ draftId: 'd1' }), principal: TEST_PRINCIPAL, token: 'tok' }
+    await expect(sendDraft(refusing, store(), refusingGuard, ctx)).rejects.toThrow('forbiddenFrom')
+    // The server answered "no", so nothing went out and the draft is free again.
+    expect(refusingGuard.reserve(TEST_PRINCIPAL, 'd1')).toBeNull()
+
+    const lostGuard = createSendGuard()
+    const lost = draftDeps({ records: { d1: stagedDraft() }, submitError: new Error('socket hang up') })
+    await expect(sendDraft(lost, store(), lostGuard, ctx)).rejects.toThrow('socket hang up')
+    // A lost answer might mean "delivered". Blocking is the safe direction.
+    expect(lostGuard.reserve(TEST_PRINCIPAL, 'd1')).toEqual({ state: 'unknown' })
+  })
+
+  test('a send whose outcome is unknown is refused rather than retried', async () => {
+    const submissions: EmailSubmissionCreateParams[] = []
+    const guard = createSendGuard()
+    guard.reserve(TEST_PRINCIPAL, 'd1')
+    guard.markUnknown(TEST_PRINCIPAL, 'd1')
+    const result = await sendDraft(draftDeps({ records: { d1: stagedDraft() }, submissions }), store(), guard, {
+      args: sendDraftInput.parse({ draftId: 'd1' }),
+      principal: TEST_PRINCIPAL,
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text ?? '').toContain('could deliver a duplicate')
+    expect(submissions).toEqual([])
+  })
+
   test('does not record a replay when the submission itself fails', async () => {
     const replays = store()
+    const guard = createSendGuard()
     const deps = draftDeps({ records: { d1: stagedDraft() }, submitError: new Error('smtp down') })
     const ctx = {
       args: sendDraftInput.parse({ draftId: 'd1', idempotencyKey: 'k1' }),
       principal: TEST_PRINCIPAL,
       token: 'tok',
     }
-    await expect(sendDraft(deps, replays, ctx)).rejects.toThrow('smtp down')
+    await expect(sendDraft(deps, replays, guard, ctx)).rejects.toThrow('smtp down')
     // A failed send must stay retryable — the key can only shadow a success.
-    expect(replays.lookup(TEST_PRINCIPAL, 'k1')).toBeNull()
+    expect(replays.lookup('send_draft', TEST_PRINCIPAL, 'k1')).toBeNull()
   })
 })

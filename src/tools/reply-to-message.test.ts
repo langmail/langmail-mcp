@@ -3,13 +3,14 @@ import { describe, expect, test } from 'bun:test'
 import { type DraftCreateParams, type EmailSubmissionCreateParams } from '@langmail/jmap'
 
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
+import { createSendGuard } from '../drafts/send-guard.ts'
 import { type DraftDepsOptions, draftDeps, receivedMessage, TEST_PRINCIPAL } from './draft-test-fixtures.ts'
 import { replyArgsError, replyToMessage, replyToMessageInput } from './reply-to-message.ts'
 
 const store = () => createIdempotencyStore<string>()
 
 const run = async (args: Record<string, unknown>, opts: DraftDepsOptions = {}) => {
-  const result = await replyToMessage(draftDeps(opts), store(), {
+  const result = await replyToMessage(draftDeps(opts), store(), createSendGuard(), {
     args: replyToMessageInput.parse(args),
     principal: TEST_PRINCIPAL,
     token: 'tok',
@@ -100,6 +101,7 @@ describe('replyToMessage', () => {
     const creates: DraftCreateParams[] = []
     const submissions: EmailSubmissionCreateParams[] = []
     const replays = store()
+    const guard = createSendGuard()
     const deps = draftDeps({ creates, records: { e1: receivedMessage() }, submissions })
     const ctx = {
       args: replyToMessageInput.parse({ idempotencyKey: 'k1', messageId: 'e1', text: 'hi' }),
@@ -107,12 +109,35 @@ describe('replyToMessage', () => {
       token: 'tok',
     }
 
-    await replyToMessage(deps, replays, ctx)
-    const second = await replyToMessage(deps, replays, ctx)
+    await replyToMessage(deps, replays, guard, ctx)
+    const second = await replyToMessage(deps, replays, guard, ctx)
 
     expect(creates).toHaveLength(1)
     expect(submissions).toHaveLength(1)
     expect(second.content[0]?.text).toContain('no second reply was sent')
+  })
+
+  test('a concurrent duplicate reply is staged but not sent twice', async () => {
+    const creates: DraftCreateParams[] = []
+    const submissions: EmailSubmissionCreateParams[] = []
+    const guard = createSendGuard()
+    const deps = draftDeps({ creates, records: { e1: receivedMessage() }, submissions })
+    const ctx = {
+      args: replyToMessageInput.parse({ messageId: 'e1', text: 'hi' }),
+      principal: TEST_PRINCIPAL,
+      token: 'tok',
+    }
+    // Each reply stages its own draft, so the guard can only fire when both
+    // land on the same draft id — which the fixture's fixed id reproduces.
+    const results = await Promise.all([
+      replyToMessage(deps, store(), guard, ctx),
+      replyToMessage(deps, store(), guard, ctx),
+    ])
+    expect(submissions).toHaveLength(1)
+    const blocked = results.find((r) => r.isError)
+    expect(blocked?.content[0]?.text ?? '').toContain('already in progress')
+    // The unsent reply is not lost — the result says where it is.
+    expect(blocked?.content[0]?.text ?? '').toContain('staged as draft')
   })
 
   test('falls back to the original thread when the new draft reports none', async () => {

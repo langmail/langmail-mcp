@@ -64,9 +64,9 @@ export const registerGetDraft = (server: McpServer, deps: DraftToolDeps, getToke
       annotations: READ_ONLY,
       description:
         'Read a staged draft back: its sender, every recipient including bcc, subject, whether it is ' +
-        'threaded onto a conversation, and a body preview. Use this to confirm what create_draft or ' +
-        'update_draft staged before sending it. For messages that have already been sent or received, ' +
-        'use get_email.',
+        'threaded onto a conversation, and the first 500 characters of the body. Use this to confirm what ' +
+        'was staged before sending — especially for a draft you did not write yourself. For messages that ' +
+        'have already been sent or received, use get_email.',
       inputSchema: getDraftInput.shape,
       title: 'Get draft',
     },

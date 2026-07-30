@@ -95,6 +95,7 @@ export {
 } from './stalwart-credential.ts'
 export {
   type EmailSubmissionCreateParams,
+  type EmailSubmissionResult,
   emailSubmissionCreate,
   type IdentityGetParams,
   identityGet,

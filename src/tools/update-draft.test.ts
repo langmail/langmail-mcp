@@ -81,11 +81,69 @@ describe('updateDraft', () => {
     expect(creates).toEqual([])
   })
 
+  test('refuses a partial body edit that would deliver the stale part', async () => {
+    const creates: DraftCreateParams[] = []
+    const both = stagedDraft({
+      bodyValues: { '1': { value: 'OLD price is 5000' }, '2': { value: '<p>OLD price is 5000</p>' } },
+      htmlBody: [{ partId: '2', type: 'text/html' }],
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    // Mail clients render the html alternative, so replacing only `text` would
+    // report the corrected body and deliver the old one.
+    const { result, text } = await run({ draftId: 'd1', text: 'NEW price is 4000' }, { creates, records: { d1: both } })
+    expect(result.isError).toBe(true)
+    expect(text).toContain('only `text` was given')
+    expect(text).toContain('Nothing was changed')
+    expect(creates).toEqual([])
+  })
+
+  test('accepts a body edit that replaces both parts', async () => {
+    const creates: DraftCreateParams[] = []
+    const both = stagedDraft({
+      bodyValues: { '1': { value: 'old' }, '2': { value: '<p>old</p>' } },
+      htmlBody: [{ partId: '2', type: 'text/html' }],
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    const { result } = await run({ draftId: 'd1', html: '<p>new</p>', text: 'new' }, { creates, records: { d1: both } })
+    expect(result.isError).toBeUndefined()
+    expect(creates[0]?.draft).toMatchObject({ html: '<p>new</p>', text: 'new' })
+  })
+
+  test('refuses to edit a draft whose body read back truncated', async () => {
+    const creates: DraftCreateParams[] = []
+    const truncated = stagedDraft({ bodyValues: { '1': { isTruncated: true, value: 'first 100k only' } } })
+    // Re-staging a truncated read would amputate the message, and the original
+    // is destroyed afterwards.
+    const { result, text } = await run({ draftId: 'd1', subject: 'New' }, { creates, records: { d1: truncated } })
+    expect(result.isError).toBe(true)
+    expect(text).toContain('too large to edit')
+    expect(creates).toEqual([])
+  })
+
+  test('carries the user’s own labels onto the replacement', async () => {
+    const creates: DraftCreateParams[] = []
+    const tagged = stagedDraft({ keywords: { $draft: true, $seen: true, '$label:Invoices': true } })
+    await run({ draftId: 'd1', subject: 'New' }, { creates, records: { d1: tagged } })
+    // An edit rewrites the message, so without this the draft comes back untagged.
+    expect(creates[0]?.keywords).toEqual(['$label:Invoices'])
+  })
+
+  test('does not silently trim a body the caller did not touch', async () => {
+    const creates: DraftCreateParams[] = []
+    const padded = stagedDraft({ bodyValues: { '1': { value: '  leading and trailing  ' } } })
+    await run({ draftId: 'd1', subject: 'New' }, { creates, records: { d1: padded } })
+    expect(creates[0]?.draft.text).toBe('  leading and trailing  ')
+  })
+
   test('admits when the superseded draft could not be removed', async () => {
     const { text } = await run(
       { draftId: 'd1', text: 'hi' },
       { created: { id: 'd2', replacedDestroyed: false, threadId: null }, records: { d1: stagedDraft() } }
     )
     expect(text).toContain('previous draft d1 could not be removed')
+    // The leftover holds the pre-edit content and is still sendable, so the note
+    // has to say which id to send.
+    expect(text).toContain('PRE-EDIT content')
+    expect(text).toContain('send d2')
   })
 })

@@ -17,10 +17,12 @@ import { z } from 'zod'
 
 import { bearerAuthorization, type EmailDraft } from '@langmail/jmap'
 
-import { ACCOUNT_WRITE } from './annotations.ts'
+import { ACCOUNT_DESTRUCTIVE } from './annotations.ts'
 import {
+  bodyTruncated,
   type DraftToolDeps,
   draftFromRecord,
+  draftLabelKeywords,
   formatDraft,
   isDraft,
   MAX_DRAFT_BODY_VALUE_BYTES,
@@ -58,6 +60,25 @@ export interface UpdateDraftContext {
   token: string
 }
 
+// Which body part would be left holding old content, if any: the draft has both
+// parts and the caller supplied exactly one.
+const staleBodyPart = (
+  staged: EmailDraft,
+  args: UpdateDraftArgs
+): { stale: 'html' | 'text'; supplied: 'html' | 'text' } | null => {
+  const hasBoth = staged.text !== undefined && staged.html !== undefined
+  if (!hasBoth) {
+    return null
+  }
+  if (args.text !== undefined && args.html === undefined) {
+    return { stale: 'html', supplied: 'text' }
+  }
+  if (args.html !== undefined && args.text === undefined) {
+    return { stale: 'text', supplied: 'html' }
+  }
+  return null
+}
+
 export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext): Promise<ToolResult> => {
   const { args } = ctx
   const authorization = bearerAuthorization(ctx.token)
@@ -76,6 +97,29 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
   if (!isDraft(record)) {
     return errorResult(`${args.draftId} is not a draft — it has already been sent or received, and cannot be edited.`)
   }
+  // An edit re-stages whatever came back, so a body that was truncated on the way
+  // in would be truncated on the way out — and the original is destroyed after.
+  // Refusing keeps the user's message intact; nothing has changed at this point.
+  if (bodyTruncated(record)) {
+    return errorResult(
+      `Draft ${args.draftId} has a body too large to edit without risking losing part of it, so it was left ` +
+        'unchanged. Stage a fresh draft with create_draft instead.'
+    )
+  }
+
+  const staged = draftFromRecord(record)
+  // Replacing one body part while the other survives is how a stale body gets
+  // delivered: mail clients render the html alternative, so an html draft
+  // "corrected" via `text` alone goes out saying the old thing. Both parts or
+  // neither.
+  const stalePart = staleBodyPart(staged, args)
+  if (stalePart) {
+    return errorResult(
+      `This draft has both a plain-text and an HTML body, and only \`${stalePart.supplied}\` was given — the ` +
+        `\`${stalePart.stale}\` version would keep its old content, and that is the one most mail clients ` +
+        'show. Pass both `text` and `html`, or stage a fresh draft with create_draft. Nothing was changed.'
+    )
+  }
 
   const recipients = parseRecipients({
     ...(args.to ? { to: args.to } : {}),
@@ -92,7 +136,7 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
   }
 
   const merged: EmailDraft = {
-    ...draftFromRecord(record),
+    ...staged,
     ...recipients,
     ...(args.subject === undefined ? {} : { subject: args.subject }),
     ...(args.text === undefined ? {} : { text: args.text }),
@@ -105,15 +149,23 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
     authorization,
     draft: merged,
     mailboxId: mailboxes.drafts,
+    // The user's own labels survive the edit — an edit shouldn't quietly
+    // untag a draft they filed.
+    keywords: draftLabelKeywords(record),
     replaces: args.draftId,
   })
 
   // A create that landed while the destroy didn't leaves the superseded draft in
   // the folder. Saying so beats the user finding two drafts and neither tool
   // admitting to it.
+  // A create that landed while the destroy didn't leaves the superseded draft in
+  // the folder — still sendable, and still holding the *pre-edit* content. That
+  // makes it actively dangerous, not just untidy, so the note says which id to
+  // send and which to leave alone.
   const leftover =
     created.replacedDestroyed === false
-      ? `\nNote: the previous draft ${args.draftId} could not be removed and is still in Drafts.`
+      ? `\nNote: the previous draft ${args.draftId} could not be removed and is still in Drafts. It holds the ` +
+        `PRE-EDIT content and is still sendable — do not send it; send ${created.id}.`
       : ''
   return textResult(
     `Draft updated and still unsent — its id is now ${created.id} (the previous id is gone; use the new one ` +
@@ -127,12 +179,14 @@ export const registerUpdateDraft = (server: McpServer, deps: DraftToolDeps, getT
   server.registerTool(
     'update_draft',
     {
-      annotations: ACCOUNT_WRITE,
+      annotations: ACCOUNT_DESTRUCTIVE,
       description:
         'Edit a staged draft that has not been sent. Omitted fields keep their staged values; an empty ' +
         'recipient array clears that field. Returns a NEW draftId — the edit replaces the message, so the ' +
-        'old id stops working and later calls (including send_draft) must use the returned one. The sender ' +
-        'and the reply threading cannot be changed here; stage a new draft with create_draft instead.',
+        'old id stops working and later calls (including send_draft) must use the returned one. The ' +
+        'previous version is not recoverable. If the draft has both a plain-text and an HTML body, pass ' +
+        'both `text` and `html` or neither; replacing one would leave the other saying the old thing. The ' +
+        'sender and the reply threading cannot be changed here; stage a new draft with create_draft instead.',
       inputSchema: updateDraftInput.shape,
       title: 'Update draft',
     },

@@ -90,6 +90,61 @@ describe('createDraft', () => {
     expect(recipients.map((a) => a.email)).not.toContain(TEST_PRINCIPAL)
   })
 
+  test('rejects replyAll combined with explicit recipients, as reply_to_message does', async () => {
+    const creates: DraftCreateParams[] = []
+    // Per-field precedence here silently dropped the person being replied to:
+    // the derived Cc excludes the derived To, so with an explicit `to` the
+    // original sender landed in neither list.
+    const { result, text } = await run(
+      { inReplyTo: 'e1', replyAll: true, text: 'hi', to: ['tomas@example.com'] },
+      { creates, records: { e1: receivedMessage() } }
+    )
+    expect(result.isError).toBe(true)
+    expect(text).toContain('replyAll cannot be combined')
+    expect(creates).toEqual([])
+  })
+
+  test('refuses a reply that would have no recipient', async () => {
+    const creates: DraftCreateParams[] = []
+    // Replying to the user's own message: every address on it is theirs, so
+    // every candidate recipient is excluded. That's a follow-up, not a reply.
+    const own = receivedMessage({ cc: [], from: [{ email: TEST_PRINCIPAL }], to: [{ email: 'nadia@example.org' }] })
+    const { result, text } = await run({ inReplyTo: 'e1', text: 'following up' }, { creates, records: { e1: own } })
+    expect(result.isError).toBe(true)
+    expect(text).toContain('leaves no recipient')
+    expect(creates).toEqual([])
+  })
+
+  test('requires recipients or a message to derive them from', async () => {
+    const creates: DraftCreateParams[] = []
+    const { result, text } = await run({ text: 'hi' }, { creates })
+    expect(result.isError).toBe(true)
+    expect(text).toContain('Provide recipients')
+    // A draft with no recipients cannot be sent, so failing now beats failing
+    // at send_draft.
+    expect(creates).toEqual([])
+  })
+
+  test('excludes every address that is the user, not just the sending one', async () => {
+    const creates: DraftCreateParams[] = []
+    // The original was addressed to one of the user's aliases; a reply-all must
+    // not deliver the user their own reply.
+    const toAlias = receivedMessage({ cc: [{ email: 'carl@example.org' }], to: [{ email: 'sales@langmail.me' }] })
+    await run(
+      { inReplyTo: 'e1', replyAll: true, text: 'hi' },
+      {
+        creates,
+        identities: [
+          { email: TEST_PRINCIPAL, id: 'i1', name: 'Dana Okonjo' },
+          { email: 'sales@langmail.me', id: 'i2' },
+        ],
+        records: { e1: toAlias },
+      }
+    )
+    const recipients = [...(creates[0]?.draft.to ?? []), ...(creates[0]?.draft.cc ?? [])]
+    expect(recipients.map((a) => a.email)).toEqual(['nadia@example.org', 'carl@example.org'])
+  })
+
   test('explicit recipients override the derived reply recipients', async () => {
     const creates: DraftCreateParams[] = []
     await run(

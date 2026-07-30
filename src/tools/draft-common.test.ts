@@ -71,7 +71,11 @@ describe('resolveIdentity', () => {
       authorization: 'Bearer tok',
       principal: 'user@langmail.me',
     })
-    expect(resolved).toEqual({ address: { email: 'user@langmail.me', name: 'Dana Okonjo' }, identityId: 'i1' })
+    expect(resolved).toEqual({
+      address: { email: 'user@langmail.me', name: 'Dana Okonjo' },
+      identityId: 'i1',
+      selfAddresses: ['user@langmail.me', 'user@langmail.me', 'sales@langmail.me'],
+    })
   })
 
   test('selects an alias by address, case-insensitively', async () => {
@@ -81,7 +85,12 @@ describe('resolveIdentity', () => {
       from: 'SALES@langmail.me',
       principal: 'user@langmail.me',
     })
-    expect(resolved).toEqual({ address: { email: 'sales@langmail.me' }, identityId: 'i2' })
+    expect(resolved).toEqual({
+      address: { email: 'sales@langmail.me' },
+      identityId: 'i2',
+      // Every address that is "the user" — a reply must exclude all of them.
+      selfAddresses: ['user@langmail.me', 'user@langmail.me', 'sales@langmail.me'],
+    })
   })
 
   test('refuses an address the account cannot send as, and names the ones it can', async () => {
@@ -98,13 +107,35 @@ describe('resolveIdentity', () => {
     }
   })
 
-  test('falls back to the first identity when the principal is not one of them', async () => {
+  test('refuses to guess when the principal is not an identity and there are several', async () => {
     const resolved = await resolveIdentity(draftDeps({ identities }), {
       accountId: 'acct',
       authorization: 'Bearer tok',
       principal: 'aliased-login@langmail.me',
     })
-    expect(resolved).toEqual({ address: { email: 'user@langmail.me', name: 'Dana Okonjo' }, identityId: 'i1' })
+    // Identity/get guarantees no ordering, so picking one would be a guess at
+    // which of the user's addresses they meant. Ask instead.
+    expect('error' in resolved).toBe(true)
+    if ('error' in resolved) {
+      expect(resolved.error).toContain('Could not tell which address to send as')
+      expect(resolved.error).toContain('sales@langmail.me')
+    }
+  })
+
+  test('uses the sole identity when the principal is not among them', async () => {
+    const [only] = identities
+    const resolved = await resolveIdentity(draftDeps({ identities: only ? [only] : [] }), {
+      accountId: 'acct',
+      authorization: 'Bearer tok',
+      principal: 'aliased-login@langmail.me',
+    })
+    // One identity means there is only one address this account could send as,
+    // so there is nothing to guess.
+    expect(resolved).toEqual({
+      address: { email: 'user@langmail.me', name: 'Dana Okonjo' },
+      identityId: 'i1',
+      selfAddresses: ['aliased-login@langmail.me', 'user@langmail.me'],
+    })
   })
 
   test('errors when the account has no identity at all', async () => {
@@ -116,6 +147,8 @@ describe('resolveIdentity', () => {
     expect('error' in resolved).toBe(true)
   })
 })
+
+const SELF = 'user@langmail.me'
 
 const original: EmailComposeRecord = {
   cc: [{ email: 'carl@example.org' }, { email: 'user@langmail.me' }],
@@ -129,14 +162,14 @@ const original: EmailComposeRecord = {
 
 describe('replyRecipients', () => {
   test('replies to the sender only by default', () => {
-    expect(replyRecipients(original, 'user@langmail.me', false)).toEqual({
+    expect(replyRecipients(original, [SELF], false)).toEqual({
       cc: [],
       to: [{ email: 'nadia@example.org', name: 'Nadia Bram' }],
     })
   })
 
   test('reply-all folds the original To and Cc into Cc, minus the user', () => {
-    const { cc, to } = replyRecipients(original, 'user@langmail.me', true)
+    const { cc, to } = replyRecipients(original, [SELF], true)
     expect(to).toEqual([{ email: 'nadia@example.org', name: 'Nadia Bram' }])
     expect(cc).toEqual([{ email: 'tomas@example.com' }, { email: 'carl@example.org' }])
     // The user is never mailed their own reply.
@@ -145,7 +178,7 @@ describe('replyRecipients', () => {
 
   test('prefers Reply-To over From when the sender set one', () => {
     const withReplyTo: EmailComposeRecord = { ...original, replyTo: [{ email: 'desk@example.org' }] }
-    expect(replyRecipients(withReplyTo, 'user@langmail.me', false).to).toEqual([{ email: 'desk@example.org' }])
+    expect(replyRecipients(withReplyTo, [SELF], false).to).toEqual([{ email: 'desk@example.org' }])
   })
 
   test('never lists the same address twice, even across To and Cc', () => {
@@ -154,11 +187,11 @@ describe('replyRecipients', () => {
       cc: [{ email: 'Tomas@example.com' }],
       to: [{ email: 'tomas@example.com' }],
     }
-    expect(replyRecipients(dupes, 'user@langmail.me', true).cc).toEqual([{ email: 'tomas@example.com' }])
+    expect(replyRecipients(dupes, [SELF], true).cc).toEqual([{ email: 'tomas@example.com' }])
   })
 
   test('yields no recipient when the original has no sender to reply to', () => {
-    expect(replyRecipients({ id: 'e1' }, 'user@langmail.me', true).to).toEqual([])
+    expect(replyRecipients({ id: 'e1' }, [SELF], true).to).toEqual([])
   })
 })
 

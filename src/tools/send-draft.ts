@@ -15,9 +15,10 @@
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
-import { bearerAuthorization, type EmailComposeRecord, type EmailDraft } from '@langmail/jmap'
+import { bearerAuthorization, type EmailComposeRecord, type EmailDraft, JmapError } from '@langmail/jmap'
 
 import { type IdempotencyStore } from '../drafts/idempotency.ts'
+import { type SendGuard } from '../drafts/send-guard.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import {
   type DraftToolDeps,
@@ -28,6 +29,9 @@ import {
   resolveIdentity,
 } from './draft-common.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
+
+// The replay cache is keyed per tool — see drafts/idempotency.ts.
+const TOOL_NAME = 'send_draft'
 
 export const sendDraftInput = z.object({
   draftId: z
@@ -61,7 +65,10 @@ export interface SubmitParams {
   // The account's Drafts mailbox — the message leaves it on success. Not
   // nullable: a caller with no Drafts folder has nothing staged to send.
   draftsMailboxId: string
+  // Guards the window between "is it still a draft?" and the submission landing.
+  guard: SendGuard
   identityId: string
+  principal: string
   // The account's Sent mailbox, when it has one.
   sentMailboxId?: string
 }
@@ -69,25 +76,64 @@ export interface SubmitParams {
 // Submit a staged draft and report where the message ended up. Shared with
 // reply_to_message, which stages its own draft first and then lands here — the
 // send half must be identical on both paths or one of them drifts.
-export const submitDraft = async (deps: DraftToolDeps, p: SubmitParams): Promise<string> => {
-  const submission = await deps.emailSubmissionCreate({
-    accountId: await deps.resolveSubmissionAccountId(p.authorization),
-    apiUrl: '',
-    authorization: p.authorization,
-    draftsMailboxId: p.draftsMailboxId,
-    emailId: p.draftId,
-    identityId: p.identityId,
-    ...(p.sentMailboxId ? { sentMailboxId: p.sentMailboxId } : {}),
-  })
-  const lines = p.sentMailboxId
-    ? ['The message is in Sent — read it back with get_email using the messageId above.']
-    : [
-        'The message was sent but stayed in Drafts — this account has no Sent folder. Read it back with ' +
-          'get_email using the messageId above.',
-      ]
-  if (submission.sendAt) {
-    lines.unshift(`sendAt: ${submission.sendAt}`)
+export const submitDraft = async (deps: DraftToolDeps, p: SubmitParams): Promise<{ error: string } | string> => {
+  const held = p.guard.reserve(p.principal, p.draftId)
+  if (held) {
+    return {
+      error:
+        held.state === 'in_flight'
+          ? `A send of ${p.draftId} is already in progress. Nothing was sent by this call. Wait, then read the ` +
+            'message back with get_email to see whether it went out.'
+          : `An earlier send of ${p.draftId} failed without saying whether the message went out, so it was NOT ` +
+            'sent again — a second attempt could deliver a duplicate. Read it back with get_email, or check the ' +
+            "user's Sent folder, before deciding.",
+    }
   }
+
+  let submission: Awaited<ReturnType<typeof deps.emailSubmissionCreate>>
+  try {
+    submission = await deps.emailSubmissionCreate({
+      accountId: await deps.resolveSubmissionAccountId(p.authorization),
+      apiUrl: '',
+      authorization: p.authorization,
+      draftsMailboxId: p.draftsMailboxId,
+      emailId: p.draftId,
+      identityId: p.identityId,
+      ...(p.sentMailboxId ? { sentMailboxId: p.sentMailboxId } : {}),
+    })
+  } catch (error) {
+    // A JMAP method error means the server answered, and it answered no — so
+    // nothing was sent and this stays retryable. Anything else (timeout, reset)
+    // may have been accepted with the answer lost: hold the reservation.
+    if (error instanceof JmapError && error.errorType !== undefined) {
+      p.guard.release(p.principal, p.draftId)
+    } else {
+      p.guard.markUnknown(p.principal, p.draftId)
+    }
+    throw error
+  }
+  const lines: string[] = []
+  if (submission.sendAt) {
+    lines.push(`sendAt: ${submission.sendAt}`)
+  }
+  if (submission.filed) {
+    lines.push(
+      p.sentMailboxId
+        ? 'The message is in Sent — read it back with get_email using the messageId above.'
+        : 'The message was sent but stayed in Drafts — this account has no Sent folder. Read it back with ' +
+            'get_email using the messageId above.'
+    )
+    return lines.join('\n')
+  }
+  // Delivered, but the server did not apply the follow-up patch, so the message
+  // still looks like an unsent draft. Say so loudly: this is the one state where
+  // the usual "it's still a draft, so it can't have been sent" reasoning is
+  // wrong, and acting on it would deliver the message twice.
+  lines.push(
+    'WARNING: the message WAS sent, but the mailbox could not be updated, so it still appears in Drafts and ' +
+      'still looks unsent. Do NOT send it again — that would deliver a second copy. Tell the user it went out ' +
+      'and that the stale draft can be deleted by hand.'
+  )
   return lines.join('\n')
 }
 
@@ -138,11 +184,12 @@ const loadSendableDraft = async (
 export const sendDraft = async (
   deps: DraftToolDeps,
   replays: IdempotencyStore<string>,
+  guard: SendGuard,
   ctx: SendDraftContext
 ): Promise<ToolResult> => {
   const { args, principal, token } = ctx
   if (args.idempotencyKey) {
-    const replayed = replays.lookup(principal, args.idempotencyKey)
+    const replayed = replays.lookup(TOOL_NAME, principal, args.idempotencyKey)
     if (replayed) {
       return textResult(
         `${replayed}\n\n(Replayed: idempotencyKey "${args.idempotencyKey}" was already used — the message was NOT sent again.)`
@@ -184,9 +231,14 @@ export const sendDraft = async (
     authorization,
     draftId: args.draftId,
     draftsMailboxId: mailboxes.drafts,
+    guard,
     identityId: identity.identityId,
+    principal,
     ...(mailboxes.sent ? { sentMailboxId: mailboxes.sent } : {}),
   })
+  if (typeof outcome !== 'string') {
+    return errorResult(outcome.error)
+  }
   const summary = formatSent('Sent.', {
     draft: draftFromRecord(record),
     messageId: args.draftId,
@@ -194,7 +246,7 @@ export const sendDraft = async (
     threadId: record.threadId ?? null,
   })
   if (args.idempotencyKey) {
-    replays.record(principal, args.idempotencyKey, summary)
+    replays.record(TOOL_NAME, principal, args.idempotencyKey, summary)
   }
   return textResult(summary)
 }
@@ -205,6 +257,7 @@ export const registerSendDraft = (
   server: McpServer,
   deps: DraftToolDeps,
   replays: IdempotencyStore<string>,
+  guard: SendGuard,
   getToken: () => string,
   getPrincipal: () => string
 ): void => {
@@ -213,17 +266,19 @@ export const registerSendDraft = (
     {
       annotations: OUTWARD_DESTRUCTIVE,
       description:
-        'Send a draft that create_draft staged. This delivers the message to its recipients and cannot be ' +
-        'undone. Confirm the recipients and the body with the user before calling it unless they have ' +
-        'already asked for the message to be sent. Use the draftId from the most recent create_draft or ' +
-        'update_draft — editing a draft changes its id. Returns the sent message’s id, which get_email ' +
-        'can read back. A draft that has already been sent is refused rather than sent twice.',
+        'Send a draft. This delivers the message to its recipients and cannot be undone. Confirm the ' +
+        'recipients and the body with the user before calling it unless they have already asked for the ' +
+        'message to be sent. Sends any draft in the user’s Drafts folder, not only ones you staged — find ' +
+        'an existing one with search_emails using `mailbox: "Drafts"`, and read it back with get_draft ' +
+        'before sending something you did not write. Use the draftId from the most recent create_draft or ' +
+        'update_draft; editing a draft changes its id. Returns the sent message’s id, which get_email can ' +
+        'read back. A draft that has already been sent is refused rather than sent twice.',
       inputSchema: sendDraftInput.shape,
       title: 'Send draft',
     },
     (args) => {
       const parsed = sendDraftInput.parse(args)
-      return sendDraft(deps, replays, { args: parsed, principal: getPrincipal(), token: getToken() })
+      return sendDraft(deps, replays, guard, { args: parsed, principal: getPrincipal(), token: getToken() })
     }
   )
 }

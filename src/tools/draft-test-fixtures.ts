@@ -11,7 +11,7 @@ import {
   type DraftCreateResult,
   type EmailComposeRecord,
   type EmailSubmissionCreateParams,
-  type EmailSubmissionRecord,
+  type EmailSubmissionResult,
   type IdentityRecord,
 } from '@langmail/jmap'
 
@@ -32,7 +32,7 @@ export interface DraftDepsOptions {
   mailboxes?: ComposeMailboxes
   // The mailbox emailComposeGet reads from, keyed by id. A missing id reads as null.
   records?: Record<string, EmailComposeRecord>
-  submission?: EmailSubmissionRecord
+  submission?: EmailSubmissionResult
   // Recorded EmailSubmission/set calls — empty means nothing was sent.
   submissions?: EmailSubmissionCreateParams[]
   submitError?: Error
@@ -49,7 +49,7 @@ export const draftDeps = (opts: DraftDepsOptions = {}): DraftToolDeps => ({
     if (opts.submitError) {
       return Promise.reject(opts.submitError)
     }
-    return Promise.resolve(opts.submission ?? { id: 's1', undoStatus: 'final' })
+    return Promise.resolve(opts.submission ?? { filed: true, id: 's1', undoStatus: 'final' })
   },
   identityGet: () => Promise.resolve(opts.identities ?? TEST_IDENTITIES),
   resolveAccountId: () => Promise.resolve('acct'),

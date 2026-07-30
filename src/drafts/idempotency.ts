@@ -7,9 +7,19 @@
 // second send. With one, the first call's answer is replayed and nothing leaves
 // the mailbox twice.
 //
-// Entries are scoped by principal so two accounts can't collide on the same
-// key, and the value is the tool's result text — replaying the exact answer is
-// the point, not just suppressing the write.
+// The value is the tool's result text, because replaying the exact answer is the
+// point — not merely suppressing the write.
+//
+// Entries are scoped by (tool, principal), and both halves matter:
+//
+//   - by principal, so two accounts can't collide on the same key;
+//   - by tool, because "one key per user request" is the natural way for an
+//     agent to use these. Sharing a namespace would make
+//     `create_draft(key: "k")` followed by `send_draft(key: "k")` look like a
+//     retry of the create — so the send would be skipped, and the agent would be
+//     handed the create's "Nothing has been sent" text as though it were the
+//     send's answer. A retry is the same call again, not the next call in a
+//     chain.
 //
 // Single-process state is fine here, for the same reason it is for attachment
 // tickets: the server is one container. A restart loses the cache, which
@@ -21,16 +31,17 @@ export const IDEMPOTENCY_TTL_MINUTES = 15
 const IDEMPOTENCY_TTL_MS = IDEMPOTENCY_TTL_MINUTES * 60 * 1000
 
 export interface IdempotencyStore<T> {
-  // The recorded value for a key this principal already used, or null.
-  lookup: (principal: string, key: string) => T | null
-  record: (principal: string, key: string, value: T) => void
+  // The recorded value for a key this tool and principal already used, or null.
+  lookup: (tool: string, principal: string, key: string) => T | null
+  record: (tool: string, principal: string, key: string, value: T) => void
 }
 
 // Length-prefixed rather than separator-joined, so no key — whatever bytes an
-// agent puts in one — can be split differently and collide with another
-// principal's entry. A separator only works if it cannot occur in the operands,
-// and `key` is caller-supplied.
-const scopedKey = (principal: string, key: string): string => `${principal.length}:${principal}${key}`
+// agent puts in one — can be split differently and collide with another tool's
+// or principal's entry. A separator only works if it cannot occur in the
+// operands, and `key` is caller-supplied.
+const scopedKey = (tool: string, principal: string, key: string): string =>
+  `${tool.length}:${tool}${principal.length}:${principal}${key}`
 
 export const createIdempotencyStore = <T>(now: () => number = Date.now): IdempotencyStore<T> => {
   const entries = new Map<string, { expiresAt: number; value: T }>()
@@ -46,13 +57,13 @@ export const createIdempotencyStore = <T>(now: () => number = Date.now): Idempot
   }
 
   return {
-    lookup: (principal, key) => {
+    lookup: (tool, principal, key) => {
       sweep()
-      return entries.get(scopedKey(principal, key))?.value ?? null
+      return entries.get(scopedKey(tool, principal, key))?.value ?? null
     },
-    record: (principal, key, value) => {
+    record: (tool, principal, key, value) => {
       sweep()
-      entries.set(scopedKey(principal, key), { expiresAt: now() + IDEMPOTENCY_TTL_MS, value })
+      entries.set(scopedKey(tool, principal, key), { expiresAt: now() + IDEMPOTENCY_TTL_MS, value })
     },
   }
 }
