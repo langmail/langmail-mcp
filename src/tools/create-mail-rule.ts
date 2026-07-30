@@ -14,7 +14,7 @@ import { z } from 'zod'
 
 import { LARGE_APPLY_THRESHOLD } from '../rules/apply.ts'
 import { hasAnyCondition, type MailRule, normalizeConditions } from '../rules/rule.ts'
-import { ACCOUNT_WRITE } from './annotations.ts'
+import { OUTWARD_WRITE } from './annotations.ts'
 import {
   existingMailSchema,
   existingMailShape,
@@ -113,7 +113,7 @@ export const registerCreateMailRule = (server: McpServer, deps: MailRuleToolDeps
   server.registerTool(
     'create_mail_rule',
     {
-      annotations: ACCOUNT_WRITE,
+      annotations: OUTWARD_WRITE,
       description:
         'Create a persistent mail rule (filter) that automatically sorts, labels, archives or forwards ' +
         'FUTURE incoming messages until it is disabled or deleted. Use ONLY when the user expresses ongoing ' +

@@ -125,6 +125,20 @@ describe('createDraft', () => {
     expect(creates).toEqual([])
   })
 
+  test('treats an empty recipient array as no recipients, not as recipients given', async () => {
+    const creates: DraftCreateParams[] = []
+    const { result } = await run({ text: 'hi', to: [] }, { creates })
+    expect(result.isError).toBe(true)
+    expect(creates).toEqual([])
+  })
+
+  test('accepts a draft addressed only via cc', async () => {
+    const creates: DraftCreateParams[] = []
+    const { result } = await run({ cc: ['nadia@example.org'], text: 'hi' }, { creates })
+    expect(result.isError).toBeUndefined()
+    expect(creates).toHaveLength(1)
+  })
+
   test('excludes every address that is the user, not just the sending one', async () => {
     const creates: DraftCreateParams[] = []
     // The original was addressed to one of the user's aliases; a reply-all must

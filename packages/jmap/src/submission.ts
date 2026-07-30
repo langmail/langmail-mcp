@@ -105,7 +105,15 @@ export const emailSubmissionCreate = async (p: EmailSubmissionCreateParams): Pro
     // `type` is a JMAP error code (`forbiddenFrom`, `tooManyRecipients`, …),
     // not free text, so it's safe to surface; the description can quote the
     // message and stays out.
-    throw new JmapError(200, `EmailSubmission/set did not send ${p.emailId}: ${reason?.type ?? 'unknown'}`)
+    // `type` is passed through as the error type, not just interpolated: callers
+    // branch on it to tell "the server refused, nothing was sent" from "the
+    // answer never arrived, delivery unknown" — and those two demand opposite
+    // retry behaviour.
+    throw new JmapError(
+      200,
+      `EmailSubmission/set did not send ${p.emailId}: ${reason?.type ?? 'unknown'}`,
+      reason?.type
+    )
   }
   return { ...created, filed: emailWasPatched(resp, p.emailId) }
 }

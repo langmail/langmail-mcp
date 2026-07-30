@@ -57,6 +57,13 @@ export const ACCOUNT_DESTRUCTIVE: ToolRiskAnnotations = {
 }
 
 // Third parties are notified, but nothing is destroyed — an invitation, an RSVP.
+//
+// The mail-rule writers live here rather than under ACCOUNT_WRITE because a rule
+// may carry a `forward` action, which redirects a copy of every matching future
+// message to an arbitrary address. A static annotation has to describe what the
+// tool *can* do, and "quietly installs a persistent data-forwarding rule" is the
+// most consequential outward reach on this surface — a client gating on
+// `openWorldHint` has to see it.
 export const OUTWARD_WRITE: ToolRiskAnnotations = {
   destructiveHint: false,
   idempotentHint: false,

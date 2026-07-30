@@ -184,6 +184,18 @@ const destroyDraft = async (p: JmapCall & { accountId: string; id: string }): Pr
   return (out.destroyed ?? []).includes(p.id)
 }
 
+// The destroy half of an edit, with every failure folded into `false`. Once the
+// replacement exists, throwing would discard its id — and the caller, told only
+// that the edit failed, would retry against the old id and pile up more drafts.
+// A leftover draft the caller is told about beats a lost id.
+const destroyedQuietly = async (p: JmapCall & { accountId: string; id: string }): Promise<boolean> => {
+  try {
+    return await destroyDraft(p)
+  } catch {
+    return false
+  }
+}
+
 // Stage a draft and return its id. When `replaces` is given, the superseded
 // draft is destroyed only after the new one exists — see the header for why that
 // is a second round trip and not one batched Email/set.
@@ -206,7 +218,7 @@ export const draftCreate = async (p: DraftCreateParams): Promise<DraftCreateResu
   return {
     id: created.id,
     threadId: created.threadId ?? null,
-    ...(p.replaces ? { replacedDestroyed: await destroyDraft({ ...p, id: p.replaces }) } : {}),
+    ...(p.replaces ? { replacedDestroyed: await destroyedQuietly({ ...p, id: p.replaces }) } : {}),
   }
 }
 

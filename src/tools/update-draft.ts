@@ -60,14 +60,19 @@ export interface UpdateDraftContext {
   token: string
 }
 
-// Which body part would be left holding old content, if any: the draft has both
-// parts and the caller supplied exactly one.
+// Which body part would be left holding old content, if any.
+//
+// The test is on the *merged* result, not on what was staged: an html-only draft
+// given a new `text` also ends up with both parts, one of them stale — and it is
+// the html one, which is what clients render. Checking the staged draft for
+// "has both" missed exactly that case.
 const staleBodyPart = (
   staged: EmailDraft,
   args: UpdateDraftArgs
 ): { stale: 'html' | 'text'; supplied: 'html' | 'text' } | null => {
-  const hasBoth = staged.text !== undefined && staged.html !== undefined
-  if (!hasBoth) {
+  const mergedHasText = args.text !== undefined || staged.text !== undefined
+  const mergedHasHtml = args.html !== undefined || staged.html !== undefined
+  if (!(mergedHasText && mergedHasHtml)) {
     return null
   }
   if (args.text !== undefined && args.html === undefined) {
@@ -79,8 +84,25 @@ const staleBodyPart = (
   return null
 }
 
+// Whether the caller asked for any change at all. A bare `draftId` would
+// otherwise replace and destroy the draft for nothing, invalidating every stored
+// reference to it and running the replacement's failure modes for no benefit.
+const editsNothing = (args: UpdateDraftArgs): boolean =>
+  args.to === undefined &&
+  args.cc === undefined &&
+  args.bcc === undefined &&
+  args.subject === undefined &&
+  args.text === undefined &&
+  args.html === undefined
+
 export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext): Promise<ToolResult> => {
   const { args } = ctx
+  if (editsNothing(args)) {
+    return errorResult(
+      `No changes were given, so draft ${args.draftId} was left exactly as it is — its id still works. Pass at ` +
+        'least one of to/cc/bcc/subject/text/html to edit it.'
+    )
+  }
   const authorization = bearerAuthorization(ctx.token)
   const accountId = await deps.resolveAccountId(authorization)
 
@@ -104,6 +126,17 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
     return errorResult(
       `Draft ${args.draftId} has a body too large to edit without risking losing part of it, so it was left ` +
         'unchanged. Stage a fresh draft with create_draft instead.'
+    )
+  }
+
+  // Editing rewrites the message, and composition has no attachment support, so
+  // the attachments of a draft written elsewhere cannot be carried across. Losing
+  // a file the user deliberately attached is worse than refusing the edit — and
+  // the original is destroyed on the way, so it would be unrecoverable.
+  if ((record.attachments ?? []).length > 0) {
+    return errorResult(
+      `Draft ${args.draftId} has attachments, which this tool cannot preserve, so it was left unchanged. Edit ` +
+        'it in Langmail instead.'
     )
   }
 

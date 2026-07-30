@@ -188,10 +188,13 @@ export const createDraft = async (
   if (conflict) {
     return errorResult(`${conflict} Nothing was staged.`)
   }
-  if (args.to === undefined && args.inReplyTo === undefined) {
+  // Counted across all three fields, not just "was `to` supplied": `to: []` is
+  // present but empty, and would stage a draft with no recipients at all.
+  const namedRecipients = (args.to?.length ?? 0) + (args.cc?.length ?? 0) + (args.bcc?.length ?? 0)
+  if (namedRecipients === 0 && args.inReplyTo === undefined) {
     return errorResult(
-      'Provide recipients: `to`, or `inReplyTo` to derive them from the message being answered. A draft ' +
-        'with no recipients cannot be sent.'
+      'Provide recipients: `to` (or `cc`/`bcc`), or `inReplyTo` to derive them from the message being ' +
+        'answered. A draft with no recipients cannot be sent.'
     )
   }
   if (args.idempotencyKey) {

@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test'
 
+import { type JmapError } from './session.ts'
 import { emailSubmissionCreate, identityGet } from './submission.ts'
 
 const API = 'https://mail.example.com/jmap/'
@@ -178,6 +179,25 @@ describe('emailSubmissionCreate', () => {
           sentMailboxId: 'mbSent',
         })
       ).rejects.toThrow(FORBIDDEN_FROM_RE)
+    })
+  })
+
+  test('carries the refusal type as the error type, not just in the message', async () => {
+    const f = mock(() =>
+      Promise.resolve(jmapResponse([['EmailSubmission/set', { notCreated: { send: { type: 'forbiddenFrom' } } }, '0']]))
+    )
+    await withFetch(f, async () => {
+      const err = await emailSubmissionCreate({
+        ...call,
+        draftsMailboxId: 'mbDrafts',
+        emailId: 'd1',
+        identityId: 'i1',
+        sentMailboxId: 'mbSent',
+      }).catch((e: unknown) => e as JmapError)
+      // Callers branch on errorType to tell "the server refused, nothing was
+      // sent" from "the answer never arrived" — and those demand opposite retry
+      // behaviour, so the type cannot live only in the message string.
+      expect(err.errorType).toBe('forbiddenFrom')
     })
   })
 

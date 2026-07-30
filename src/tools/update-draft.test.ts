@@ -97,6 +97,46 @@ describe('updateDraft', () => {
     expect(creates).toEqual([])
   })
 
+  test('refuses a text edit that would leave an html-only draft rendering the old body', async () => {
+    const creates: DraftCreateParams[] = []
+    const htmlOnly = stagedDraft({
+      bodyValues: { '2': { value: '<p>OLD price is 5000</p>' } },
+      htmlBody: [{ partId: '2', type: 'text/html' }],
+      textBody: [],
+    })
+    // The merged draft would carry both parts with only the text one refreshed —
+    // and the html alternative is the one clients render.
+    const { result, text } = await run(
+      { draftId: 'd1', text: 'NEW price is 4000' },
+      { creates, records: { d1: htmlOnly } }
+    )
+    expect(result.isError).toBe(true)
+    expect(text).toContain('only `text` was given')
+    expect(creates).toEqual([])
+  })
+
+  test('refuses to edit a draft with attachments rather than dropping them', async () => {
+    const creates: DraftCreateParams[] = []
+    const withFile = stagedDraft({
+      attachments: [{ blobId: 'Ginvoice', name: 'invoice.pdf', size: 1024, type: 'application/pdf' }],
+    })
+    // The edit rewrites the message and cannot carry attachment parts across, and
+    // the original is destroyed on the way — so losing the file is unrecoverable.
+    const { result, text } = await run({ draftId: 'd1', subject: 'New' }, { creates, records: { d1: withFile } })
+    expect(result.isError).toBe(true)
+    expect(text).toContain('has attachments')
+    expect(creates).toEqual([])
+  })
+
+  test('refuses an edit that changes nothing, leaving the id valid', async () => {
+    const creates: DraftCreateParams[] = []
+    const { result, text } = await run({ draftId: 'd1' }, { creates, records: { d1: stagedDraft() } })
+    expect(result.isError).toBe(true)
+    expect(text).toContain('its id still works')
+    // Replacing for nothing would invalidate every stored reference to the draft.
+    expect(creates).toEqual([])
+  })
+
   test('accepts a body edit that replaces both parts', async () => {
     const creates: DraftCreateParams[] = []
     const both = stagedDraft({

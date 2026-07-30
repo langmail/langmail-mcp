@@ -149,6 +149,29 @@ describe('draftCreate', () => {
     expect(calls[0]?.destroy).toBeUndefined()
   })
 
+  test('keeps the new draft id when the destroy request itself throws', async () => {
+    const f = mock((_url: string, init?: RequestInit) => {
+      const params = JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1]
+      if (params.create) {
+        return Promise.resolve(jmapResponse([['Email/set', { created: { draft: { id: 'd1' } } }, '0']]))
+      }
+      return Promise.reject(new Error('socket hang up'))
+    })
+    const result = await withFetch(f, () =>
+      draftCreate({
+        ...call,
+        draft: { from: [{ email: 'me@example.com' }], text: 'edited' },
+        mailboxId: 'mbDrafts',
+        replaces: 'd0',
+      })
+    )
+    // Throwing here would discard the id of a draft that already exists, and the
+    // caller — told only that the edit failed — would retry against the old id
+    // and pile up more drafts.
+    expect(result.id).toBe('d1')
+    expect(result.replacedDestroyed).toBe(false)
+  })
+
   test('reports a replacement whose destroy did not land', async () => {
     const f = mock((_url: string, init?: RequestInit) => {
       const params = JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1]
