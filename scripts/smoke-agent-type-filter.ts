@@ -66,6 +66,10 @@ interface Session {
   accountId: string
   apiUrl: string
   uploadUrl: string
+  // The authenticated principal (RFC 8620 §2). The fixtures are addressed to
+  // it, so the seeded mail names the mailbox it actually lands in rather than
+  // a guess at who is running the eval.
+  username: string
 }
 
 // A JMAP response envelope, left deliberately loose: this script pokes at a
@@ -96,12 +100,13 @@ const openSession = async (): Promise<Session> => {
     apiUrl?: string
     primaryAccounts?: Record<string, string>
     uploadUrl?: string
+    username?: string
   }
   const accountId = body.primaryAccounts?.['urn:ietf:params:jmap:mail']
-  if (!(body.apiUrl && body.uploadUrl && accountId)) {
-    throw new Error('jmap session missing apiUrl / uploadUrl / mail account')
+  if (!(body.apiUrl && body.uploadUrl && body.username && accountId)) {
+    throw new Error('jmap session missing apiUrl / uploadUrl / username / mail account')
   }
-  return { accountId, apiUrl: body.apiUrl, uploadUrl: body.uploadUrl }
+  return { accountId, apiUrl: body.apiUrl, username: body.username, uploadUrl: body.uploadUrl }
 }
 
 const inboxId = async (session: Session): Promise<string> => {
@@ -283,9 +288,10 @@ const runAgent = (prompt: string): Trajectory => {
 const main = async () => {
   const session = await openSession()
   const mailboxId = await inboxId(session)
-  // The account's own address, as the MCP principal reports it — the fixtures
-  // are addressed to whoever is running the eval.
-  const to = process.env.MCP_PRINCIPAL ?? 'eval@langmail.me'
+  // Addressed to the authenticated principal itself: the fixtures are imported
+  // straight into that account's Inbox, so anything else would put a recipient
+  // in the header that never received the mail.
+  const to = session.username
 
   const now = new Date()
   const daysAgo = (n: number): Date => new Date(now.getTime() - n * DAY_MS)
