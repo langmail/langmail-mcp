@@ -1,20 +1,39 @@
 // Shared formatters for the lightweight email shape returned by search_emails
 // and get_thread. Kept token-frugal: one hit is a few short lines.
 
-import { type EmailAddress, type EmailBodyPart, type EmailRecord, LABEL_KEYWORD_PREFIX } from '@langmail/jmap'
+import {
+  type EmailAddress,
+  type EmailBodyPart,
+  type EmailRecord,
+  LABEL_KEYWORD_PREFIX,
+  TYPE_KEYWORD_PREFIX,
+} from '@langmail/jmap'
 
 const LIST_ATTACHMENT_LIMIT = 5
+
+// The two keyword namespaces a reader cares about: agent labels and the
+// classified email type. Everything else ($seen, $draft, …) is a system flag.
+const TAG_PREFIXES = [LABEL_KEYWORD_PREFIX, TYPE_KEYWORD_PREFIX]
 
 export const formatAddressList = (addrs?: EmailAddress[] | null): string =>
   (addrs ?? []).map((a) => (a.name ? `${a.name} <${a.email}>` : a.email)).join(', ')
 
-// A message's user-facing "tags" are its `$label:` keywords; system flags
-// ($seen, $draft, …) are not tags, so they're filtered out and the prefix is
-// stripped for display.
-export const emailTags = (e: EmailRecord): string[] =>
-  Object.keys(e.keywords ?? {})
-    .filter((k) => k.startsWith(LABEL_KEYWORD_PREFIX))
-    .map((k) => k.slice(LABEL_KEYWORD_PREFIX.length))
+// A message's user-facing "tags" are its `$label:` agent labels and its
+// `$type:` classified type; system flags ($seen, $draft, …) are not tags, so
+// they're filtered out and the prefix is stripped for display. The two
+// namespaces overlap by design — an agent writes `$label:receipt` for the same
+// mail the classifier types `receipt` — so tags are deduplicated by the
+// rendered suffix rather than shown twice.
+export const emailTags = (e: EmailRecord): string[] => {
+  const tags = new Set<string>()
+  for (const keyword of Object.keys(e.keywords ?? {})) {
+    const prefix = TAG_PREFIXES.find((p) => keyword.startsWith(p))
+    if (prefix) {
+      tags.add(keyword.slice(prefix.length))
+    }
+  }
+  return [...tags]
+}
 
 // Email/get doesn't guarantee list order; reorder fetched records to match a
 // caller-supplied id order (the query's newest-first sort, or a thread's

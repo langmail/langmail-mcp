@@ -386,8 +386,19 @@ export interface EmailSetManyParams extends JmapCall {
   ids: string[]
 }
 
+// One id the server refused, with the SetError type it gave (RFC 8620 §5.3),
+// or `unknown` when the id was simply absent from both maps. The type is what
+// lets a caller distinguish "this message was deleted" (`notFound`) from a
+// failure it must not paper over — the keyword backfill skips the former and
+// aborts on the latter rather than reporting a completed run over messages it
+// never labeled.
+export interface EmailSetError {
+  id: string
+  type: string
+}
+
 export interface EmailSetManyResult {
-  notUpdated: string[]
+  notUpdated: EmailSetError[]
   updated: string[]
 }
 
@@ -418,7 +429,9 @@ export const emailSetMany = async (p: EmailSetManyParams): Promise<EmailSetManyR
   }>(resp, 'Email/set', '0')
   const updated = new Set(Object.keys(out.updated ?? {}))
   return {
-    notUpdated: p.ids.filter((id) => !updated.has(id)),
+    notUpdated: p.ids
+      .filter((id) => !updated.has(id))
+      .map((id) => ({ id, type: out.notUpdated?.[id]?.type ?? 'unknown' })),
     updated: p.ids.filter((id) => updated.has(id)),
   }
 }

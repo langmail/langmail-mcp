@@ -63,6 +63,12 @@ describe('searchEmailsInput schema', () => {
     expect(r.success).toBe(true)
   })
 
+  // The types no agent labels — previously absent from the enum entirely.
+  test('accepts the full taxonomy, including ticket and scheduling', () => {
+    expect(searchEmailsInput.safeParse({ keywords: ['ticket'] }).success).toBe(true)
+    expect(searchEmailsInput.safeParse({ keywords: ['scheduling', 'security_alert'] }).success).toBe(true)
+  })
+
   test('accepts a date-range-only search', () => {
     const r = searchEmailsInput.safeParse({ after: '2026-04-01T00:00:00Z' })
     expect(r.success).toBe(true)
@@ -163,14 +169,14 @@ describe('searchEmails', () => {
     expect(txt).toContain('invoice.pdf — application/pdf, 34.9 KB — blobId: Ginvoice')
   })
 
-  test("shows a matched message's $label tags stripped of the prefix", async () => {
+  test("shows a matched message's tags stripped of the prefix", async () => {
     const result = await searchEmails(
       fakeDeps({
         emails: [
           {
             from: [{ email: 'store@shop.example' }],
             id: 'e1',
-            keywords: { '$label:receipt': true, $seen: true },
+            keywords: { '$label:receipt': true, $seen: true, '$type:order': true },
             receivedAt: '2026-05-01T00:00:00Z',
             subject: 'Your order shipped',
           },
@@ -180,12 +186,12 @@ describe('searchEmails', () => {
       { args: { keywords: ['receipt'], limit: 20 }, token: 'tok' }
     )
     const txt = result.content[0]?.text ?? ''
-    expect(txt).toContain('tags: receipt')
+    expect(txt).toContain('tags: receipt, order')
     // System flags are not surfaced as tags.
     expect(txt).not.toContain('$seen')
   })
 
-  test('maps keyword enum values verbatim to $label: filters, no stray text', async () => {
+  test('maps type values to $type: filters and todo to $label:, no stray text', async () => {
     let seen: EmailQueryParams | undefined
     await searchEmails(
       fakeDeps({
@@ -200,7 +206,36 @@ describe('searchEmails', () => {
       }
     )
     // Exact shape: a keyword-only search carries no text/date/mailbox condition.
-    expect(seen?.filters).toEqual({ keywords: ['$label:receipt', '$label:todo'] })
+    expect(seen?.filters).toEqual({ keywords: ['$type:receipt', '$label:todo'] })
+  })
+
+  // The motivating shape: a type filter plus a received-date window, no
+  // free-text at all — one call instead of two speculative keyword searches.
+  test('composes a ticket filter with a date window and limit', async () => {
+    let seen: EmailQueryParams | undefined
+    await searchEmails(
+      fakeDeps({
+        onQuery: (p) => {
+          seen = p
+        },
+        queryIds: [],
+      }),
+      {
+        args: {
+          after: '2026-07-01T00:00:00Z',
+          before: '2026-07-31T00:00:00Z',
+          keywords: ['ticket'],
+          limit: 5,
+        },
+        token: 'tok',
+      }
+    )
+    expect(seen?.filters).toEqual({
+      after: '2026-07-01T00:00:00Z',
+      before: '2026-07-31T00:00:00Z',
+      keywords: ['$type:ticket'],
+    })
+    expect(seen?.limit).toBe(5)
   })
 
   test('threads text + date + from filters through to the query', async () => {

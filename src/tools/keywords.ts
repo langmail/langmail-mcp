@@ -1,34 +1,46 @@
-// The searchable keyword vocabulary, derived from @langmail/agents so it stays
-// in lockstep with the classification taxonomy. Exposed to the model as a
-// z.enum on search_emails; mapped to JMAP `$label:` keywords server-side.
+// The searchable keyword vocabulary. Derived from the classification taxonomy
+// in @langmail/agents (not from the agent set) so a value means the same thing
+// for every user: agent labels are per-user configurable and coarser than the
+// taxonomy — one agent writes `$label:receipt` for both `receipt` and `order`
+// mail, and no agent covers `ticket` or `scheduling` at all. Exposed to the
+// model as a z.enum on search_emails; mapped to JMAP keywords server-side.
 
-import { agentsConfig } from '@langmail/agents'
-import { toLabelKeyword } from '@langmail/jmap'
+import { EMAIL_TYPE_VALUES, EMAIL_TYPES } from '@langmail/agents'
+import { toLabelKeyword, toTypeKeyword } from '@langmail/jmap'
 
-// enum value -> human gloss. Each agent carries its own description; `todo` is
-// agent/user bookkeeping the taxonomy doesn't model as an agent, glossed here.
+// The one value that is not an email type: a flag orthogonal to the taxonomy
+// (a message of any type can be a to-do), so it keeps mapping onto the agent
+// label the email-agent writes.
+const TODO_VALUE = 'todo'
+
+// enum value -> human gloss. Type glosses live next to the taxonomy itself;
+// `todo` is agent/user bookkeeping the taxonomy doesn't model, glossed here.
 // The AI processed-marker is deliberately absent — it's not a search facet.
 const KEYWORD_GLOSSES: Record<string, string> = {
-  ...Object.fromEntries(agentsConfig.agents.map((a) => [a.internalLabel, a.description])),
-  todo: 'Messages the user (or an agent) flagged as an action item / to-do.',
+  ...Object.fromEntries(EMAIL_TYPE_VALUES.map((type) => [type, EMAIL_TYPES[type].search])),
+  [TODO_VALUE]: 'Messages the user (or an agent) flagged as an action item / to-do.',
 }
 
-// Ordered enum values: agent internalLabels (config order) then `todo`. The
+// Ordered enum values: the taxonomy in its canonical order, then `todo`. The
 // non-empty tuple type is what z.enum() requires.
 export const KEYWORD_VALUES = Object.keys(KEYWORD_GLOSSES) as [string, ...string[]]
 
 // A single description string glossing every value — zod enums have no
 // per-member describe, so we compose one self-documenting blurb that grows
-// automatically as the taxonomy grows.
-export const KEYWORDS_DESCRIPTION = `Category labels to filter by; multiple values are combined with OR. ${Object.entries(
+// automatically as the taxonomy grows. The lead paragraph is the part that
+// changes retrieval behaviour: transactional mail is exactly the mail whose
+// words never appear in its own subject, so an agent that reaches for
+// free-text first will not find it.
+export const KEYWORDS_DESCRIPTION = `Filter by classified email type; multiple values are combined with OR, and the filter composes with query/from/after/before/mailbox. Transactional mail (tickets, invoices, orders, bookings, confirmations) rarely names its own type in the subject or body — a cinema booking is titled after the film, an invoice after the vendor — so for requests like "find my tickets" or "show the invoice from X", prefer this filter plus an after/before window over a free-text query. Messages that predate classification carry no type, so fall back to query when a filter returns nothing. Values: ${Object.entries(
   KEYWORD_GLOSSES
 )
   .map(([value, gloss]) => `"${value}" = ${gloss}`)
   .join('; ')}`
 
-// The `$label:` convention (shared via @langmail/jmap's toLabelKeyword) is
-// Bulwark's internal keyword namespace the agent never sees. Enum values
-// (already lowercase slugs) are used verbatim as suffixes — including `todo`,
-// now that the JMAP-first email-agent writes the canonical `$label:todo`
-// (the legacy Gmail-echoed `$label:to-do` was dropped with that migration).
-export const keywordToJmapLabel = (value: string): string => toLabelKeyword(value)
+// Two namespaces behind one enum: email types resolve to the `$type:`
+// keywords the email-agent writes for every classified message, while `todo`
+// resolves to the `$label:todo` agent label (canonical since the JMAP-first
+// migration — the legacy Gmail-echoed `$label:to-do` was dropped with it).
+// Enum values are already lowercase slugs and are used verbatim as suffixes.
+export const keywordToJmapKeyword = (value: string): string =>
+  value === TODO_VALUE ? toLabelKeyword(value) : toTypeKeyword(value)

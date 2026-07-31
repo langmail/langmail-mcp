@@ -38,10 +38,12 @@ const BASE64_RUN_RE = /[A-Za-z0-9+/=]{100,}/u
 const EPOCH_PAST = '2020-01-01T00:00:00Z'
 const EPOCH_FUTURE = '2100-01-01T00:00:00Z'
 
-// The category keyword the smoke run stamps onto its message so the
-// keyword-filter path can be exercised end-to-end. Maps to the `receipt`
-// enum value on search_emails.
-const SMOKE_LABEL = '$label:receipt'
+// The email-type keyword the smoke run stamps onto its message so the
+// keyword-filter path can be exercised end-to-end. The `receipt` enum value on
+// search_emails maps to the `$type:` namespace the email-agent writes, not to
+// the coarser `$label:` agent label (ADR 0010) — stamping the label instead
+// would leave the message unmatched by the very filter under test.
+const SMOKE_LABEL = '$type:receipt'
 const JMAP_USING = ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail']
 
 const log = (msg: string) => process.stdout.write(`▶ ${msg}\n`)
@@ -384,8 +386,8 @@ const main = async () => {
 
     // --- 2f. Keyword filter (stamp a label via JMAP, then search) -------
     //
-    // The category keywords are Postgres-only today (the agent never echoes
-    // them to Stalwart), so no message carries one out of the box. Stamp one
+    // The smoke message is delivered by the mail smoke, not by the email-agent,
+    // so nothing classified it and it carries no type keyword. Stamp one
     // directly via Email/set to exercise the keyword-filter path end-to-end.
     log(`stamp ${SMOKE_LABEL} onto the smoke message and search keywords=["receipt"]`)
     const js = await jmapSession(stalwart, accessToken)

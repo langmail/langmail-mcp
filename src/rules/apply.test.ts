@@ -144,7 +144,8 @@ describe('makeMailRulesApplier', () => {
 
   test('partial Email/set failures surface as failed count', async () => {
     const io = fakeIo(['m1', 'm2'], {
-      updateEmails: (_t, ids) => Promise.resolve({ notUpdated: [ids[1] ?? ''], updated: [ids[0] ?? ''] }),
+      updateEmails: (_t, ids) =>
+        Promise.resolve({ notUpdated: [{ id: ids[1] ?? '', type: 'notFound' }], updated: [ids[0] ?? ''] }),
     })
     const res = await makeMailRulesApplier(io).applyToExisting('tok', rule(), 'messages', 'all')
     expect(res.modified).toBe(1)

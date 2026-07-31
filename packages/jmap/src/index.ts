@@ -37,6 +37,7 @@ export {
   type EmailQueryParams,
   type EmailQueryPerTermParams,
   type EmailSetChanges,
+  type EmailSetError,
   type EmailSetManyParams,
   type EmailSetManyResult,
   type EmailSetParams,
@@ -67,7 +68,7 @@ export {
   threadEmailIds,
   threadsExpandEmailIds,
 } from './email.ts'
-export { LABEL_KEYWORD_PREFIX, toLabelKeyword } from './keywords.ts'
+export { LABEL_KEYWORD_PREFIX, TYPE_KEYWORD_PREFIX, toLabelKeyword, toTypeKeyword } from './keywords.ts'
 export { type JmapLive, makeJmapLive } from './live.ts'
 export {
   accountIdForContacts,

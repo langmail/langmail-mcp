@@ -1,6 +1,27 @@
 import { describe, expect, test } from 'bun:test'
 
-import { formatEmailLine, formatSize } from './format.ts'
+import { emailTags, formatEmailLine, formatSize } from './format.ts'
+
+describe('emailTags', () => {
+  test('renders $label: and $type: keywords, ignoring system flags', () => {
+    expect(
+      emailTags({
+        id: 'e1',
+        keywords: { '$label:ai': true, '$label:todo': true, $seen: true, '$type:ticket': true },
+      })
+    ).toEqual(['ai', 'todo', 'ticket'])
+  })
+
+  // The namespaces overlap by design: receipt-agent writes `$label:receipt`
+  // for the same mail the classifier types `receipt`.
+  test('shows a suffix carried by both namespaces exactly once', () => {
+    expect(emailTags({ id: 'e1', keywords: { '$label:receipt': true, '$type:receipt': true } })).toEqual(['receipt'])
+  })
+
+  test('returns nothing for a message with no keywords', () => {
+    expect(emailTags({ id: 'e1' })).toEqual([])
+  })
+})
 
 describe('formatEmailLine', () => {
   test('renders a whitespace-normalized snippet when preview is present', () => {

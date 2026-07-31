@@ -15,6 +15,7 @@ import {
   type EmailFilter,
   type EmailFilterCondition,
   type EmailSetChanges,
+  type EmailSetManyResult,
   emailQueryFilter,
   emailSetMany,
   type JmapLive,
@@ -66,11 +67,7 @@ export interface ApplyIo {
   // named mailboxes on demand. Returns the mailbox id.
   resolveMailboxByName: (token: string, name: string) => Promise<string>
   resolveMailboxByRole: (token: string, role: 'archive' | 'inbox' | 'trash', createName: string) => Promise<string>
-  updateEmails: (
-    token: string,
-    ids: string[],
-    changes: EmailSetChanges
-  ) => Promise<{ notUpdated: string[]; updated: string[] }>
+  updateEmails: (token: string, ids: string[], changes: EmailSetChanges) => Promise<EmailSetManyResult>
 }
 
 // --- conditions → JMAP filter ------------------------------------------------

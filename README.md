@@ -15,7 +15,7 @@
 
 - Speaks the Streamable HTTP transport over `/mcp`
 - Authenticates clients via OAuth 2.0 — advertises its own authorization metadata and proxies dynamic client registration to Stalwart
-- Structured search over the authenticated user's mailbox — free-text combined with date-range, sender, category-label, and mailbox filters
+- Structured search over the authenticated user's mailbox — free-text combined with date-range, sender, email-type, and mailbox filters
 - Read a single message's full body, or every message in a thread
 - List and create the user's calendars
 - List, create, update, and delete calendar events — including recurring series — sending iMIP invitations and cancellations to attendees
@@ -109,7 +109,7 @@ Parameters (at least one of `query`, `after`, `before`, `from`, `keywords`, or `
 - `after`: string (optional) — only messages received on/after this UTC ISO-8601 timestamp (e.g. `2026-04-01T00:00:00Z`)
 - `before`: string (optional) — only messages received strictly before this UTC ISO-8601 timestamp
 - `from`: string (optional) — substring match on the sender name or address (1–200 characters)
-- `keywords`: array of string (optional) — category labels to filter by (combined with OR); values come from the classification taxonomy
+- `keywords`: array of string (optional) — email types to filter by (combined with OR); values come from the classification taxonomy, plus the orthogonal `todo` flag
 - `mailbox`: string (optional) — restrict to a named mailbox/folder (e.g. `Inbox`)
 - `limit`: number (optional) — maximum results, 1–100 (default 20)
 
