@@ -36,9 +36,16 @@ const DAY_MS = 86_400_000
 
 const log = (msg: string) => process.stdout.write(`▶ ${msg}\n`)
 
+// A failed expectation, distinguished from a crash so the handler can print it
+// as a clean `✗ message` rather than a stack.
+class EvalFailure extends Error {}
+
+// Throws rather than exiting: this eval seeds real messages into a real
+// mailbox, and it is non-deterministic by nature, so a failing run is the
+// expected case. `process.exit` here would skip main's `finally` and leave the
+// fixtures behind, so every later run would start dirty.
 const fail = (msg: string): never => {
-  process.stderr.write(`✗ ${msg}\n`)
-  process.exit(1)
+  throw new EvalFailure(msg)
 }
 
 const requireEnv = (name: string): string => {
@@ -391,6 +398,13 @@ const main = async () => {
 try {
   await main()
 } catch (error) {
-  process.stderr.write(`✗ ${error instanceof Error ? error.stack : String(error)}\n`)
+  // A failed expectation is the eval's own verdict and reads better as one
+  // line; anything else is a genuine crash and keeps its stack. Either way the
+  // exit happens here, after main's `finally` has removed the fixtures.
+  if (error instanceof EvalFailure) {
+    process.stderr.write(`✗ ${error.message}\n`)
+  } else {
+    process.stderr.write(`✗ ${error instanceof Error ? error.stack : String(error)}\n`)
+  }
   process.exit(1)
 }
