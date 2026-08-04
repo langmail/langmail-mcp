@@ -19,6 +19,21 @@ function mockFetch(response: Response): ReturnType<typeof mock> {
   return fn
 }
 
+/** Answers with each entry in turn, so a retry sees a different outcome. */
+function mockFetchSequence(responses: (() => Promise<Response>)[]): ReturnType<typeof mock> {
+  let call = 0
+  const fn = mock(() => {
+    const next = responses[Math.min(call, responses.length - 1)]
+    call++
+    return next?.() ?? Promise.reject(new Error('no response configured'))
+  })
+  globalThis.fetch = fn as unknown as typeof fetch
+  return fn
+}
+
+const badGateway = () => Promise.resolve(new Response('<html>502 Bad Gateway</html>', { status: 502 }))
+const credentialOk = () => Promise.resolve(Response.json({ address: 'alice@langmail.me', authorization: 'Basic ok' }))
+
 describe('fetchStalwartCredential', () => {
   it('returns the Basic authorization and address on success', async () => {
     mockFetch(Response.json({ address: 'alice@langmail.me', authorization: 'Basic abc123' }))
@@ -89,5 +104,78 @@ describe('fetchStalwartCredential', () => {
     expect(error).toBeInstanceOf(StalwartCredentialError)
     expect((error as StalwartCredentialError).status).toBe(200)
     expect((error as StalwartCredentialError).message).toContain('200')
+  })
+
+  describe('transient failures', () => {
+    it('retries a 502 and succeeds once the auth service is back', async () => {
+      // The production failure: nginx answers 502 while the auth container is
+      // restarting, which used to lose the caller's whole poll tick.
+      const fn = mockFetchSequence([badGateway, credentialOk])
+
+      const result = await fetchStalwartCredential('user-uuid', config)
+
+      expect(result).toEqual({ address: 'alice@langmail.me', authorization: 'Basic ok' })
+      expect(fn).toHaveBeenCalledTimes(2)
+    })
+
+    it('retries a network error, which never reached the endpoint at all', async () => {
+      const fn = mockFetchSequence([() => Promise.reject(new Error('connect ECONNREFUSED')), credentialOk])
+
+      await expect(fetchStalwartCredential('user-uuid', config)).resolves.toEqual({
+        address: 'alice@langmail.me',
+        authorization: 'Basic ok',
+      })
+      expect(fn).toHaveBeenCalledTimes(2)
+    })
+
+    it('gives up after the retry budget and reports the failure as transient', async () => {
+      const fn = mockFetchSequence([badGateway])
+
+      const error = await fetchStalwartCredential('user-uuid', config).catch((e: unknown) => e)
+
+      expect(error).toBeInstanceOf(StalwartCredentialError)
+      expect((error as StalwartCredentialError).transient).toBe(true)
+      expect((error as StalwartCredentialError).status).toBe(502)
+      // The default budget: one attempt plus two retries.
+      expect(fn).toHaveBeenCalledTimes(3)
+    })
+
+    it('does not retry a 401 — a bad internal token is an answer, not a blip', async () => {
+      const fn = mockFetchSequence([() => Promise.resolve(Response.json({ error: 'unauthorized' }, { status: 401 }))])
+
+      const error = await fetchStalwartCredential('user-uuid', config).catch((e: unknown) => e)
+
+      expect((error as StalwartCredentialError).transient).toBe(false)
+      expect(fn).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not retry a 500 — the endpoint answered, it just could not decrypt', async () => {
+      const fn = mockFetchSequence([
+        () => Promise.resolve(Response.json({ error: 'credential_unavailable' }, { status: 500 })),
+      ])
+
+      const error = await fetchStalwartCredential('user-uuid', config).catch((e: unknown) => e)
+
+      expect((error as StalwartCredentialError).transient).toBe(false)
+      expect(fn).toHaveBeenCalledTimes(1)
+    })
+
+    it('honours retries: 0 for callers that own their own scheduling', async () => {
+      const fn = mockFetchSequence([badGateway])
+
+      await expect(fetchStalwartCredential('user-uuid', config, { retries: 0 })).rejects.toBeInstanceOf(
+        StalwartCredentialError
+      )
+      expect(fn).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not retry when the caller supplied a signal — the caller owns that deadline', async () => {
+      const fn = mockFetchSequence([badGateway])
+
+      await expect(
+        fetchStalwartCredential('user-uuid', config, { signal: AbortSignal.timeout(5000) })
+      ).rejects.toBeInstanceOf(StalwartCredentialError)
+      expect(fn).toHaveBeenCalledTimes(1)
+    })
   })
 })
