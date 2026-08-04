@@ -2,8 +2,9 @@
 // in @langmail/agents (not from the agent set) so a value means the same thing
 // for every user: agent labels are per-user configurable and coarser than the
 // taxonomy — one agent writes `$label:receipt` for both `receipt` and `order`
-// mail, and no agent covers `ticket` or `scheduling` at all. Exposed to the
-// model as a z.enum on search_emails; mapped to JMAP keywords server-side.
+// mail, and one writes `$label:notification` for `notification`,
+// `security_alert`, and `terms`. Exposed to the model as a z.enum on
+// search_emails; mapped to JMAP keywords server-side.
 
 import { EMAIL_TYPE_VALUES, EMAIL_TYPES } from '@langmail/agents'
 import { toLabelKeyword, toTypeKeyword } from '@langmail/jmap'
