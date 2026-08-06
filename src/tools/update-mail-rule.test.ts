@@ -1,7 +1,24 @@
 import { describe, expect, test } from 'bun:test'
+import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
 import { fakeDeps, githubRule } from './mail-rule-test-fixtures.ts'
-import { updateMailRule, updateMailRuleInput } from './update-mail-rule.ts'
+import { type ToolResult } from './result.ts'
+import { registerUpdateMailRule, updateMailRule, updateMailRuleInput } from './update-mail-rule.ts'
+
+type Registered = (args: unknown) => unknown
+
+// A stand-in for the one method the registration wrapper calls, so the test
+// drives the registered tool callback directly instead of through a transport.
+const makeServer = (): { registered: Map<string, Registered>; server: McpServer } => {
+  const registered = new Map<string, Registered>()
+  const server = {
+    registerTool: (name: string, _config: unknown, cb: Registered) => {
+      registered.set(name, cb)
+      return { name }
+    },
+  } as unknown as McpServer
+  return { registered, server }
+}
 
 describe('updateMailRuleInput schema', () => {
   test('requires the ruleId plus at least one updatable field', () => {
@@ -86,5 +103,32 @@ describe('updateMailRule', () => {
     expect(result.isError).toBe(true)
     expect(deps.saves).toBe(0)
     expect(deps.applies).toHaveLength(0)
+  })
+})
+
+describe('registerUpdateMailRule', () => {
+  test('registers under update_mail_rule and rejects invalid args without calling deps', async () => {
+    const deps = fakeDeps([githubRule()])
+    const { registered, server } = makeServer()
+    registerUpdateMailRule(server, deps, () => 'tok')
+
+    const result = (await registered.get('update_mail_rule')?.({ ruleId: 'rule-00000001' })) as ToolResult
+
+    expect(result.isError).toBe(true)
+    expect(deps.saves).toBe(0)
+  })
+
+  test('parses valid args and delegates to updateMailRule', async () => {
+    const deps = fakeDeps([githubRule()])
+    const { registered, server } = makeServer()
+    registerUpdateMailRule(server, deps, () => 'tok')
+
+    const result = (await registered.get('update_mail_rule')?.({
+      enabled: false,
+      ruleId: 'rule-00000001',
+    })) as ToolResult
+
+    expect(result.isError).toBeUndefined()
+    expect(deps.rules[0]?.enabled).toBe(false)
   })
 })
