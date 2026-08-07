@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { isSeriesOccurrence, recurrenceSchema, toRRule } from './recurrence.ts'
+import { isSeriesOccurrence, recurrenceSchema, startContradictsRule, toRRule } from './recurrence.ts'
 
 describe('recurrenceSchema', () => {
   test('accepts a raw RRULE string', () => {
@@ -120,5 +120,75 @@ describe('isSeriesOccurrence', () => {
     const until = 'FREQ=WEEKLY;UNTIL=20260623T100000Z'
     expect(isSeriesOccurrence(start, until, '2026-06-23T10:00:00Z')).toBe(true)
     expect(isSeriesOccurrence(start, until, '2026-06-30T10:00:00Z')).toBe(false)
+  })
+
+  // A zoned master (naive wall-clock `start`, no Z, paired with a `timeZone`):
+  // the recurrence is evaluated in that zone rather than in UTC.
+  describe('with a timeZone', () => {
+    test('accepts a UTC instant that is the master wall-clock time in the zone', () => {
+      // 08:00Z 2026-06-16 == 10:00 Europe/Berlin (CEST), a Tuesday.
+      expect(isSeriesOccurrence('2026-06-16T10:00:00', weekly, '2026-06-16T08:00:00Z', 'Europe/Berlin')).toBe(true)
+    })
+
+    test('rejects an instant that lands on the wrong local weekday', () => {
+      // 08:00Z 2026-06-17 == 10:00 Europe/Berlin on a Wednesday, not the ruled Tuesday.
+      expect(isSeriesOccurrence('2026-06-16T10:00:00', weekly, '2026-06-17T08:00:00Z', 'Europe/Berlin')).toBe(false)
+    })
+
+    test('strips a trailing zone-name suffix from a floating masterStart', () => {
+      expect(
+        isSeriesOccurrence('2026-06-16T10:00:00 Europe/Berlin', weekly, '2026-06-16T08:00:00Z', 'Europe/Berlin')
+      ).toBe(true)
+    })
+  })
+})
+
+describe('startContradictsRule', () => {
+  // 2026-06-16 is a Tuesday, 2026-06-19 is the Friday of the same week.
+  const tuesday = new Date('2026-06-16T10:00:00Z')
+  const friday = new Date('2026-06-19T10:00:00Z')
+
+  test('false when the start falls on the ruled weekday', () => {
+    expect(startContradictsRule('FREQ=WEEKLY;BYDAY=TU', tuesday, 'UTC')).toBe(false)
+  })
+
+  test('true when the start falls on a different weekday than the rule', () => {
+    expect(startContradictsRule('FREQ=WEEKLY;BYDAY=TU', friday, 'UTC')).toBe(true)
+  })
+
+  test('false when the rule has no BYDAY', () => {
+    expect(startContradictsRule('FREQ=DAILY', friday, 'UTC')).toBe(false)
+  })
+
+  test('false when BYDAY is a filter within a larger pattern (BYMONTHDAY present)', () => {
+    expect(startContradictsRule('FREQ=MONTHLY;BYMONTHDAY=19;BYDAY=TU', friday, 'UTC')).toBe(false)
+  })
+
+  test('false when the start matches any weekday in a multi-day BYDAY', () => {
+    expect(startContradictsRule('FREQ=WEEKLY;BYDAY=MO,WE,FR', friday, 'UTC')).toBe(false)
+  })
+
+  test('true when the start matches none of a multi-day BYDAY', () => {
+    expect(startContradictsRule('FREQ=WEEKLY;BYDAY=MO,WE', friday, 'UTC')).toBe(true)
+  })
+
+  test('strips an ordinal prefix from BYDAY before comparing weekdays', () => {
+    // FREQ=MONTHLY;BYDAY=2TU ("the second Tuesday") is not caught by the
+    // BYSETPOS/BYMONTHDAY/BYYEARDAY/BYWEEKNO guard, so it is judged the same
+    // as an unconditional weekly Tuesday rule — current behavior, not a claim
+    // that this is the semantically correct call for an ordinal BYDAY. A
+    // Tuesday start is required to actually exercise the stripping: on a
+    // Friday start both the stripped ('TU') and unstripped ('2TU') forms
+    // mismatch and return true either way, so that case can't tell the two
+    // apart.
+    expect(startContradictsRule('FREQ=MONTHLY;BYDAY=2TU', tuesday, 'UTC')).toBe(false)
+  })
+
+  test('evaluates the weekday in the given time zone, not UTC', () => {
+    // 02:00Z 2026-06-16 (a UTC Tuesday) is 16:00 the prior day in Honolulu
+    // (UTC-10, no DST) — a Monday.
+    const crossesMidnight = new Date('2026-06-16T02:00:00Z')
+    expect(startContradictsRule('FREQ=WEEKLY;BYDAY=MO', crossesMidnight, 'Pacific/Honolulu')).toBe(false)
+    expect(startContradictsRule('FREQ=WEEKLY;BYDAY=TU', crossesMidnight, 'Pacific/Honolulu')).toBe(true)
   })
 })
