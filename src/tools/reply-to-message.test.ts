@@ -1,6 +1,7 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
 
 import { type DraftCreateParams, type EmailSubmissionCreateParams } from '@langmail/jmap'
+import { logger } from '@langmail/logger'
 
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
 import { createSendGuard } from '../drafts/send-guard.ts'
@@ -124,17 +125,31 @@ describe('replyToMessage', () => {
       records: { e1: receivedMessage() },
       submitError: new Error('socket hang up'),
     })
-    const result = await replyToMessage(deps, store(), createSendGuard(), {
-      args: replyToMessageInput.parse({ messageId: 'e1', text: 'hi' }),
-      principal: TEST_PRINCIPAL,
-      token: 'tok',
-    })
-    expect(result.isError).toBe(true)
-    const text = result.content[0]?.text ?? ''
-    // The reply exists even though the send failed; naming it is the difference
-    // between a recoverable message and a lost one.
-    expect(text).toContain(`staged as draft ${creates[0] ? 'dNew1' : ''}`)
-    expect(text).toContain('send_draft')
+    // The failure is returned in-band, which tool-logging.ts records at `warn`.
+    // This path is a real fault rather than a "the answer is no", so it has to
+    // log its own `error` line or it would stop reaching error tracking.
+    const error = spyOn(logger, 'error').mockImplementation(() => undefined)
+    try {
+      const result = await replyToMessage(deps, store(), createSendGuard(), {
+        args: replyToMessageInput.parse({ messageId: 'e1', text: 'hi' }),
+        principal: TEST_PRINCIPAL,
+        token: 'tok',
+      })
+      expect(result.isError).toBe(true)
+      const text = result.content[0]?.text ?? ''
+      // The reply exists even though the send failed; naming it is the difference
+      // between a recoverable message and a lost one.
+      expect(text).toContain(`staged as draft ${creates[0] ? 'dNew1' : ''}`)
+      expect(text).toContain('send_draft')
+
+      expect(error).toHaveBeenCalledTimes(1)
+      const fields = error.mock.calls[0]?.[0] as Record<string, unknown>
+      expect(fields.tool).toBe('reply_to_message')
+      expect(fields.errorClass).toBe('Error')
+      expect(fields.errorMessage).toBe('socket hang up')
+    } finally {
+      error.mockRestore()
+    }
   })
 
   test('a blind retry after a lost response is refused rather than sending a second reply', async () => {

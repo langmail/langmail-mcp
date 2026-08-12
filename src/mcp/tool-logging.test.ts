@@ -31,21 +31,27 @@ const register = (server: McpServer, name: string, cb: () => unknown): void => {
 // process-wide for the whole test run, and a stale replacement would follow
 // every other file that logs (see update-calendar-event.test.ts).
 const withLogSpies = async (
-  fn: (spies: { error: ReturnType<typeof spyOn>; info: ReturnType<typeof spyOn> }) => Promise<void>
+  fn: (spies: {
+    error: ReturnType<typeof spyOn>
+    info: ReturnType<typeof spyOn>
+    warn: ReturnType<typeof spyOn>
+  }) => Promise<void>
 ): Promise<void> => {
   const info = spyOn(logger, 'info').mockImplementation(() => undefined)
   const error = spyOn(logger, 'error').mockImplementation(() => undefined)
+  const warn = spyOn(logger, 'warn').mockImplementation(() => undefined)
   try {
-    await fn({ error, info })
+    await fn({ error, info, warn })
   } finally {
     info.mockRestore()
     error.mockRestore()
+    warn.mockRestore()
   }
 }
 
 describe('instrumentToolLogging', () => {
   test('logs name, duration and outcome for a successful call', async () => {
-    await withLogSpies(async ({ error, info }) => {
+    await withLogSpies(async ({ error, info, warn }) => {
       const { registered, server } = makeServer()
       register(server, 'list_calendars', () => ({ content: [{ text: '2 calendars', type: 'text' }] }))
 
@@ -53,6 +59,7 @@ describe('instrumentToolLogging', () => {
 
       expect(result).toEqual({ content: [{ text: '2 calendars', type: 'text' }] })
       expect(error).not.toHaveBeenCalled()
+      expect(warn).not.toHaveBeenCalled()
       expect(info).toHaveBeenCalledTimes(1)
       const fields = info.mock.calls[0]?.[0] as Record<string, unknown>
       expect(fields.tool).toBe('list_calendars')
@@ -61,8 +68,12 @@ describe('instrumentToolLogging', () => {
     })
   })
 
-  test('counts an isError result as a failure without quoting its text', async () => {
-    await withLogSpies(async ({ error, info }) => {
+  // An `isError: true` result is the tool answering the model in-band, not a
+  // service fault. It must stay off `error`: that is the level forwarded to
+  // Better Stack Error Tracking, and paging on "no such thread" is what made
+  // every tool's rejection collapse into one untriageable alert.
+  test('logs an isError result at warn, not error, without quoting its text', async () => {
+    await withLogSpies(async ({ error, info, warn }) => {
       const { registered, server } = makeServer()
       register(server, 'create_calendar_event', () => ({
         content: [{ text: 'Conflicts with lunch with bob@langmail.me', type: 'text' }],
@@ -72,8 +83,9 @@ describe('instrumentToolLogging', () => {
       await registered.get('create_calendar_event')?.({}, {})
 
       expect(info).not.toHaveBeenCalled()
-      expect(error).toHaveBeenCalledTimes(1)
-      const fields = error.mock.calls[0]?.[0] as Record<string, unknown>
+      expect(error).not.toHaveBeenCalled()
+      expect(warn).toHaveBeenCalledTimes(1)
+      const fields = warn.mock.calls[0]?.[0] as Record<string, unknown>
       expect(fields.tool).toBe('create_calendar_event')
       expect(fields.outcome).toBe('tool_error')
       expect(JSON.stringify(fields)).not.toContain('bob@langmail.me')
@@ -81,7 +93,7 @@ describe('instrumentToolLogging', () => {
   })
 
   test('logs a thrown error by class and rethrows it', async () => {
-    await withLogSpies(async ({ error }) => {
+    await withLogSpies(async ({ error, warn }) => {
       const { registered, server } = makeServer()
       register(server, 'search_emails', () => {
         throw new TypeError('fetch failed for alice@langmail.me')
@@ -92,6 +104,8 @@ describe('instrumentToolLogging', () => {
         .catch((err: unknown) => err)
 
       expect(thrown).toBeInstanceOf(TypeError)
+      expect(warn).not.toHaveBeenCalled()
+      expect(error).toHaveBeenCalledTimes(1)
       const fields = error.mock.calls[0]?.[0] as Record<string, unknown>
       expect(fields.tool).toBe('search_emails')
       expect(fields.outcome).toBe('exception')

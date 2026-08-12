@@ -4,10 +4,27 @@
 // (`createMcpHandler`), so instrumenting `registerTool` on that instance
 // covers the whole surface — one wrapper rather than an edit per tool file.
 //
-// An MCP tool error returned as `isError: true` is a successful HTTP response
-// but a failed invocation, so it logs at `error` level too. The result text
-// itself never appears in the line: tool results quote event content and
-// mailbox addresses, and these lines ship off-box.
+// The two failure outcomes are not the same severity, and the split matters
+// because `error` is the level pinoIntegration forwards to Better Stack Error
+// Tracking (see @langmail/logger's initErrorTracking):
+//
+//   tool_error — the tool returned `isError: true`. That is the MCP contract
+//     for answering the calling model in-band: "no such thread", "query must
+//     not be empty", "event end must be after its start". The service worked;
+//     the answer is no. Logging these at `error` raised a production alert
+//     every time an agent passed a stale id, and since the pattern is grouped
+//     on the message text, every such answer from every tool collapsed into a
+//     single untriageable "mcp tool failed". Logged at `warn`: still visible
+//     in Log Management, no longer paged on.
+//   exception — the tool threw. No tool throws to express a designed answer,
+//     so a throw is always an upstream or programming fault. Stays at `error`.
+//
+// The one place a genuine fault used to reach the `tool_error` branch is
+// reply_to_message, which catches a failed submission to name the draft it
+// left behind; it now logs its own `error` line before returning that result.
+//
+// The result text itself never appears in either line: tool results quote
+// event content and mailbox addresses, and these lines ship off-box.
 
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
@@ -36,7 +53,7 @@ export const instrumentToolLogging = (server: McpServer): void => {
         const result = await call(...args)
         const durationMs = Math.round(performance.now() - startedAt)
         if (isErrorResult(result)) {
-          logger.error({ durationMs, outcome: 'tool_error', tool: name }, 'mcp tool failed')
+          logger.warn({ durationMs, outcome: 'tool_error', tool: name }, 'mcp tool returned an error result')
         } else {
           logger.info({ durationMs, outcome: 'success', tool: name }, 'mcp tool completed')
         }

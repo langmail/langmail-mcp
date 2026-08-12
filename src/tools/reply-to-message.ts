@@ -21,9 +21,11 @@ import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
 import { bearerAuthorization, type EmailComposeRecord, type EmailDraft } from '@langmail/jmap'
+import { logger } from '@langmail/logger'
 
 import { type IdempotencyStore } from '../drafts/idempotency.ts'
 import { type SendGuard } from '../drafts/send-guard.ts'
+import { describeError } from '../observability/errors.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import {
   type DraftToolDeps,
@@ -233,6 +235,11 @@ export const replyToMessage = async (
       ...(mailboxes.sent ? { sentMailboxId: mailboxes.sent } : {}),
     })
   } catch (error) {
+    // The submission genuinely failed, and returning it in-band would otherwise
+    // log as a `tool_error` — the level tool-logging.ts reserves for "the answer
+    // is no", not "the send broke". Log it here so the fault still reaches error
+    // tracking, redacted: the raw message routinely echoes the mailbox address.
+    logger.error({ ...describeError(error), tool: TOOL_NAME }, 'reply submission failed after the draft was staged')
     // The reply exists as a draft even though the send failed. Naming it is the
     // difference between a recoverable message and a lost one.
     const detail = error instanceof Error ? error.message : 'unknown error'
