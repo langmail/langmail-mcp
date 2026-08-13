@@ -167,14 +167,46 @@ export interface ContactCardOrganization {
   name?: string | null
 }
 
+// JSContact Phone (RFC 9553 §2.3.3). `features` carries what the number is
+// good for (`mobile`, `fax`, `voice`, …), `contexts` where it is used
+// (`work`, `private`) — the two axes vCard collapsed into one TYPE list.
+export interface ContactCardPhone {
+  contexts?: Record<string, boolean> | null
+  features?: Record<string, boolean> | null
+  number: string
+  [extension: `${string}:${string}`]: unknown
+}
+
+// One part of a structured postal address (RFC 9553 §2.5.1). `kind` is from
+// the registry — `name` is the street name, `number` the house number,
+// `locality` the city, `region` the state/province, `postcode` the ZIP.
+export interface ContactCardAddressComponent {
+  kind: string
+  value: string
+}
+
+// JSContact Address (RFC 9553 §2.5.1). Structured by design: address
+// formats are country-specific, and an agent addressing a letter needs the
+// parts separately. `countryCode` is ISO 3166-1 alpha-2; `contexts` uses
+// `private`/`work` (there is no `home` in JSContact).
+export interface ContactCardAddress {
+  components?: ContactCardAddressComponent[] | null
+  contexts?: Record<string, boolean> | null
+  countryCode?: string | null
+  full?: string | null
+  [extension: `${string}:${string}`]: unknown
+}
+
 // A ContactCard draft: JSContact Card (RFC 9553) narrowed to what Langmail
 // writes, before the server assigns an id.
 export interface ContactCardDraft {
   addressBookIds: Record<string, boolean>
+  addresses?: Record<string, ContactCardAddress> | null
   emails?: Record<string, ContactCardEmail> | null
   name?: ContactCardName | null
   notes?: Record<string, ContactCardNote> | null
   organizations?: Record<string, ContactCardOrganization> | null
+  phones?: Record<string, ContactCardPhone> | null
   uid?: string | null
   version?: string | null
 }

@@ -21,18 +21,21 @@ import { createIdempotencyStore } from '../drafts/idempotency.ts'
 import { createSendGuard } from '../drafts/send-guard.ts'
 import { makeLiveApplyIo, makeMailRulesApplier } from '../rules/apply.ts'
 import { makeLiveSieveIo, makeMailRulesStore } from '../rules/store.ts'
+import { makeLiveDeps as makeContactWriteDeps } from '../tools/contact-common.ts'
 import { makeAttendeeWriteThrough } from '../tools/contact-write-through.ts'
 import { makeLiveDeps as makeCreateCalendarDeps, registerCreateCalendar } from '../tools/create-calendar.ts'
 import {
   makeLiveDeps as makeCreateCalendarEventDeps,
   registerCreateCalendarEvent,
 } from '../tools/create-calendar-event.ts'
+import { registerCreateContact } from '../tools/create-contact.ts'
 import { registerCreateDraft } from '../tools/create-draft.ts'
 import { registerCreateMailRule } from '../tools/create-mail-rule.ts'
 import {
   makeLiveDeps as makeDeleteCalendarEventDeps,
   registerDeleteCalendarEvent,
 } from '../tools/delete-calendar-event.ts'
+import { registerDeleteContact } from '../tools/delete-contact.ts'
 import { registerDeleteMailRule } from '../tools/delete-mail-rule.ts'
 import { makeLiveDeps as makeDownloadAttachmentDeps, registerDownloadAttachment } from '../tools/download-attachment.ts'
 import { makeLiveDeps as makeDraftDeps } from '../tools/draft-common.ts'
@@ -56,6 +59,7 @@ import {
   makeLiveDeps as makeUpdateCalendarEventDeps,
   registerUpdateCalendarEvent,
 } from '../tools/update-calendar-event.ts'
+import { registerUpdateContact } from '../tools/update-contact.ts'
 import { registerUpdateDraft } from '../tools/update-draft.ts'
 import { registerUpdateMailRule } from '../tools/update-mail-rule.ts'
 import { instrumentToolLogging } from './tool-logging.ts'
@@ -103,6 +107,9 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   const deleteCalendarEventDeps = makeDeleteCalendarEventDeps(caldavCfg)
   const respondToEventDeps = makeRespondToEventDeps(caldavCfg, collectAttendees)
   const searchContactsDeps = makeSearchContactsDeps(jmapLive, caldavCfg)
+  // The write side of the address book. Same JMAP session cache as the read
+  // side; separate deps bundle because no writer hydrates subjects or titles.
+  const contactWriteDeps = makeContactWriteDeps(jmapLive)
   // Composition: one deps bundle for the whole draft/send surface (they share
   // every seam), plus one process-lifetime replay cache so a client that
   // retries a send whose response it never saw gets the first answer back
@@ -137,6 +144,9 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     registerDeleteCalendarEvent(server, deleteCalendarEventDeps, () => ctx.token)
     registerRespondToEvent(server, respondToEventDeps, () => ctx.token)
     registerSearchContacts(server, searchContactsDeps, () => ctx.token)
+    registerCreateContact(server, contactWriteDeps, () => ctx.token)
+    registerUpdateContact(server, contactWriteDeps, () => ctx.token)
+    registerDeleteContact(server, contactWriteDeps, () => ctx.token)
     registerCreateDraft(
       server,
       draftDeps,

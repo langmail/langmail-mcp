@@ -15,8 +15,13 @@ interface SetError {
   type?: string
 }
 
-const setErrorDetail = (err: SetError | undefined): string =>
-  [err?.type ?? 'unknown', err?.description].filter(Boolean).join(' — ')
+// `type` is a JMAP error code (`invalidProperties`, `notFound`, …), not free
+// text, so it is safe to surface. The server's `description` stays out: it is
+// free-form and can quote the value it rejected — a name, a note, a phone
+// number, a postal address — and these messages travel to off-box error
+// tracking, whose redactor only strips bearer tokens and addresses. Same rule
+// as the EmailSubmission wrapper, for the same reason.
+const setErrorType = (err: SetError | undefined): string => err?.type ?? 'unknown'
 
 // --- AddressBook/get -------------------------------------------------------
 
@@ -56,7 +61,8 @@ export const addressBookCreate = async (p: AddressBookCreateParams): Promise<str
   )
   const id = out.created?.b0?.id
   if (!id) {
-    throw new JmapError(200, `AddressBook/set did not create ${p.name}: ${setErrorDetail(out.notCreated?.b0)}`)
+    const reason = out.notCreated?.b0
+    throw new JmapError(200, `AddressBook/set did not create a book: ${setErrorType(reason)}`, reason?.type)
   }
   return id
 }
@@ -145,7 +151,8 @@ export const contactCardCreate = async (p: ContactCardCreateParams): Promise<str
   )
   const id = out.created?.c0?.id
   if (!id) {
-    throw new JmapError(200, `ContactCard/set did not create card: ${setErrorDetail(out.notCreated?.c0)}`)
+    const reason = out.notCreated?.c0
+    throw new JmapError(200, `ContactCard/set did not create card: ${setErrorType(reason)}`, reason?.type)
   }
   return id
 }
@@ -170,9 +177,30 @@ export const contactCardUpdate = async (p: ContactCardUpdateParams): Promise<voi
     '0'
   )
   if (!(out.updated && p.cardId in out.updated)) {
-    throw new JmapError(
-      200,
-      `ContactCard/set did not update ${p.cardId}: ${setErrorDetail(out.notUpdated?.[p.cardId])}`
-    )
+    const reason = out.notUpdated?.[p.cardId]
+    throw new JmapError(200, `ContactCard/set did not update ${p.cardId}: ${setErrorType(reason)}`, reason?.type)
+  }
+}
+
+export interface ContactCardDestroyParams extends JmapCall {
+  accountId: string
+  cardId: string
+}
+
+// Removes the card from every address book it is in — RFC 9610 has no
+// per-book unlink, so `destroy` is the only deletion primitive.
+export const contactCardDestroy = async (p: ContactCardDestroyParams): Promise<void> => {
+  const resp = await jmapCall(p, {
+    methodCalls: [['ContactCard/set', { accountId: p.accountId, destroy: [p.cardId] }, '0']],
+    using: USING,
+  })
+  const out = methodResponse<{ destroyed?: string[]; notDestroyed?: Record<string, SetError> }>(
+    resp,
+    'ContactCard/set',
+    '0'
+  )
+  if (!out.destroyed?.includes(p.cardId)) {
+    const reason = out.notDestroyed?.[p.cardId]
+    throw new JmapError(200, `ContactCard/set did not destroy ${p.cardId}: ${setErrorType(reason)}`, reason?.type)
   }
 }

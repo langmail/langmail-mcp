@@ -216,6 +216,9 @@ const main = async () => {
     'update_mail_rule',
     'delete_mail_rule',
     'search_contacts',
+    'create_contact',
+    'update_contact',
+    'delete_contact',
   ]
   for (const required of requiredTools) {
     if (!names.includes(required)) {

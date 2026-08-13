@@ -19,6 +19,14 @@ export const COLLECTED_PROPERTY = 'langmail.me:collected' as const
 
 export const COLLECTED_NOTE_KEY = 'langmail-collected'
 
+// Book create_contact provisions when the account has no address book at
+// all — deliberately not the collected one, which is machine-maintained.
+export const PERSONAL_BOOK_NAME = 'Contacts'
+
+// Note entry the contact tools write a user-authored note into, when the
+// card doesn't already carry exactly one note of its own (see profile.ts).
+export const USER_NOTE_KEY = 'langmail-note'
+
 // The visible note text CardDAV clients render for the entry — a short
 // explanation instead of raw data (the payload itself is invisible to
 // standard clients).

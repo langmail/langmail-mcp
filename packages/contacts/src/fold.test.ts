@@ -227,3 +227,26 @@ describe('foldObservations — updates and ownership', () => {
     expect(updates).toEqual([])
   })
 })
+
+describe('foldObservations — provenance', () => {
+  test('a card the fold creates is stamped derived', () => {
+    const { creates } = foldObservations({ cards: [], collectedBookId: BOOK }, [obs()])
+    expect(readExt(creates[0] as unknown as Record<string, unknown>).source).toBe('derived')
+  })
+
+  test('an authored stamp survives later collection — derivation never relabels the card', () => {
+    const card = existingCard({
+      notes: {
+        [COLLECTED_NOTE_KEY]: collectedNoteEntry({ addresses: {}, interactions: [], source: 'authored' }),
+      },
+    })
+    const { updates } = foldObservations({ cards: [card], collectedBookId: BOOK }, [obs()])
+    expect(readExt(updates[0]?.patch ?? {}).source).toBe('authored')
+  })
+
+  test('an authored name is never overwritten by an observed one', () => {
+    const card = existingCard({ name: { full: 'Robin Fairweather-Ng' } })
+    const { updates } = foldObservations({ cards: [card], collectedBookId: BOOK }, [obs({ name: 'Robin Fairweather' })])
+    expect(updates[0]?.patch.name).toBeUndefined()
+  })
+})

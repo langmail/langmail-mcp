@@ -17,15 +17,18 @@ import {
   type InteractionTuple,
   rankCards,
   readCollected,
+  readOrganization,
   relationshipFor,
   relativeAge,
   SHOWN_INTERACTIONS,
+  sourceOf,
 } from '@langmail/contacts'
 import { parseEvents } from '@langmail/ical'
 import {
   accountIdForContacts,
   bearerAuthorization,
   type ContactCard,
+  type ContactCardFilter,
   type ContactCardGetParams,
   type ContactCardQueryParams,
   contactCardGet,
@@ -38,6 +41,7 @@ import {
 
 import { type CalDavConfig, discoverAccount, fetchEvents } from '../caldav/client.ts'
 import { READ_ONLY } from './annotations.ts'
+import { profileLines } from './contact-format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 const searchContactsShape = {
@@ -62,9 +66,10 @@ const searchContactsShape = {
     .enum(['concise', 'detailed'])
     .default('concise')
     .describe(
-      '`concise` returns name, best address, confidence, relationship, and the ' +
-        'last interactions. `detailed` adds all known addresses with their own ' +
-        'confidence and interaction record ids (for chaining into get_email or ' +
+      '`concise` returns name, contact id, best address, confidence, relationship, ' +
+        'and the last interactions. `detailed` adds all known addresses with their ' +
+        'own confidence, phone numbers, postal addresses, the note, where the record ' +
+        'came from, and interaction record ids (for chaining into get_email or ' +
         'list_calendar_events), plus excluded relay addresses.'
     ),
 }
@@ -97,6 +102,10 @@ export interface SearchContactsContext {
 // Fetch window before ranking: ranking needs the whole candidate set, not
 // just the first page the server happens to return.
 const QUERY_WINDOW = 50
+
+// Window for the unfiltered sweep (see below). Bounded rather than
+// unbounded: past this size the filtered read is what still reaches a card.
+const SWEEP_WINDOW = 250
 
 // Client-side refinement of the server-side candidate set, and the final
 // word on what matched: the server's `text` condition also searches notes,
@@ -198,9 +207,13 @@ const concisePerson = (
   const lines = ext.interactions
     .slice(0, SHOWN_INTERACTIONS)
     .map((t) => `   - ${interactionLine(t, hydrated.subjects, hydrated.eventTitles, now)}`)
-  const organization = Object.values(card.organizations ?? {}).find((o) => o.name)?.name
+  const organization = readOrganization(card)
   return [
     `${index + 1}. ${card.name?.full ?? best?.address ?? '(unnamed)'}`,
+    // The handle create_contact/update_contact/delete_contact address the
+    // record by — in the concise format too, so editing a contact never
+    // costs an extra detailed round-trip.
+    `   contact_id: ${card.id}`,
     ...(organization ? [`   organization: ${organization}`] : []),
     `   best_address: ${best?.address ?? '(none)'} (${best?.context ?? 'unknown'})`,
     `   address_confidence: ${best?.confidence ?? 'weak'} | relationship: ${relationshipFor(ext, now)}`,
@@ -225,6 +238,15 @@ const detailedPerson = (
       parts.push(`   - ${c.address} (${c.context}, ${c.confidence}${seen})`)
     }
   }
+  // The authored half of the record — phones, postal addresses, note. Only
+  // in the detailed format: an agent resolving a name before drafting mail
+  // has no use for a street address, and the concise format is what that
+  // call reads.
+  parts.push(...profileLines(card))
+  // Provenance, because `confidence` means different things across sources:
+  // on a derived address it is an inference from headers, on an authored one
+  // it is the user's own assertion.
+  parts.push(`   source: ${sourceOf(card)}`)
   const withIds = ext.interactions.map(
     (t) =>
       `   - ${interactionLine(t, hydrated.subjects, hydrated.eventTitles, now)} [${
@@ -249,20 +271,35 @@ export const searchContacts = async (deps: SearchContactsDeps, ctx: SearchContac
   const authorization = bearerAuthorization(token)
   const accountId = await deps.resolveAccountId(authorization)
 
-  // Server-side where RFC 9610 filters allow (name/email/free text), refined
-  // client-side. All address books are queried — collected and personal alike.
-  const ids = await deps.contactCardQuery({
-    accountId,
-    apiUrl: '',
-    authorization,
-    filter: { conditions: [{ text: query }, { email: query }, { name: query }], operator: 'OR' },
-    limit: QUERY_WINDOW,
-  })
-  const cards = await deps.contactCardGet({ accountId, apiUrl: '', authorization, ids })
+  // Two candidate sets, unioned, then refined client-side by `matchesQuery`
+  // — which is the authority either way, because the server's `text`
+  // condition also hits the machine-written note every collected card
+  // carries. All address books are queried, collected and personal alike.
+  //
+  // The filtered read reaches cards past the sweep window on a large book.
+  // The unfiltered sweep reaches cards the filter structurally cannot see:
+  // Stalwart does not return a card with no `emails` property for a query on
+  // its display name, which is exactly what create_contact writes from a name
+  // and a postal address. Neither is a superset of the other, so a search
+  // that ran only one of them would silently drop people — the sweep alone
+  // would truncate a big book, and the filter alone would hide every
+  // emailless contact that shares a query term with an addressed one.
+  // Queries return ids only; the single `get` below is the real cost.
+  const ids = async (filter: ContactCardFilter | undefined, limit: number): Promise<string[]> =>
+    deps.contactCardQuery({ accountId, apiUrl: '', authorization, ...(filter ? { filter } : {}), limit })
+
+  const [filteredIds, sweptIds] = await Promise.all([
+    ids({ conditions: [{ text: query }, { email: query }, { name: query }], operator: 'OR' }, QUERY_WINDOW),
+    ids(undefined, SWEEP_WINDOW),
+  ])
+  const candidateIds = [...new Set([...filteredIds, ...sweptIds])]
+  const cards = await deps.contactCardGet({ accountId, apiUrl: '', authorization, ids: candidateIds })
   const matched = cards.filter((c) => matchesQuery(c, query))
   if (matched.length === 0) {
     return textResult(emptyResultText(query))
   }
+  // Either window coming back full means the count below is a floor.
+  const windowFull = filteredIds.length >= QUERY_WINDOW || sweptIds.length >= SWEEP_WINDOW
 
   const now = new Date()
   const ranked = rankCards(matched, now)
@@ -280,7 +317,7 @@ export const searchContacts = async (deps: SearchContactsDeps, ctx: SearchContac
 
   // The candidate window caps what we can count, so say "at least" when the
   // window was full rather than understating a very ambiguous query.
-  const atLeast = ids.length >= QUERY_WINDOW ? 'at least ' : ''
+  const atLeast = windowFull ? 'at least ' : ''
   const truncationNote =
     ranked.length > args.limit
       ? `\n\nShowing the top ${args.limit} of ${atLeast}${ranked.length} matches — narrow the query (add a surname, address fragment, or organization) to disambiguate.`
@@ -343,12 +380,14 @@ export const registerSearchContacts = (
         'known contacts, ranked by interaction recency and frequency. Sources ' +
         'include the collected address book maintained from mail headers (both ' +
         'directions, including Sent) and calendar attendees and organizers, plus ' +
-        "the user's personal address books. Use this before creating events or " +
-        'drafting mail when only a name is known. Returns for each contact one or ' +
-        'more addresses with a confidence level and recent interactions. Do not ' +
-        'use it to enumerate all contacts; a query is required. If several ' +
-        'plausible people match, present the candidates to the user rather than ' +
-        'guessing.',
+        "the user's personal address books, and contacts written with " +
+        'create_contact. Use this before creating events or drafting mail when only ' +
+        'a name is known, and before create_contact or update_contact to get the ' +
+        'contact_id. Returns for each contact one or more addresses with a ' +
+        'confidence level and recent interactions; the detailed format adds phone ' +
+        'numbers, postal addresses and the note. Do not use it to enumerate all ' +
+        'contacts; a query is required. If several plausible people match, present ' +
+        'the candidates to the user rather than guessing.',
       inputSchema: searchContactsShape,
       title: 'Search contacts',
     },

@@ -21,6 +21,47 @@ export type Direction = 'incoming' | 'outgoing'
 
 export type AddressContext = 'private' | 'work'
 
+// Where a card came from. `derived`: built by the collection fold from mail
+// headers and calendar attendees. `authored`: written through the MCP
+// contact tools. `imported`: already in an address book Langmail syncs — a
+// CardDAV client, a vCard import — and never observed here. The marker
+// matters because `confidence` means different things across them:
+// confidence in a derived address is an inference, confidence in an authored
+// one is the user's assertion.
+export type ContactSource = 'authored' | 'derived' | 'imported'
+
+export type PostalLabel = 'home' | 'other' | 'work'
+
+export type PhoneLabel = 'fax' | 'home' | 'mobile' | 'other' | 'work'
+
+// The authored half of a contact, flat — the mapping to and from the
+// JSContact card shape lives in profile.ts.
+export interface PostalAddress {
+  city?: string
+  // ISO 3166-1 alpha-2, e.g. `DE`.
+  country?: string
+  label: PostalLabel
+  postalCode?: string
+  region?: string
+  // Street including the house number — one line, because the split between
+  // the two is itself country-specific.
+  street?: string
+}
+
+export interface PhoneNumber {
+  label: PhoneLabel
+  number: string
+}
+
+// A card entry plus the key it is stored under. The key is the handle
+// search_contacts prints and update_contact takes, the same way the
+// interaction log exposes record ids for chaining. `display` is the card's
+// own one-line rendering, which stays correct for an address carrying
+// components this flat model has no field for.
+export type StoredPostalAddress = PostalAddress & { display: string; key: string }
+
+export type StoredPhoneNumber = PhoneNumber & { key: string }
+
 // One sighting in a card's bounded interaction log. `recordId` is the JMAP
 // Email id for `email`, the iCalendar event UID for `calendar` — the handles
 // search_contacts hydrates subjects/titles from, and offers for chaining.
@@ -44,10 +85,14 @@ export interface CollectedAddress {
 // newest-first, capped at INTERACTION_LOG_SIZE; `relays` lists relay
 // addresses observed alongside this person (the LinkedIn digest case),
 // so output can surface them as excluded rather than silently dropped.
+// `source` records where the card itself came from (see profile.ts) and
+// survives every fold, so a later derivation can never relabel a card the
+// user authored.
 export interface CollectedExtension {
   addresses: Record<string, CollectedAddress>
   interactions: InteractionTuple[]
   relays?: string[]
+  source?: ContactSource
 }
 
 // One sighting of one address in one record, graded at collection time.

@@ -184,7 +184,10 @@ export const foldObservations = (
       changedEmails: false,
       changedName: false,
       emails: {},
-      ext: { addresses: {}, interactions: [] },
+      // Stamped at creation and round-tripped by readCollected from then on,
+      // so a card the collection pipeline minted stays distinguishable from
+      // one the user authored through the contact tools.
+      ext: { addresses: {}, interactions: [], source: 'derived' },
       // Irrelevant for a draft (creates carry `notes` wholesale), but the
       // shape is shared with existing cards.
       hasNotes: false,

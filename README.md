@@ -21,6 +21,7 @@
 - List, create, update, and delete calendar events — including recurring series — sending iMIP invitations and cancellations to attendees
 - RSVP to invitations (accept / decline / tentative), notifying the organizer automatically
 - Resolve a name, partial name, address, or organization to known contacts — collected automatically from mail headers and calendar attendees, ranked by interaction recency and frequency
+- Create, edit, and delete contacts, holding phone numbers and structured postal addresses alongside the addressing data — for the people automatic collection structurally cannot reach
 
 The public endpoint is `https://mcp.langmail.me/mcp`.
 
@@ -160,12 +161,13 @@ Parameters:
 
 - `query`: string — name, partial name, email address, or organization (1–200 characters); matched against display names, organization names, addresses, and address domains
 - `context`: string (optional) — `work`, `private`, or `any` (default `any`); biases which address is reported as best when a person has several, never filters anyone out
-- `response_format`: string (optional) — `concise` (default) or `detailed`; detailed adds all known addresses, the full interaction log with record ids for chaining into `get_email` / `list_calendar_events`, and excluded relay addresses
+- `response_format`: string (optional) — `concise` (default) or `detailed`; detailed adds all known addresses, phone numbers, structured postal addresses, the note, the `source` marker, the full interaction log with record ids for chaining into `get_email` / `list_calendar_events`, and excluded relay addresses
 - `limit`: number (optional) — maximum number of matching people, 1–25 (default 5)
 
 Returns:
 
-- A ranked list of people, each with a best address, an `address_confidence`
+- A ranked list of people, each with a `contact_id` (the handle the write
+  tools take), a best address, an `address_confidence`
   (`confirmed` / `strong` / `weak`), a computed `relationship`
   (`active` / `occasional` / `incidental`), and the most recent interactions as
   relative-dated prose, hydrated at query time from the record ids on the card
@@ -174,6 +176,61 @@ Returns:
 
 Collection and grading live in `packages/contacts`; the card model and every
 threshold are documented in `docs/reference/contact-collection.md`.
+
+### create_contact
+
+Creates a contact in the user's default address book — a person the collected
+book structurally cannot reach, because they have never sent mail or shared a
+calendar event. Holds a name plus optional email addresses, phone numbers,
+structured postal addresses, an organization, and a note; an email address is
+not required. The card is stamped `source: authored`, and collection only ever
+fills blanks on standard properties, so nothing typed here is later
+overwritten by inference. Refuses when a supplied address already belongs to
+another card, naming that card's id.
+
+Parameters:
+
+- `name`: string — display name (1–200 characters)
+- `emails`: array (optional) — up to 10 `{ address, context? }`; `context` is `work` or `private`, inferred from the domain when omitted
+- `phones`: array (optional) — up to 10 `{ number, label? }`; label is `mobile` / `home` / `work` / `fax` / `other`
+- `postalAddresses`: array (optional) — up to 5 `{ street?, postalCode?, city?, region?, country?, label? }`; `country` is an ISO 3166-1 alpha-2 code, and at least one component beyond the label is required
+- `organization`: string (optional)
+- `note`: string (optional, up to 2000 characters)
+
+Returns:
+
+- The stored record as prose, including its `contact_id` and the `[p0]` /
+  `[a0]` handles addressing individual phones and postal addresses
+
+### update_contact
+
+Edits a stored contact by delta — scalars are set by naming them, repeated
+fields take `added…` / `removed…` lists, and a stored postal address is
+corrected component-by-component through `updatedPostalAddresses`. Fields not
+named keep their stored value, so a caller never has to read the record and
+re-send it (the same reasoning as `update_calendar_event`'s attendee delta).
+
+Parameters:
+
+- `contactId`: string — as printed by `search_contacts`
+- `name`, `organization`, `note`: string (optional) — set directly; `""` clears the last two
+- `addedEmails` / `removedEmails`: arrays (optional) — removal is by address, case-insensitive
+- `addedPhones` / `removedPhones`: arrays (optional) — removal is by `[p0]` handle or by the number itself
+- `addedPostalAddresses` / `updatedPostalAddresses` / `removedPostalAddresses`: arrays (optional) — corrections name a `key` plus only the changed components; removal is by `[a0]` handle or by label
+
+At least one field beyond `contactId` is required. A correction addressed to a
+handle the card does not carry fails without writing anything.
+
+### delete_contact
+
+Deletes a contact by id. The result names what deletion actually meant: an
+`authored` or `imported` card is gone, a `derived` one only until the next
+message or calendar invitation from that person recreates it — there is no
+permanent suppression on this surface.
+
+Parameters:
+
+- `contactId`: string — as printed by `search_contacts`
 
 ### list_calendars
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { COLLECTED_NOTE_KEY, collectedNoteEntry } from '@langmail/contacts'
+import { COLLECTED_NOTE_KEY, collectedNoteEntry, toCardAddress, toCardPhone, USER_NOTE_KEY } from '@langmail/contacts'
 import { type ContactCard } from '@langmail/jmap'
 
 import { type SearchContactsDeps, searchContacts, searchContactsInput } from './search-contacts.ts'
@@ -40,7 +40,9 @@ const robinCard = (over: Partial<ContactCard> = {}): ContactCard =>
   }) as ContactCard
 
 const makeDeps = (cards: ContactCard[], over: Partial<SearchContactsDeps> = {}): SearchContactsDeps => ({
-  contactCardGet: () => Promise.resolve(cards),
+  // Honours `ids` — the tool unions two query results, so a seam that
+  // returned every card regardless would hide which read found whom.
+  contactCardGet: (p) => Promise.resolve(cards.filter((c) => p.ids.includes(c.id))),
   contactCardQuery: () => Promise.resolve(cards.map((c) => c.id)),
   emailGet: (p) =>
     Promise.resolve(p.ids.map((id) => ({ id, subject: id === 'mail-1' ? 'Northwind onboarding' : 'Follow-up' }))),
@@ -134,6 +136,48 @@ describe('searchContacts — concise', () => {
     expect(result.content[0]?.text).toContain('1 person(s) matched')
   })
 
+  test('finds a contact that has no email address at all, by name', async () => {
+    // The shape create_contact can write: a name and a postal address,
+    // nobody's mail header involved. Stalwart does not return such a card for
+    // a server-side query on its display name, so the tool falls back to an
+    // unfiltered read of the book — modelled here by a query seam that
+    // answers the filtered call with nothing.
+    const authored = robinCard({
+      addresses: { a0: toCardAddress({ city: 'München', label: 'home', street: 'Beispielweg 1' }) },
+      emails: {},
+      id: 'card-authored',
+    })
+    const deps = makeDeps([authored], {
+      contactCardQuery: (p) => Promise.resolve(p.filter === undefined ? ['card-authored'] : []),
+    })
+    const result = await searchContacts(deps, { args: args({ query: 'Fairweather' }), token: 'tok' })
+    expect(result.isError).toBeUndefined()
+    expect(result.content[0]?.text).toContain('1 person(s) matched')
+    expect(result.content[0]?.text).toContain('contact_id: card-authored')
+  })
+
+  test('an emailless contact is not hidden by an addressed one matching the same query', async () => {
+    // The filtered read finds only the addressed card; the sweep finds only
+    // the emailless one. Choosing between them would drop a person, and this
+    // tool is supposed to present ambiguity rather than resolve it silently.
+    const addressed = robinCard()
+    const authored = robinCard({ emails: {}, id: 'card-authored', name: { full: 'Robin Fairweather-Ng' } })
+    const deps = makeDeps([addressed, authored], {
+      contactCardQuery: (p) => Promise.resolve(p.filter === undefined ? ['card-authored'] : ['card-robin']),
+    })
+    const result = await searchContacts(deps, { args: args({ query: 'Fairweather' }), token: 'tok' })
+    const text = result.content[0]?.text ?? ''
+    expect(text).toContain('2 person(s) matched')
+    expect(text).toContain('contact_id: card-robin')
+    expect(text).toContain('contact_id: card-authored')
+  })
+
+  test('a genuinely unknown person is still the empty result after the fallback', async () => {
+    const deps = makeDeps([], { contactCardQuery: () => Promise.resolve([]) })
+    const result = await searchContacts(deps, { args: args({ query: 'nobody' }), token: 'tok' })
+    expect(result.content[0]?.text).toContain('No contact matched')
+  })
+
   test('a server hit on the shared collection note alone is not a match', async () => {
     // Every collected card carries the same machine-written note, so the
     // server's `text` condition returns the whole book for a word from it.
@@ -178,6 +222,43 @@ describe('searchContacts — detailed', () => {
     expect(text).toContain('[event uid: evt-lunch@langmail.me]')
     expect(text).toContain('[email id: mail-1]')
     expect(text).toContain('excluded_relays: messaging-digest-noreply@linkedin.com')
+  })
+
+  test('surfaces the authored half of the record with handles the write tools take', async () => {
+    const card = robinCard({
+      addresses: {
+        a0: toCardAddress({
+          city: 'München',
+          country: 'DE',
+          label: 'home',
+          postalCode: '80331',
+          street: 'Beispielweg 1',
+        }),
+      },
+      notes: {
+        [COLLECTED_NOTE_KEY]: collectedNoteEntry({ addresses: {}, interactions: [], source: 'derived' }),
+        [USER_NOTE_KEY]: { note: 'Prefers letters.' },
+      },
+      phones: { p0: toCardPhone({ label: 'mobile', number: '+49 89 1234567' }) },
+    })
+    const result = await searchContacts(makeDeps([card]), {
+      args: args({ response_format: 'detailed' }),
+      token: 'tok',
+    })
+    const text = result.content[0]?.text ?? ''
+    expect(text).toContain('[p0] +49 89 1234567 (mobile)')
+    expect(text).toContain('[a0] Beispielweg 1, 80331 München, DE (home)')
+    expect(text).toContain('note: Prefers letters.')
+    expect(text).toContain('source: derived')
+  })
+
+  test('the concise format keeps the postal address out of a name-resolution answer', async () => {
+    const card = robinCard({ addresses: { a0: toCardAddress({ city: 'München', label: 'home' }) } })
+    const result = await searchContacts(makeDeps([card]), { args: args(), token: 'tok' })
+    const text = result.content[0]?.text ?? ''
+    expect(text).not.toContain('postal_addresses')
+    // The contact id is in both formats: editing must not cost a second call.
+    expect(text).toContain('contact_id: card-robin')
   })
 })
 

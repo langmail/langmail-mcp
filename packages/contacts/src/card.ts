@@ -6,7 +6,9 @@ import { type ContactCard, type ContactCardEmail, type ContactCardNote } from '@
 
 import { normalizeAddress } from './address-class.ts'
 import { COLLECTED_NOTE_KEY, COLLECTED_NOTE_TEXT, COLLECTED_PROPERTY } from './constants.ts'
-import { type CollectedExtension } from './types.ts'
+import { type CollectedExtension, type ContactSource } from './types.ts'
+
+const SOURCES = new Set<ContactSource>(['authored', 'derived', 'imported'])
 
 const emptyExtension = (): CollectedExtension => ({ addresses: {}, interactions: [] })
 
@@ -30,6 +32,9 @@ export const readCollected = (card: ContactCard): CollectedExtension => {
     addresses: typeof ext.addresses === 'object' && ext.addresses ? ext.addresses : {},
     interactions: Array.isArray(ext.interactions) ? ext.interactions : [],
     ...(Array.isArray(ext.relays) && ext.relays.length > 0 ? { relays: ext.relays } : {}),
+    // Round-tripped rather than re-derived: every fold rebuilds the entry
+    // from what it read here, so the marker survives later collection.
+    ...(ext.source && SOURCES.has(ext.source) ? { source: ext.source } : {}),
   }
 }
 
@@ -41,14 +46,17 @@ export const cardAddresses = (card: ContactCard): string[] =>
 // user-visible address book, a missed merge merely shows two candidates.
 export const normalizeName = (name: string): string => name.trim().replace(/\s+/gu, ' ').toLowerCase()
 
-// First free e<n> key: existing cards keep their key scheme, we only ever add.
-export const nextEmailKey = (emails: Record<string, ContactCardEmail>): string => {
+// First free `<prefix><n>` key: existing cards keep their key scheme, we only
+// ever add — so a handle printed in one response stays valid in the next.
+export const nextKey = (existing: Record<string, unknown> | null | undefined, prefix: string): string => {
   let n = 0
-  while (`e${n}` in emails) {
+  while (`${prefix}${n}` in (existing ?? {})) {
     n += 1
   }
-  return `e${n}`
+  return `${prefix}${n}`
 }
+
+export const nextEmailKey = (emails: Record<string, ContactCardEmail>): string => nextKey(emails, 'e')
 
 // Deterministic uid so a crashed-and-retried create of the same person
 // resolves to the same identity instead of minting a new one.

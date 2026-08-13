@@ -4,6 +4,7 @@ import {
   addressBookCreate,
   addressBookList,
   contactCardCreate,
+  contactCardDestroy,
   contactCardGet,
   contactCardQuery,
   contactCardUpdate,
@@ -238,6 +239,38 @@ describe('contactCardUpdate', () => {
         authorization: 'Bearer tok',
         cardId: 'c7',
         patch: { name: { full: 'Robin' } },
+      }).catch((error) => error)
+      expect(err).toBeInstanceOf(JmapError)
+      expect((err as JmapError).message).toContain('notFound')
+    })
+  })
+})
+
+describe('contactCardDestroy', () => {
+  test('sends ContactCard/set destroy with the single card id', async () => {
+    const f = mock((_u: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}')
+      const [name, args] = body.methodCalls[0]
+      expect(name).toBe('ContactCard/set')
+      expect(args).toEqual({ accountId: 'acct', destroy: ['c7'] })
+      return Promise.resolve(jmapResponse([['ContactCard/set', { destroyed: ['c7'] }, '0']]))
+    })
+    await withFetch(f, () =>
+      contactCardDestroy({ accountId: 'acct', apiUrl: API, authorization: 'Bearer tok', cardId: 'c7' })
+    )
+    expect(f).toHaveBeenCalled()
+  })
+
+  test('throws a JmapError naming the notDestroyed type', async () => {
+    const f = mock(() =>
+      Promise.resolve(jmapResponse([['ContactCard/set', { notDestroyed: { c7: { type: 'notFound' } } }, '0']]))
+    )
+    await withFetch(f, async () => {
+      const err = await contactCardDestroy({
+        accountId: 'acct',
+        apiUrl: API,
+        authorization: 'Bearer tok',
+        cardId: 'c7',
       }).catch((error) => error)
       expect(err).toBeInstanceOf(JmapError)
       expect((err as JmapError).message).toContain('notFound')
