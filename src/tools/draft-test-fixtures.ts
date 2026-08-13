@@ -7,6 +7,7 @@
 // was sent" — the strongest assertion on this surface.
 
 import {
+  type BlobUploadParams,
   type DraftCreateParams,
   type DraftCreateResult,
   type EmailComposeRecord,
@@ -24,6 +25,9 @@ const TEST_IDENTITIES: IdentityRecord[] = [{ email: TEST_PRINCIPAL, id: 'i1', na
 const TEST_MAILBOXES: ComposeMailboxes = { drafts: 'mbDrafts', sent: 'mbSent' }
 
 export interface DraftDepsOptions {
+  // Recorded blob uploads, newest last — what a test asserts on to tell
+  // "re-referenced an existing blob" from "re-uploaded the bytes".
+  blobUploads?: BlobUploadParams[]
   // What draftCreate reports back. Defaults to a fresh id.
   created?: DraftCreateResult
   // Recorded Email/set creates, newest last.
@@ -43,7 +47,13 @@ export const draftDeps = (opts: DraftDepsOptions = {}): DraftToolDeps => {
   // id every time would make two independent drafts look like one — which is
   // exactly how a duplicate-send bug hides from its own test.
   let nextDraft = 0
+  let nextBlob = 0
   return {
+    blobUpload: (p) => {
+      opts.blobUploads?.push(p)
+      nextBlob += 1
+      return Promise.resolve(`blobUploaded${nextBlob}`)
+    },
     draftCreate: (p) => {
       opts.creates?.push(p)
       nextDraft += 1

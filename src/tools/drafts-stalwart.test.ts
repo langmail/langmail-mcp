@@ -33,6 +33,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 
 import {
   blobDownload,
+  blobUpload,
   draftCreate,
   emailComposeGet,
   emailGetDetail,
@@ -226,6 +227,7 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
 
     // Live deps with the Basic credential pinned in place of a Bearer token.
     deps = {
+      blobUpload: (p) => blobUpload({ ...p, authorization, uploadUrl: session.uploadUrl }),
       draftCreate: (p) => draftCreate({ ...p, apiUrl, authorization }),
       emailComposeGet: (p) => emailComposeGet({ ...p, apiUrl, authorization }),
       emailSubmissionCreate: (p) => emailSubmissionCreate({ ...p, apiUrl, authorization }),

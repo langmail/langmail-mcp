@@ -18,6 +18,7 @@ export {
 } from './contacts.ts'
 export {
   DRAFT_KEYWORD,
+  type DraftAttachment,
   type DraftCreateParams,
   type DraftCreateResult,
   draftCreate,

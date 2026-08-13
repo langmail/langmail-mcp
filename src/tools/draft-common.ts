@@ -15,7 +15,10 @@
 import {
   accountIdForMail,
   accountIdForSubmission,
+  type BlobUploadParams,
+  blobUpload,
   DRAFT_KEYWORD,
+  type DraftAttachment,
   type DraftCreateParams,
   type DraftCreateResult,
   draftCreate,
@@ -30,12 +33,13 @@ import {
   type IdentityGetParams,
   type IdentityRecord,
   identityGet,
+  JmapError,
   type JmapLive,
   LABEL_KEYWORD_PREFIX,
   mailboxIdsByRoles,
 } from '@langmail/jmap'
 
-import { formatAddressList } from './format.ts'
+import { formatAddressList, formatSize } from './format.ts'
 
 // The read-back budget for a draft's body values, in *octets* (RFC 8621 §4.2) —
 // four times the 100_000-*character* cap the composition tools accept, because a
@@ -62,6 +66,9 @@ export interface ComposeMailboxes {
 }
 
 export interface DraftToolDeps {
+  // Stages attachment bytes as a blob so `Email/set` can reference the handle —
+  // see drafts/attachments.ts for why bytes never reach Email/set directly.
+  blobUpload: (p: BlobUploadParams) => Promise<string>
   draftCreate: (p: DraftCreateParams) => Promise<DraftCreateResult>
   emailComposeGet: (p: EmailComposeGetParams) => Promise<EmailComposeRecord | null>
   emailSubmissionCreate: (p: EmailSubmissionCreateParams) => Promise<EmailSubmissionResult>
@@ -382,8 +389,61 @@ const bodyOfType = (
 // Whether any body value came back truncated. A truncated read is fine to
 // *display* and unsafe to *re-stage*, so this is the signal update_draft refuses
 // on rather than quietly shortening the user's message.
-export const bodyTruncated = (record: EmailComposeRecord): boolean =>
-  Object.values(record.bodyValues ?? {}).some((value) => value.isTruncated === true)
+// Scoped to the parts that actually make up the body, because `bodyValues` holds
+// more than those: the read asks for `fetchAllBodyValues`, and RFC 8621 §4.2.2
+// defines that as every text/* part in the structure — a .csv or .txt
+// *attachment* included. Those come back truncated at the same budget, and a
+// truncated attachment is not a truncated body: its bytes are re-referenced by
+// blobId on a rewrite, never re-staged from this text, so nothing is at risk.
+// Checking them too refused perfectly lossless edits with a diagnosis about the
+// body — including an `attachments: []` that meant to remove the very file
+// causing it. Unreachable before this surface could edit an attached draft at
+// all, which is why it surfaces now.
+export const bodyTruncated = (record: EmailComposeRecord): boolean => {
+  const bodyPartIds = new Set(
+    [...(record.textBody ?? []), ...(record.htmlBody ?? [])].flatMap((part) => (part.partId ? [part.partId] : []))
+  )
+  return Object.entries(record.bodyValues ?? {}).some(
+    ([partId, value]) => value.isTruncated === true && bodyPartIds.has(partId)
+  )
+}
+
+// The attached files of a stored draft, in the shape a re-create can reference.
+//
+// Only the blobId is carried, never the bytes: an edit rewrites the message, and
+// re-referencing the existing blobs is what lets it do so without downloading
+// and re-uploading a 5 MB PDF the caller never even mentioned. Parts with no
+// blobId are dropped — an EmailBodyPart without one names nothing that can be
+// re-attached — which is why `unreferencableAttachments` exists to stop an edit
+// before that drop can become a silent loss.
+const attachmentsFromRecord = (record: EmailComposeRecord): DraftAttachment[] =>
+  (record.attachments ?? []).flatMap((part) =>
+    part.blobId
+      ? [
+          {
+            blobId: part.blobId,
+            ...(part.cid ? { cid: part.cid } : {}),
+            // Preserved, not re-derived — see DraftAttachment.disposition.
+            ...(part.disposition ? { disposition: part.disposition } : {}),
+            ...(part.location ? { location: part.location } : {}),
+            ...(part.name ? { name: part.name } : {}),
+            ...(typeof part.size === 'number' ? { size: part.size } : {}),
+            ...(part.type ? { type: part.type } : {}),
+          },
+        ]
+      : []
+  )
+
+// The attached files of a stored draft that could *not* be carried onto a
+// replacement, named for a refusal message.
+//
+// RFC 8621 lets an EmailBodyPart's `blobId` be null (it is, for a multipart
+// part), and a part without one cannot be re-referenced by the new message. An
+// edit that quietly skipped it would destroy the original after writing a
+// replacement missing the file — unrecoverable, and reported as a success.
+// Refusing costs the caller an edit; the alternative costs them the file.
+export const unreferencableAttachments = (record: EmailComposeRecord): string[] =>
+  (record.attachments ?? []).filter((part) => !part.blobId).map((part) => part.name ?? '(unnamed)')
 
 // Read a stored draft back into the composable shape, so update_draft can merge
 // changes onto it and re-create the message (RFC 8621 makes an Email's content
@@ -391,8 +451,10 @@ export const bodyTruncated = (record: EmailComposeRecord): boolean =>
 export const draftFromRecord = (record: EmailComposeRecord): EmailDraft => {
   const text = bodyOfType(record, record.textBody, 'text/plain')
   const html = bodyOfType(record, record.htmlBody, 'text/html')
+  const attachments = attachmentsFromRecord(record)
   return {
     from: record.from ?? [],
+    ...(attachments.length > 0 ? { attachments } : {}),
     ...(record.to ? { to: record.to } : {}),
     ...(record.cc ? { cc: record.cc } : {}),
     ...(record.bcc ? { bcc: record.bcc } : {}),
@@ -406,6 +468,28 @@ export const draftFromRecord = (record: EmailComposeRecord): EmailDraft => {
 }
 
 export const isDraft = (record: EmailComposeRecord): boolean => Boolean(record.keywords?.[DRAFT_KEYWORD])
+
+// Why the server refused to write a draft, phrased for the agent that has to
+// fix it — or null when the failure was not the server saying no, in which case
+// the caller rethrows rather than reporting a refusal that never happened.
+//
+// The attachment hint is the reason this exists. Stalwart answers an
+// unresolvable `attachments` blobId with a bare `invalidProperties`, and an
+// agent told only that has no way to know which of the properties it sent was
+// the problem — while "the blobId" is very often the right guess, because a
+// blobId is per-account and does not outlive the message it was read from.
+export const draftRefusalReason = (error: unknown, draft: EmailDraft): string | null => {
+  if (!(error instanceof JmapError) || error.errorType === undefined) {
+    return null
+  }
+  const hint =
+    (draft.attachments ?? []).length > 0 && error.errorType === 'invalidProperties'
+      ? ' The likeliest cause is an attachment blobId the server does not recognise: blobIds belong to one ' +
+        'account and do not outlive the message they were read from, so re-read it with get_email or ' +
+        'get_draft and use the blobId it reports now — or pass the file as base64 `content` instead.'
+      : ''
+  return `The server refused this draft (${error.errorType}).${hint}`
+}
 
 // The user-facing `$label:` tags on a message. Carried onto the replacement when
 // a draft is edited: an edit rewrites the message, so without this a draft the
@@ -437,6 +521,14 @@ const bodyPreview = (draft: EmailDraft): string => {
 
 export interface DraftFormatOptions {
   threadId?: string | null
+  // Files the draft carries that this surface cannot re-reference (see
+  // `unreferencableAttachments`). Reported separately from the draft itself,
+  // and never folded into it: `EmailDraft.attachments` is the model a rewrite
+  // is built from, so a placeholder blobId in there would eventually be sent to
+  // the server. They still have to appear, because a review surface that says
+  // "no attachments" about a draft holding one — and that send_draft will
+  // deliver — is worse than one that says the file is there but unmanageable.
+  unreferencable?: string[]
 }
 
 // The message itself, as a composition tool reports it back: resolved
@@ -463,7 +555,38 @@ export const formatDraft = (draft: EmailDraft, opts: DraftFormatOptions = {}): s
     lines.push('threading: In-Reply-To/References set — this message continues an existing conversation')
   }
   lines.push(`body (${bodyKind(draft)}): ${bodyPreview(draft)}`)
+  lines.push(...attachmentLines(draft.attachments ?? [], opts.unreferencable ?? []))
   return lines.join('\n')
+}
+
+// What is attached, itemised. This is the half of the draft a human reviewing it
+// cannot otherwise see — the body they can read back, but "did the invoice
+// actually make it on?" is only answerable if the files are listed — so it is
+// printed by every composition tool, not just get_draft.
+//
+// The blobId is on the line because it is the handle the next call needs: an
+// update_draft that keeps this file, or a second message that attaches it too,
+// both reference it and neither should have to re-upload anything.
+const attachmentLines = (attachments: DraftAttachment[], unreferencable: string[]): string[] => {
+  const total = attachments.length + unreferencable.length
+  if (total === 0) {
+    return []
+  }
+  return [
+    `attachments (${total}):`,
+    ...attachments.map((attachment, index) => {
+      const pieces = [attachment.name ?? '(unnamed)', attachment.type ?? 'application/octet-stream']
+      if (typeof attachment.size === 'number') {
+        pieces.push(formatSize(attachment.size))
+      }
+      return `  ${index + 1}. ${pieces.join(' — ')} — blobId: ${attachment.blobId}`
+    }),
+    ...unreferencable.map(
+      (name, index) =>
+        `  ${attachments.length + index + 1}. ${name} — no blobId, so this file cannot be re-attached: it will ` +
+        'be sent with the draft, but an edit here cannot carry it across. Edit the draft in Langmail to change it.'
+    ),
+  ]
 }
 
 // --- live-deps wiring ----------------------------------------------------
@@ -471,6 +594,7 @@ export const formatDraft = (draft: EmailDraft, opts: DraftFormatOptions = {}): s
 // `live` is shared across the JMAP tools (built once in the handler) so a
 // bearer's session is resolved once per request cycle, not once per tool.
 export const makeLiveDeps = (live: JmapLive): DraftToolDeps => ({
+  blobUpload: async (p) => blobUpload({ ...p, uploadUrl: (await live.getSession(p.authorization)).uploadUrl }),
   draftCreate: async (p) => draftCreate({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   emailComposeGet: async (p) => emailComposeGet({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   emailSubmissionCreate: async (p) =>

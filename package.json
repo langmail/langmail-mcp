@@ -11,7 +11,7 @@
     "start": "NODE_ENV=production bun src/index.ts",
     "test": "bun test",
     "test:integration": "bun test caldav-integration",
-    "test:stalwart": "bun test stalwart-update-organizer stalwart-cancel-occurrence stalwart-attendee-delta attachments-stalwart mail-rules-stalwart search-contacts-stalwart search-emails-stalwart drafts-stalwart",
+    "test:stalwart": "bun test stalwart-update-organizer stalwart-cancel-occurrence stalwart-attendee-delta attachments-stalwart mail-rules-stalwart search-contacts-stalwart search-emails-stalwart drafts-stalwart draft-attachments-stalwart",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

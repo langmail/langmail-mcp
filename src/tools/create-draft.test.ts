@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type DraftCreateParams, type EmailSubmissionCreateParams } from '@langmail/jmap'
+import { type BlobUploadParams, type DraftCreateParams, type EmailSubmissionCreateParams } from '@langmail/jmap'
 
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
 import { createDraft, createDraftInput } from './create-draft.ts'
@@ -182,6 +182,58 @@ describe('createDraft', () => {
     const { result, text } = await run({ inReplyTo: 'gone', text: 'hi' }, { creates })
     expect(result.isError).toBe(true)
     expect(text).toContain('message not found')
+    expect(creates).toEqual([])
+  })
+
+  test('stages a generated file as an attachment in the same call', async () => {
+    // The motivating case: the agent has the bytes and the draft, and connects
+    // the two without the user opening the mailbox.
+    const creates: DraftCreateParams[] = []
+    const blobUploads: BlobUploadParams[] = []
+    const { result, text } = await run(
+      {
+        attachments: [{ content: Buffer.from('%PDF-1.4 invoice').toString('base64'), filename: 'RE-2026-006.pdf' }],
+        text: 'Corrected invoice attached.',
+        to: ['nadia@example.org'],
+      },
+      { blobUploads, creates }
+    )
+    expect(result.isError).toBeUndefined()
+    expect(blobUploads[0]?.type).toBe('application/pdf')
+    expect(creates[0]?.draft.attachments).toEqual([
+      { blobId: 'blobUploaded1', name: 'RE-2026-006.pdf', type: 'application/pdf' },
+    ])
+    // Reported back, so the agent can tell the user what it staged.
+    expect(text).toContain('attachments (1):')
+    expect(text).toContain('RE-2026-006.pdf')
+  })
+
+  test('forwards a mailbox attachment by blobId without moving any bytes', async () => {
+    const creates: DraftCreateParams[] = []
+    const blobUploads: BlobUploadParams[] = []
+    await run(
+      {
+        attachments: [{ blobId: 'Gcontract', filename: 'contract.pdf' }],
+        text: 'Forwarding the contract.',
+        to: ['lawyer@example.org'],
+      },
+      { blobUploads, creates }
+    )
+    expect(creates[0]?.draft.attachments).toEqual([
+      { blobId: 'Gcontract', name: 'contract.pdf', type: 'application/pdf' },
+    ])
+    expect(blobUploads).toEqual([])
+  })
+
+  test('stages nothing when an attachment cannot be resolved', async () => {
+    const creates: DraftCreateParams[] = []
+    const { result, text } = await run(
+      { attachments: [{ content: 'not base64!!', filename: 'x.pdf' }], text: 'hi', to: ['nadia@example.org'] },
+      { creates }
+    )
+    expect(result.isError).toBe(true)
+    expect(text).toContain('not valid base64')
+    // The draft is not staged half-attached.
     expect(creates).toEqual([])
   })
 

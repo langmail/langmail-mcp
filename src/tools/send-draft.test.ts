@@ -64,16 +64,16 @@ describe('sendDraft', () => {
     expect(submissions).toEqual([])
   })
 
-  test('points an unaddressed attached draft at Langmail, not at a call that would refuse it', async () => {
+  test('points an unaddressed attached draft at update_draft, which can now edit it', async () => {
     const submissions: EmailSubmissionCreateParams[] = []
-    // update_draft refuses attached drafts outright, so naming it here would
-    // send the agent into a call that cannot succeed.
+    // update_draft used to refuse an attached draft outright, so this case was
+    // sent to Langmail instead. It carries attachments across now, which makes
+    // "add the recipients with update_draft" the remedy on both paths.
     const attached = stagedDraft({ attachments: [{ partId: '2', type: 'application/pdf' }], to: [] })
     const { result, text } = await run({ draftId: 'd1' }, { records: { d1: attached }, submissions })
     expect(result.isError).toBe(true)
     expect(text).toContain('has no recipients')
-    expect(text).toContain('Langmail')
-    expect(text).not.toContain('send the draftId it returns')
+    expect(text).toContain('send the draftId it returns')
     expect(submissions).toEqual([])
   })
 

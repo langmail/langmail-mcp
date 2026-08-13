@@ -79,6 +79,110 @@ describe('draftCreate', () => {
     )
   })
 
+  test('references attachment blobs as body parts, and drops the read-back size', async () => {
+    const f = mock((_url: string, init?: RequestInit) => {
+      const draft = JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1].create.draft
+      expect(draft.attachments).toEqual([
+        // `disposition` is explicit — it is what decides whether the recipient's
+        // client offers the part as a file or renders it in place.
+        { blobId: 'Ginvoice', disposition: 'attachment', name: 'invoice.pdf', type: 'application/pdf' },
+        // A part the HTML body points at is inline by definition.
+        { blobId: 'Glogo', cid: 'logo@langmail', disposition: 'inline', name: 'logo.png', type: 'image/png' },
+        // No name and no type given: the wire still needs a media type.
+        { blobId: 'Gbare', disposition: 'attachment', type: 'application/octet-stream' },
+      ])
+      // `size` exists only so a stored draft can be read back — the server
+      // computes the part's size from the blob, so sending it back is noise.
+      expect(JSON.stringify(draft.attachments)).not.toContain('size')
+      return Promise.resolve(jmapResponse([['Email/set', { created: { draft: { id: 'd1' } } }, '0']]))
+    })
+    await withFetch(f, () =>
+      draftCreate({
+        ...call,
+        draft: {
+          attachments: [
+            { blobId: 'Ginvoice', name: 'invoice.pdf', size: 1024, type: 'application/pdf' },
+            { blobId: 'Glogo', cid: 'logo@langmail', name: 'logo.png', type: 'image/png' },
+            { blobId: 'Gbare' },
+          ],
+          from: [{ email: 'me@example.com' }],
+          text: 'See attached.',
+        },
+        mailboxId: 'mbDrafts',
+      })
+    )
+    expect(f).toHaveBeenCalledTimes(1)
+  })
+
+  test('keeps a stored disposition instead of re-deriving it from the cid', async () => {
+    const f = mock((_url: string, init?: RequestInit) => {
+      const draft = JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1].create.draft
+      expect(draft.attachments).toEqual([
+        // A plain attachment may well carry a Content-ID. Inferring from the cid
+        // would flip it to inline, and the recipient's client would try to
+        // render a document in the body instead of offering it as a download.
+        { blobId: 'Gdoc', cid: 'doc@example', disposition: 'attachment', name: 'report.pdf', type: 'application/pdf' },
+        // The mirror: inline with no cid stays inline rather than becoming a file.
+        { blobId: 'Gart', disposition: 'inline', name: 'art.png', type: 'image/png' },
+        // Content-Location is the other way an HTML body resolves an inline
+        // resource; dropping it would leave the unchanged HTML pointing nowhere.
+        {
+          blobId: 'Gbg',
+          disposition: 'inline',
+          location: 'https://example.com/bg.png',
+          name: 'bg.png',
+          type: 'image/png',
+        },
+      ])
+      return Promise.resolve(jmapResponse([['Email/set', { created: { draft: { id: 'd1' } } }, '0']]))
+    })
+    await withFetch(f, () =>
+      draftCreate({
+        ...call,
+        draft: {
+          attachments: [
+            {
+              blobId: 'Gdoc',
+              cid: 'doc@example',
+              disposition: 'attachment',
+              name: 'report.pdf',
+              type: 'application/pdf',
+            },
+            { blobId: 'Gart', disposition: 'inline', name: 'art.png', type: 'image/png' },
+            {
+              blobId: 'Gbg',
+              disposition: 'inline',
+              location: 'https://example.com/bg.png',
+              name: 'bg.png',
+              type: 'image/png',
+            },
+          ],
+          from: [{ email: 'me@example.com' }],
+          text: 'See attached.',
+        },
+        mailboxId: 'mbDrafts',
+      })
+    )
+    expect(f).toHaveBeenCalledTimes(1)
+  })
+
+  test('omits the attachments property entirely when there are none', async () => {
+    const f = mock((_url: string, init?: RequestInit) => {
+      const draft = JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1].create.draft
+      // An empty list is how update_draft spells "the user removed the files",
+      // and the absent property is the canonical form of that on a create.
+      expect(draft).not.toHaveProperty('attachments')
+      return Promise.resolve(jmapResponse([['Email/set', { created: { draft: { id: 'd1' } } }, '0']]))
+    })
+    await withFetch(f, () =>
+      draftCreate({
+        ...call,
+        draft: { attachments: [], from: [{ email: 'me@example.com' }], text: 'hi' },
+        mailboxId: 'mbDrafts',
+      })
+    )
+  })
+
   test('carries the threading headers as bare message ids', async () => {
     const f = mock((_url: string, init?: RequestInit) => {
       const draft = JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1].create.draft
@@ -222,6 +326,12 @@ describe('emailComposeGet', () => {
       expect(params.fetchAllBodyValues).toBe(true)
       expect(params.maxBodyValueBytes).toBe(1000)
       expect(params.bodyProperties).toContain('type')
+      // Everything a rewrite has to put back on an attachment part. Carrying
+      // these through `attachmentPart` is useless if they were never read, and
+      // that half of the round trip is invisible from the write side.
+      for (const property of ['blobId', 'disposition', 'cid', 'location', 'name', 'size']) {
+        expect(params.bodyProperties).toContain(property)
+      }
       return Promise.resolve(jmapResponse([['Email/get', { list: [{ id: 'd1' }] }, '0']]))
     })
     const record = await withFetch(f, () => emailComposeGet({ ...call, id: 'd1', maxBodyValueBytes: 1000 }))

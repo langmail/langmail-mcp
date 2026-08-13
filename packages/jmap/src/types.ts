@@ -54,6 +54,9 @@ export interface EmailBodyPart {
   blobId?: string | null
   cid?: string | null
   disposition?: string | null
+  // RFC 8621 §4.1.4 `location` — the part's Content-Location header. The other
+  // way an HTML body can point at an inline resource, besides `cid:`.
+  location?: string | null
   name?: string | null
   partId?: string | null
   size?: number | null

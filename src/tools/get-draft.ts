@@ -18,6 +18,7 @@ import {
   formatDraft,
   isDraft,
   MAX_DRAFT_BODY_VALUE_BYTES,
+  unreferencableAttachments,
 } from './draft-common.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
@@ -51,7 +52,13 @@ export const getDraft = async (deps: DraftToolDeps, ctx: GetDraftContext): Promi
     )
   }
   return textResult(
-    `Draft (not sent):\ndraftId: ${record.id}\n${formatDraft(draftFromRecord(record), { threadId: record.threadId })}`
+    `Draft (not sent):\ndraftId: ${record.id}\n${formatDraft(draftFromRecord(record), {
+      threadId: record.threadId,
+      // A file with no blobId is dropped from the composable model, so without
+      // this the one surface a human reviews the draft on would report it as
+      // carrying nothing.
+      unreferencable: unreferencableAttachments(record),
+    })}`
   )
 }
 
@@ -64,9 +71,10 @@ export const registerGetDraft = (server: McpServer, deps: DraftToolDeps, getToke
       annotations: READ_ONLY,
       description:
         'Read a staged draft back: its sender, every recipient including bcc, subject, whether it is ' +
-        'threaded onto a conversation, and the first 500 characters of the body. Use this to confirm what ' +
-        'was staged before sending — especially for a draft you did not write yourself. For messages that ' +
-        'have already been sent or received, use get_email.',
+        'threaded onto a conversation, the first 500 characters of the body, and every attached file with ' +
+        'its blobId. Use this to confirm what was staged before sending — especially for a draft you did ' +
+        'not write yourself — and to get the blobIds update_draft needs to keep those files when it ' +
+        'replaces the attachment list. For messages that have already been sent or received, use get_email.',
       inputSchema: getDraftInput.shape,
       title: 'Get draft',
     },

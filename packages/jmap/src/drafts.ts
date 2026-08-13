@@ -72,13 +72,54 @@ const COMPOSE_PROPERTIES = [
   'hasAttachment',
 ] as const
 
-const COMPOSE_BODY_PROPERTIES = ['partId', 'blobId', 'name', 'type', 'size', 'disposition', 'cid'] as const
+const COMPOSE_BODY_PROPERTIES = [
+  'partId',
+  'blobId',
+  'name',
+  'type',
+  'size',
+  'disposition',
+  'cid',
+  // Read so a rewrite can put it back — an HTML body may resolve an inline
+  // resource through Content-Location rather than `cid:`.
+  'location',
+] as const
+
+// One file hanging off a draft. Always a blob that already exists on the
+// server: RFC 8621 §4.1.4 `attachments` is a list of EmailBodyPart references,
+// so bytes are uploaded first (RFC 8620 §6.1 `uploadUrl` — `blobUpload` in
+// blob.ts) and only the resulting handle reaches Email/set. That is also what
+// makes re-attaching a file already in the mailbox free: its blobId is the same
+// kind of handle, so a forward transfers nothing.
+export interface DraftAttachment {
+  blobId: string
+  // Set only for an inline part an HTML body references as `cid:…`.
+  cid?: string
+  // RFC 8621 §4.1.4 `disposition` as the *stored* message has it. Carried
+  // through a rewrite rather than re-derived, because the two are genuinely
+  // independent: a plain attachment may well carry a Content-ID, and inferring
+  // "has a cid, therefore inline" would turn a file the recipient was offered
+  // as a download into one their client tries to render in the body. Absent for
+  // a newly supplied file, where there is nothing to preserve and the cid is
+  // the only signal available.
+  disposition?: string
+  // Content-Location, preserved for the same reason as `cid`: an HTML body may
+  // resolve an inline resource through it, and a rewrite that dropped it would
+  // leave the unchanged HTML pointing at nothing.
+  location?: string
+  name?: string
+  // Read back off a stored draft so a caller can report what is attached.
+  // Never sent — the server computes the part's size from the blob.
+  size?: number
+  type?: string
+}
 
 // The message a draft stages, in the shape the caller thinks in. `text` and
 // `html` are the body content itself (not part references) — the wrapper turns
 // them into the bodyValues/textBody/htmlBody triple the wire wants, and
 // Stalwart assembles multipart/alternative when both are given.
 export interface EmailDraft {
+  attachments?: DraftAttachment[]
   bcc?: EmailAddress[]
   cc?: EmailAddress[]
   from: EmailAddress[]
@@ -168,8 +209,30 @@ const draftProperties = (p: DraftCreateParams): Record<string, unknown> => {
   if (Object.keys(bodyValues).length > 0) {
     props.bodyValues = bodyValues
   }
+  if (draft.attachments && draft.attachments.length > 0) {
+    props.attachments = draft.attachments.map(attachmentPart)
+  }
   return props
 }
+
+// One EmailBodyPart reference, as Email/set wants it.
+//
+// `disposition` is set explicitly rather than left to the server: it is what
+// decides whether a receiving client shows the part as a file to download or
+// renders it in place, and RFC 8621 gives no default. A disposition read off a
+// stored message wins, so an edit presents the file the way it was already
+// presented; only a newly supplied attachment falls back to inferring it from
+// the `cid`, which is then the only evidence there is. `size` is dropped — the
+// server computes it from the blob, and it only exists on this type so a stored
+// draft can be read back.
+const attachmentPart = (attachment: DraftAttachment): Record<string, unknown> => ({
+  blobId: attachment.blobId,
+  disposition: attachment.disposition ?? (attachment.cid ? 'inline' : 'attachment'),
+  type: attachment.type ?? 'application/octet-stream',
+  ...(attachment.cid ? { cid: attachment.cid } : {}),
+  ...(attachment.location ? { location: attachment.location } : {}),
+  ...(attachment.name === undefined ? {} : { name: attachment.name }),
+})
 
 // Destroy one draft. Returns whether the server actually destroyed it, rather
 // than throwing: the only caller is the second half of an edit, where the new
@@ -213,7 +276,16 @@ export const draftCreate = async (p: DraftCreateParams): Promise<DraftCreateResu
   }>(resp, 'Email/set', '0')
   const created = out.created?.[CREATE_ID]
   if (!created?.id) {
-    throw new JmapError(200, `Email/set did not create the draft: ${out.notCreated?.[CREATE_ID]?.type ?? 'unknown'}`)
+    // `type` is a JMAP error code (`invalidProperties`, `overQuota`, …), not
+    // free text, so it is safe to surface; the description can quote the
+    // message the caller staged and stays out, as it does on submission.
+    //
+    // It is passed through as the error type rather than only interpolated so
+    // callers can tell "the server refused this draft" from a transport
+    // failure — an unresolvable attachment blobId lands here as
+    // `invalidProperties`, and that is a mistake the caller can correct.
+    const refusal = out.notCreated?.[CREATE_ID]
+    throw new JmapError(200, `Email/set did not create the draft: ${refusal?.type ?? 'unknown'}`, refusal?.type)
   }
   return {
     id: created.id,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type DraftCreateParams } from '@langmail/jmap'
+import { type BlobUploadParams, type DraftCreateParams } from '@langmail/jmap'
 
 import { type DraftDepsOptions, draftDeps, stagedDraft } from './draft-test-fixtures.ts'
 import { updateDraft, updateDraftInput } from './update-draft.ts'
@@ -148,17 +148,124 @@ describe('updateDraft', () => {
     expect(creates[0]?.draft.html).toBeUndefined()
   })
 
-  test('refuses to edit a draft with attachments rather than dropping them', async () => {
+  test('a truncated text attachment does not block an edit the way a truncated body does', async () => {
+    const creates: DraftCreateParams[] = []
+    // `fetchAllBodyValues` returns a bodyValue for every text/* part, so a large
+    // .csv attachment comes back truncated too. Its bytes are re-referenced by
+    // blobId, never re-staged from that text, so nothing is at risk — refusing
+    // here would block a lossless edit and blame the body for it.
+    const withBigCsv = stagedDraft({
+      attachments: [{ blobId: 'Gexport', name: 'export.csv', size: 900_000, type: 'text/csv' }],
+      bodyValues: { '1': { value: 'Here they are.' }, '9': { isTruncated: true, value: 'a,b,c…' } },
+    })
+    const { result } = await run({ draftId: 'd1', subject: 'New' }, { creates, records: { d1: withBigCsv } })
+    expect(result.isError).toBeUndefined()
+    expect(creates).toHaveLength(1)
+  })
+
+  test('still refuses when the message body itself came back truncated', async () => {
+    const creates: DraftCreateParams[] = []
+    // The guard that matters: this text *is* re-staged by the rewrite, so
+    // editing would silently amputate the user's message.
+    const truncatedBody = stagedDraft({ bodyValues: { '1': { isTruncated: true, value: 'a very long body…' } } })
+    const { result, text } = await run({ draftId: 'd1', subject: 'New' }, { creates, records: { d1: truncatedBody } })
+    expect(result.isError).toBe(true)
+    expect(text).toContain('too large to edit')
+    expect(creates).toEqual([])
+  })
+
+  test('carries the attached files across an edit that never mentions them', async () => {
+    const creates: DraftCreateParams[] = []
+    const blobUploads: BlobUploadParams[] = []
+    const withFile = stagedDraft({
+      attachments: [
+        { blobId: 'Ginvoice', disposition: 'attachment', name: 'invoice.pdf', size: 1024, type: 'application/pdf' },
+      ],
+    })
+    const { result, text } = await run(
+      { draftId: 'd1', subject: 'New' },
+      { blobUploads, creates, records: { d1: withFile } }
+    )
+    expect(result.isError).toBeUndefined()
+    // The edit rewrites the message, and the original is destroyed on the way —
+    // so a file dropped here would be unrecoverable.
+    expect(creates[0]?.draft.attachments).toEqual([
+      { blobId: 'Ginvoice', disposition: 'attachment', name: 'invoice.pdf', size: 1024, type: 'application/pdf' },
+    ])
+    // Re-referenced, not re-uploaded: the bytes never move for a subject edit.
+    // (The stored disposition rides along too — see the jmap-level test.)
+    expect(blobUploads).toEqual([])
+    expect(text).toContain('invoice.pdf')
+  })
+
+  test('refuses an edit that would silently drop an attachment it cannot reference', async () => {
+    const creates: DraftCreateParams[] = []
+    // RFC 8621 allows a null blobId, and a part without one cannot be carried
+    // onto the replacement. The rewrite would drop it and the destroy would make
+    // that permanent — while reporting success.
+    const unreferencable = stagedDraft({
+      attachments: [{ name: 'scan.pdf', size: 4096, type: 'application/pdf' }],
+    })
+    const { result, text } = await run({ draftId: 'd1', subject: 'New' }, { creates, records: { d1: unreferencable } })
+    expect(result.isError).toBe(true)
+    expect(text).toContain('scan.pdf')
+    expect(text).toContain('left unchanged')
+    expect(creates).toEqual([])
+  })
+
+  test('allows the edit when the caller replaces the attachment list outright', async () => {
+    const creates: DraftCreateParams[] = []
+    const unreferencable = stagedDraft({ attachments: [{ name: 'scan.pdf', type: 'application/pdf' }] })
+    // Nothing is being lost silently here — the caller said what the edited
+    // draft should carry, so the unreferencable part is not load-bearing.
+    const { result } = await run(
+      { attachments: [{ blobId: 'Gfresh', filename: 'fresh.pdf' }], draftId: 'd1' },
+      { creates, records: { d1: unreferencable } }
+    )
+    expect(result.isError).toBeUndefined()
+    expect(creates[0]?.draft.attachments).toEqual([{ blobId: 'Gfresh', name: 'fresh.pdf', type: 'application/pdf' }])
+  })
+
+  test('an empty attachments array removes every file', async () => {
     const creates: DraftCreateParams[] = []
     const withFile = stagedDraft({
       attachments: [{ blobId: 'Ginvoice', name: 'invoice.pdf', size: 1024, type: 'application/pdf' }],
     })
-    // The edit rewrites the message and cannot carry attachment parts across, and
-    // the original is destroyed on the way — so losing the file is unrecoverable.
-    const { result, text } = await run({ draftId: 'd1', subject: 'New' }, { creates, records: { d1: withFile } })
-    expect(result.isError).toBe(true)
-    expect(text).toContain('has attachments')
-    expect(creates).toEqual([])
+    const { result } = await run({ attachments: [], draftId: 'd1' }, { creates, records: { d1: withFile } })
+    expect(result.isError).toBeUndefined()
+    expect(creates[0]?.draft.attachments).toEqual([])
+  })
+
+  test('a supplied attachments list replaces the staged one wholesale', async () => {
+    const creates: DraftCreateParams[] = []
+    const blobUploads: BlobUploadParams[] = []
+    const withFile = stagedDraft({
+      attachments: [{ blobId: 'Gold', name: 'draft-invoice.pdf', size: 1024, type: 'application/pdf' }],
+    })
+    const { result } = await run(
+      {
+        attachments: [{ content: Buffer.from('%PDF-1.4 corrected').toString('base64'), filename: 'invoice.pdf' }],
+        draftId: 'd1',
+      },
+      { blobUploads, creates, records: { d1: withFile } }
+    )
+    expect(result.isError).toBeUndefined()
+    // The old file is gone, not appended to — and the new one's media type was
+    // inferred from the .pdf the caller named.
+    expect(creates[0]?.draft.attachments).toEqual([
+      { blobId: 'blobUploaded1', name: 'invoice.pdf', type: 'application/pdf' },
+    ])
+    expect(blobUploads).toHaveLength(1)
+  })
+
+  test('attachments alone counts as an edit', async () => {
+    const creates: DraftCreateParams[] = []
+    const { result } = await run(
+      { attachments: [{ blobId: 'Gcontract', filename: 'contract.pdf' }], draftId: 'd1' },
+      { creates, records: { d1: stagedDraft() } }
+    )
+    expect(result.isError).toBeUndefined()
+    expect(creates).toHaveLength(1)
   })
 
   test('refuses an edit that changes nothing, leaving the id valid', async () => {

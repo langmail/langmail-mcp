@@ -28,6 +28,7 @@ import {
   isDraft,
   MAX_DRAFT_BODY_VALUE_BYTES,
   resolveIdentity,
+  unreferencableAttachments,
 } from './draft-common.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
@@ -153,9 +154,24 @@ export const submitDraft = async (deps: DraftToolDeps, p: SubmitParams): Promise
 // "read back what you just sent" a get_email call rather than a search.
 export const formatSent = (
   heading: string,
-  p: { draft: EmailDraft; messageId: string; outcome: string; threadId: string | null }
+  p: {
+    draft: EmailDraft
+    messageId: string
+    outcome: string
+    threadId: string | null
+    // Files the sent message carried that the composable model cannot express
+    // (see `unreferencableAttachments`). They went out with it, so a report that
+    // omitted them would understate what was just delivered — and that report is
+    // the record of an action nobody can take back.
+    unreferencable?: string[]
+  }
 ): string =>
-  [heading, `messageId: ${p.messageId}`, formatDraft(p.draft, { threadId: p.threadId }), p.outcome].join('\n')
+  [
+    heading,
+    `messageId: ${p.messageId}`,
+    formatDraft(p.draft, { threadId: p.threadId, ...(p.unreferencable ? { unreferencable: p.unreferencable } : {}) }),
+    p.outcome,
+  ].join('\n')
 
 // Resolve the draft and the identity it goes out as, or the reason it can't be
 // sent. A missing draft and an already-sent one are different failures and the
@@ -194,15 +210,11 @@ const loadSendableDraft = async (
   // submission with nothing to derive an envelope from, and the agent gets a raw
   // JMAP error instead of the one fact it can act on.
   if (countRecipients(record) === 0) {
-    // Which remedy to name depends on the attachments: update_draft refuses an
-    // attached draft outright, so pointing there would send the agent into a
-    // call that cannot succeed.
-    const remedy =
-      (record.attachments ?? []).length > 0
-        ? 'This draft has attachments, so it has to be addressed in Langmail — update_draft cannot edit it.'
-        : 'Add them with update_draft, then send the draftId it returns.'
     return {
-      error: errorResult(`Draft ${p.draftId} has no recipients, so it cannot be sent. Nothing was sent. ${remedy}`),
+      error: errorResult(
+        `Draft ${p.draftId} has no recipients, so it cannot be sent. Nothing was sent. Add them with ` +
+          'update_draft, then send the draftId it returns.'
+      ),
     }
   }
   return { record }
@@ -273,6 +285,7 @@ export const sendDraft = async (
     messageId: args.draftId,
     outcome,
     threadId: record.threadId ?? null,
+    unreferencable: unreferencableAttachments(record),
   })
   if (args.idempotencyKey) {
     replays.record(TOOL_NAME, principal, args.idempotencyKey, summary)
