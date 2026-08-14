@@ -50,6 +50,9 @@ const EMAIL_DETAIL_PROPERTIES = [
   'keywords',
   'messageId',
   'textBody',
+  // Part metadata only (no values fetched here) — the blobId handle lets a
+  // caller download the full HTML part without a truncation cap.
+  'htmlBody',
   'bodyValues',
   'threadId',
   'attachments',

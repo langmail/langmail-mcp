@@ -428,6 +428,41 @@ describe('emailGetDetail', () => {
     expect(out[0]?.attachments?.[0]?.blobId).toBe('Gd41d8cd')
     expect(out[0]?.attachments?.[0]?.size).toBe(186_777)
   })
+
+  test('requests htmlBody parts so callers can locate the HTML part blob', async () => {
+    const f = mock((_u: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}')
+      const args = body.methodCalls[0][1]
+      expect(args.properties).toContain('htmlBody')
+      return Promise.resolve(
+        jmapResponse([
+          [
+            'Email/get',
+            {
+              list: [
+                {
+                  htmlBody: [{ blobId: 'Ghtml1', partId: '2', size: 48_211, type: 'text/html' }],
+                  id: 'e1',
+                },
+              ],
+            },
+            '0',
+          ],
+        ])
+      )
+    })
+    const out = await withFetch(f, () =>
+      emailGetDetail({
+        accountId: 'acct',
+        apiUrl: API,
+        ids: ['e1'],
+        maxBodyValueBytes: 4096,
+        authorization: 'Bearer tok',
+      })
+    )
+    expect(out[0]?.htmlBody?.[0]?.blobId).toBe('Ghtml1')
+    expect(out[0]?.htmlBody?.[0]?.type).toBe('text/html')
+  })
 })
 
 describe('threadEmailIds', () => {

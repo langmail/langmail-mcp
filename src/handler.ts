@@ -9,6 +9,7 @@ import { logger } from '@langmail/logger'
 import { type AttachmentDownload } from './attachments/download.ts'
 import { type AuthContext, type AuthMiddleware, createAuthMiddleware } from './auth/middleware.ts'
 import { TokenCache } from './auth/token-cache.ts'
+import { type ImageProxy } from './email-render/image-proxy.ts'
 import {
   authReachable,
   createReadiness,
@@ -28,6 +29,10 @@ export interface HandlerConfig {
   // its authorization server and validates every bearer at its userinfo.
   authIssuer: string
   cache?: TokenCache
+  // Redeems a minted image-proxy ticket (GET /image-proxy/:token) — the
+  // email-viewer's remote images. Same credential model as attachments.
+  // Absent → the route 404s.
+  imageProxy?: ImageProxy
   // Authenticated MCP handler. Phase 1 leaves this stubbed to 501;
   // phase 2 wires StreamableHTTPServerTransport in here.
   mcpHandler?: (req: Request, ctx: AuthContext) => Promise<Response>
@@ -53,6 +58,14 @@ const attachmentsRoute = (req: Request, pathname: string, download?: AttachmentD
   const token = pathname.slice('/attachments/'.length)
   if (req.method === 'GET' && download && token && !token.includes('/')) {
     return download(token)
+  }
+  return Promise.resolve(new Response('not found\n', { status: 404 }))
+}
+
+const imageProxyRoute = (req: Request, pathname: string, proxy?: ImageProxy): Promise<Response> => {
+  const token = pathname.slice('/image-proxy/'.length)
+  if (req.method === 'GET' && proxy && token && !token.includes('/')) {
+    return proxy(token)
   }
   return Promise.resolve(new Response('not found\n', { status: 404 }))
 }
@@ -162,6 +175,10 @@ export const createRoutes = (cfg: HandlerConfig): Routes => {
 
     if (url.pathname.startsWith('/attachments/')) {
       return attachmentsRoute(req, url.pathname, cfg.attachmentDownload)
+    }
+
+    if (url.pathname.startsWith('/image-proxy/')) {
+      return imageProxyRoute(req, url.pathname, cfg.imageProxy)
     }
 
     if (url.pathname === '/mcp' || url.pathname.startsWith('/mcp/')) {

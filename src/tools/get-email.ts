@@ -29,8 +29,9 @@ import { emailTags, formatAddressList, formatAttachmentLine } from './format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 // Cap the body we pull back so a huge newsletter can't blow the token budget;
-// Stalwart truncates the value at this byte count.
-const MAX_BODY_VALUE_BYTES = 100_000
+// Stalwart truncates the value at this byte count. Shared with preview_email's
+// text fallback so the two caps can't drift.
+export const MAX_BODY_VALUE_BYTES = 100_000
 
 // Raw messages above this size skip the download-and-clean path (attachments
 // are base64 inside the raw blob, so a big attachment would mean buffering
@@ -68,7 +69,8 @@ export interface GetEmailContext {
 
 // Concatenate the text/plain body parts, resolving each part's fetched value.
 // HTML-only messages fall back to Stalwart's server-side textBody resolution.
-const bodyText = (e: EmailDetailRecord): string => {
+// Shared with preview_email's no-HTML fallback rendering.
+export const bodyText = (e: EmailDetailRecord): string => {
   const values = e.bodyValues ?? {}
   return (e.textBody ?? [])
     .map((part) => (part.partId ? (values[part.partId]?.value ?? '') : ''))

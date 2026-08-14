@@ -78,6 +78,9 @@ export interface EmailDetailRecord extends EmailRecord {
   blobId?: string | null
   bodyValues?: Record<string, EmailBodyValue> | null
   cc?: EmailAddress[] | null
+  // Part metadata for the rendered HTML body (values are not fetched with the
+  // detail call; the blobId is the handle for a full, untruncated download).
+  htmlBody?: EmailBodyPart[] | null
   messageId?: string[] | null
   // Raw message size in octets (attachments included).
   size?: number | null
@@ -93,7 +96,6 @@ export interface EmailDetailRecord extends EmailRecord {
 // without re-deriving the thread.
 export interface EmailComposeRecord extends EmailDetailRecord {
   bcc?: EmailAddress[] | null
-  htmlBody?: EmailBodyPart[] | null
   inReplyTo?: string[] | null
   references?: string[] | null
   replyTo?: EmailAddress[] | null

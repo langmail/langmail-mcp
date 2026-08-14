@@ -68,6 +68,29 @@ describe('routes', () => {
     expect(body.bearer_methods_supported).toEqual(['header'])
   })
 
+  test('GET /image-proxy/:token dispatches to the injected proxy', async () => {
+    const proxy = mock((_token: string) => Promise.resolve(new Response('PNG', { status: 200 })))
+    const r = createRoutes({
+      authIssuer: AUTH,
+      imageProxy: proxy,
+      observability: () => ({ errorTracking: true, logShipping: true }),
+      publicUrl: PUBLIC,
+      stalwartUrl: STALWART,
+    })
+    const res = await r.fetch(new Request(`${PUBLIC}/image-proxy/tok123`))
+    expect(res.status).toBe(200)
+    expect(proxy).toHaveBeenCalledWith('tok123')
+    // Anything but a clean GET of one token segment is a 404, like /attachments.
+    expect((await r.fetch(new Request(`${PUBLIC}/image-proxy/tok123`, { method: 'POST' }))).status).toBe(404)
+    expect((await r.fetch(new Request(`${PUBLIC}/image-proxy/tok/extra`))).status).toBe(404)
+  })
+
+  test('GET /image-proxy/:token without an injected proxy returns 404', async () => {
+    const r = makeRoutes()
+    const res = await r.fetch(new Request(`${PUBLIC}/image-proxy/tok123`))
+    expect(res.status).toBe(404)
+  })
+
   test('GET /unknown returns 404', async () => {
     const r = makeRoutes()
     const res = await r.fetch(new Request(`${PUBLIC}/nope`))

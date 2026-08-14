@@ -16,6 +16,7 @@ import { makeJmapLive } from '@langmail/jmap'
 
 import { createAttachmentDownload } from './attachments/download.ts'
 import { createTicketStore } from './attachments/tickets.ts'
+import { createImageProxy, createImageProxyStore } from './email-render/image-proxy.ts'
 import { createRoutes } from './handler.ts'
 import { createMcpHandler } from './mcp/handler.ts'
 import { logObservabilityConfig } from './observability/config.ts'
@@ -37,14 +38,23 @@ const AUTH_ISSUER = `${AUTH_URL}/api/auth`
 
 // One JMAP session cache + one ticket store shared between the MCP tool
 // surface (download_attachment mints) and the plain-HTTP download route
-// (GET /attachments/:token redeems).
+// (GET /attachments/:token redeems). The image-proxy store follows the same
+// mint/redeem split for preview_email's remote images.
 const jmapLive = makeJmapLive(STALWART_URL)
 const tickets = createTicketStore()
+const imageTokens = createImageProxyStore()
 
 const routes = createRoutes({
   attachmentDownload: createAttachmentDownload(jmapLive, tickets),
   authIssuer: AUTH_ISSUER,
-  mcpHandler: createMcpHandler({ live: jmapLive, publicUrl: PUBLIC_URL, stalwartUrl: STALWART_URL, tickets }),
+  imageProxy: createImageProxy(imageTokens),
+  mcpHandler: createMcpHandler({
+    imageTokens,
+    live: jmapLive,
+    publicUrl: PUBLIC_URL,
+    stalwartUrl: STALWART_URL,
+    tickets,
+  }),
   publicUrl: PUBLIC_URL,
   stalwartUrl: STALWART_URL,
 })

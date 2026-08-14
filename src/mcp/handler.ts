@@ -19,6 +19,8 @@ import { type AuthContext } from '../auth/middleware.ts'
 import { makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
 import { createSendGuard } from '../drafts/send-guard.ts'
+import { type ImageProxyStore } from '../email-render/image-proxy.ts'
+import { registerEmailViewerResource } from '../email-render/viewer-resource.ts'
 import { makeLiveApplyIo, makeMailRulesApplier } from '../rules/apply.ts'
 import { makeLiveSieveIo, makeMailRulesStore } from '../rules/store.ts'
 import { makeLiveDeps as makeContactWriteDeps } from '../tools/contact-common.ts'
@@ -49,6 +51,7 @@ import {
 import { makeLiveDeps as makeListCalendarsDeps, registerListCalendars } from '../tools/list-calendars.ts'
 import { registerListMailRules } from '../tools/list-mail-rules.ts'
 import { type MailRuleToolDeps } from '../tools/mail-rule-common.ts'
+import { makeLiveDeps as makePreviewEmailDeps, registerPreviewEmail } from '../tools/preview-email.ts'
 import { registerPreviewMailRule } from '../tools/preview-mail-rule.ts'
 import { registerReplyToMessage } from '../tools/reply-to-message.ts'
 import { makeLiveDeps as makeRespondToEventDeps, registerRespondToEvent } from '../tools/respond-to-event.ts'
@@ -65,6 +68,9 @@ import { registerUpdateMailRule } from '../tools/update-mail-rule.ts'
 import { instrumentToolLogging } from './tool-logging.ts'
 
 export interface McpHandlerConfig {
+  // Shared with the /image-proxy/:token route: preview_email mints, the
+  // route redeems.
+  imageTokens: ImageProxyStore
   // Shared with the /attachments/:token route (handler.ts) so a bearer's
   // JMAP session is resolved once, not once per surface.
   live: JmapLive
@@ -81,6 +87,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   const getEmailDeps = makeGetEmailDeps(jmapLive)
   const getThreadDeps = makeGetThreadDeps(jmapLive)
   const downloadAttachmentDeps = makeDownloadAttachmentDeps(jmapLive, cfg.tickets, cfg.publicUrl)
+  const previewEmailDeps = makePreviewEmailDeps(jmapLive, cfg.tickets, cfg.imageTokens, cfg.publicUrl)
   // CalDAV tools discover against the same Stalwart base; tsdav follows
   // /.well-known/caldav to /dav/cal.
   const caldavCfg = { serverUrl: cfg.stalwartUrl }
@@ -129,6 +136,10 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     instrumentToolLogging(server)
     registerSearchEmails(server, searchEmailsDeps, () => ctx.token)
     registerGetEmail(server, getEmailDeps, () => ctx.token)
+    registerPreviewEmail(server, previewEmailDeps, () => ctx.token)
+    // The tool's UI template (SEP-1865). Registering it also turns on the
+    // `resources` capability for this per-request server.
+    registerEmailViewerResource(server, cfg.publicUrl)
     registerGetThread(server, getThreadDeps, () => ctx.token)
     registerDownloadAttachment(server, downloadAttachmentDeps, () => ctx.token)
     registerPreviewMailRule(server, mailRuleDeps, () => ctx.token)
