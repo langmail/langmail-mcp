@@ -21,7 +21,7 @@
     "@langmail/ical": "*",
     "@langmail/jmap": "*",
     "@langmail/logger": "*",
-    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@touch4it/ical-timezones": "^1.9.0",
     "ical-generator": "^11.0.0",
     "langmail": "^0.11.2",
