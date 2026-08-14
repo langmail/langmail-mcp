@@ -172,9 +172,9 @@ export const createImageProxy = (store: ImageProxyStore, fetchImpl: typeof fetch
       'content-type': type,
       'x-content-type-options': 'nosniff',
     })
-    if (upstream.headers.get('content-length')) {
-      headers.set('content-length', upstream.headers.get('content-length') as string)
-    }
+    // No content-length forwarded: fetch transparently decompresses a
+    // gzip/brotli-encoded upstream, so the header would describe the encoded
+    // bytes and make browsers truncate the image. Chunked streaming is fine.
     // Streamed through, never buffered.
     return new Response(upstream.body?.pipeThrough(byteLimit(MAX_IMAGE_BYTES)) ?? null, { headers })
   }
