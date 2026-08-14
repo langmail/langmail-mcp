@@ -49,7 +49,9 @@ describe('previewEmail', () => {
 
     expect(out.isError).toBeUndefined()
     expect(out.structuredContent).toEqual({
-      attachmentCount: 1,
+      // The QR is an inline cid part already rendered in the preview, not a
+      // document — same exclusion format.ts applies to attachment listings.
+      attachmentCount: 0,
       date: '2026-07-30T18:02:11Z',
       from: 'Picture Palace <box-office@cinema.example.com>',
       renderSource: 'html',
@@ -82,14 +84,26 @@ describe('previewEmail', () => {
   test('falls back to an escaped text rendering when the message has no HTML part', async () => {
     const email: EmailDetailRecord = {
       ...ticketEmail,
-      attachments: [],
+      attachments: [
+        {
+          blobId: 'Gpdf',
+          disposition: 'attachment',
+          name: 'invoice.pdf',
+          partId: '4',
+          size: 8000,
+          type: 'application/pdf',
+        },
+      ],
       bodyValues: { '1': { value: 'Seats: A1 & A2 <balcony>' } },
       htmlBody: [],
       textBody: [{ partId: '1', type: 'text/plain' }],
     }
     const deps = makeDeps(email, '')
     const out = await previewEmail(deps, { args: { id: 'e1' }, token: 'tok' })
-    expect((out.structuredContent as { renderSource: string }).renderSource).toBe('text')
+    const structured = out.structuredContent as { attachmentCount: number; renderSource: string }
+    expect(structured.renderSource).toBe('text')
+    // A genuine (non-inline) document still counts.
+    expect(structured.attachmentCount).toBe(1)
     const meta = out._meta as Record<string, { html: string }>
     expect(meta[PREVIEW_META_KEY]?.html).toContain('Seats: A1 &amp; A2 &lt;balcony&gt;')
     expect(deps.downloadHtmlPart).not.toHaveBeenCalled()

@@ -51,8 +51,9 @@ const normalizedSnippet = (preview?: string | null): string => (preview ?? '').r
 
 // A part referenced from the rendered HTML body by Content-ID (logos,
 // signature images, tracking pixels). Full get_email output marks these;
-// list-level output hides them so real documents stand out.
-const isInlinePart = (part: EmailBodyPart): boolean => part.disposition === 'inline' && Boolean(part.cid)
+// list-level output and preview_email's attachment count hide them so real
+// documents stand out.
+export const isInlinePart = (part: EmailBodyPart): boolean => part.disposition === 'inline' && Boolean(part.cid)
 
 export const formatAttachmentLine = (idx: number, part: EmailBodyPart): string => {
   const pieces = [

@@ -31,7 +31,7 @@ import { type ImageProxyStore, isProxyableImageUrl } from '../email-render/image
 import { EMAIL_VIEWER_RESOURCE_URI, PREVIEW_META_KEY } from '../email-render/meta.ts'
 import { sanitizeEmailHtml } from '../email-render/sanitize.ts'
 import { READ_ONLY } from './annotations.ts'
-import { emailTags, formatAddressList } from './format.ts'
+import { emailTags, formatAddressList, isInlinePart } from './format.ts'
 import { bodyText, MAX_BODY_VALUE_BYTES } from './get-email.ts'
 import { errorResult, type ToolResult } from './result.ts'
 
@@ -152,7 +152,9 @@ export const previewEmail = async (deps: PreviewEmailDeps, ctx: PreviewEmailCont
   const renderSource = rawHtml ? 'html' : 'text'
 
   const structuredContent = {
-    attachmentCount: (email.attachments ?? []).length,
+    // Real documents only: an inline cid part (the QR, a logo) is already
+    // rendered in the preview and must not read as a separate attachment.
+    attachmentCount: (email.attachments ?? []).filter((part) => !isInlinePart(part)).length,
     date: email.receivedAt ?? '',
     from: formatAddressList(email.from) || '(unknown sender)',
     renderSource,
