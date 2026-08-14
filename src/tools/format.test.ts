@@ -7,9 +7,9 @@ describe('emailTags', () => {
     expect(
       emailTags({
         id: 'e1',
-        keywords: { '$label:ai': true, '$label:todo': true, $seen: true, '$type:ticket': true },
+        keywords: { '$label:newsletter': true, '$label:todo': true, $seen: true, '$type:ticket': true },
       })
-    ).toEqual(['ai', 'todo', 'ticket'])
+    ).toEqual(['newsletter', 'todo', 'ticket'])
   })
 
   // The namespaces overlap by design: receipt-agent writes `$label:receipt`

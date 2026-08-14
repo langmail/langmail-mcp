@@ -16,7 +16,6 @@ const TODO_VALUE = 'todo'
 
 // enum value -> human gloss. Type glosses live next to the taxonomy itself;
 // `todo` is agent/user bookkeeping the taxonomy doesn't model, glossed here.
-// The AI processed-marker is deliberately absent — it's not a search facet.
 const KEYWORD_GLOSSES: Record<string, string> = {
   ...Object.fromEntries(EMAIL_TYPE_VALUES.map((type) => [type, EMAIL_TYPES[type].search])),
   [TODO_VALUE]: 'Messages the user (or an agent) flagged as an action item / to-do.',

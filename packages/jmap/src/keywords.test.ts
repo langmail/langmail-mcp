@@ -9,7 +9,6 @@ describe('keywords', () => {
 
   test('toLabelKeyword prefixes the suffix verbatim (no slug pass)', () => {
     expect(toLabelKeyword('receipt')).toBe('$label:receipt')
-    expect(toLabelKeyword('ai')).toBe('$label:ai')
     expect(toLabelKeyword('todo')).toBe('$label:todo')
   })
 })

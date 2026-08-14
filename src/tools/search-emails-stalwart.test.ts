@@ -214,7 +214,7 @@ live('search_emails email-type filter against live Stalwart', () => {
     seeded.orderWithAgentLabel = await importEmail({
       body: 'Your parcel is on its way.',
       from: 'Northwind Supplies <orders@northwind.example>',
-      keywords: { '$label:ai': true, '$label:receipt': true, $seen: true, '$type:order': true },
+      keywords: { '$label:receipt': true, $seen: true, '$type:order': true },
       receivedAt: bookingReceivedAt,
       subject: 'Your order has shipped',
     })

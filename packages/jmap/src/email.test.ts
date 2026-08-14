@@ -834,7 +834,7 @@ describe('emailSet', () => {
       const err = await emailSet({
         accountId: 'acct',
         apiUrl: API,
-        changes: { keywords: { '$label:ai': true } },
+        changes: { keywords: { '$label:receipt': true } },
         id: 'e1',
         authorization: 'Bearer tok',
       }).catch((error) => error)
