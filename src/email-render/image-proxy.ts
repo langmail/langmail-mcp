@@ -16,8 +16,12 @@
 
 import { logger } from '@langmail/logger'
 
-const IMAGE_PROXY_TTL_MINUTES = 15
-const TTL_MS = IMAGE_PROXY_TTL_MINUTES * 60 * 1000
+// A day, not minutes: these URLs are embedded in a rendered preview the user
+// re-opens from conversation scrollback — a short TTL turns every image into
+// a broken icon an hour later. The store is in-memory, so a redeploy still
+// invalidates everything; that residual gap needs signed stateless URLs.
+const IMAGE_PROXY_TTL_HOURS = 24
+const TTL_MS = IMAGE_PROXY_TTL_HOURS * 60 * 60 * 1000
 
 // Big enough for any real inline/hero image; a 4K photo attachment is not
 // what an email body embeds.

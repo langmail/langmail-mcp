@@ -53,7 +53,7 @@ describe('downloadAttachment', () => {
     const txt = result.content[0]?.text ?? ''
     expect(result.isError).toBeUndefined()
     expect(txt).toContain('invoice-2026-06.pdf (application/pdf, 182.4 KB)')
-    expect(txt).toContain('expires in 15 minutes')
+    expect(txt).toContain('expires in 24 hours')
     expect(txt).toContain(`${PUBLIC}/attachments/tok3n`)
     expect(txt).toContain("curl -sS -o 'invoice-2026-06.pdf'")
     // The ticket binds the canonical server-side name/type, not client input.
