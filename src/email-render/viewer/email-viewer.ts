@@ -65,7 +65,6 @@ app.addEventListener('toolresult', (result) => {
   }
 })
 
-// No top-level await — the bundle is an IIFE inlined into the template.
 app.connect().catch(() => {
   el('subject').textContent = 'Could not connect to the host.'
 })

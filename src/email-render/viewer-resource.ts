@@ -35,15 +35,20 @@ const shell = (script: string): string =>
 <body>
 <div id="header"><div id="subject"></div><div id="from"></div><div id="date"></div></div>
 <iframe id="frame" sandbox="allow-same-origin" referrerpolicy="no-referrer" title="Email"></iframe>
-<script>${script}</script>
+<script type="module">${script}</script>
 </body>
 </html>
 `
 
 const buildViewerHtml = async (): Promise<string> => {
+  // esm, not iife: Bun's iife output references its CommonJS-interop helper
+  // `__require` without defining it (a bundled require shim deep in the MCP
+  // SDK chain triggers it), which threw a ReferenceError inside the host's
+  // sandbox and left the view blank. The esm build has no such helper; the
+  // shell inlines it as <script type="module">.
   const build = await Bun.build({
     entrypoints: [VIEW_ENTRYPOINT],
-    format: 'iife',
+    format: 'esm',
     minify: true,
     target: 'browser',
   })
