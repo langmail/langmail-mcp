@@ -19,7 +19,7 @@ describe('ticket store', () => {
     const token = store.mint(INPUT)
     const ticket = store.lookup(token)
     expect(ticket).toMatchObject(INPUT)
-    expect(ticket?.expiresAt).toBe(1000 + 15 * 60 * 1000)
+    expect(ticket?.expiresAt).toBe(1000 + 24 * 60 * 60 * 1000)
   })
 
   test('tokens are base64url, 256-bit, and unique', () => {
@@ -39,7 +39,7 @@ describe('ticket store', () => {
     expect(store.lookup(token)).not.toBeNull()
     // Reusable: a second lookup within the window still hits.
     expect(store.lookup(token)).not.toBeNull()
-    now = 15 * 60 * 1000
+    now = 24 * 60 * 60 * 1000
     expect(store.lookup(token)).toBeNull()
   })
 
@@ -47,7 +47,7 @@ describe('ticket store', () => {
     let now = 0
     const store = createTicketStore(() => now)
     const stale = store.mint(INPUT)
-    now = 16 * 60 * 1000
+    now = 25 * 60 * 60 * 1000
     store.mint(INPUT)
     // The stale entry is gone even if time were wound back (sweep, not filter).
     now = 0

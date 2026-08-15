@@ -33,7 +33,7 @@ describe('imageProxyStore', () => {
     const store = createImageProxyStore(() => t)
     const token = store.mint('https://cdn.example.com/qr.png')
     expect(store.lookup(token)).toBe('https://cdn.example.com/qr.png')
-    t += 16 * 60 * 1000
+    t += 25 * 60 * 60 * 1000
     expect(store.lookup(token)).toBeNull()
   })
 
@@ -41,12 +41,12 @@ describe('imageProxyStore', () => {
     let t = 0
     const store = createImageProxyStore(() => t)
     const a = store.mint('https://cdn.example.com/qr.png')
-    t = 14 * 60 * 1000
+    t = 23 * 60 * 60 * 1000
     const b = store.mint('https://cdn.example.com/qr.png')
     expect(a).toBe(b)
-    // A preview rendered at minute 14 must not ship image URLs that die at
-    // minute 15 — the re-mint restarts the window.
-    t = 24 * 60 * 1000
+    // A preview rendered at hour 23 must not ship image URLs that die at
+    // hour 24 — the re-mint restarts the window.
+    t = 46 * 60 * 60 * 1000
     expect(store.lookup(a)).toBe('https://cdn.example.com/qr.png')
   })
 })

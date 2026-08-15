@@ -7,8 +7,13 @@
 // state is fine: the server is one container, and a restart merely
 // invalidates outstanding URLs (the agent re-calls the tool).
 
-export const TICKET_TTL_MINUTES = 15
-const TICKET_TTL_MS = TICKET_TTL_MINUTES * 60 * 1000
+// A day: preview_email embeds these URLs (cid inline images) in a rendering
+// the user re-opens from scrollback, and 15 minutes turned them into broken
+// icons almost immediately. Redeeming still forwards the stored bearer, so
+// the effective ceiling is the bearer's own lifetime — past that, Stalwart
+// rejects the download regardless of the ticket.
+export const TICKET_TTL_HOURS = 24
+const TICKET_TTL_MS = TICKET_TTL_HOURS * 60 * 60 * 1000
 
 export interface Ticket {
   accountId: string

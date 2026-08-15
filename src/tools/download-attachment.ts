@@ -16,7 +16,7 @@ import {
   type JmapLive,
 } from '@langmail/jmap'
 
-import { TICKET_TTL_MINUTES, type TicketInput, type TicketStore } from '../attachments/tickets.ts'
+import { TICKET_TTL_HOURS, type TicketInput, type TicketStore } from '../attachments/tickets.ts'
 import { READ_ONLY } from './annotations.ts'
 import { formatSize } from './format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
@@ -94,7 +94,7 @@ export const downloadAttachment = async (
 
   return textResult(
     `${name} (${type}, ${formatSize(part.size ?? 0)})\n` +
-      `Download URL (expires in ${TICKET_TTL_MINUTES} minutes):\n` +
+      `Download URL (expires in ${TICKET_TTL_HOURS} hours):\n` +
       `${url}\n\n` +
       'Save it straight to a file, e.g.:\n' +
       `  curl -sS -o '${shellSafeFilename(name)}' '${url}'\n` +
@@ -128,7 +128,7 @@ export const registerDownloadAttachment = (
         'plus an HTTPS URL — never the file content. Save the file to disk ' +
         "out-of-band, e.g. `curl -sS -o '<filename>' '<url>'`; do not fetch " +
         'the URL into the conversation, the file may be large. The URL ' +
-        `expires after ${TICKET_TTL_MINUTES} minutes — re-call this tool for a fresh one.`,
+        `expires after ${TICKET_TTL_HOURS} hours — re-call this tool for a fresh one.`,
       inputSchema: downloadAttachmentShape,
       title: 'Download attachment',
     },
