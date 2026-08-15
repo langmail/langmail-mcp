@@ -9,14 +9,22 @@ describe('emailViewerHtml', () => {
     const html = await emailViewerHtml()
     expect(html).toStartWith('<!doctype html>')
     // The App SDK handshake code must be inlined — no external scripts.
-    expect(html).toContain('<script>')
+    expect(html).toContain('<script type="module">')
     expect(html).not.toContain('<script src=')
     expect(html).toContain('me.langmail/email-preview')
+    const open = '<script type="module">'
+    const js = html.slice(html.indexOf(open) + open.length, html.lastIndexOf('</script>'))
     // A "</script>" inside a JS string literal must not terminate the tag:
     // the only closer allowed is the shell's own, so the inlined JS between
     // the opening tag and the final closer must contain none.
-    const js = html.slice(html.indexOf('<script>') + '<script>'.length, html.lastIndexOf('</script>'))
     expect(js).not.toContain('</script>')
+    // Bun's iife format references its CommonJS-interop helper without ever
+    // defining it (the SDK chain contains a bundled `require` shim), which
+    // crashed the view on claude.ai with `__require is not defined`. The esm
+    // build keeps the dependency's own guarded shim instead. Tripwire only:
+    // if a future bundle legitimately *defines* the helper, relax this to
+    // check reference-without-definition.
+    expect(js).not.toContain('__require')
   })
 
   test('is memoized', async () => {
@@ -46,6 +54,6 @@ describe('registerEmailViewerResource', () => {
     const read = await call[3](new URL('ui://langmail/email-viewer'))
     expect(read.contents[0]?.uri).toBe('ui://langmail/email-viewer')
     expect(read.contents[0]?.mimeType).toBe('text/html;profile=mcp-app')
-    expect(read.contents[0]?.text).toContain('<script>')
+    expect(read.contents[0]?.text).toContain('<script type="module">')
   })
 })
