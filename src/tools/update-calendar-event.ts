@@ -243,7 +243,8 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
     // The master's stored ORGANIZER wins over the discovered principal: an
     // event created under a previous account address (still an alias) would
     // otherwise get an override with a different ORGANIZER, which Stalwart
-    // rejects with 412 SameOrganizerInAllComponents.
+    // rejects with 412 SameOrganizerInAllComponents (see
+    // docs/reference/stalwart/observed-behaviour.md).
     organizer: master.organizer ?? organizer,
     recurrenceTimeZone: master.startTzid ?? UTC_TIME_ZONE,
     recurrenceId: new Date(recurrenceId),
@@ -332,6 +333,10 @@ const removedAttendees = (stored: string[], resolved: string[]): string[] => {
   return stored.filter((email) => !kept.has(email.toLowerCase()))
 }
 
+// Reports what was handed to Stalwart, not what it sent. For a moved single
+// occurrence Stalwart currently emits an RFC-invalid METHOD:ADD that Google
+// cannot load — see docs/upstream/stalwart/occurrence-override-sent-as-itip-add.md
+// (fixed upstream in 0.16.21; restore the plain wording on that bump).
 const deliverySummary = (attendees: string[], scheduleAgent?: 'NONE', removedAny = false): string => {
   if (attendees.length === 0) {
     return 'no attendees remain; anyone previously invited may receive a cancellation'
