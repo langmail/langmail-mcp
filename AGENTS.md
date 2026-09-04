@@ -8,6 +8,12 @@ This README captures per-service conventions. Repo-wide guidance lives
 in `../../AGENTS.md`; the design rationale lives in
 `../../spec/03-monorepo-and-app-vm.md` and `../../spec/02-mcp.md`.
 
+## Stalwart upstream issues
+CalDAV/iMIP defects this service works around → `docs/upstream/stalwart/`
+(scheduling behaviour that is by design → `docs/reference/stalwart/observed-behaviour.md`).
+Read the matching issue file before changing a workaround; each has a
+"Drop workaround when" clause.
+
 ## Runtime: Bun only, no Node fallback
 
 This service is **Bun-only**. It ships as a container image (`oven/bun`
