@@ -333,10 +333,11 @@ const removedAttendees = (stored: string[], resolved: string[]): string[] => {
   return stored.filter((email) => !kept.has(email.toLowerCase()))
 }
 
-// Reports what was handed to Stalwart, not what it sent. For a moved single
-// occurrence Stalwart currently emits an RFC-invalid METHOD:ADD that Google
-// cannot load — see docs/upstream/stalwart/occurrence-override-sent-as-itip-add.md
-// (fixed upstream in 0.16.21; restore the plain wording on that bump).
+// Reports what was handed to Stalwart, not what it sent — the iMIP fan-out is
+// Stalwart's (RFC 6638), so this names the intended recipients, not delivery
+// receipts. Until 0.16.21 the moved-occurrence path was additionally
+// unreliable (an RFC-invalid METHOD:ADD Google could not load); that is fixed
+// upstream and guarded by caldav/stalwart-move-occurrence.test.ts.
 const deliverySummary = (attendees: string[], scheduleAgent?: 'NONE', removedAny = false): string => {
   if (attendees.length === 0) {
     return 'no attendees remain; anyone previously invited may receive a cancellation'

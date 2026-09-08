@@ -12,7 +12,7 @@
     "start": "NODE_ENV=production bun src/index.ts",
     "test": "bun test",
     "test:integration": "bun test caldav-integration",
-    "test:stalwart": "bun test stalwart-update-organizer stalwart-cancel-occurrence stalwart-attendee-delta attachments-stalwart mail-rules-stalwart search-contacts-stalwart contacts-write-stalwart search-emails-stalwart drafts-stalwart draft-attachments-stalwart",
+    "test:stalwart": "bun test stalwart-update-organizer stalwart-cancel-occurrence stalwart-move-occurrence stalwart-attendee-delta attachments-stalwart mail-rules-stalwart search-contacts-stalwart contacts-write-stalwart search-emails-stalwart drafts-stalwart draft-attachments-stalwart",
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/email-render/viewer"
   },
   "dependencies": {
