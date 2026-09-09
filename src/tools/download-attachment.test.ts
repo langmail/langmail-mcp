@@ -32,6 +32,7 @@ const EMAIL: EmailDetailRecord = {
 const makeDeps = (emails: EmailDetailRecord[]) => {
   const minted: TicketInput[] = []
   const fetched: EmailGetDetailParams[] = []
+  const resolved: string[] = []
   return {
     deps: {
       emailGetDetail: (p: EmailGetDetailParams) => {
@@ -43,10 +44,14 @@ const makeDeps = (emails: EmailDetailRecord[]) => {
         return 'tok3n'
       },
       publicUrl: PUBLIC,
-      resolveAccountId: () => Promise.resolve('acct'),
+      resolveAccountId: (authorization: string) => {
+        resolved.push(authorization)
+        return Promise.resolve('acct')
+      },
     },
     fetched,
     minted,
+    resolved,
   }
 }
 
@@ -122,7 +127,7 @@ describe('downloadAttachment', () => {
   })
 
   test('reads only the requested message, with body values capped to metadata size', async () => {
-    const { deps, fetched } = makeDeps([EMAIL])
+    const { deps, fetched, resolved } = makeDeps([EMAIL])
     await downloadAttachment(deps, { args: { blobId: 'Gd41d8cd', emailId: 'e1' }, token: 'secret' })
     expect(fetched).toEqual([
       {
@@ -134,6 +139,28 @@ describe('downloadAttachment', () => {
         maxBodyValueBytes: 16,
       },
     ])
+    // The account lookup gets the built header, not the bare token — only the
+    // `Bearer ` form is one Better Auth will accept.
+    expect(resolved).toEqual(['Bearer secret'])
+  })
+
+  test('picks the requested attachment out of several on the message', async () => {
+    const { deps, minted } = makeDeps([
+      {
+        attachments: [
+          { blobId: 'b1', name: 'cover.png', partId: '2', size: 12, type: 'image/png' },
+          { blobId: 'b2', name: 'contract.pdf', partId: '3', size: 2048, type: 'application/pdf' },
+        ],
+        id: 'e1',
+      },
+    ])
+    const result = await downloadAttachment(deps, { args: { blobId: 'b2', emailId: 'e1' }, token: 'tok' })
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toContain('contract.pdf (application/pdf, 2.0 KB)')
+    expect(txt).not.toContain('cover.png')
+    // The ticket binds the matched part, not simply the first one.
+    expect(minted[0]?.blobId).toBe('b2')
+    expect(minted[0]?.name).toBe('contract.pdf')
   })
 
   test('errors when the message carries no attachments at all', async () => {
@@ -182,8 +209,8 @@ describe('downloadAttachment', () => {
     ])
     const result = await downloadAttachment(deps, { args: { blobId: 'b1', emailId: 'e1' }, token: 'tok' })
     expect(result.content[0]?.text).toContain("curl -sS -o 'attachment'")
-    // Only the curl example is sanitized — the ticket keeps the canonical name,
-    // which is what the download route serves the file as.
+    // Only the curl example is sanitized here; the ticket keeps the canonical
+    // name, and the download route applies its own, separate sanitizing.
     expect(minted[0]?.name).toBe('..')
   })
 
@@ -195,7 +222,7 @@ describe('downloadAttachment', () => {
     expect(result.content[0]?.text).toContain("curl -sS -o '___'")
   })
 
-  test('control characters in a filename cannot forge extra lines in the result', async () => {
+  test('a newline in a filename reaches the metadata line; only the curl example is sanitized', async () => {
     const { deps } = makeDeps([
       {
         attachments: [{ blobId: 'b1', name: 'report\n\tsummary.pdf', partId: '2', size: 10, type: 'application/pdf' }],
@@ -219,11 +246,19 @@ const session = (over: Partial<JmapSession> = {}): JmapSession => ({
   ...over,
 })
 
-const liveStub = (over: Partial<JmapLive> = {}): JmapLive => ({
-  getSession: () => Promise.resolve(session()),
+const liveStub = (over: Partial<JmapLive> = {}, sessionFor: string[] = []): JmapLive => ({
+  getSession: (authorization) => {
+    sessionFor.push(authorization)
+    return Promise.resolve(session())
+  },
   resolveAccountId: () => Promise.resolve('acct'),
   ...over,
 })
+
+interface FetchCall {
+  headers: Record<string, string> | undefined
+  url: string
+}
 
 const ticketStoreStub = (): { minted: TicketInput[]; store: TicketStore } => {
   const minted: TicketInput[] = []
@@ -240,15 +275,16 @@ const ticketStoreStub = (): { minted: TicketInput[]; store: TicketStore } => {
 }
 
 describe('makeLiveDeps', () => {
-  test('emailGetDetail reaches the apiUrl discovered from the session', async () => {
-    const urls: string[] = []
+  test("emailGetDetail reaches the apiUrl discovered from the session, forwarding the caller's bearer", async () => {
+    const calls: FetchCall[] = []
+    const sessionFor: string[] = []
     const originalFetch = globalThis.fetch
-    globalThis.fetch = ((input: string) => {
-      urls.push(String(input))
+    globalThis.fetch = ((input: string, init?: RequestInit) => {
+      calls.push({ headers: init?.headers as Record<string, string> | undefined, url: String(input) })
       return Promise.resolve(Response.json({ methodResponses: [['Email/get', { list: [EMAIL] }, '0']] }))
-    }) as typeof fetch
+    }) as unknown as typeof fetch
     try {
-      const wired = makeLiveDeps(liveStub(), ticketStoreStub().store, PUBLIC)
+      const wired = makeLiveDeps(liveStub({}, sessionFor), ticketStoreStub().store, PUBLIC)
       const emails = await wired.emailGetDetail({
         accountId: 'acct',
         // The tool passes an empty apiUrl; the session's real one must win.
@@ -258,13 +294,18 @@ describe('makeLiveDeps', () => {
         maxBodyValueBytes: 16,
       })
       expect(emails).toEqual([EMAIL])
-      expect(urls).toEqual(['https://mail.example.com/jmap/'])
+      expect(calls).toHaveLength(1)
+      expect(calls[0]?.url).toBe('https://mail.example.com/jmap/')
+      // The session is discovered with the caller's own bearer, and the same
+      // one is forwarded to Stalwart — the tool never mints a credential.
+      expect(sessionFor).toEqual(['Bearer tok'])
+      expect(calls[0]?.headers?.authorization).toBe('Bearer tok')
     } finally {
       globalThis.fetch = originalFetch
     }
   })
 
-  test('mintTicket is the store’s own mint and publicUrl is passed through', () => {
+  test("mintTicket is the store's own mint and publicUrl is passed through", () => {
     const { minted, store } = ticketStoreStub()
     const wired = makeLiveDeps(liveStub(), store, PUBLIC)
     expect(wired.publicUrl).toBe(PUBLIC)
@@ -345,9 +386,21 @@ describe('registerDownloadAttachment', () => {
   })
 
   test('the registered callback rejects args the schema does not accept', () => {
+    const { deps, fetched, minted, resolved } = makeDeps([EMAIL])
     const { registered, server } = makeServer()
-    registerDownloadAttachment(server, makeDeps([EMAIL]).deps, () => 'tok')
+    let tokenReads = 0
+    registerDownloadAttachment(server, deps, () => {
+      tokenReads += 1
+      return 'tok'
+    })
     const call = registered.get('download_attachment')
+
     expect(() => call?.({ blobId: '', emailId: 'e1' })).toThrow()
+    // Validation runs before anything else, so a malformed call never reads the
+    // bearer and never reaches Stalwart.
+    expect(tokenReads).toBe(0)
+    expect(resolved).toHaveLength(0)
+    expect(fetched).toHaveLength(0)
+    expect(minted).toHaveLength(0)
   })
 })
