@@ -126,7 +126,7 @@ describe('downloadAttachment', () => {
     expect(minted).toHaveLength(0)
   })
 
-  test('reads only the requested message, with body values capped to metadata size', async () => {
+  test('reads only the requested message, with maxBodyValueBytes capped to metadata size', async () => {
     const { deps, fetched, resolved } = makeDeps([EMAIL])
     await downloadAttachment(deps, { args: { blobId: 'Gd41d8cd', emailId: 'e1' }, token: 'secret' })
     expect(fetched).toEqual([
