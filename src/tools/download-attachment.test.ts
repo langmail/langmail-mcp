@@ -232,8 +232,14 @@ describe('downloadAttachment', () => {
     const result = await downloadAttachment(deps, { args: { blobId: 'b1', emailId: 'e1' }, token: 'tok' })
     const txt = result.content[0]?.text ?? ''
     expect(txt).toContain("curl -sS -o 'report__summary.pdf'")
-    // The header line still shows the raw name — today's behaviour, so the
-    // newline does reach the (non-executable) metadata line.
+    // KNOWN GAP, not a guarantee: only the curl example goes through
+    // shellSafeFilename, so the raw sender-controlled name — newline and all —
+    // lands in the model-visible metadata line. That is an indirect
+    // prompt-injection surface, and it is not specific to this tool: format.ts
+    // and draft-common.ts render attachment and sender names into tool results
+    // just as unsanitized. Sanitizing it is a behaviour change and belongs in
+    // its own PR across that whole surface; when that lands, update this
+    // assertion rather than reading it as the intended contract.
     expect(txt.startsWith('report\n\tsummary.pdf (application/pdf, 10 B)')).toBe(true)
   })
 })
