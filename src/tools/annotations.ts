@@ -48,7 +48,9 @@ export const ACCOUNT_WRITE: ToolRiskAnnotations = {
 }
 
 // Removes something from the user's own account. Still nobody outside sees it,
-// but it doesn't come back.
+// but this surface cannot undo it — a deleted rule is gone, an edited draft
+// is replaced, trashed mail is recoverable only from the mail client until
+// Trash is emptied.
 export const ACCOUNT_DESTRUCTIVE: ToolRiskAnnotations = {
   destructiveHint: true,
   idempotentHint: false,
