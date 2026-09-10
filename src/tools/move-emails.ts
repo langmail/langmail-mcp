@@ -1,15 +1,19 @@
 // move_emails tool — file messages into a named folder. A move is a wholesale
 // replacement of the mailbox set (the whole RFC 8621 `mailboxIds` property,
-// via emailSetMailboxes — a pointer patch could only add), which is what
-// every JMAP client means by "move". Trash is refused here — by resolved id,
-// not by name, so a localized trash folder cannot slip through — so this tool
-// can stay a non-destructive write; trash_emails carries that annotation.
+// via emailSetMailboxes — a pointer patch can only add or drop the ids it
+// names, never "and remove everything else"), which is what every JMAP
+// client means by "move". Trash is refused here — by resolved id, so a
+// localized trash-role folder cannot slip through, and by place name, so a
+// role-less folder called "Trash" cannot either — so this tool can stay a
+// non-destructive write; trash_emails carries that annotation.
 
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
+import { roleForPlaceName } from '@langmail/jmap'
+
 import { ACCOUNT_WRITE } from './annotations.ts'
-import { type FileEmailsDeps, formatBatchResult, idsInput, idsShape } from './file-emails-common.ts'
+import { dedupedIds, type FileEmailsDeps, formatBatchResult, idsShape } from './file-emails-common.ts'
 import { errorResult, type ToolResult } from './result.ts'
 
 const moveEmailsShape = {
@@ -19,15 +23,14 @@ const moveEmailsShape = {
     .min(1)
     .max(200)
     .describe(
-      'Destination folder. The standard places — Inbox, Archive, Junk — resolve to the folder ' +
-        'holding that role whatever the server calls it; any other value must match an existing ' +
-        'folder name exactly (case-insensitive). Folders are never created. Trash is not accepted ' +
-        'here: use trash_emails.'
+      'Destination folder. The standard places — Inbox, Archive, Sent, Drafts, Junk — resolve to ' +
+        'the folder holding that role whatever the server calls it; any other value must match an ' +
+        'existing folder name exactly (case-insensitive). Folders are never created. Trash is not ' +
+        'accepted here: use trash_emails.'
     ),
 }
 
-// Reuse the duplicate-collapsing ids parser from the shared seam.
-export const moveEmailsInput = z.object({ ...moveEmailsShape, ids: idsInput.shape.ids })
+export const moveEmailsInput = z.object({ ...moveEmailsShape, ids: dedupedIds })
 
 export type MoveEmailsArgs = z.infer<typeof moveEmailsInput>
 
@@ -36,6 +39,10 @@ export const moveEmails = async (
   ctx: { args: MoveEmailsArgs; token: string }
 ): Promise<ToolResult> => {
   const { ids, mailbox } = ctx.args
+  const trashRefusal = errorResult(`Moving to ${mailbox} is a delete. Use trash_emails instead. Nothing was moved.`)
+  if (roleForPlaceName(mailbox) === 'trash') {
+    return trashRefusal
+  }
   const lookup = await deps.resolveMailbox(ctx.token, mailbox)
   if (!lookup.id) {
     const available = lookup.available.length > 0 ? ` Available folders: ${lookup.available.join(', ')}.` : ''
@@ -43,7 +50,7 @@ export const moveEmails = async (
   }
   const places = await deps.resolvePlaces(ctx.token)
   if (lookup.id === places.trash) {
-    return errorResult(`Moving to ${mailbox} is a delete. Use trash_emails instead. Nothing was moved.`)
+    return trashRefusal
   }
   const result = await deps.replaceMailboxes(ctx.token, ids, lookup.id)
   return formatBatchResult('Moved', result, ` to ${mailbox}`)

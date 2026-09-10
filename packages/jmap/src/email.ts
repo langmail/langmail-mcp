@@ -457,9 +457,9 @@ export interface EmailSetMailboxesParams extends JmapCall {
 // Replace every email's mailbox membership with exactly one mailbox — a
 // "move" in the sense every JMAP client means it. Sends the whole
 // `mailboxIds` property rather than a `mailboxIds/<id>` pointer patch: the
-// patch form (`emailSetMany`) can only add or drop ids it names, so it
-// cannot express "and leave wherever it was". Same partial-failure contract
-// as emailSetMany.
+// patch form (`emailSetMany`) can only add or drop the mailboxes it names,
+// so it cannot express "and remove it from everywhere else". Same
+// partial-failure contract as emailSetMany.
 export const emailSetMailboxes = async (p: EmailSetMailboxesParams): Promise<EmailSetManyResult> => {
   if (p.ids.length === 0) {
     return { notUpdated: [], updated: [] }

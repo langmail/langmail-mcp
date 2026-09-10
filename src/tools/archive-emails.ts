@@ -6,11 +6,11 @@
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
 import { ACCOUNT_WRITE } from './annotations.ts'
-import { type FileEmailsDeps, formatBatchResult, idsInput, idsShape } from './file-emails-common.ts'
+import { type FileEmailsDeps, formatBatchResult, type IdsArgs, idsInput, idsShape } from './file-emails-common.ts'
 import { errorResult, type ToolResult } from './result.ts'
 
 export interface ArchiveEmailsContext {
-  args: { ids: string[] }
+  args: IdsArgs
   token: string
 }
 

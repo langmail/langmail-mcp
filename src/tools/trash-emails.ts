@@ -8,18 +8,21 @@
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
 import { ACCOUNT_DESTRUCTIVE } from './annotations.ts'
-import { type FileEmailsDeps, formatBatchResult, idsInput, idsShape } from './file-emails-common.ts'
+import { type FileEmailsDeps, formatBatchResult, type IdsArgs, idsInput, idsShape } from './file-emails-common.ts'
 import { errorResult, type ToolResult } from './result.ts'
 
 export interface TrashEmailsContext {
-  args: { ids: string[] }
+  args: IdsArgs
   token: string
 }
 
 export const trashEmails = async (deps: FileEmailsDeps, ctx: TrashEmailsContext): Promise<ToolResult> => {
   const places = await deps.resolvePlaces(ctx.token)
   if (!places.trash) {
-    return errorResult('This account has no Trash mailbox, so messages cannot be trashed. Nothing was changed.')
+    return errorResult(
+      'This account has no Trash mailbox. Nothing was trashed. Create one in the mail client, or use ' +
+        'archive_emails to clear the inbox or move_emails to file into an existing folder.'
+    )
   }
   const result = await deps.replaceMailboxes(ctx.token, ctx.args.ids, places.trash)
   return formatBatchResult('Trashed', result)
@@ -36,8 +39,9 @@ export const registerTrashEmails = (server: McpServer, deps: FileEmailsDeps, get
         'Move one or more messages to the Trash. Use this only when the user asks to delete, trash, ' +
         'or bin mail; to clear the inbox without deleting, use archive_emails, and to file into a ' +
         'folder use move_emails. Trashed messages stay recoverable in the mail client until Trash ' +
-        'is emptied; there is no permanent delete. Takes message ids from search_emails or ' +
-        'get_thread. Reports how many messages were trashed and lists any id the server refused.',
+        'is emptied; there is no permanent delete. Re-running it on the same ids is harmless. Takes ' +
+        'message ids from search_emails or get_thread. Reports how many messages were trashed and ' +
+        'lists any id the server refused.',
       inputSchema: idsShape,
       title: 'Trash emails',
     },

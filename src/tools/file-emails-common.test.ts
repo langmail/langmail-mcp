@@ -42,5 +42,6 @@ describe('formatBatchResult', () => {
     expect(result.isError).toBe(true)
     expect(result.content[0]?.text).toContain('Trashed 0 message(s).')
     expect(result.content[0]?.text).toContain('m1 (notFound)')
+    expect(result.content[0]?.text).toContain('search_emails or get_thread')
   })
 })

@@ -23,12 +23,12 @@ import {
   mailboxCreate,
   mailboxIdByNameOrRole,
   mailboxIdsByRoles,
-  mailboxNames,
   makeJmapLive,
 } from '@langmail/jmap'
 
 import { archiveEmails } from './archive-emails.ts'
 import { type FileEmailsDeps } from './file-emails-common.ts'
+import { lookupMailbox } from './mailbox-lookup.ts'
 import { moveEmails } from './move-emails.ts'
 import { trashEmails } from './trash-emails.ts'
 
@@ -197,10 +197,7 @@ live('filing tools against live Stalwart', () => {
     // Bearer; a dev-Stalwart throwaway account authenticates with Basic).
     deps = {
       replaceMailboxes: (_token, ids, mailboxId) => emailSetMailboxes({ ...call, ids, mailboxId }),
-      resolveMailbox: async (_token, name) => {
-        const id = await mailboxIdByNameOrRole({ ...call, name })
-        return { available: id ? [] : await mailboxNames(call), id }
-      },
+      resolveMailbox: (_token, name) => lookupMailbox(call, name),
       resolvePlaces: async () => {
         const byRole = await mailboxIdsByRoles({ ...call, roles: ['archive', 'inbox', 'trash'] })
         return { archive: byRole.archive ?? null, inbox: byRole.inbox ?? null, trash: byRole.trash ?? null }
@@ -224,7 +221,7 @@ live('filing tools against live Stalwart', () => {
     const id = await importEmail({
       body: 'Accepted from the attendee calendar.',
       from: 'Calendar Bot <calendar@example.com>',
-      keywords: { $seen: false },
+      keywords: {},
       receivedAt: new Date(run),
       subject: 'Accepted: sync',
     })
@@ -247,7 +244,7 @@ live('filing tools against live Stalwart', () => {
     expect(await mailboxesOf(id)).toEqual([projectsId])
   })
 
-  test('move_emails refuses the trash-role mailbox by its server-side name', async () => {
+  test('move_emails refuses the trash-role mailbox under its server-side name', async () => {
     const id = await importEmail({
       body: 'Keep me.',
       from: 'Ada Example <ada@example.com>',
@@ -255,7 +252,10 @@ live('filing tools against live Stalwart', () => {
       receivedAt: new Date(run),
       subject: 'Not a delete',
     })
-    const result = await moveEmails(deps, { args: { ids: [id], mailbox: 'Trash' }, token: TOKEN })
+    // Stock Stalwart names its trash-role mailbox "Deleted Items": not a place
+    // name, so this exercises the name lookup → resolved-id refusal, not the
+    // place-name short-circuit.
+    const result = await moveEmails(deps, { args: { ids: [id], mailbox: 'Deleted Items' }, token: TOKEN })
     expect(result.isError).toBe(true)
     expect(result.content[0]?.text).toContain('trash_emails')
     expect(await mailboxesOf(id)).toEqual([inboxId])
@@ -272,8 +272,7 @@ live('filing tools against live Stalwart', () => {
     const result = await trashEmails(deps, { args: { ids: [id, 'zz-does-not-exist'] }, token: TOKEN })
     expect(result.isError).toBeUndefined()
     expect(result.content[0]?.text).toContain('Trashed 1 message(s).')
-    // RFC 8620 §5.3 prescribes `notFound` for an unknown id; if Stalwart
-    // reports it under another SetError type, update this to the real one.
+    // RFC 8620 §5.3: an unknown id in `update` is refused as `notFound`.
     expect(result.content[0]?.text).toContain('zz-does-not-exist (notFound)')
     expect(await mailboxesOf(id)).toEqual([trashId])
   })

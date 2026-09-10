@@ -171,7 +171,7 @@ Trash — use `trash_emails`.
 Parameters:
 
 - `ids`: array of string — 1–50 message ids
-- `mailbox`: string — destination folder, e.g. `Projects`, `Inbox`, `Archive`
+- `mailbox`: string — destination folder, e.g. `Projects`, `Inbox`, `Archive` (1–200 characters)
 
 Returns:
 

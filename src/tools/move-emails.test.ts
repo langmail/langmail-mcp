@@ -56,4 +56,19 @@ describe('moveEmails', () => {
     }
     expect(deps.replacements).toHaveLength(0)
   })
+
+  test('refuses a role-less folder named Trash when the account has no trash role', async () => {
+    const deps = fakeDeps({ folders: { Trash: 'mb-roleless-trash' }, places: { trash: null } })
+    const result = await moveEmails(deps, { args: { ids: ['m1'], mailbox: 'Trash' }, token: 'tok' })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('trash_emails')
+    expect(deps.replacements).toHaveLength(0)
+  })
+
+  test('resolves Archive by role as a plain move destination', async () => {
+    const deps = fakeDeps()
+    const result = await moveEmails(deps, { args: { ids: ['m1'], mailbox: 'Archive' }, token: 'tok' })
+    expect(result.isError).toBeUndefined()
+    expect(deps.replacements[0]?.mailboxId).toBe('mb-archive')
+  })
 })

@@ -23,6 +23,11 @@ export interface FakeFileEmailsDeps extends FileEmailsDeps {
 
 const PLACES: PlaceIds = { archive: 'mb-archive', inbox: 'mb-inbox', trash: 'mb-trash' }
 
+// The place roles the fixture knows; the live resolver also maps Sent, Drafts,
+// and Junk by role, which fall through to the name lookup here.
+const isPlaceRole = (role: string | undefined): role is keyof PlaceIds =>
+  role === 'archive' || role === 'inbox' || role === 'trash'
+
 // `folders` maps user-facing names (case-insensitive) to ids; `places`
 // overrides the role lookup; `missing` ids are reported notFound by Email/set.
 // `resolveMailbox` applies the live resolver's rule: a place name ("Bin",
@@ -54,7 +59,7 @@ export const fakeDeps = (
     replacements,
     resolveMailbox: (_token, name) => {
       const role = roleForPlaceName(name)
-      const byRole = role && role in places ? places[role as keyof PlaceIds] : null
+      const byRole = isPlaceRole(role) ? places[role] : null
       const byName = Object.entries(folders).find(([n]) => n.toLowerCase() === name.trim().toLowerCase())?.[1]
       const id = byRole ?? byName ?? null
       return Promise.resolve({ available: id ? [] : Object.keys(folders), id })

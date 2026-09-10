@@ -22,13 +22,12 @@ import {
   emailQuery,
   emailQueryPerTerm,
   type JmapLive,
-  mailboxIdByNameOrRole,
-  mailboxNames,
 } from '@langmail/jmap'
 
 import { READ_ONLY } from './annotations.ts'
 import { formatEmailLine, orderById } from './format.ts'
 import { KEYWORD_VALUES, KEYWORDS_DESCRIPTION, keywordToJmapKeyword } from './keywords.ts'
+import { lookupMailbox, type MailboxLookup } from './mailbox-lookup.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 // Raw shape handed to registerTool (JSON-schema source). The "at least one
@@ -133,16 +132,6 @@ const rankByMatchCount = (lists: string[][], limit: number, window: number): Ran
     ids: ranked.slice(0, limit),
     matchCounts: counts,
   }
-}
-
-// Outcome of a mailbox-filter lookup. On a miss the account's folder names come
-// back with it so the error can name what *does* exist — a bare "not found" on
-// a folder whose server-side name differs from the place name (Stalwart calls
-// the sent mailbox "Sent Items") reads as "those messages were never synced".
-export interface MailboxLookup {
-  // Empty on a hit — the listing is only fetched when there's an error to write.
-  available: string[]
-  id: string | null
 }
 
 export interface SearchEmailsDeps {
@@ -270,10 +259,7 @@ export const makeLiveDeps = (live: JmapLive): SearchEmailsDeps => ({
   resolveAccountId: live.resolveAccountId,
   resolveMailbox: async (authorization, name) => {
     const s = await live.getSession(authorization)
-    const call = { accountId: accountIdForMail(s), apiUrl: s.apiUrl, authorization }
-    const id = await mailboxIdByNameOrRole({ ...call, name })
-    // The folder listing is only worth a round-trip when the lookup missed.
-    return { available: id ? [] : await mailboxNames(call), id }
+    return lookupMailbox({ accountId: accountIdForMail(s), apiUrl: s.apiUrl, authorization }, name)
   },
 })
 
