@@ -23,6 +23,7 @@ import { type ImageProxyStore } from '../email-render/image-proxy.ts'
 import { registerEmailViewerResource } from '../email-render/viewer-resource.ts'
 import { makeLiveApplyIo, makeMailRulesApplier } from '../rules/apply.ts'
 import { makeLiveSieveIo, makeMailRulesStore } from '../rules/store.ts'
+import { registerArchiveEmails } from '../tools/archive-emails.ts'
 import { makeLiveDeps as makeContactWriteDeps } from '../tools/contact-common.ts'
 import { makeAttendeeWriteThrough } from '../tools/contact-write-through.ts'
 import { makeLiveDeps as makeCreateCalendarDeps, registerCreateCalendar } from '../tools/create-calendar.ts'
@@ -41,6 +42,7 @@ import { registerDeleteContact } from '../tools/delete-contact.ts'
 import { registerDeleteMailRule } from '../tools/delete-mail-rule.ts'
 import { makeLiveDeps as makeDownloadAttachmentDeps, registerDownloadAttachment } from '../tools/download-attachment.ts'
 import { makeLiveDeps as makeDraftDeps } from '../tools/draft-common.ts'
+import { makeLiveDeps as makeFileEmailsDeps } from '../tools/file-emails-common.ts'
 import { registerGetDraft } from '../tools/get-draft.ts'
 import { makeLiveDeps as makeGetEmailDeps, registerGetEmail } from '../tools/get-email.ts'
 import { makeLiveDeps as makeGetThreadDeps, registerGetThread } from '../tools/get-thread.ts'
@@ -51,6 +53,7 @@ import {
 import { makeLiveDeps as makeListCalendarsDeps, registerListCalendars } from '../tools/list-calendars.ts'
 import { registerListMailRules } from '../tools/list-mail-rules.ts'
 import { type MailRuleToolDeps } from '../tools/mail-rule-common.ts'
+import { registerMoveEmails } from '../tools/move-emails.ts'
 import { makeLiveDeps as makePreviewEmailDeps, registerPreviewEmail } from '../tools/preview-email.ts'
 import { registerPreviewMailRule } from '../tools/preview-mail-rule.ts'
 import { registerReplyToMessage } from '../tools/reply-to-message.ts'
@@ -58,6 +61,7 @@ import { makeLiveDeps as makeRespondToEventDeps, registerRespondToEvent } from '
 import { makeLiveDeps as makeSearchContactsDeps, registerSearchContacts } from '../tools/search-contacts.ts'
 import { makeLiveDeps as makeSearchEmailsDeps, registerSearchEmails } from '../tools/search-emails.ts'
 import { registerSendDraft } from '../tools/send-draft.ts'
+import { registerTrashEmails } from '../tools/trash-emails.ts'
 import {
   makeLiveDeps as makeUpdateCalendarEventDeps,
   registerUpdateCalendarEvent,
@@ -86,6 +90,9 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   const searchEmailsDeps = makeSearchEmailsDeps(jmapLive)
   const getEmailDeps = makeGetEmailDeps(jmapLive)
   const getThreadDeps = makeGetThreadDeps(jmapLive)
+  // Filing: archive/move/trash share one deps bundle and the request-cycle
+  // JMAP session cache.
+  const fileEmailsDeps = makeFileEmailsDeps(jmapLive)
   const downloadAttachmentDeps = makeDownloadAttachmentDeps(jmapLive, cfg.tickets, cfg.publicUrl)
   const previewEmailDeps = makePreviewEmailDeps(jmapLive, cfg.tickets, cfg.imageTokens, cfg.publicUrl)
   // CalDAV tools discover against the same Stalwart base; tsdav follows
@@ -141,6 +148,9 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     // `resources` capability for this per-request server.
     registerEmailViewerResource(server, cfg.publicUrl)
     registerGetThread(server, getThreadDeps, () => ctx.token)
+    registerArchiveEmails(server, fileEmailsDeps, () => ctx.token)
+    registerMoveEmails(server, fileEmailsDeps, () => ctx.token)
+    registerTrashEmails(server, fileEmailsDeps, () => ctx.token)
     registerDownloadAttachment(server, downloadAttachmentDeps, () => ctx.token)
     registerPreviewMailRule(server, mailRuleDeps, () => ctx.token)
     registerCreateMailRule(server, mailRuleDeps, () => ctx.token)
