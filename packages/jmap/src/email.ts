@@ -426,17 +426,58 @@ export const emailSetMany = async (p: EmailSetManyParams): Promise<EmailSetManyR
     ],
     using: USING,
   })
-  const out = methodResponse<{
-    notUpdated?: Record<string, { type?: string }>
-    updated?: Record<string, unknown>
-  }>(resp, 'Email/set', '0')
+  return setManyOutcome(p.ids, methodResponse<EmailSetManyResponse>(resp, 'Email/set', '0'))
+}
+
+interface EmailSetManyResponse {
+  notUpdated?: Record<string, { type?: string }>
+  updated?: Record<string, unknown>
+}
+
+// Fold an Email/set response over the ids we asked for: every id is reported
+// exactly once, as updated or as refused with the server's SetError type.
+const setManyOutcome = (ids: string[], out: EmailSetManyResponse): EmailSetManyResult => {
   const updated = new Set(Object.keys(out.updated ?? {}))
   return {
-    notUpdated: p.ids
+    notUpdated: ids
       .filter((id) => !updated.has(id))
       .map((id) => ({ id, type: out.notUpdated?.[id]?.type ?? 'unknown' })),
-    updated: p.ids.filter((id) => updated.has(id)),
+    updated: ids.filter((id) => updated.has(id)),
   }
+}
+
+// --- Email/set (bulk mailbox replacement) ---------------------------------
+
+export interface EmailSetMailboxesParams extends JmapCall {
+  accountId: string
+  ids: string[]
+  mailboxId: string
+}
+
+// Replace every email's mailbox membership with exactly one mailbox — a
+// "move" in the sense every JMAP client means it. Sends the whole
+// `mailboxIds` property rather than a `mailboxIds/<id>` pointer patch: the
+// patch form (`emailSetMany`) can only add or drop ids it names, so it
+// cannot express "and leave wherever it was". Same partial-failure contract
+// as emailSetMany.
+export const emailSetMailboxes = async (p: EmailSetMailboxesParams): Promise<EmailSetManyResult> => {
+  if (p.ids.length === 0) {
+    return { notUpdated: [], updated: [] }
+  }
+  const resp = await call(p, {
+    methodCalls: [
+      [
+        'Email/set',
+        {
+          accountId: p.accountId,
+          update: Object.fromEntries(p.ids.map((id) => [id, { mailboxIds: { [p.mailboxId]: true } }])),
+        },
+        '0',
+      ],
+    ],
+    using: USING,
+  })
+  return setManyOutcome(p.ids, methodResponse<EmailSetManyResponse>(resp, 'Email/set', '0'))
 }
 
 // --- Email state ----------------------------------------------------------
