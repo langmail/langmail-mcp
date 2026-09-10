@@ -7,6 +7,7 @@ import {
   emailQuery,
   emailQueryPerTerm,
   emailSet,
+  emailSetMailboxes,
   emailState,
   mailboxCreate,
   mailboxIdByName,
@@ -961,5 +962,42 @@ describe('emailState', () => {
       expect(err).toBeInstanceOf(JmapError)
       expect((err as JmapError).errorType).toBe('cannotCalculateChanges')
     }
+  })
+})
+
+describe('emailSetMailboxes', () => {
+  test('sends the whole mailboxIds property per id and reports per-id outcome', async () => {
+    const f = mock((url: string, init?: RequestInit) => {
+      expect(url).toBe(API)
+      const body = JSON.parse(String(init?.body))
+      expect(body.methodCalls[0][0]).toBe('Email/set')
+      expect(body.methodCalls[0][1].accountId).toBe('a1')
+      expect(body.methodCalls[0][1].update).toEqual({
+        e1: { mailboxIds: { mb9: true } },
+        e2: { mailboxIds: { mb9: true } },
+      })
+      return Promise.resolve(
+        jmapResponse([['Email/set', { notUpdated: { e2: { type: 'notFound' } }, updated: { e1: null } }, '0']])
+      )
+    })
+    const result = await withFetch(f, () =>
+      emailSetMailboxes({
+        accountId: 'a1',
+        apiUrl: API,
+        authorization: 'Bearer t',
+        ids: ['e1', 'e2'],
+        mailboxId: 'mb9',
+      })
+    )
+    expect(result).toEqual({ notUpdated: [{ id: 'e2', type: 'notFound' }], updated: ['e1'] })
+  })
+
+  test('is a no-op for an empty id list', async () => {
+    const f = mock(() => Promise.reject(new Error('must not call')))
+    const result = await withFetch(f, () =>
+      emailSetMailboxes({ accountId: 'a1', apiUrl: API, authorization: 'Bearer t', ids: [], mailboxId: 'mb9' })
+    )
+    expect(result).toEqual({ notUpdated: [], updated: [] })
+    expect(f).not.toHaveBeenCalled()
   })
 })

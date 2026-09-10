@@ -147,6 +147,51 @@ Returns:
 
 - A list of the thread's messages oldest-first, each with its id, subject, sender, date, and tags
 
+### archive_emails
+
+Removes one or more messages from the Inbox and files them in the Archive
+mailbox. Read state is untouched. Fails, without creating anything, if the
+account has no Archive mailbox.
+
+Parameters:
+
+- `ids`: array of string — 1–50 message ids, as returned by `search_emails` or `get_thread`
+
+Returns:
+
+- How many messages were archived, and any id the server refused with its reason
+
+### move_emails
+
+Moves one or more messages into a named folder, replacing whatever folders they
+were in. The folder is resolved like the `search_emails` `mailbox` filter (place
+names by role, otherwise an exact folder name) and is never created. Refuses
+Trash — use `trash_emails`.
+
+Parameters:
+
+- `ids`: array of string — 1–50 message ids
+- `mailbox`: string — destination folder, e.g. `Projects`, `Inbox`, `Archive` (1–200 characters)
+
+Returns:
+
+- How many messages were moved, and any id the server refused with its reason
+- On an unknown folder, an error listing the folders that exist
+
+### trash_emails
+
+Moves one or more messages to the Trash. Recoverable in the mail client until
+Trash is emptied; permanent deletion is not exposed. Annotated as destructive so
+clients can ask before running it.
+
+Parameters:
+
+- `ids`: array of string — 1–50 message ids
+
+Returns:
+
+- How many messages were trashed, and any id the server refused with its reason
+
 ### search_contacts
 
 Resolves a person's name, partial name, email address, or organization to
