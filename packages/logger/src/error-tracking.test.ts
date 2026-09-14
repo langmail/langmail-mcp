@@ -1,23 +1,18 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { type NodeOptions } from '@sentry/node'
 
-// Capture what the Sentry SDK receives; initErrorTracking's whole job is
-// assembling these two calls, so the options object is the behaviour under test.
-interface InitOptions {
-  dsn: string
-  enabled: boolean
-  environment: string
-  integrations: { name: string }[]
-  sendDefaultPii: boolean
-}
+// initErrorTracking's whole job is assembling the Sentry init options and
+// tagging the service, so both calls land in one ordered log: their relative
+// order is part of the behaviour (a tag set before init is dropped).
+type SentryCall = { kind: 'init'; options: NodeOptions } | { kind: 'setTag'; key: string; value: string }
 
-const initCalls: InitOptions[] = []
-const tagCalls: { key: string; value: string }[] = []
+const calls: SentryCall[] = []
 const pinoIntegrationOptions: unknown[] = []
 
 mock.module('@sentry/node', () => ({
   contextLinesIntegration: () => ({ name: 'ContextLines' }),
-  init: (options: InitOptions) => {
-    initCalls.push(options)
+  init: (options: NodeOptions) => {
+    calls.push({ kind: 'init', options })
   },
   nodeContextIntegration: () => ({ name: 'NodeContext' }),
   pinoIntegration: (options: unknown) => {
@@ -25,16 +20,19 @@ mock.module('@sentry/node', () => ({
     return { name: 'Pino' }
   },
   setTag: (key: string, value: string) => {
-    tagCalls.push({ key, value })
+    calls.push({ kind: 'setTag', key, value })
   },
   withScope: () => undefined,
 }))
 
-const { initErrorTracking } = await import('./error-tracking')
+const { initErrorTracking, withScope } = await import('./error-tracking')
+
+const isInit = (call: SentryCall): call is Extract<SentryCall, { kind: 'init' }> => call.kind === 'init'
 
 // initErrorTracking reads process.env at call time, so each case swaps the two
 // variables it cares about and restores them afterwards.
-const initWithEnv = (env: { dsn?: string; nodeEnv?: string }, serviceName = 'test-service'): InitOptions => {
+const initWithEnv = (env: { dsn?: string; nodeEnv?: string }, serviceName = 'test-service'): NodeOptions => {
+  const before = calls.length
   const originalDsn = process.env.BETTERSTACK_ERRORS_DSN
   const originalNodeEnv = process.env.NODE_ENV
 
@@ -64,16 +62,29 @@ const initWithEnv = (env: { dsn?: string; nodeEnv?: string }, serviceName = 'tes
     }
   }
 
-  const options = initCalls.at(-1)
+  // One call in, exactly one init out — so a double-init regression can't hide
+  // behind "read the most recent options".
+  const inits = calls.slice(before).filter(isInit)
+  expect(inits).toHaveLength(1)
+  const options = inits[0]?.options
   if (!options) {
     throw new Error('initErrorTracking did not call init()')
   }
   return options
 }
 
+// The source passes a static array; a function form would mean the assertions
+// below are inspecting something other than what ships.
+const integrationNames = (options: NodeOptions): string[] => {
+  const { integrations } = options
+  if (!Array.isArray(integrations)) {
+    throw new Error('expected init() to receive a static integrations array')
+  }
+  return integrations.map((integration) => integration.name)
+}
+
 beforeEach(() => {
-  initCalls.length = 0
-  tagCalls.length = 0
+  calls.length = 0
   pinoIntegrationOptions.length = 0
 })
 
@@ -106,9 +117,9 @@ describe('initErrorTracking', () => {
     expect(initWithEnv({ nodeEnv: 'staging' }).enabled).toBe(false)
   })
 
-  test('stays disabled in production when no DSN is configured', () => {
-    // The DSN is what silences the client here: `enabled` still tracks
-    // NODE_ENV alone, so an unconfigured production service reports nowhere.
+  test('stays enabled in production without a DSN, leaving the empty DSN to no-op the client', () => {
+    // `enabled` tracks NODE_ENV alone, so an unconfigured production service
+    // still gets an enabled client — it is the empty DSN that silences it.
     const options = initWithEnv({ nodeEnv: 'production' })
 
     expect(options.enabled).toBe(true)
@@ -133,7 +144,7 @@ describe('initErrorTracking', () => {
   test('wires node context, context lines and pino integrations', () => {
     const options = initWithEnv({ nodeEnv: 'production' })
 
-    expect(options.integrations.map((integration) => integration.name)).toEqual(['NodeContext', 'ContextLines', 'Pino'])
+    expect(integrationNames(options)).toEqual(['NodeContext', 'ContextLines', 'Pino'])
   })
 
   test('captures only error-level pino records', () => {
@@ -142,15 +153,22 @@ describe('initErrorTracking', () => {
     expect(pinoIntegrationOptions).toEqual([{ error: { levels: ['error'] } }])
   })
 
-  test('tags the service name after initialising', () => {
+  test('tags the service name after init, so the tag lands on an initialised client', () => {
     initWithEnv({ nodeEnv: 'production' }, 'email-agent')
 
-    expect(tagCalls).toEqual([{ key: 'service', value: 'email-agent' }])
+    expect(calls.map((call) => call.kind)).toEqual(['init', 'setTag'])
+    expect(calls.at(-1)).toEqual({ kind: 'setTag', key: 'service', value: 'email-agent' })
   })
 
   test('tags whatever service name it is given, including an empty one', () => {
     initWithEnv({ nodeEnv: 'production' }, '')
 
-    expect(tagCalls).toEqual([{ key: 'service', value: '' }])
+    expect(calls.at(-1)).toEqual({ kind: 'setTag', key: 'service', value: '' })
+  })
+})
+
+describe('@sentry/node re-exports', () => {
+  test('re-exports withScope for package consumers', () => {
+    expect(typeof withScope).toBe('function')
   })
 })
