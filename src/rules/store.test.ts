@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 
-import { type JmapLive, type JmapSession } from '@langmail/jmap'
+import { type JmapLive, type JmapSession, type SieveScriptRecord } from '@langmail/jmap'
 
 import { generateSieveScript, type MailRule, RULES_SCRIPT_NAME } from './rule.ts'
 import { makeLiveSieveIo, makeMailRulesStore, type SieveIo } from './store.ts'
@@ -112,7 +112,7 @@ interface StubOptions {
   // The bytes a blob download hands back.
   scriptContent?: string
   // What SieveScript/get reports the account holds.
-  scripts?: { blobId: string; id: string; isActive: boolean; name: string }[]
+  scripts?: SieveScriptRecord[]
 }
 
 // A `JmapLive` that answers with a fixed session and records the Authorization
