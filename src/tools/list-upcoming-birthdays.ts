@@ -101,7 +101,8 @@ const whenLine = (inDays: number): string => {
   return inDays === 1 ? 'tomorrow' : `in ${inDays} days`
 }
 
-const nameOf = (card: ContactCard): string => card.name?.full ?? '(unnamed)'
+// Same fallback as search_contacts: a card with no name shows its address.
+const nameOf = (card: ContactCard): string => card.name?.full ?? bestAddress(card, 'any')?.address ?? '(unnamed)'
 
 const renderRow = (row: Upcoming, index: number): string => {
   const { birthday, card, inDays, occurrence } = row

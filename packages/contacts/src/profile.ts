@@ -247,6 +247,16 @@ const BIRTH_KIND = 'birth'
 // Read as "no year" so nobody is reported as turning 422.
 const UNKNOWN_YEAR_SENTINEL = 1604
 
+// A leap year to validate a yearless date against: `--02-29` is a real
+// birthday, so February gets 29 days when no year says otherwise.
+const LEAP_REFERENCE_YEAR = 2000
+
+// Month and day form a real calendar date (in the given year, or in any
+// leap year when the year is unknown). Shared by the read side and the
+// parser so an imported Feb 30 is skipped rather than clamped to Feb 28.
+const isCalendarDate = (month: number, day: number, year: number | undefined): boolean =>
+  month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year ?? LEAP_REFERENCE_YEAR, month)
+
 const birthEntries = (card: ContactCard): [string, ContactCardAnniversary][] =>
   Object.entries(card.anniversaries ?? {}).filter(([, a]) => a.kind === BIRTH_KIND)
 
@@ -257,8 +267,13 @@ export const readBirthday = (card: ContactCard): Birthday | undefined => {
     // Defensive on `date`: a malformed card from a foreign client must not
     // take down every contact read that renders a birthday line.
     const { day, month, year } = entry.date ?? {}
-    if (typeof month === 'number' && typeof day === 'number' && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-      const known = typeof year === 'number' && year !== UNKNOWN_YEAR_SENTINEL
+    if (typeof month !== 'number' || typeof day !== 'number') {
+      continue
+    }
+    const known = typeof year === 'number' && year !== UNKNOWN_YEAR_SENTINEL
+    // A foreign client can write a numerically shaped non-date (Feb 30);
+    // that is no birthday, not one to clamp.
+    if (isCalendarDate(month, day, known ? year : undefined)) {
       return { day, month, ...(known ? { year } : {}) }
     }
   }
@@ -267,10 +282,6 @@ export const readBirthday = (card: ContactCard): Birthday | undefined => {
 
 const FULL_DATE = /^(\d{4})-(\d{2})-(\d{2})$/u
 const YEARLESS_DATE = /^--(\d{2})-(\d{2})$/u
-
-// A leap year to validate a yearless date against: `--02-29` is a real
-// birthday, so February gets 29 days when no year says otherwise.
-const LEAP_REFERENCE_YEAR = 2000
 
 // What both write tools call on the caller's text. `YYYY-MM-DD`, or
 // `--MM-DD` when the year is unknown (the vCard 4 spelling, RFC 6350
@@ -286,7 +297,7 @@ export const parseBirthday = (text: string): { birthday: Birthday } | { error: s
   const year = full ? Number(full[1]) : undefined
   const month = Number(full ? full[2] : yearless?.[1])
   const day = Number(full ? full[3] : yearless?.[2])
-  if (month < 1 || month > 12 || day < 1 || day > daysInMonth(year ?? LEAP_REFERENCE_YEAR, month)) {
+  if (!isCalendarDate(month, day, year)) {
     return { error: `Birthday "${text}" is not a calendar date — check the month and day.` }
   }
   return { birthday: { day, month, ...(year === undefined ? {} : { year }) } }
@@ -306,6 +317,14 @@ export const birthAnniversary = (birthday: Birthday): ContactCardAnniversary => 
   return { date: { day, month, ...(year === undefined ? {} : { year }) }, kind: BIRTH_KIND }
 }
 
+const freeKey = (taken: Record<string, unknown>, wanted: string): string => {
+  let key = wanted
+  for (let n = 1; key in taken; n += 1) {
+    key = `${wanted}-${n}`
+  }
+  return key
+}
+
 // The anniversaries map with the birth entry replaced (or removed when
 // `birthday` is undefined) and every other entry — a wedding date a phone
 // wrote, a vendor kind — left exactly where it was. A stored birth entry
@@ -321,7 +340,9 @@ export const withBirthday = (
   if (birthday === undefined) {
     return kept
   }
-  const [key, existing] = births[0] ?? [BIRTHDAY_KEY, undefined]
+  // A foreign entry may legally sit under the reserved key; it is never
+  // overwritten — the birth entry takes the next free key instead.
+  const [key, existing] = births[0] ?? [freeKey(kept, BIRTHDAY_KEY), undefined]
   return { ...kept, [key]: { ...existing, ...birthAnniversary(birthday) } }
 }
 

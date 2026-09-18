@@ -139,6 +139,12 @@ describe('listUpcomingBirthdays', () => {
     expect(utc.content[0]?.text).toContain('No birthdays in the next 7 day(s) from 2026-09-19')
   })
 
+  test('a card without a name is listed under its best address', async () => {
+    const cards = [{ ...person('card-anon', 'x', birth({ day: 20, month: 9 })), name: undefined }]
+    const result = await listUpcomingBirthdays(makeDeps(cards), { args: args(), token: 'tok' })
+    expect(result.content[0]?.text).toContain('1. card-anon@northwind.example — 2026-09-20')
+  })
+
   test('a malformed from is an error', async () => {
     const result = await listUpcomingBirthdays(makeDeps([]), { args: args({ from: '18.09.2026' }), token: 'tok' })
     expect(result.isError).toBe(true)

@@ -212,6 +212,27 @@ describe('birthday', () => {
     })
   })
 
+  test('an imported non-date such as Feb 30 is no birthday, not one to clamp', () => {
+    expect(readBirthday(card({ anniversaries: { b: { date: { day: 30, month: 2 }, kind: 'birth' } } }))).toBeUndefined()
+    expect(
+      readBirthday(card({ anniversaries: { b: { date: { day: 29, month: 2, year: 2023 }, kind: 'birth' } } }))
+    ).toBeUndefined()
+    expect(readBirthday(card({ anniversaries: { b: { date: { day: 29, month: 2 }, kind: 'birth' } } }))).toEqual({
+      day: 29,
+      month: 2,
+    })
+  })
+
+  test('withBirthday never overwrites a foreign entry sitting under the reserved key', () => {
+    const stored = card({
+      anniversaries: { [BIRTHDAY_KEY]: { date: { day: 1, month: 6, year: 2015 }, kind: 'wedding' } },
+    })
+    expect(withBirthday(stored, { day: 3, month: 3 })).toEqual({
+      [BIRTHDAY_KEY]: { date: { day: 1, month: 6, year: 2015 }, kind: 'wedding' },
+      [`${BIRTHDAY_KEY}-1`]: { date: { day: 3, month: 3 }, kind: 'birth' },
+    })
+  })
+
   test('withBirthday takes the reserved key on a card without a birth entry', () => {
     expect(withBirthday(card(), { day: 29, month: 2, year: 2000 })).toEqual({
       [BIRTHDAY_KEY]: { date: { day: 29, month: 2, year: 2000 }, kind: 'birth' },
