@@ -285,7 +285,7 @@ export const parseBirthday = (text: string): { birthday: Birthday } | { error: s
   const month = Number(full ? full[2] : yearless?.[1])
   const day = Number(full ? full[3] : yearless?.[2])
   if (month < 1 || month > 12 || day < 1 || day > daysInMonth(year ?? LEAP_REFERENCE_YEAR, month)) {
-    return { error: `Birthday "${text}" is not a calendar date.` }
+    return { error: `Birthday "${text}" is not a calendar date — check the month and day.` }
   }
   return { birthday: { day, month, ...(year === undefined ? {} : { year }) } }
 }

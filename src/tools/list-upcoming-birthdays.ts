@@ -46,13 +46,16 @@ const listUpcomingBirthdaysShape = {
     .min(1)
     .max(366)
     .default(30)
-    .describe('Length of the window in days: 7 for a week, 30 for a month, 90 for a quarter. Defaults to 30.'),
+    .describe(
+      'Length of the window in days, counting `from` as day 0: 7 for a week (Monday through Sunday), ' +
+        '30 for a month, 90 for a quarter. Defaults to 30.'
+    ),
   from: z
     .string()
     .optional()
     .describe(
-      'First day of the window as `YYYY-MM-DD`. Defaults to today. A past date answers ' +
-        '"which birthdays did I miss last week".'
+      'First day of the window as `YYYY-MM-DD`. Defaults to today in UTC — pass the user’s local ' +
+        'date when you know it. A past date answers "which birthdays did I miss last week".'
     ),
   limit: z.number().int().min(1).max(100).default(25).describe('Maximum number of people to list. Defaults to 25.'),
 }

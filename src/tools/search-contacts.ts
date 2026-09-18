@@ -67,7 +67,7 @@ const searchContactsShape = {
     .default('concise')
     .describe(
       '`concise` returns name, contact id, best address, confidence, relationship, ' +
-        'and the last interactions. `detailed` adds all known addresses with their ' +
+        'the birthday when stored, and the last interactions. `detailed` adds all known addresses with their ' +
         'own confidence, phone numbers, postal addresses, the note, where the record ' +
         'came from, and interaction record ids (for chaining into get_email or ' +
         'list_calendar_events), plus excluded relay addresses.'

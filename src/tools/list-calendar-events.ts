@@ -137,7 +137,8 @@ export const registerListCalendarEvents = (
         'the current membership those tools edit, so read it here before removing or ' +
         'adding attendees rather than guessing. Optionally bound the results with a ' +
         'start/end window (ISO 8601 with offset); omit both to list everything. ' +
-        'Defaults to the user’s default calendar.',
+        'Defaults to the user’s default calendar. Birthdays are not calendar events here; ' +
+        'for upcoming birthdays use list_upcoming_birthdays.',
       inputSchema: listCalendarEventsInput.shape,
       title: 'List calendar events',
     },

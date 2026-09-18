@@ -140,6 +140,14 @@ describe('createContact', () => {
     expect(result.content[0]?.text).toContain('birthday: --02-29')
   })
 
+  test('an empty birthday means none, the same idiom update_contact uses to clear', async () => {
+    const book = fakeBook()
+    const result = await createContact(book.deps, { args: args({ birthday: '' }), token: 'tok' })
+    expect(result.isError).toBeUndefined()
+    const [card] = [...book.cards.values()]
+    expect(card?.anniversaries).toBeUndefined()
+  })
+
   test('a malformed birthday is an error and nothing is created', async () => {
     const book = fakeBook()
     for (const birthday of ['2024-02-30', '3 March 1990']) {

@@ -101,8 +101,10 @@ export const createContact = async (
   if (name.length === 0) {
     return errorResult('name must not be empty.')
   }
-  // Parsed before any read, so a malformed date costs no round-trip.
-  const parsedBirthday = args.birthday === undefined ? undefined : parseBirthday(args.birthday)
+  // Parsed before any read, so a malformed date costs no round-trip. `""`
+  // is "none", as it is for `note` — the idiom update_contact teaches.
+  const birthdayText = args.birthday?.trim()
+  const parsedBirthday = birthdayText ? parseBirthday(birthdayText) : undefined
   if (parsedBirthday && 'error' in parsedBirthday) {
     return errorResult(`${parsedBirthday.error} Nothing was created.`)
   }
