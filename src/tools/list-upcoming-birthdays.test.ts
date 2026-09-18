@@ -88,6 +88,22 @@ describe('listUpcomingBirthdays', () => {
     expect(result.content[0]?.text).toContain('Leap Person — 2027-02-28 (in 3 days, turning 27)')
   })
 
+  test('a window before a known birth year lists nothing, the birth date itself is turning 0', async () => {
+    const cards = [person('card-robin', 'Robin Fairweather', birth({ day: 3, month: 3, year: 1990 }))]
+    const before = await listUpcomingBirthdays(makeDeps(cards), {
+      args: args({ days: 366, from: '1980-01-01' }),
+      token: 'tok',
+    })
+    expect(before.content[0]?.text).toContain('No birthdays')
+    expect(before.content[0]?.text).not.toContain('turning -')
+
+    const born = await listUpcomingBirthdays(makeDeps(cards), {
+      args: args({ days: 7, from: '1990-03-01' }),
+      token: 'tok',
+    })
+    expect(born.content[0]?.text).toContain('Robin Fairweather — 1990-03-03 (in 2 days, turning 0)')
+  })
+
   test('the empty window says so and points at update_contact', async () => {
     const result = await listUpcomingBirthdays(makeDeps([person('card-none', 'No Birthday')]), {
       args: args(),
