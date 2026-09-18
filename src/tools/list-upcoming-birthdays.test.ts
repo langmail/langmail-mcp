@@ -22,10 +22,11 @@ const person = (id: string, name: string, anniversaries?: Record<string, Contact
     name: { full: name },
   })
 
-const makeDeps = (cards: ContactCard[]): ListUpcomingBirthdaysDeps => ({
+const makeDeps = (cards: ContactCard[], timeZone: string | null = null): ListUpcomingBirthdaysDeps => ({
   contactCardGet: (p) => Promise.resolve(cards.filter((c) => p.ids.includes(c.id))),
   contactCardQuery: (p) => Promise.resolve(cards.map((c) => c.id).slice(0, p.limit)),
   resolveAccountId: () => Promise.resolve('acct'),
+  resolveTimeZone: () => Promise.resolve(timeZone),
 })
 
 const args = (over: Record<string, unknown> = {}) => listUpcomingBirthdaysInput.parse({ from: '2026-09-18', ...over })
@@ -103,7 +104,7 @@ describe('listUpcomingBirthdays', () => {
       person(`card-${i}`, `Person ${i}`, i === 0 ? birth({ day: 20, month: 9 }) : undefined)
     )
     const result = await listUpcomingBirthdays(makeDeps(cards), { args: args(), token: 'tok' })
-    expect(result.content[0]?.text).toContain(`more than ${CARD_CAP} cards`)
+    expect(result.content[0]?.text).toContain(`${CARD_CAP} cards or more`)
   })
 
   test('limit truncates and says how to see the rest', async () => {
@@ -112,18 +113,30 @@ describe('listUpcomingBirthdays', () => {
     )
     const result = await listUpcomingBirthdays(makeDeps(cards), { args: args({ limit: 2 }), token: 'tok' })
     const text = result.content[0]?.text ?? ''
-    expect(text).toContain('2 upcoming birthday(s)')
+    // The header counts everything in the window; the trailer says what was cut.
+    expect(text).toContain('4 upcoming birthday(s)')
     expect(text).toContain('Showing the first 2 of 4')
+    expect(text).not.toContain('Person 2')
   })
 
-  test('defaults from to today in UTC', async () => {
-    const cards = [person('card-tomorrow', 'Tomorrow Person', birth({ day: 19, month: 9 }))]
-    const result = await listUpcomingBirthdays(makeDeps(cards), {
+  test('defaults from to today in the account’s time zone, UTC when none is set', async () => {
+    // 17:30 in Los Angeles on the 18th is already the 19th in UTC: the
+    // birthday on the 18th must still be "today" for that user.
+    const cards = [person('card-today', 'Today Person', birth({ day: 18, month: 9 }))]
+    const instant = new Date('2026-09-19T00:30:00Z')
+    const zoned = await listUpcomingBirthdays(makeDeps(cards, 'America/Los_Angeles'), {
       args: listUpcomingBirthdaysInput.parse({ days: 7 }),
-      now: new Date('2026-09-18T23:30:00Z'),
+      now: instant,
       token: 'tok',
     })
-    expect(result.content[0]?.text).toContain('Tomorrow Person — 2026-09-19 (tomorrow)')
+    expect(zoned.content[0]?.text).toContain('Today Person — 2026-09-18 (today)')
+
+    const utc = await listUpcomingBirthdays(makeDeps(cards), {
+      args: listUpcomingBirthdaysInput.parse({ days: 7 }),
+      now: instant,
+      token: 'tok',
+    })
+    expect(utc.content[0]?.text).toContain('No birthdays in the next 7 day(s) from 2026-09-19')
   })
 
   test('a malformed from is an error', async () => {

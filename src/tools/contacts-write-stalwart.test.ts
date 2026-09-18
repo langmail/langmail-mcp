@@ -313,18 +313,20 @@ live('contact write tools against live Stalwart — author, read back, correct, 
     })
     expect(search.content[0]?.text).toContain('birthday: --03-03')
 
-    const upcoming = await listUpcomingBirthdays(writeDeps, {
-      args: listUpcomingBirthdaysInput.parse({ days: 7, from: '2027-03-01' }),
-      token: TOKEN,
-    })
+    const upcoming = await listUpcomingBirthdays(
+      { ...writeDeps, resolveTimeZone: () => Promise.resolve(null) },
+      { args: listUpcomingBirthdaysInput.parse({ days: 7, from: '2027-03-01' }), token: TOKEN }
+    )
     expect(upcoming.isError).toBeUndefined()
     expect(upcoming.content[0]?.text).toContain(`${PERSON} — 2027-03-03 (in 2 days)`)
     expect(upcoming.content[0]?.text).toContain(`contact_id: ${contactId}`)
   })
 
-  test('the vCard 3 sentinel year 1604 is read back as no year', async () => {
-    // Older Apple clients wrote "unknown year" as 1604. Whether Stalwart
-    // normalises it or stores it verbatim, the read side reports no year.
+  test('a stored sentinel year 1604 survives the round trip and is read as no year', async () => {
+    // Older Apple clients wrote "unknown year" as 1604. This seeds the value
+    // over JMAP, so it proves the read-side guard against what Stalwart
+    // stores — not whether Stalwart normalises a vCard 3 BDAY on CardDAV
+    // import, which needs a raw vCard PUT and is still open.
     await contactCardUpdate({
       ...ctx,
       cardId: contactId,

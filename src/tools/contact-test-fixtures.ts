@@ -16,13 +16,18 @@ export interface FakeBook {
 }
 
 // RFC 8620 §5.3 PatchObject, narrowed to what the tools emit: a top-level
-// property replacement, or one `a/b` path setting or removing a nested key.
+// property replacement (null removes it), or one `a/b` path setting or
+// removing a nested key.
 const applyPatch = (card: ContactCard, patch: Record<string, unknown>): ContactCard => {
   const next = { ...card } as Record<string, unknown>
   for (const [path, value] of Object.entries(patch)) {
     const [head, key] = path.split('/')
     if (key === undefined) {
-      next[path] = value
+      if (value === null) {
+        delete next[path]
+      } else {
+        next[path] = value
+      }
       continue
     }
     const parent = next[head as string]

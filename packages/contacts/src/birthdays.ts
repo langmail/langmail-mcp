@@ -71,9 +71,23 @@ export const parseCalendarDate = (text: string): CalendarDate | undefined => {
   return { day, month, year }
 }
 
-// Today's date in UTC as a calendar date — the tool's default `from`.
-export const todayUtc = (now: Date): CalendarDate => ({
-  day: now.getUTCDate(),
-  month: now.getUTCMonth() + 1,
-  year: now.getUTCFullYear(),
-})
+// The calendar day `now` falls on in an IANA time zone — the tool's default
+// `from`. The user's day, not the server's: at 17:30 in Los Angeles it is
+// already tomorrow in UTC, and "whose birthday is today" must not skip
+// today. An unknown zone falls back to UTC rather than failing the call.
+export const todayIn = (now: Date, timeZone: string): CalendarDate => {
+  const parts = (zone: string): CalendarDate | undefined =>
+    // en-CA formats as `YYYY-MM-DD`, which parseCalendarDate reads.
+    parseCalendarDate(
+      new Intl.DateTimeFormat('en-CA', { day: '2-digit', month: '2-digit', timeZone: zone, year: 'numeric' }).format(
+        now
+      )
+    )
+  let day: CalendarDate | undefined
+  try {
+    day = parts(timeZone)
+  } catch {
+    day = undefined
+  }
+  return day ?? (parts('UTC') as CalendarDate)
+}

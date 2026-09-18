@@ -254,7 +254,9 @@ const birthEntries = (card: ContactCard): [string, ContactCardAnniversary][] =>
 // birthday (legal in JSContact) is unusable for "coming up" and is skipped.
 export const readBirthday = (card: ContactCard): Birthday | undefined => {
   for (const [, entry] of birthEntries(card)) {
-    const { day, month, year } = entry.date
+    // Defensive on `date`: a malformed card from a foreign client must not
+    // take down every contact read that renders a birthday line.
+    const { day, month, year } = entry.date ?? {}
     if (typeof month === 'number' && typeof day === 'number' && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
       const known = typeof year === 'number' && year !== UNKNOWN_YEAR_SENTINEL
       return { day, month, ...(known ? { year } : {}) }
@@ -297,6 +299,13 @@ export const formatBirthday = (birthday: Birthday): string => {
   return birthday.year === undefined ? `--${md}` : `${String(birthday.year).padStart(4, '0')}-${md}`
 }
 
+// One birth entry as the tools write it — shared by create_contact (a fresh
+// card) and withBirthday (a stored one), so the two can never diverge.
+export const birthAnniversary = (birthday: Birthday): ContactCardAnniversary => {
+  const { day, month, year } = birthday
+  return { date: { day, month, ...(year === undefined ? {} : { year }) }, kind: BIRTH_KIND }
+}
+
 // The anniversaries map with the birth entry replaced (or removed when
 // `birthday` is undefined) and every other entry — a wedding date a phone
 // wrote, a vendor kind — left exactly where it was. A stored birth entry
@@ -313,15 +322,7 @@ export const withBirthday = (
     return kept
   }
   const [key, existing] = births[0] ?? [BIRTHDAY_KEY, undefined]
-  const { day, month, year } = birthday
-  return {
-    ...kept,
-    [key]: {
-      ...existing,
-      date: { day, month, ...(year === undefined ? {} : { year }) },
-      kind: BIRTH_KIND,
-    },
-  }
+  return { ...kept, [key]: { ...existing, ...birthAnniversary(birthday) } }
 }
 
 // --- organization, note, source -------------------------------------------

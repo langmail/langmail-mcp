@@ -6,7 +6,7 @@ export {
   formatCalendarDate,
   nextOccurrence,
   parseCalendarDate,
-  todayUtc,
+  todayIn,
 } from './birthdays.ts'
 export { collectedNoteEntry, nextKey, readCollected } from './card.ts'
 export {
@@ -26,6 +26,7 @@ export {
   observationsFromEvent,
 } from './observations.ts'
 export {
+  birthAnniversary,
   formatBirthday,
   formatCardAddress,
   parseBirthday,

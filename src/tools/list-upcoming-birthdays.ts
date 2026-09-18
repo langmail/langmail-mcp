@@ -27,7 +27,7 @@ import {
   nextOccurrence,
   parseCalendarDate,
   readBirthday,
-  todayUtc,
+  todayIn,
 } from '@langmail/contacts'
 import {
   bearerAuthorization,
@@ -36,6 +36,8 @@ import {
   type ContactCardQueryParams,
 } from '@langmail/jmap'
 
+import { type AccountTimeZoneResolver } from '../caldav/account-settings.ts'
+import { UTC_TIME_ZONE } from '../caldav/timezone.ts'
 import { READ_ONLY } from './annotations.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
@@ -54,8 +56,8 @@ const listUpcomingBirthdaysShape = {
     .string()
     .optional()
     .describe(
-      'First day of the window as `YYYY-MM-DD`. Defaults to today in UTC — pass the user’s local ' +
-        'date when you know it. A past date answers "which birthdays did I miss last week".'
+      'First day of the window as `YYYY-MM-DD`. Defaults to today in the account’s time zone (UTC when none is set) — ' +
+        'pass the user’s local date when you know it. A past date answers "which birthdays did I miss last week".'
     ),
   limit: z.number().int().min(1).max(100).default(25).describe('Maximum number of people to list. Defaults to 25.'),
 }
@@ -64,13 +66,15 @@ export const listUpcomingBirthdaysInput = z.object(listUpcomingBirthdaysShape)
 
 export type ListUpcomingBirthdaysArgs = z.infer<typeof listUpcomingBirthdaysInput>
 
-// The read seam. The write tools' deps bundle satisfies it structurally, so
-// the handler wires the same live object in.
+// The read seam: the write tools' deps bundle plus the account time-zone
+// resolver the calendar tools share, so "today" is the user's day.
 export interface ListUpcomingBirthdaysDeps {
   contactCardGet: (p: ContactCardGetParams) => Promise<ContactCard[]>
   contactCardQuery: (p: ContactCardQueryParams) => Promise<string[]>
   // Contacts-capability account id for the bearer.
   resolveAccountId: (authorization: string) => Promise<string>
+  // The account's preferred zone, or null when none is set (then UTC).
+  resolveTimeZone: AccountTimeZoneResolver
 }
 
 export interface ListUpcomingBirthdaysContext {
@@ -112,12 +116,17 @@ const renderRow = (row: Upcoming, index: number): string => {
   ].join('\n')
 }
 
+// Today in the account's preferred zone, falling back to UTC — the same
+// preference create_calendar_event applies when its input names no zone.
+const defaultFrom = async (deps: ListUpcomingBirthdaysDeps, ctx: ListUpcomingBirthdaysContext): Promise<CalendarDate> =>
+  todayIn(ctx.now ?? new Date(), (await deps.resolveTimeZone(ctx.token)) ?? UTC_TIME_ZONE)
+
 export const listUpcomingBirthdays = async (
   deps: ListUpcomingBirthdaysDeps,
   ctx: ListUpcomingBirthdaysContext
 ): Promise<ToolResult> => {
   const { args } = ctx
-  const from = args.from === undefined ? todayUtc(ctx.now ?? new Date()) : parseCalendarDate(args.from)
+  const from = args.from === undefined ? await defaultFrom(deps, ctx) : parseCalendarDate(args.from)
   if (!from) {
     return errorResult(`from "${args.from}" is not a calendar date. Use YYYY-MM-DD.`)
   }
@@ -146,9 +155,7 @@ export const listUpcomingBirthdays = async (
 
   const window = `the next ${args.days} day(s) from ${formatCalendarDate(from)}`
   const capNote =
-    ids.length >= CARD_CAP
-      ? `\n\nThe address book has more than ${CARD_CAP} cards, so this list may be incomplete.`
-      : ''
+    ids.length >= CARD_CAP ? `\n\nThe address book has ${CARD_CAP} cards or more, so this list may be incomplete.` : ''
   if (upcoming.length === 0) {
     return textResult(
       `No birthdays in ${window}. Only birthdays stored on contacts are listed — ` +
@@ -162,7 +169,7 @@ export const listUpcomingBirthdays = async (
       ? `\n\nShowing the first ${page.length} of ${upcoming.length} — raise \`limit\` or shorten \`days\` to see the rest.`
       : ''
   return textResult(
-    `${page.length} upcoming birthday(s) in ${window}:\n\n${page.map(renderRow).join('\n\n')}${truncationNote}${capNote}`
+    `${upcoming.length} upcoming birthday(s) in ${window}:\n\n${page.map(renderRow).join('\n\n')}${truncationNote}${capNote}`
   )
 }
 

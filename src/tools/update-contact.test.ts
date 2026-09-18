@@ -84,6 +84,9 @@ describe('updateContact — birthday', () => {
     expect(cleared.isError).toBeUndefined()
     expect(cleared.content[0]?.text).not.toContain('birthday:')
     expect(readBirthday(stored(book))).toBeUndefined()
+    // Nothing else was stored, so the property is removed rather than left as `{}`.
+    expect(book.patches.at(-1)).toEqual({ anniversaries: null })
+    expect(stored(book).anniversaries).toBeUndefined()
   })
 
   test('a birthday edit keeps a wedding entry a phone wrote and lands on its birth key', async () => {

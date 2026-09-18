@@ -220,16 +220,15 @@ const notePatch = (card: ContactCard, note: string): Record<string, unknown> => 
 // changed: withBirthday keeps every foreign entry (a wedding date a phone
 // wrote) in place, and a whole-property set is the one patch shape that is
 // valid whether or not the card carried the property before (RFC 8620 §5.3
-// rejects a scoped path whose parent is missing).
+// rejects a scoped path whose parent is missing). When nothing remains the
+// property is set to null — the unambiguous "absent" — rather than to `{}`.
 const birthdayPatch = (card: ContactCard, text: string): { error: string } | { patch: Record<string, unknown> } => {
-  if (text.length === 0) {
-    return { patch: { anniversaries: withBirthday(card, undefined) } }
-  }
-  const parsed = parseBirthday(text)
-  if ('error' in parsed) {
+  const parsed = text.length === 0 ? undefined : parseBirthday(text)
+  if (parsed && 'error' in parsed) {
     return parsed
   }
-  return { patch: { anniversaries: withBirthday(card, parsed.birthday) } }
+  const anniversaries = withBirthday(card, parsed?.birthday)
+  return { patch: { anniversaries: Object.keys(anniversaries).length > 0 ? anniversaries : null } }
 }
 
 const organizationPatch = (card: ContactCard, organization: string): Record<string, unknown> => {

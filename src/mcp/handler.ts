@@ -166,8 +166,9 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     registerDeleteCalendarEvent(server, deleteCalendarEventDeps, () => ctx.token)
     registerRespondToEvent(server, respondToEventDeps, () => ctx.token)
     registerSearchContacts(server, searchContactsDeps, () => ctx.token)
-    // Reads through the write bundle: it only needs query + get.
-    registerListUpcomingBirthdays(server, contactWriteDeps, () => ctx.token)
+    // Reads through the write bundle (query + get) plus the account zone the
+    // calendar tools share, so "today" is the user's day.
+    registerListUpcomingBirthdays(server, { ...contactWriteDeps, resolveTimeZone }, () => ctx.token)
     registerCreateContact(server, contactWriteDeps, () => ctx.token)
     registerUpdateContact(server, contactWriteDeps, () => ctx.token)
     registerDeleteContact(server, contactWriteDeps, () => ctx.token)

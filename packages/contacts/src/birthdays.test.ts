@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { daysUntil, formatCalendarDate, nextOccurrence, parseCalendarDate, todayUtc } from './birthdays.ts'
+import { daysUntil, formatCalendarDate, nextOccurrence, parseCalendarDate, todayIn } from './birthdays.ts'
 
 describe('nextOccurrence', () => {
   test('a birthday later this year stays in this year', () => {
@@ -78,7 +78,12 @@ describe('calendar dates', () => {
     expect(formatCalendarDate({ day: 3, month: 3, year: 2027 })).toBe('2027-03-03')
   })
 
-  test('today is taken in UTC so the server time zone cannot shift it', () => {
-    expect(todayUtc(new Date('2026-09-18T23:30:00Z'))).toEqual({ day: 18, month: 9, year: 2026 })
+  test('today is the user’s calendar day in their zone, not the server’s', () => {
+    const instant = new Date('2026-09-19T00:30:00Z')
+    expect(todayIn(instant, 'America/Los_Angeles')).toEqual({ day: 18, month: 9, year: 2026 })
+    expect(todayIn(instant, 'Europe/Berlin')).toEqual({ day: 19, month: 9, year: 2026 })
+    expect(todayIn(instant, 'UTC')).toEqual({ day: 19, month: 9, year: 2026 })
+    // An unknown zone degrades to UTC instead of failing the call.
+    expect(todayIn(instant, 'Not/AZone')).toEqual({ day: 19, month: 9, year: 2026 })
   })
 })

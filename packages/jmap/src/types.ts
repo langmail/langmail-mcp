@@ -212,6 +212,11 @@ export interface ContactCardPartialDate {
 // `death` or a vendor value; CardDAV round-trips the first three as `BDAY`,
 // `ANNIVERSARY` and `DEATHDATE` (RFC 9555). Langmail reads and writes only
 // `birth` and preserves every other entry untouched.
+//
+// `date` is narrowed to the PartialDate form. The RFC also allows a
+// Timestamp (`{ "@type": "Timestamp", utc }`, what a vCard `BDAY` with a
+// time component becomes); such an entry has no `month`/`day` and reads as
+// no birthday, and a write replaces it with a PartialDate.
 export interface ContactCardAnniversary {
   date: ContactCardPartialDate
   kind: string

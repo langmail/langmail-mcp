@@ -21,7 +21,8 @@
 - List, create, update, and delete calendar events — including recurring series — sending iMIP invitations and cancellations to attendees
 - RSVP to invitations (accept / decline / tentative), notifying the organizer automatically
 - Resolve a name, partial name, address, or organization to known contacts — collected automatically from mail headers and calendar attendees, ranked by interaction recency and frequency
-- Create, edit, and delete contacts, holding phone numbers and structured postal addresses alongside the addressing data — for the people automatic collection structurally cannot reach
+- Create, edit, and delete contacts, holding phone numbers, structured postal addresses, and a birthday alongside the addressing data — for the people automatic collection structurally cannot reach
+- List whose birthday falls in the next N days, across every address book
 
 The public endpoint is `https://mcp.langmail.me/mcp`.
 
@@ -236,7 +237,7 @@ Feb 29 is listed on Feb 28 in a non-leap year.
 Parameters:
 
 - `days`: number (optional) — window length in days, 1–366 (default 30); 7 for a week, 30 for a month, 90 for a quarter
-- `from`: string (optional) — first day of the window as `YYYY-MM-DD` (default today, UTC)
+- `from`: string (optional) — first day of the window as `YYYY-MM-DD` (default today in the account's preferred time zone, UTC when none is set)
 - `limit`: number (optional) — maximum number of people, 1–100 (default 25)
 
 Returns:
@@ -246,7 +247,7 @@ Returns:
   stored, their `contact_id`, the stored `birthday`, and their best email
   address, so a card can be drafted without another lookup
 - A note when the window is empty, when `limit` cut the list, and when the
-  address book exceeds the 500-card sweep cap (the list may then be
+  address book reaches the 500-card sweep cap (the list may then be
   incomplete)
 
 ### create_contact

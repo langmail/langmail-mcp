@@ -17,6 +17,7 @@ import { z } from 'zod'
 
 import {
   BIRTHDAY_KEY,
+  birthAnniversary,
   COLLECTED_BOOK_NAME,
   COLLECTED_NOTE_KEY,
   collectedNoteEntry,
@@ -139,7 +140,7 @@ export const createContact = async (
     ...(Object.keys(addresses).length > 0 ? { addresses } : {}),
     // A fresh card has no foreign anniversary entries to preserve, so the
     // reserved key is written directly (withBirthday is for stored cards).
-    ...(parsedBirthday ? { anniversaries: { [BIRTHDAY_KEY]: { date: parsedBirthday.birthday, kind: 'birth' } } } : {}),
+    ...(parsedBirthday ? { anniversaries: { [BIRTHDAY_KEY]: birthAnniversary(parsedBirthday.birthday) } } : {}),
     ...(Object.keys(emails).length > 0 ? { emails } : {}),
     name: { full: name },
     notes: {
