@@ -242,7 +242,7 @@ export const readPhones = (card: ContactCard): StoredPhoneNumber[] =>
 // preserved but never read, written or listed by the tools.
 const BIRTH_KIND = 'birth'
 
-// Older Apple clients wrote vCard 3 birthdays with no known year as
+// Older vCard 3 clients wrote a birthday with no known year as
 // `1604-MM-DD` (the Gregorian reform year, chosen as an obvious sentinel).
 // Read as "no year" so nobody is reported as turning 422.
 const UNKNOWN_YEAR_SENTINEL = 1604
@@ -257,6 +257,9 @@ const LEAP_REFERENCE_YEAR = 2000
 const isCalendarDate = (month: number, day: number, year: number | undefined): boolean =>
   month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year ?? LEAP_REFERENCE_YEAR, month)
 
+// The one calendar scale this model interprets; RFC 9553 defaults to it.
+const GREGORIAN = 'gregorian'
+
 const birthEntries = (card: ContactCard): [string, ContactCardAnniversary][] =>
   Object.entries(card.anniversaries ?? {}).filter(([, a]) => a.kind === BIRTH_KIND)
 
@@ -266,7 +269,12 @@ export const readBirthday = (card: ContactCard): Birthday | undefined => {
   for (const [, entry] of birthEntries(card)) {
     // Defensive on `date`: a malformed card from a foreign client must not
     // take down every contact read that renders a birthday line.
-    const { day, month, year } = entry.date ?? {}
+    const { calendarScale, day, month, year } = entry.date ?? {}
+    // A month and day on another calendar scale (`chinese`, `hebrew`) mean
+    // something else entirely; skipped rather than read as Gregorian.
+    if (calendarScale && calendarScale !== GREGORIAN) {
+      continue
+    }
     if (typeof month !== 'number' || typeof day !== 'number') {
       continue
     }

@@ -199,16 +199,16 @@ describe('birthday', () => {
   test('withBirthday keeps a foreign wedding entry and reuses the existing birth key', () => {
     const stored = card({
       anniversaries: {
-        'apple-1': { date: { day: 3, month: 3, year: 1990 }, kind: 'birth' },
-        'apple-2': { date: { day: 1, month: 6, year: 2015 }, kind: 'wedding' },
+        'phone-1': { date: { day: 3, month: 3, year: 1990 }, kind: 'birth' },
+        'phone-2': { date: { day: 1, month: 6, year: 2015 }, kind: 'wedding' },
       },
     })
     expect(withBirthday(stored, { day: 4, month: 3 })).toEqual({
-      'apple-1': { date: { day: 4, month: 3 }, kind: 'birth' },
-      'apple-2': { date: { day: 1, month: 6, year: 2015 }, kind: 'wedding' },
+      'phone-1': { date: { day: 4, month: 3 }, kind: 'birth' },
+      'phone-2': { date: { day: 1, month: 6, year: 2015 }, kind: 'wedding' },
     })
     expect(withBirthday(stored, undefined)).toEqual({
-      'apple-2': { date: { day: 1, month: 6, year: 2015 }, kind: 'wedding' },
+      'phone-2': { date: { day: 1, month: 6, year: 2015 }, kind: 'wedding' },
     })
   })
 
@@ -221,6 +221,19 @@ describe('birthday', () => {
       day: 29,
       month: 2,
     })
+  })
+
+  test('a birthday on a non-Gregorian calendar scale is skipped, not misread', () => {
+    expect(
+      readBirthday(
+        card({ anniversaries: { b: { date: { calendarScale: 'hebrew', day: 15, month: 1 }, kind: 'birth' } } })
+      )
+    ).toBeUndefined()
+    expect(
+      readBirthday(
+        card({ anniversaries: { b: { date: { calendarScale: 'gregorian', day: 3, month: 3 }, kind: 'birth' } } })
+      )
+    ).toEqual({ day: 3, month: 3 })
   })
 
   test('withBirthday never overwrites a foreign entry sitting under the reserved key', () => {

@@ -102,6 +102,13 @@ describe('listUpcomingBirthdays', () => {
       token: 'tok',
     })
     expect(born.content[0]?.text).toContain('Robin Fairweather — 1990-03-03 (in 2 days, turning 0)')
+
+    // A window that starts a year ahead of the birth date still contains it.
+    const yearAhead = await listUpcomingBirthdays(makeDeps(cards), {
+      args: args({ days: 366, from: '1989-03-03' }),
+      token: 'tok',
+    })
+    expect(yearAhead.content[0]?.text).toContain('Robin Fairweather — 1990-03-03 (in 365 days, turning 0)')
   })
 
   test('the empty window says so and points at update_contact', async () => {

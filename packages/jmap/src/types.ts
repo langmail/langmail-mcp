@@ -202,7 +202,10 @@ export interface ContactCardAddress {
 // JSContact PartialDate (RFC 9553 §2.8.1). Every part is optional by
 // design: a birthday without a year is the common case, and a placeholder
 // year would be a bug — so no `Date` object anywhere near this.
+// `calendarScale` is a CLDR calendar name (`chinese`, `hebrew`, …); absent
+// means `gregorian`, the only scale Langmail interprets.
 export interface ContactCardPartialDate {
+  calendarScale?: string | null
   day?: number
   month?: number
   year?: number

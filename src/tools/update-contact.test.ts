@@ -93,15 +93,15 @@ describe('updateContact — birthday', () => {
     const book = fakeBook([
       authored({
         anniversaries: {
-          'apple-1': { date: { day: 3, month: 3, year: 1990 }, kind: 'birth' },
-          'apple-2': { date: { day: 1, month: 6, year: 2015 }, kind: 'wedding' },
+          'phone-1': { date: { day: 3, month: 3, year: 1990 }, kind: 'birth' },
+          'phone-2': { date: { day: 1, month: 6, year: 2015 }, kind: 'wedding' },
         },
       }),
     ])
     await updateContact(book.deps, { args: args({ birthday: '1991-03-04' }), token: 'tok' })
     expect(stored(book).anniversaries).toEqual({
-      'apple-1': { date: { day: 4, month: 3, year: 1991 }, kind: 'birth' },
-      'apple-2': { date: { day: 1, month: 6, year: 2015 }, kind: 'wedding' },
+      'phone-1': { date: { day: 4, month: 3, year: 1991 }, kind: 'birth' },
+      'phone-2': { date: { day: 1, month: 6, year: 2015 }, kind: 'wedding' },
     })
   })
 

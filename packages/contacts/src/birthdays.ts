@@ -40,10 +40,14 @@ const inYear = (birthday: Birthday, year: number): CalendarDate => ({
 const isBefore = (a: CalendarDate, b: CalendarDate): boolean => epochDay(a) < epochDay(b)
 
 // The next calendar date on or after `from` on which the birthday falls. A
-// birthday on `from` itself is `from`.
+// birthday on `from` itself is `from`. When the birth year is known the
+// answer is never earlier than the birth date: a window that starts a year
+// ahead of it still contains the day the person was born (turning 0),
+// and nobody turns -10.
 export const nextOccurrence = (birthday: Birthday, from: CalendarDate): CalendarDate => {
   const thisYear = inYear(birthday, from.year)
-  return isBefore(thisYear, from) ? inYear(birthday, from.year + 1) : thisYear
+  const next = isBefore(thisYear, from) ? inYear(birthday, from.year + 1) : thisYear
+  return birthday.year !== undefined && next.year < birthday.year ? inYear(birthday, birthday.year) : next
 }
 
 // Whole days from `from` to `occurrence`; the same day is 0.

@@ -145,12 +145,9 @@ export const listUpcomingBirthdays = async (
     if (!birthday) {
       continue
     }
+    // Never before a known birth date (see nextOccurrence), so a window that
+    // predates the birth year lists nothing and the birth date is turning 0.
     const occurrence = nextOccurrence(birthday, from)
-    // A window that predates a known birth year has no occurrence in it:
-    // nobody turns -10. The birth date itself (turning 0) still counts.
-    if (birthday.year !== undefined && occurrence.year < birthday.year) {
-      continue
-    }
     const inDays = daysUntil(occurrence, from)
     // Window end is exclusive: `days: 7` from Monday is Monday through Sunday.
     if (inDays < args.days) {

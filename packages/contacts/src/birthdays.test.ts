@@ -32,6 +32,19 @@ describe('nextOccurrence', () => {
     })
   })
 
+  test('never lands before a known birth date', () => {
+    const born = { day: 3, month: 3, year: 1990 }
+    expect(nextOccurrence(born, { day: 1, month: 1, year: 1980 })).toEqual({ day: 3, month: 3, year: 1990 })
+    expect(nextOccurrence(born, { day: 3, month: 3, year: 1989 })).toEqual({ day: 3, month: 3, year: 1990 })
+    expect(nextOccurrence(born, { day: 3, month: 3, year: 1990 })).toEqual({ day: 3, month: 3, year: 1990 })
+    // Without a year there is no birth date to respect.
+    expect(nextOccurrence({ day: 3, month: 3 }, { day: 1, month: 1, year: 1980 })).toEqual({
+      day: 3,
+      month: 3,
+      year: 1980,
+    })
+  })
+
   test('Feb 29 falls on Feb 28 in a non-leap year and on Feb 29 in a leap year', () => {
     expect(nextOccurrence({ day: 29, month: 2 }, { day: 1, month: 1, year: 2027 })).toEqual({
       day: 28,

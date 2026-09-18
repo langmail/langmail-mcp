@@ -323,7 +323,7 @@ live('contact write tools against live Stalwart — author, read back, correct, 
   })
 
   test('a stored sentinel year 1604 survives the round trip and is read as no year', async () => {
-    // Older Apple clients wrote "unknown year" as 1604. This seeds the value
+    // Older vCard 3 clients wrote "unknown year" as 1604. This seeds the value
     // over JMAP, so it proves the read-side guard against what Stalwart
     // stores — not whether Stalwart normalises a vCard 3 BDAY on CardDAV
     // import, which needs a raw vCard PUT and is still open.
