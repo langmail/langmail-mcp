@@ -252,6 +252,25 @@ describe('searchContacts — detailed', () => {
     expect(text).toContain('source: derived')
   })
 
+  test('the birthday shows once in the concise format and once in the detailed format', async () => {
+    const card = robinCard({ anniversaries: { b: { date: { day: 3, month: 3, year: 1990 }, kind: 'birth' } } })
+    const concise = await searchContacts(makeDeps([card]), { args: args(), token: 'tok' })
+    const conciseText = concise.content[0]?.text ?? ''
+    expect(conciseText.split('birthday: 1990-03-03')).toHaveLength(2)
+
+    const detailed = await searchContacts(makeDeps([card]), {
+      args: args({ response_format: 'detailed' }),
+      token: 'tok',
+    })
+    const detailedText = detailed.content[0]?.text ?? ''
+    expect(detailedText.split('birthday: 1990-03-03')).toHaveLength(2)
+  })
+
+  test('no birthday line when none is stored', async () => {
+    const result = await searchContacts(makeDeps([robinCard()]), { args: args(), token: 'tok' })
+    expect(result.content[0]?.text).not.toContain('birthday:')
+  })
+
   test('the concise format keeps the postal address out of a name-resolution answer', async () => {
     const card = robinCard({ addresses: { a0: toCardAddress({ city: 'München', label: 'home' }) } })
     const result = await searchContacts(makeDeps([card]), { args: args(), token: 'tok' })

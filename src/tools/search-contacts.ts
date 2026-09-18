@@ -41,7 +41,7 @@ import {
 
 import { type CalDavConfig, discoverAccount, fetchEvents } from '../caldav/client.ts'
 import { READ_ONLY } from './annotations.ts'
-import { profileLines } from './contact-format.ts'
+import { birthdayLine, profileLines } from './contact-format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 const searchContactsShape = {
@@ -208,6 +208,7 @@ const concisePerson = (
     .slice(0, SHOWN_INTERACTIONS)
     .map((t) => `   - ${interactionLine(t, hydrated.subjects, hydrated.eventTitles, now)}`)
   const organization = readOrganization(card)
+  const birthday = birthdayLine(card)
   return [
     `${index + 1}. ${card.name?.full ?? best?.address ?? '(unnamed)'}`,
     // The handle create_contact/update_contact/delete_contact address the
@@ -215,6 +216,9 @@ const concisePerson = (
     // costs an extra detailed round-trip.
     `   contact_id: ${card.id}`,
     ...(organization ? [`   organization: ${organization}`] : []),
+    // One short line, only when stored: "when is Robin's birthday" should
+    // not need the detailed format.
+    ...(birthday ? [birthday] : []),
     `   best_address: ${best?.address ?? '(none)'} (${best?.context ?? 'unknown'})`,
     `   address_confidence: ${best?.confidence ?? 'weak'} | relationship: ${relationshipFor(ext, now)}`,
     ...(lines.length > 0 ? ['   last_interactions:', ...lines] : []),
@@ -241,8 +245,8 @@ const detailedPerson = (
   // The authored half of the record — phones, postal addresses, note. Only
   // in the detailed format: an agent resolving a name before drafting mail
   // has no use for a street address, and the concise format is what that
-  // call reads.
-  parts.push(...profileLines(card))
+  // call reads. The birthday is already on the concise block above.
+  parts.push(...profileLines(card, { birthday: false }))
   // Provenance, because `confidence` means different things across sources:
   // on a derived address it is an inference from headers, on an authored one
   // it is the user's own assertion.
@@ -384,10 +388,12 @@ export const registerSearchContacts = (
         'create_contact. Use this before creating events or drafting mail when only ' +
         'a name is known, and before create_contact or update_contact to get the ' +
         'contact_id. Returns for each contact one or more addresses with a ' +
-        'confidence level and recent interactions; the detailed format adds phone ' +
-        'numbers, postal addresses and the note. Do not use it to enumerate all ' +
-        'contacts; a query is required. If several plausible people match, present ' +
-        'the candidates to the user rather than guessing.',
+        'confidence level, the birthday when one is stored, and recent ' +
+        'interactions; the detailed format adds phone numbers, postal addresses ' +
+        'and the note. Do not use it to enumerate all contacts; a query is ' +
+        'required, and for "whose birthday is coming up" use ' +
+        'list_upcoming_birthdays instead. If several plausible people match, ' +
+        'present the candidates to the user rather than guessing.',
       inputSchema: searchContactsShape,
       title: 'Search contacts',
     },

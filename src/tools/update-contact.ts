@@ -19,17 +19,20 @@ import { z } from 'zod'
 import {
   COLLECTED_NOTE_KEY,
   nextKey,
+  parseBirthday,
   patchCardAddress,
   readPostalAddresses,
   toCardAddress,
   toCardPhone,
   userNoteEntry,
   userNoteKey,
+  withBirthday,
 } from '@langmail/contacts'
 import { type ContactCard, type ContactCardAddress, type ContactCardEmail, type ContactCardPhone } from '@langmail/jmap'
 
 import { ACCOUNT_WRITE } from './annotations.ts'
 import {
+  birthdaySchema,
   type ContactWriteDeps,
   contactCtx,
   contactIdSchema,
@@ -62,6 +65,9 @@ const updateContactShape = {
   addedEmails: z.array(emailEntrySchema).max(10).optional().describe('Email addresses to add to the contact.'),
   addedPhones: z.array(phoneSchema).max(10).optional().describe('Phone numbers to add to the contact.'),
   addedPostalAddresses: z.array(postalAddressSchema).max(5).optional().describe('Postal addresses to add.'),
+  birthday: birthdaySchema
+    .optional()
+    .describe('New birthday as `YYYY-MM-DD`, or `--MM-DD` when the year is unknown; `""` clears it. Omit to keep it.'),
   contactId: contactIdSchema,
   name: z.string().min(1).max(200).optional().describe('New display name. Omit to keep the stored one.'),
   note: z
@@ -99,6 +105,7 @@ export const updateContactInput = z
   .object(updateContactShape)
   .refine(
     (a) =>
+      a.birthday !== undefined ||
       a.name !== undefined ||
       a.note !== undefined ||
       a.organization !== undefined ||
@@ -209,12 +216,47 @@ const notePatch = (card: ContactCard, note: string): Record<string, unknown> => 
   return { ...removals, [`notes/${key}`]: userNoteEntry(note) }
 }
 
+// The whole `anniversaries` map is re-sent with only the birth entry
+// changed: withBirthday keeps every foreign entry (a wedding date a phone
+// wrote) in place, and a whole-property set is the one patch shape that is
+// valid whether or not the card carried the property before (RFC 8620 §5.3
+// rejects a scoped path whose parent is missing).
+const birthdayPatch = (card: ContactCard, text: string): { error: string } | { patch: Record<string, unknown> } => {
+  if (text.length === 0) {
+    return { patch: { anniversaries: withBirthday(card, undefined) } }
+  }
+  const parsed = parseBirthday(text)
+  if ('error' in parsed) {
+    return parsed
+  }
+  return { patch: { anniversaries: withBirthday(card, parsed.birthday) } }
+}
+
 const organizationPatch = (card: ContactCard, organization: string): Record<string, unknown> => {
   if (organization.length === 0) {
     return { organizations: {} }
   }
   const key = Object.keys(card.organizations ?? {})[0] ?? 'o0'
   return { organizations: { [key]: { name: organization } } }
+}
+
+// The four scalars — set by naming them, cleared with `""` (name excepted).
+const scalarPatch = (
+  card: ContactCard,
+  args: UpdateContactArgs
+): { error: string } | { patch: Record<string, unknown> } => {
+  const birthday = args.birthday === undefined ? undefined : birthdayPatch(card, args.birthday.trim())
+  if (birthday && 'error' in birthday) {
+    return birthday
+  }
+  return {
+    patch: {
+      ...(birthday?.patch ?? {}),
+      ...(args.name === undefined ? {} : { name: { full: args.name.trim() } }),
+      ...(args.note === undefined ? {} : notePatch(card, args.note.trim())),
+      ...(args.organization === undefined ? {} : organizationPatch(card, args.organization.trim())),
+    },
+  }
 }
 
 export const updateContact = async (
@@ -256,6 +298,11 @@ export const updateContact = async (
     }
   }
 
+  const scalars = scalarPatch(card, args)
+  if ('error' in scalars) {
+    return errorResult(`${scalars.error} Nothing was changed.`)
+  }
+
   const addresses = resolvePostal(card, args)
   const emails = resolveEmails(card, args)
   const phones = resolvePhones(card, args)
@@ -264,12 +311,7 @@ export const updateContact = async (
     ...(emails === undefined ? {} : { emails }),
     ...(phones === undefined ? {} : { phones }),
   }
-  const patch: Record<string, unknown> = {
-    ...changed,
-    ...(args.name === undefined ? {} : { name: { full: args.name.trim() } }),
-    ...(args.note === undefined ? {} : notePatch(card, args.note.trim())),
-    ...(args.organization === undefined ? {} : organizationPatch(card, args.organization.trim())),
-  }
+  const patch: Record<string, unknown> = { ...changed, ...scalars.patch }
   if (Object.keys(patch).length === 0) {
     return errorResult('Nothing to change: the requested edit is already the stored state.')
   }
@@ -292,7 +334,7 @@ export const registerUpdateContact = (server: McpServer, deps: ContactWriteDeps,
       description:
         'Edit a stored contact by id, changing only the fields you name — everything else ' +
         'is kept, so you never have to read the record and re-send it. Set `name`, ' +
-        '`organization` or `note` directly (`""` clears the last two); add or remove email ' +
+        '`organization`, `birthday` or `note` directly (`""` clears all but the name); add or remove email ' +
         'addresses, phone numbers and postal addresses with the `added…`/`removed…` lists; ' +
         'correct one component of a stored postal address with `updatedPostalAddresses`. ' +
         'Find the contact_id and the `[a0]`-style handles with search_contacts.',

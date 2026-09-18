@@ -27,6 +27,11 @@ export const PERSONAL_BOOK_NAME = 'Contacts'
 // card doesn't already carry exactly one note of its own (see profile.ts).
 export const USER_NOTE_KEY = 'langmail-note'
 
+// Anniversary entry the contact tools write a birthday into, when the card
+// doesn't already carry a `birth` entry under some other key (see
+// profile.ts). A foreign client's key is reused so the edit lands in place.
+export const BIRTHDAY_KEY = 'langmail-birthday'
+
 // The visible note text CardDAV clients render for the entry — a short
 // explanation instead of raw data (the payload itself is invisible to
 // standard clients).

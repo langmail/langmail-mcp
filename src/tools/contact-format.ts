@@ -8,19 +8,39 @@
 // formatting alone, not on the write tools' deps bundle (mirrors
 // mail-rule-format.ts next to mail-rule-common.ts).
 
-import { readNote, readOrganization, readPhones, readPostalAddresses, sourceOf } from '@langmail/contacts'
+import {
+  formatBirthday,
+  readBirthday,
+  readNote,
+  readOrganization,
+  readPhones,
+  readPostalAddresses,
+  sourceOf,
+} from '@langmail/contacts'
 import { type ContactCard } from '@langmail/jmap'
 
 // Indented so a multi-line note stays visually attached to its contact
 // block, which is how the whole search_contacts output is shaped.
 const indentNote = (note: string): string => note.split('\n').join('\n     ')
 
-// The authored half of a card: phone numbers, postal addresses, note. Only
-// the detailed search format and the write confirmations show these — the
-// call that resolves a name before drafting mail has no use for a street
-// address.
-export const profileLines = (card: ContactCard): string[] => {
+// `birthday: 1990-03-03` / `birthday: --03-03` — the spelling the write
+// tools accept, so the line can be echoed straight back into update_contact.
+export const birthdayLine = (card: ContactCard): string | undefined => {
+  const birthday = readBirthday(card)
+  return birthday ? `   birthday: ${formatBirthday(birthday)}` : undefined
+}
+
+// The authored half of a card: birthday, phone numbers, postal addresses,
+// note. Only the detailed search format and the write confirmations show
+// these — the call that resolves a name before drafting mail has no use for
+// a street address. The birthday is the one line the concise format shows
+// too, so a caller that already printed it passes `{ birthday: false }`.
+export const profileLines = (card: ContactCard, shown: { birthday: boolean } = { birthday: true }): string[] => {
   const lines: string[] = []
+  const birthday = shown.birthday ? birthdayLine(card) : undefined
+  if (birthday) {
+    lines.push(birthday)
+  }
   const phones = readPhones(card)
   if (phones.length > 0) {
     lines.push('   phones:', ...phones.map((p) => `   - [${p.key}] ${p.number} (${p.label})`))

@@ -17,13 +17,16 @@ import {
   type ContactCard,
   type ContactCardAddress,
   type ContactCardAddressComponent,
+  type ContactCardAnniversary,
   type ContactCardNote,
   type ContactCardPhone,
 } from '@langmail/jmap'
 
+import { daysInMonth } from './birthdays.ts'
 import { readCollected } from './card.ts'
-import { COLLECTED_NOTE_KEY, USER_NOTE_KEY } from './constants.ts'
+import { BIRTHDAY_KEY, COLLECTED_NOTE_KEY, USER_NOTE_KEY } from './constants.ts'
 import {
+  type Birthday,
   type ContactSource,
   type PhoneLabel,
   type PhoneNumber,
@@ -231,6 +234,95 @@ const fromCardPhone = (key: string, phone: ContactCardPhone): StoredPhoneNumber 
 
 export const readPhones = (card: ContactCard): StoredPhoneNumber[] =>
   Object.entries(card.phones ?? {}).map(([key, phone]) => fromCardPhone(key, phone))
+
+// --- birthday --------------------------------------------------------------
+
+// The JSContact anniversary kind CardDAV maps to vCard `BDAY` (RFC 9555).
+// Every other kind (`wedding`, `death`, vendor values) is stored and
+// preserved but never read, written or listed by the tools.
+const BIRTH_KIND = 'birth'
+
+// Older Apple clients wrote vCard 3 birthdays with no known year as
+// `1604-MM-DD` (the Gregorian reform year, chosen as an obvious sentinel).
+// Read as "no year" so nobody is reported as turning 422.
+const UNKNOWN_YEAR_SENTINEL = 1604
+
+const birthEntries = (card: ContactCard): [string, ContactCardAnniversary][] =>
+  Object.entries(card.anniversaries ?? {}).filter(([, a]) => a.kind === BIRTH_KIND)
+
+// The first birth entry carrying at least a month and a day. A year-only
+// birthday (legal in JSContact) is unusable for "coming up" and is skipped.
+export const readBirthday = (card: ContactCard): Birthday | undefined => {
+  for (const [, entry] of birthEntries(card)) {
+    const { day, month, year } = entry.date
+    if (typeof month === 'number' && typeof day === 'number' && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const known = typeof year === 'number' && year !== UNKNOWN_YEAR_SENTINEL
+      return { day, month, ...(known ? { year } : {}) }
+    }
+  }
+  return
+}
+
+const FULL_DATE = /^(\d{4})-(\d{2})-(\d{2})$/u
+const YEARLESS_DATE = /^--(\d{2})-(\d{2})$/u
+
+// A leap year to validate a yearless date against: `--02-29` is a real
+// birthday, so February gets 29 days when no year says otherwise.
+const LEAP_REFERENCE_YEAR = 2000
+
+// What both write tools call on the caller's text. `YYYY-MM-DD`, or
+// `--MM-DD` when the year is unknown (the vCard 4 spelling, RFC 6350
+// §4.3.1). The calendar date is validated: Feb 30 is rejected, `--02-29`
+// is accepted because a leap-day birthday needs no particular year.
+export const parseBirthday = (text: string): { birthday: Birthday } | { error: string } => {
+  const trimmed = text.trim()
+  const full = FULL_DATE.exec(trimmed)
+  const yearless = YEARLESS_DATE.exec(trimmed)
+  if (!(full || yearless)) {
+    return { error: `Birthday "${text}" is not a date. Use YYYY-MM-DD, or --MM-DD when the year is unknown.` }
+  }
+  const year = full ? Number(full[1]) : undefined
+  const month = Number(full ? full[2] : yearless?.[1])
+  const day = Number(full ? full[3] : yearless?.[2])
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth(year ?? LEAP_REFERENCE_YEAR, month)) {
+    return { error: `Birthday "${text}" is not a calendar date.` }
+  }
+  return { birthday: { day, month, ...(year === undefined ? {} : { year }) } }
+}
+
+// `1990-03-03`, or `--03-03` when the year is unknown — the spelling the
+// tools accept, so what they print can be sent straight back.
+export const formatBirthday = (birthday: Birthday): string => {
+  const md = `${String(birthday.month).padStart(2, '0')}-${String(birthday.day).padStart(2, '0')}`
+  return birthday.year === undefined ? `--${md}` : `${String(birthday.year).padStart(4, '0')}-${md}`
+}
+
+// The anniversaries map with the birth entry replaced (or removed when
+// `birthday` is undefined) and every other entry — a wedding date a phone
+// wrote, a vendor kind — left exactly where it was. A stored birth entry
+// keeps its key so the edit lands in place on every synced device; a card
+// without one takes the reserved key.
+export const withBirthday = (
+  card: ContactCard,
+  birthday: Birthday | undefined
+): Record<string, ContactCardAnniversary> => {
+  const stored = card.anniversaries ?? {}
+  const births = birthEntries(card)
+  const kept = Object.fromEntries(Object.entries(stored).filter(([, a]) => a.kind !== BIRTH_KIND))
+  if (birthday === undefined) {
+    return kept
+  }
+  const [key, existing] = births[0] ?? [BIRTHDAY_KEY, undefined]
+  const { day, month, year } = birthday
+  return {
+    ...kept,
+    [key]: {
+      ...existing,
+      date: { day, month, ...(year === undefined ? {} : { year }) },
+      kind: BIRTH_KIND,
+    },
+  }
+}
 
 // --- organization, note, source -------------------------------------------
 

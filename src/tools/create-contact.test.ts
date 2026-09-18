@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { readNote, readPhones, readPostalAddresses, sourceOf } from '@langmail/contacts'
+import { BIRTHDAY_KEY, readBirthday, readNote, readPhones, readPostalAddresses, sourceOf } from '@langmail/contacts'
 
 import { derivedCard, fakeBook } from './contact-test-fixtures.ts'
 import { createContact, createContactInput } from './create-contact.ts'
@@ -119,6 +119,35 @@ describe('createContact', () => {
     expect(result.content[0]?.text).toContain('card-robin')
     expect(result.content[0]?.text).toContain('update_contact')
     expect(book.cards.size).toBe(1)
+  })
+
+  test('stores a birthday as a JSContact birth anniversary and echoes it back', async () => {
+    const book = fakeBook()
+    const result = await createContact(book.deps, { args: args({ birthday: '1990-03-03' }), token: 'tok' })
+    expect(result.isError).toBeUndefined()
+    const [card] = [...book.cards.values()]
+    const stored = card as NonNullable<typeof card>
+    expect(stored.anniversaries).toEqual({ [BIRTHDAY_KEY]: { date: { day: 3, month: 3, year: 1990 }, kind: 'birth' } })
+    expect(readBirthday(stored)).toEqual({ day: 3, month: 3, year: 1990 })
+    expect(result.content[0]?.text).toContain('birthday: 1990-03-03')
+  })
+
+  test('a birthday without a year stores no year — never a placeholder', async () => {
+    const book = fakeBook()
+    const result = await createContact(book.deps, { args: args({ birthday: '--02-29' }), token: 'tok' })
+    const [card] = [...book.cards.values()]
+    expect(readBirthday(card as NonNullable<typeof card>)).toEqual({ day: 29, month: 2 })
+    expect(result.content[0]?.text).toContain('birthday: --02-29')
+  })
+
+  test('a malformed birthday is an error and nothing is created', async () => {
+    const book = fakeBook()
+    for (const birthday of ['2024-02-30', '3 March 1990']) {
+      const result = await createContact(book.deps, { args: args({ birthday }), token: 'tok' })
+      expect(result.isError).toBe(true)
+      expect(result.content[0]?.text).toContain('Nothing was created')
+    }
+    expect(book.cards.size).toBe(0)
   })
 
   test('rejects a postal address with no usable component', () => {

@@ -3,10 +3,13 @@ import { describe, expect, test } from 'bun:test'
 import { type ContactCard } from '@langmail/jmap'
 
 import { collectedNoteEntry, nextKey } from './card.ts'
-import { COLLECTED_NOTE_KEY, USER_NOTE_KEY } from './constants.ts'
+import { BIRTHDAY_KEY, COLLECTED_NOTE_KEY, USER_NOTE_KEY } from './constants.ts'
 import {
+  formatBirthday,
   formatCardAddress,
+  parseBirthday,
   patchCardAddress,
+  readBirthday,
   readNote,
   readOrganization,
   readPhones,
@@ -15,6 +18,7 @@ import {
   toCardAddress,
   toCardPhone,
   userNoteKey,
+  withBirthday,
 } from './profile.ts'
 
 const card = (overrides: Partial<ContactCard> = {}): ContactCard => ({
@@ -161,6 +165,73 @@ describe('phones', () => {
       { key: 'p0', label: 'mobile', number: '+1' },
       { key: 'p1', label: 'home', number: '+2' },
     ])
+  })
+})
+
+describe('birthday', () => {
+  test('reads a birth entry with and without a year', () => {
+    expect(
+      readBirthday(card({ anniversaries: { k0: { date: { day: 3, month: 3, year: 1990 }, kind: 'birth' } } }))
+    ).toEqual({ day: 3, month: 3, year: 1990 })
+    expect(readBirthday(card({ anniversaries: { k0: { date: { day: 3, month: 3 }, kind: 'birth' } } }))).toEqual({
+      day: 3,
+      month: 3,
+    })
+  })
+
+  test('ignores a card with only a wedding entry, and a year-only birthday', () => {
+    expect(
+      readBirthday(card({ anniversaries: { w: { date: { day: 1, month: 6, year: 2015 }, kind: 'wedding' } } }))
+    ).toBeUndefined()
+    expect(readBirthday(card({ anniversaries: { b: { date: { year: 1990 }, kind: 'birth' } } }))).toBeUndefined()
+    expect(readBirthday(card())).toBeUndefined()
+  })
+
+  test('treats the vCard 3 sentinel year 1604 as unknown', () => {
+    expect(
+      readBirthday(card({ anniversaries: { b: { date: { day: 3, month: 3, year: 1604 }, kind: 'birth' } } }))
+    ).toEqual({
+      day: 3,
+      month: 3,
+    })
+  })
+
+  test('withBirthday keeps a foreign wedding entry and reuses the existing birth key', () => {
+    const stored = card({
+      anniversaries: {
+        'apple-1': { date: { day: 3, month: 3, year: 1990 }, kind: 'birth' },
+        'apple-2': { date: { day: 1, month: 6, year: 2015 }, kind: 'wedding' },
+      },
+    })
+    expect(withBirthday(stored, { day: 4, month: 3 })).toEqual({
+      'apple-1': { date: { day: 4, month: 3 }, kind: 'birth' },
+      'apple-2': { date: { day: 1, month: 6, year: 2015 }, kind: 'wedding' },
+    })
+    expect(withBirthday(stored, undefined)).toEqual({
+      'apple-2': { date: { day: 1, month: 6, year: 2015 }, kind: 'wedding' },
+    })
+  })
+
+  test('withBirthday takes the reserved key on a card without a birth entry', () => {
+    expect(withBirthday(card(), { day: 29, month: 2, year: 2000 })).toEqual({
+      [BIRTHDAY_KEY]: { date: { day: 29, month: 2, year: 2000 }, kind: 'birth' },
+    })
+  })
+
+  test('parseBirthday accepts both spellings and validates the calendar date', () => {
+    expect(parseBirthday('1990-03-03')).toEqual({ birthday: { day: 3, month: 3, year: 1990 } })
+    expect(parseBirthday(' --03-03 ')).toEqual({ birthday: { day: 3, month: 3 } })
+    expect(parseBirthday('--02-29')).toEqual({ birthday: { day: 29, month: 2 } })
+    expect(parseBirthday('2000-02-29')).toEqual({ birthday: { day: 29, month: 2, year: 2000 } })
+    expect(parseBirthday('2024-02-30')).toHaveProperty('error')
+    expect(parseBirthday('2023-02-29')).toHaveProperty('error')
+    expect(parseBirthday('--13-01')).toHaveProperty('error')
+    expect(parseBirthday('3 March 1990')).toHaveProperty('error')
+  })
+
+  test('formatBirthday prints what parseBirthday reads', () => {
+    expect(formatBirthday({ day: 3, month: 3, year: 1990 })).toBe('1990-03-03')
+    expect(formatBirthday({ day: 3, month: 3 })).toBe('--03-03')
   })
 })
 

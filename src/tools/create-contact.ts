@@ -16,10 +16,12 @@ import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
 import {
+  BIRTHDAY_KEY,
   COLLECTED_BOOK_NAME,
   COLLECTED_NOTE_KEY,
   collectedNoteEntry,
   PERSONAL_BOOK_NAME,
+  parseBirthday,
   toCardAddress,
   toCardPhone,
   USER_NOTE_KEY,
@@ -34,6 +36,7 @@ import {
 
 import { ACCOUNT_WRITE } from './annotations.ts'
 import {
+  birthdaySchema,
   type ContactCtx,
   type ContactWriteDeps,
   contactCtx,
@@ -47,6 +50,7 @@ import { renderContact } from './contact-format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 const createContactShape = {
+  birthday: birthdaySchema.optional(),
   emails: z
     .array(emailEntrySchema)
     .max(10)
@@ -97,6 +101,11 @@ export const createContact = async (
   if (name.length === 0) {
     return errorResult('name must not be empty.')
   }
+  // Parsed before any read, so a malformed date costs no round-trip.
+  const parsedBirthday = args.birthday === undefined ? undefined : parseBirthday(args.birthday)
+  if (parsedBirthday && 'error' in parsedBirthday) {
+    return errorResult(`${parsedBirthday.error} Nothing was created.`)
+  }
   const ctx = await contactCtx(deps, cx.token)
 
   // Pre-write guard: an address already on a card means this person is
@@ -126,6 +135,9 @@ export const createContact = async (
   const card: ContactCardDraft = {
     addressBookIds: { [bookId]: true },
     ...(Object.keys(addresses).length > 0 ? { addresses } : {}),
+    // A fresh card has no foreign anniversary entries to preserve, so the
+    // reserved key is written directly (withBirthday is for stored cards).
+    ...(parsedBirthday ? { anniversaries: { [BIRTHDAY_KEY]: { date: parsedBirthday.birthday, kind: 'birth' } } } : {}),
     ...(Object.keys(emails).length > 0 ? { emails } : {}),
     name: { full: name },
     notes: {
@@ -161,7 +173,7 @@ export const registerCreateContact = (server: McpServer, deps: ContactWriteDeps,
         'Create a contact in the user’s address book — a person the address book does not ' +
         'yet know, typically because they have never sent mail or shared a calendar event. ' +
         'Holds a name plus optional email addresses, phone numbers, structured postal ' +
-        'addresses, an organization, and a note. Search with search_contacts first: if the ' +
+        'addresses, an organization, a birthday, and a note. Search with search_contacts first: if the ' +
         'person is already known, use update_contact instead so their history stays on one ' +
         'record. The contact syncs to the user’s devices over CardDAV.',
       inputSchema: createContactShape,

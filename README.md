@@ -206,7 +206,7 @@ Parameters:
 
 - `query`: string — name, partial name, email address, or organization (1–200 characters); matched against display names, organization names, addresses, and address domains
 - `context`: string (optional) — `work`, `private`, or `any` (default `any`); biases which address is reported as best when a person has several, never filters anyone out
-- `response_format`: string (optional) — `concise` (default) or `detailed`; detailed adds all known addresses, phone numbers, structured postal addresses, the note, the `source` marker, the full interaction log with record ids for chaining into `get_email` / `list_calendar_events`, and excluded relay addresses
+- `response_format`: string (optional) — `concise` (default) or `detailed`; detailed adds all known addresses, phone numbers, structured postal addresses, the note, the `source` marker, the full interaction log with record ids for chaining into `get_email` / `list_calendar_events`, and excluded relay addresses. The birthday, when stored, is printed in both formats
 - `limit`: number (optional) — maximum number of matching people, 1–25 (default 5)
 
 Returns:
@@ -214,21 +214,48 @@ Returns:
 - A ranked list of people, each with a `contact_id` (the handle the write
   tools take), a best address, an `address_confidence`
   (`confirmed` / `strong` / `weak`), a computed `relationship`
-  (`active` / `occasional` / `incidental`), and the most recent interactions as
-  relative-dated prose, hydrated at query time from the record ids on the card
+  (`active` / `occasional` / `incidental`), the stored `birthday` when there
+  is one (`1990-03-03`, or `--03-03` when the year is unknown), and the most
+  recent interactions as relative-dated prose, hydrated at query time from the
+  record ids on the card
 - A truncation note when more people matched than `limit` allows, and a note
   when relay addresses were excluded from the shown people
 
 Collection and grading live in `packages/contacts`; the card model and every
 threshold are documented in `docs/reference/contact-collection.md`.
 
+### list_upcoming_birthdays
+
+Lists the contacts whose birthday falls within a window of days, starting
+today or on a given date — "whose birthday is coming up this week / month /
+quarter", and, with a past `from`, "which birthdays did I miss". Every address
+book is scanned, collected and personal alike, and only birthdays *stored* on
+a card are listed: collection never infers one from mail. A birthday on
+Feb 29 is listed on Feb 28 in a non-leap year.
+
+Parameters:
+
+- `days`: number (optional) — window length in days, 1–366 (default 30); 7 for a week, 30 for a month, 90 for a quarter
+- `from`: string (optional) — first day of the window as `YYYY-MM-DD` (default today, UTC)
+- `limit`: number (optional) — maximum number of people, 1–100 (default 25)
+
+Returns:
+
+- People sorted by date then name, each with the date the birthday falls on,
+  how many days away it is, the age they are turning when the birth year is
+  stored, their `contact_id`, the stored `birthday`, and their best email
+  address, so a card can be drafted without another lookup
+- A note when the window is empty, when `limit` cut the list, and when the
+  address book exceeds the 500-card sweep cap (the list may then be
+  incomplete)
+
 ### create_contact
 
 Creates a contact in the user's default address book — a person the collected
 book structurally cannot reach, because they have never sent mail or shared a
 calendar event. Holds a name plus optional email addresses, phone numbers,
-structured postal addresses, an organization, and a note; an email address is
-not required. The card is stamped `source: authored`, and collection only ever
+structured postal addresses, an organization, a birthday, and a note; an
+email address is not required. The card is stamped `source: authored`, and collection only ever
 fills blanks on standard properties, so nothing typed here is later
 overwritten by inference. Refuses when a supplied address already belongs to
 another card, naming that card's id.
@@ -240,6 +267,7 @@ Parameters:
 - `phones`: array (optional) — up to 10 `{ number, label? }`; label is `mobile` / `home` / `work` / `fax` / `other`
 - `postalAddresses`: array (optional) — up to 5 `{ street?, postalCode?, city?, region?, country?, label? }`; `country` is an ISO 3166-1 alpha-2 code, and at least one component beyond the label is required
 - `organization`: string (optional)
+- `birthday`: string (optional) — `YYYY-MM-DD`, or `--MM-DD` when the year is unknown; stored as a JSContact `birth` anniversary, which CardDAV clients show as the birthday field
 - `note`: string (optional, up to 2000 characters)
 
 Returns:
@@ -258,7 +286,7 @@ re-send it (the same reasoning as `update_calendar_event`'s attendee delta).
 Parameters:
 
 - `contactId`: string — as printed by `search_contacts`
-- `name`, `organization`, `note`: string (optional) — set directly; `""` clears the last two
+- `name`, `organization`, `birthday`, `note`: string (optional) — set directly; `""` clears all but the name. `birthday` is `YYYY-MM-DD` or `--MM-DD`; other anniversary kinds a CardDAV client stored on the card (a wedding date) are preserved
 - `addedEmails` / `removedEmails`: arrays (optional) — removal is by address, case-insensitive
 - `addedPhones` / `removedPhones`: arrays (optional) — removal is by `[p0]` handle or by the number itself
 - `addedPostalAddresses` / `updatedPostalAddresses` / `removedPostalAddresses`: arrays (optional) — corrections name a `key` plus only the changed components; removal is by `[a0]` handle or by label

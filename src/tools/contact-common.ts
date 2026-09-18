@@ -127,6 +127,14 @@ export const emailEntrySchema = z.object({
     .describe('Whether this is a work or a private address. Inferred from the domain when omitted.'),
 })
 
+// The two vCard spellings (RFC 6350 §4.3.1), validated as a calendar date by
+// parseBirthday in the handler — a zod regex alone would accept Feb 30, and
+// its error names both spellings, which a bare schema rejection would not.
+export const birthdaySchema = z
+  .string()
+  .max(40)
+  .describe('Birthday as `YYYY-MM-DD`, or `--MM-DD` when the year is unknown.')
+
 export const contactIdSchema = z
   .string()
   .min(1)

@@ -53,6 +53,15 @@ export interface PhoneNumber {
   number: string
 }
 
+// A birthday as the card stores it: month and day always, the year only
+// when it is actually known. Never a `Date` — a placeholder year would turn
+// "unknown" into a wrong age on every device the card syncs to.
+export interface Birthday {
+  day: number
+  month: number
+  year?: number
+}
+
 // A card entry plus the key it is stored under. The key is the handle
 // search_contacts prints and update_contact takes, the same way the
 // interaction log exposes record ids for chaining. `display` is the card's

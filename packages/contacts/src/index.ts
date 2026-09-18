@@ -1,7 +1,16 @@
 // biome-ignore lint/performance/noBarrelFile: package entry point requires re-exports
 export { normalizeAddress } from './address-class.ts'
+export {
+  type CalendarDate,
+  daysUntil,
+  formatCalendarDate,
+  nextOccurrence,
+  parseCalendarDate,
+  todayUtc,
+} from './birthdays.ts'
 export { collectedNoteEntry, nextKey, readCollected } from './card.ts'
 export {
+  BIRTHDAY_KEY,
   COLLECTED_BOOK_NAME,
   COLLECTED_NOTE_KEY,
   PERSONAL_BOOK_NAME,
@@ -17,8 +26,11 @@ export {
   observationsFromEvent,
 } from './observations.ts'
 export {
+  formatBirthday,
   formatCardAddress,
+  parseBirthday,
   patchCardAddress,
+  readBirthday,
   readNote,
   readOrganization,
   readPhones,
@@ -28,6 +40,7 @@ export {
   toCardPhone,
   userNoteEntry,
   userNoteKey,
+  withBirthday,
 } from './profile.ts'
 export {
   type AddressCandidate,
@@ -39,6 +52,7 @@ export {
 } from './scoring.ts'
 export type {
   AddressContext,
+  Birthday,
   Channel,
   CollectedAddress,
   CollectedExtension,

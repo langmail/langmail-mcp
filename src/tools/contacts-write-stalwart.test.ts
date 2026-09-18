@@ -27,6 +27,7 @@ import {
   collectContacts,
   liveCollectionDeps,
   observationsFromEmail,
+  readBirthday,
   readPostalAddresses,
   sourceOf,
 } from '@langmail/contacts'
@@ -45,6 +46,7 @@ import {
 import { type ContactWriteDeps } from './contact-common.ts'
 import { createContact, createContactInput } from './create-contact.ts'
 import { deleteContact, deleteContactInput } from './delete-contact.ts'
+import { listUpcomingBirthdays, listUpcomingBirthdaysInput } from './list-upcoming-birthdays.ts'
 import { type SearchContactsDeps, searchContacts, searchContactsInput } from './search-contacts.ts'
 import { updateContact, updateContactInput } from './update-contact.ts'
 
@@ -290,6 +292,51 @@ live('contact write tools against live Stalwart — author, read back, correct, 
     })
     expect(result.isError).toBe(true)
     expect(result.content[0]?.text).toContain(contactId)
+  })
+
+  test('a yearless birthday round-trips through Stalwart and shows up as upcoming', async () => {
+    // `--MM-DD`: the partial date must come back without a year — a server
+    // that filled one in would report a wrong age on every synced device.
+    const result = await updateContact(writeDeps, {
+      args: updateContactInput.parse({ birthday: '--03-03', contactId }),
+      token: TOKEN,
+    })
+    expect(result.isError).toBeUndefined()
+    expect(result.content[0]?.text).toContain('birthday: --03-03')
+
+    const [card] = await contactCardGet({ ...ctx, ids: [contactId] })
+    expect(readBirthday(card as NonNullable<typeof card>)).toEqual({ day: 3, month: 3 })
+
+    const search = await searchContacts(searchDeps, {
+      args: searchContactsInput.parse({ query: 'Fairweather' }),
+      token: TOKEN,
+    })
+    expect(search.content[0]?.text).toContain('birthday: --03-03')
+
+    const upcoming = await listUpcomingBirthdays(writeDeps, {
+      args: listUpcomingBirthdaysInput.parse({ days: 7, from: '2027-03-01' }),
+      token: TOKEN,
+    })
+    expect(upcoming.isError).toBeUndefined()
+    expect(upcoming.content[0]?.text).toContain(`${PERSON} — 2027-03-03 (in 2 days)`)
+    expect(upcoming.content[0]?.text).toContain(`contact_id: ${contactId}`)
+  })
+
+  test('the vCard 3 sentinel year 1604 is read back as no year', async () => {
+    // Older Apple clients wrote "unknown year" as 1604. Whether Stalwart
+    // normalises it or stores it verbatim, the read side reports no year.
+    await contactCardUpdate({
+      ...ctx,
+      cardId: contactId,
+      patch: { anniversaries: { legacy: { date: { day: 3, month: 3, year: 1604 }, kind: 'birth' } } },
+    })
+    const [card] = await contactCardGet({ ...ctx, ids: [contactId] })
+    expect(readBirthday(card as NonNullable<typeof card>)).toEqual({ day: 3, month: 3 })
+
+    // Clearing it removes the birth entry and leaves nothing behind.
+    await updateContact(writeDeps, { args: updateContactInput.parse({ birthday: '', contactId }), token: TOKEN })
+    const [cleared] = await contactCardGet({ ...ctx, ids: [contactId] })
+    expect(readBirthday(cleared as NonNullable<typeof cleared>)).toBeUndefined()
   })
 
   test('delete_contact removes the card from the account', async () => {

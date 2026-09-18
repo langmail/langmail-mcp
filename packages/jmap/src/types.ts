@@ -199,11 +199,31 @@ export interface ContactCardAddress {
   [extension: `${string}:${string}`]: unknown
 }
 
+// JSContact PartialDate (RFC 9553 §2.8.1). Every part is optional by
+// design: a birthday without a year is the common case, and a placeholder
+// year would be a bug — so no `Date` object anywhere near this.
+export interface ContactCardPartialDate {
+  day?: number
+  month?: number
+  year?: number
+}
+
+// JSContact Anniversary (RFC 9553 §2.8.1). `kind` is `birth`, `wedding`,
+// `death` or a vendor value; CardDAV round-trips the first three as `BDAY`,
+// `ANNIVERSARY` and `DEATHDATE` (RFC 9555). Langmail reads and writes only
+// `birth` and preserves every other entry untouched.
+export interface ContactCardAnniversary {
+  date: ContactCardPartialDate
+  kind: string
+  [extension: `${string}:${string}`]: unknown
+}
+
 // A ContactCard draft: JSContact Card (RFC 9553) narrowed to what Langmail
 // writes, before the server assigns an id.
 export interface ContactCardDraft {
   addressBookIds: Record<string, boolean>
   addresses?: Record<string, ContactCardAddress> | null
+  anniversaries?: Record<string, ContactCardAnniversary> | null
   emails?: Record<string, ContactCardEmail> | null
   name?: ContactCardName | null
   notes?: Record<string, ContactCardNote> | null

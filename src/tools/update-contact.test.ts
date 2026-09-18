@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 
 import {
+  BIRTHDAY_KEY,
   COLLECTED_NOTE_KEY,
   collectedNoteEntry,
+  readBirthday,
   readNote,
   readPhones,
   readPostalAddresses,
@@ -67,6 +69,49 @@ describe('updateContact — scalars', () => {
     const book = fakeBook([{ addressBookIds: { ab: true }, id: 'card-robin', name: { full: 'Robin' } }])
     await updateContact(book.deps, { args: args({ note: 'hello' }), token: 'tok' })
     expect(book.patches[0]).toEqual({ notes: { 'langmail-note': { note: 'hello' } } })
+  })
+})
+
+describe('updateContact — birthday', () => {
+  test('sets a birthday, echoes it, and clears it with ""', async () => {
+    const book = fakeBook([authored()])
+    const set = await updateContact(book.deps, { args: args({ birthday: '--03-03' }), token: 'tok' })
+    expect(set.isError).toBeUndefined()
+    expect(set.content[0]?.text).toContain('birthday: --03-03')
+    expect(stored(book).anniversaries).toEqual({ [BIRTHDAY_KEY]: { date: { day: 3, month: 3 }, kind: 'birth' } })
+
+    const cleared = await updateContact(book.deps, { args: args({ birthday: '' }), token: 'tok' })
+    expect(cleared.isError).toBeUndefined()
+    expect(cleared.content[0]?.text).not.toContain('birthday:')
+    expect(readBirthday(stored(book))).toBeUndefined()
+  })
+
+  test('a birthday edit keeps a wedding entry a phone wrote and lands on its birth key', async () => {
+    const book = fakeBook([
+      authored({
+        anniversaries: {
+          'apple-1': { date: { day: 3, month: 3, year: 1990 }, kind: 'birth' },
+          'apple-2': { date: { day: 1, month: 6, year: 2015 }, kind: 'wedding' },
+        },
+      }),
+    ])
+    await updateContact(book.deps, { args: args({ birthday: '1991-03-04' }), token: 'tok' })
+    expect(stored(book).anniversaries).toEqual({
+      'apple-1': { date: { day: 4, month: 3, year: 1991 }, kind: 'birth' },
+      'apple-2': { date: { day: 1, month: 6, year: 2015 }, kind: 'wedding' },
+    })
+  })
+
+  test('a malformed birthday is an error and nothing is changed', async () => {
+    const book = fakeBook([authored()])
+    const result = await updateContact(book.deps, { args: args({ birthday: '2024-02-30' }), token: 'tok' })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('Nothing was changed')
+    expect(book.patches).toHaveLength(0)
+  })
+
+  test('a birthday alone satisfies the "at least one field" check', () => {
+    expect(updateContactInput.safeParse({ birthday: '--03-03', contactId: 'card-robin' }).success).toBe(true)
   })
 })
 
