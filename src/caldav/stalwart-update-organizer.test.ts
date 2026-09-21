@@ -158,7 +158,6 @@ live('update_calendar_event against live Stalwart — stored ORGANIZER survives 
         uid,
       }),
       token: TOKEN,
-      uid,
     })
 
     const occurrence = new Date(start.getTime() + 7 * 86_400_000)
@@ -199,7 +198,6 @@ live('update_calendar_event against live Stalwart — stored ORGANIZER survives 
         uid,
       }),
       token: TOKEN,
-      uid,
     })
 
     const result = await updateCalendarEvent(makeLiveDeps(cfg), {
