@@ -220,7 +220,7 @@ live('search_contacts against live Stalwart — collect from mail + calendar, th
       title: 'Lunch — Kai & Robin',
       uid: eventUid,
     })
-    await putEvent(caldavCfg, { calendarUrl, ical, token: TOKEN, uid: eventUid })
+    await putEvent(caldavCfg, { calendarUrl, ical, token: TOKEN })
     await collectContacts(
       liveCollectionDeps,
       ctx,

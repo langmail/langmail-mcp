@@ -3,14 +3,18 @@ import { describe, expect, test } from 'bun:test'
 import {
   findEventObject,
   isEmptyCollectionError,
+  newEventResourceName,
   pickDefaultCalendar,
   pickOrganizer,
+  putEvent,
   withTrailingSlash,
 } from './client.ts'
 import { buildInvite } from './ical.ts'
 import { type CalendarObject, type CalendarSummary } from './types.ts'
 
 const cal = (url: string, displayName = ''): CalendarSummary => ({ displayName, url })
+
+const UUID_ICS_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.ics$/u
 
 describe('pickDefaultCalendar', () => {
   test('prefers a /default/ collection', () => {
@@ -58,6 +62,83 @@ describe('pickOrganizer', () => {
 
   test('returns null when there are no addresses', () => {
     expect(pickOrganizer([])).toBeNull()
+  })
+})
+
+describe('newEventResourceName', () => {
+  // The bug this replaced: we named the `.ics` after the event UID, our UIDs
+  // carried a domain, and since Stalwart 0.16.19 the `@` is stored verbatim
+  // rather than percent-encoded — which makes the resource invisible in Apple
+  // Calendar and iOS Calendar. A UUID has no `@` and needs no encoding, which
+  // this single assertion covers; see putEvent below for the guard that the
+  // name is actually what reaches the wire.
+  test('is a bare UUID with an .ics extension, so it leaks nothing from the object', () => {
+    expect(newEventResourceName()).toMatch(UUID_ICS_RE)
+  })
+})
+
+// The fix site itself: `putEvent` must name the resource from
+// `newEventResourceName`, never from anything inside the payload. The
+// createCalendarEvent unit tests mock `deps.putEvent` away and so cannot see
+// the filename, and the live-server assertion in caldav-integration.test.ts
+// runs only when CALDAV_* is set — so without this, re-deriving the filename
+// from the UID would pass the whole default `bun test` run.
+//
+// The request is captured with a loopback server rather than by stubbing
+// `fetch`: tsdav binds `globalThis.fetch` at module load, so a later
+// reassignment never reaches it, and mock.module is process-wide for the whole
+// test run (see handler.logging.test.ts). A real server keeps tsdav's own URL
+// building — the part that turns a filename into an href — inside the path
+// under test.
+describe('putEvent', () => {
+  const UID = 'legacy-uid-9f3c@mail.example.com'
+
+  const capturePutUrl = async (): Promise<string> => {
+    let path = ''
+    const server = Bun.serve({
+      fetch: (req) => {
+        path = new URL(req.url).pathname
+        return new Response('', { status: 201 })
+      },
+      port: 0,
+    })
+    try {
+      const base = `http://127.0.0.1:${server.port}`
+      await putEvent(
+        { serverUrl: base },
+        {
+          calendarUrl: `${base}/dav/cal/u/default/`,
+          ical: buildInvite({
+            attendees: ['guest@example.com'],
+            end: new Date('2026-06-12T10:30:00Z'),
+            organizer: 'host@langmail.me',
+            start: new Date('2026-06-12T10:00:00Z'),
+            title: 'Sync',
+            uid: UID,
+          }),
+          token: 'tok',
+        }
+      )
+      return path
+    } finally {
+      await server.stop(true)
+    }
+  }
+
+  test('PUTs to a generated UUID name, not to anything derived from the payload', async () => {
+    const path = await capturePutUrl()
+    const name = path.slice(path.lastIndexOf('/') + 1)
+
+    expect(name).toMatch(UUID_ICS_RE)
+    // The UID in the payload carries a domain; none of it may reach the href.
+    expect(path).not.toContain('@')
+    expect(path).not.toContain('%40')
+    expect(path).not.toContain('legacy-uid-9f3c')
+    expect(path).not.toContain('mail.example.com')
+  })
+
+  test('names two PUTs of the same payload differently', async () => {
+    expect(await capturePutUrl()).not.toBe(await capturePutUrl())
   })
 })
 

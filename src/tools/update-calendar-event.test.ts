@@ -411,6 +411,12 @@ describe('updateCalendarEvent — partial updates', () => {
 
     const ical = unfold(cap.updated[0]?.ical ?? '')
     expect(ical).not.toContain('ATTENDEE')
+    // ORGANIZER must survive the uninvite even though no attendee is left.
+    // Stalwart's scheduler acts only when the principal is the organizer, so
+    // an object naming none gives the RFC 6638 diff nothing to anchor the
+    // CANCEL fan-out on — and the result text below promises that fan-out.
+    expect(ical).toContain('ORGANIZER')
+    expect(ical).toContain('mailto:host@langmail.me')
     expect(result.isError).toBeUndefined()
     expect(result.content[0]?.text).toContain('no attendees remain')
   })
@@ -771,6 +777,29 @@ describe('updateCalendarEvent — timeZone never moves a preserved time', () => 
 describe('updateCalendarEvent — single occurrence (recurrenceId)', () => {
   const OCCURRENCE = '2026-06-23T10:00:00Z'
 
+  // Uninviting everyone from one occurrence of a series that has attendees
+  // leaves that component with none, but the spliced object still carries
+  // METHOD:REQUEST from the master. RFC 5546 §3.2.2 requires ORGANIZER in
+  // every REQUEST component, and Stalwart enforces it with 412
+  // SameOrganizerInAllComponents — so the override must keep the master's
+  // ORGANIZER rather than infer it away from the empty attendee list.
+  test('keeps the master’s ORGANIZER on an override left with no attendees', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
+      args: { attendees: [], recurrenceId: OCCURRENCE, uid: UID },
+      token: 'tok',
+    })
+
+    expect(result.isError).toBeUndefined()
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    expect((ical.match(/BEGIN:VEVENT/gu) ?? []).length).toBe(2)
+    expect(ical).toContain('METHOD:REQUEST')
+    // One ORGANIZER per component, and both name the same address.
+    const organizers = ical.match(/^ORGANIZER.*$/gmu) ?? []
+    expect(organizers).toHaveLength(2)
+    expect(new Set(organizers).size).toBe(1)
+  })
+
   test('splices an override alongside the untouched master', async () => {
     const cap = captured()
     const result = await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
@@ -1112,12 +1141,17 @@ describe('updateCalendarEvent — attendee delta', () => {
   test('adds the first attendee onto an event created without any', async () => {
     // The two-step blocker flow: create_calendar_event without attendees, then
     // invite once the address is known.
+    //
+    // The stored object deliberately carries no ORGANIZER, because that is
+    // what create_calendar_event now writes for a personal event. Promoting it
+    // to a scheduling object therefore has no stored organizer to reuse and
+    // must fall back to the discovered principal — without one, Stalwart has
+    // nothing to fan the invitation out from.
     const cap = captured()
     const personal = storedEvent({
       data: buildInvite({
         attendees: [],
         end: new Date('2026-08-03T13:00:00Z'),
-        organizer: 'host@langmail.me',
         sequence: 0,
         start: new Date('2026-08-03T12:00:00Z'),
         timeZone: 'UTC',
@@ -1125,11 +1159,17 @@ describe('updateCalendarEvent — attendee delta', () => {
         uid: UID,
       }),
     })
+    expect(personal.data).not.toContain('ORGANIZER')
+
     const result = await updateCalendarEvent(makeDeps(account(), personal, cap), {
       args: { addedAttendees: ['anna@example.com'], uid: UID },
       token: 'tok',
     })
-    expect(unfold(cap.updated[0]?.ical ?? '')).toContain('mailto:anna@example.com')
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    expect(ical).toContain('mailto:anna@example.com')
+    expect(ical).toContain('METHOD:REQUEST')
+    expect(ical).toContain('ORGANIZER')
+    expect(ical).toContain('mailto:host@langmail.me')
     expect(result.isError).toBeUndefined()
   })
 

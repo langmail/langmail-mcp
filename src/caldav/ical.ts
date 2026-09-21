@@ -9,6 +9,15 @@ import ical, { ICalAttendeeRole, ICalAttendeeStatus, ICalCalendarMethod } from '
 import { toZonedDate, UTC_TIME_ZONE } from './timezone.ts'
 
 const RECURRENCE_ID_LINE_RE = /^RECURRENCE-ID(?:;[^:]*)?:.*$/mu
+// The DTSTAMP content line, with whatever params ical-generator attached.
+// `buildInvite` always emits exactly one VEVENT, so the `g` flag is belt and
+// braces rather than load-bearing; `String.replace` resets `lastIndex`, so
+// sharing the regex across calls is safe (`.test`/`.exec` would not be).
+//
+// It follows that only output passing through here is restamped: a stored
+// master's pre-existing floating DTSTAMP is healed by a whole-event rebuild,
+// not by an occurrence edit, which splices the master across verbatim.
+const DTSTAMP_LINE_RE = /^DTSTAMP(?:;[^:]*)?:.*$/gmu
 // The start of each ATTENDEE content line (before its first param/value
 // delimiter); multiline + global so every attendee is matched, folded
 // continuation lines (leading space) are not.
@@ -19,8 +28,25 @@ export interface InviteInput {
   description?: string
   end: Date
   location?: string
-  // Bare organizer email (no `mailto:`), the authenticated principal.
-  organizer: string
+  // Bare organizer email (no `mailto:`), the authenticated principal. Omit it
+  // to emit no ORGANIZER at all, which a *freshly created* personal event
+  // does: with no attendees it is not a scheduling object, so it needs
+  // neither METHOD nor ORGANIZER (RFC 5545 §3.8.4.3 requires ORGANIZER only
+  // for group-scheduled components).
+  //
+  // Omitting is the caller's explicit decision and must not be inferred from
+  // `attendees` being empty. Two cases have no attendees and still require an
+  // ORGANIZER, and both are silent failures if it goes missing:
+  //
+  //   - An occurrence override of a series that *does* have attendees. The
+  //     spliced object keeps METHOD:REQUEST from the master, and RFC 5546
+  //     §3.2.2 requires ORGANIZER in every REQUEST component; Stalwart
+  //     rejects the mismatch with 412 SameOrganizerInAllComponents (see
+  //     docs/reference/stalwart/observed-behaviour.md).
+  //   - Uninviting everyone from an event. Stalwart's scheduler only acts
+  //     when the principal is the organizer, so an object naming no organizer
+  //     gives the RFC 6638 diff nothing to anchor the CANCEL fan-out on.
+  organizer?: string
   // When set, this VEVENT is a single-occurrence override of a recurring
   // series: it carries a RECURRENCE-ID naming the instance it replaces (its
   // *original* start), while start/end are that occurrence's new times.
@@ -48,9 +74,10 @@ export interface InviteInput {
   start: Date
   timeZone?: string
   title: string
-  // Stable iCalendar UID. Our create tool also uses it to name the `.ics`
-  // resource on PUT, but the server is authoritative — other clients may
-  // name the object differently, so reads match by UID (see fetchEvent).
+  // Stable iCalendar UID — a bare UUID (RFC 7986 §5.3: no host or domain
+  // data). Independent of the `.ics` resource name the object is stored under
+  // (RFC 4791 §5.3.2), so reads match by UID, never by filename (see
+  // fetchEvent).
   uid: string
 }
 
@@ -72,10 +99,10 @@ export const buildInvite = (input: InviteInput): string => {
   const event = cal.createEvent({
     end: toZonedDate(input.end, timeZone),
     id: input.uid,
-    organizer: { email: input.organizer, name: input.organizer },
     start: toZonedDate(input.start, timeZone),
     summary: input.title,
     timezone: timeZone,
+    ...(input.organizer ? { organizer: { email: input.organizer, name: input.organizer } } : {}),
     ...(input.description ? { description: input.description } : {}),
     ...(input.location ? { location: input.location } : {}),
     ...(input.sequence === undefined ? {} : { sequence: input.sequence }),
@@ -100,7 +127,13 @@ export const buildInvite = (input: InviteInput): string => {
     })
   }
 
-  let serialized = cal.toString()
+  // RFC 5545 §3.8.7.2: DTSTAMP is a UTC DATE-TIME — it has no TZID param and no
+  // floating form. ical-generator formats it in the event's timezone, so a
+  // zoned event gets a floating local timestamp whose meaning depends on the
+  // host clock. Restamp it in UTC. (Rewriting the serialized line is the only
+  // lever: ical-generator has no per-property timezone.)
+  let serialized = cal.toString().replace(DTSTAMP_LINE_RE, `DTSTAMP:${formatUtcTimestamp(new Date())}`)
+
   if (input.recurrenceId && input.recurrenceTimeZone && input.recurrenceTimeZone !== timeZone) {
     serialized = serialized.replace(
       RECURRENCE_ID_LINE_RE,
@@ -127,13 +160,14 @@ export const buildInvite = (input: InviteInput): string => {
 
 const pad = (value: number, length = 2): string => String(value).padStart(length, '0')
 
+// An instant as an RFC 5545 UTC DATE-TIME value (`YYYYMMDDTHHMMSSZ`).
+const formatUtcTimestamp = (instant: Date): string =>
+  `${pad(instant.getUTCFullYear(), 4)}${pad(instant.getUTCMonth() + 1)}${pad(instant.getUTCDate())}` +
+  `T${pad(instant.getUTCHours())}${pad(instant.getUTCMinutes())}${pad(instant.getUTCSeconds())}Z`
+
 const formatRecurrenceId = (instant: Date, timeZone: string): string => {
   if (timeZone === UTC_TIME_ZONE) {
-    return (
-      'RECURRENCE-ID:' +
-      `${pad(instant.getUTCFullYear(), 4)}${pad(instant.getUTCMonth() + 1)}${pad(instant.getUTCDate())}` +
-      `T${pad(instant.getUTCHours())}${pad(instant.getUTCMinutes())}${pad(instant.getUTCSeconds())}Z`
-    )
+    return `RECURRENCE-ID:${formatUtcTimestamp(instant)}`
   }
 
   const zoned = toZonedDate(instant, timeZone)

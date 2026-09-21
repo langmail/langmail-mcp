@@ -43,6 +43,8 @@ const PASS = process.env.CALDAV_PASSWORD
 // header comes from cfg.authHeaders. Use a marker so a stray Bearer is obvious.
 const TOKEN = 'integration-basic-auth'
 
+const UUID_ICS_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.ics$/u
+
 const live = BASE && USER && PASS ? describe : describe.skip
 
 live('caldav client against a live server', () => {
@@ -75,7 +77,7 @@ live('caldav client against a live server', () => {
 
   test('create → fetch → update → delete round-trips', async () => {
     const uid = `lifecycle-${Date.now()}@mcp-it`
-    await putEvent(cfg, { calendarUrl, ical: invite(uid, 'Original'), token: TOKEN, uid })
+    await putEvent(cfg, { calendarUrl, ical: invite(uid, 'Original'), token: TOKEN })
 
     const created = await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })
     expect(created).not.toBeNull()
@@ -105,7 +107,7 @@ live('caldav client against a live server', () => {
   // we *emit* the RRULE — this proves Radicale stores and returns it unmangled.
   test('recurring event round-trips its RRULE through create → list → update → delete', async () => {
     const uid = `recurring-${Date.now()}@mcp-it`
-    await putEvent(cfg, { calendarUrl, ical: invite(uid, 'Weekly sync', 'FREQ=WEEKLY;BYDAY=TH'), token: TOKEN, uid })
+    await putEvent(cfg, { calendarUrl, ical: invite(uid, 'Weekly sync', 'FREQ=WEEKLY;BYDAY=TH'), token: TOKEN })
 
     const created = await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })
     expect(created?.data).toContain('RRULE:FREQ=WEEKLY;BYDAY=TH')
@@ -144,7 +146,7 @@ live('caldav client against a live server', () => {
   test('cancels one occurrence via EXDATE (PUT, not DELETE); whole-series delete still 404s', async () => {
     const uid = `cancel-occurrence-${Date.now()}@mcp-it`
     // Weekly on Tuesdays from 2026-06-16, so 2026-06-23T10:00:00Z is occurrence #2.
-    await putEvent(cfg, { calendarUrl, ical: invite(uid, 'Weekly sync', 'FREQ=WEEKLY;BYDAY=TU'), token: TOKEN, uid })
+    await putEvent(cfg, { calendarUrl, ical: invite(uid, 'Weekly sync', 'FREQ=WEEKLY;BYDAY=TU'), token: TOKEN })
 
     const occurrence = '2026-06-23T10:00:00Z'
     const cancelled = await deleteCalendarEvent(makeDeleteDeps(cfg), {
@@ -175,7 +177,7 @@ live('caldav client against a live server', () => {
   // "override is gone" assertion actually bites.
   test('cancelling an overridden occurrence drops the override and adds an EXDATE', async () => {
     const uid = `cancel-override-${Date.now()}@mcp-it`
-    await putEvent(cfg, { calendarUrl, ical: invite(uid, 'Weekly sync', 'FREQ=WEEKLY;BYDAY=TU'), token: TOKEN, uid })
+    await putEvent(cfg, { calendarUrl, ical: invite(uid, 'Weekly sync', 'FREQ=WEEKLY;BYDAY=TU'), token: TOKEN })
 
     const occurrence = '2026-06-23T10:00:00Z'
     // Splice an override for that occurrence and PUT it back, so the stored object
@@ -247,10 +249,36 @@ live('caldav client against a live server', () => {
     expect(await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })).toBeNull()
   })
 
+  // putEvent used to name the resource `${uid}.ics`, and our UIDs carried a
+  // domain, so every created event landed under a name containing a raw `@`.
+  //
+  // What this proves is that the name *we* send survives a real server's
+  // storage and comes back in the href unchanged — the CI server is Radicale,
+  // which has none of Stalwart's encoding behaviour, so it cannot prove
+  // anything about Stalwart or Apple. The guard that we never derive the name
+  // from the payload is the hermetic `putEvent` test in client.test.ts.
+  test('stores a created event under a URL-safe name containing no "@" (regression)', async () => {
+    const uid = `resource-name-${Date.now()}@mcp-it`
+    await putEvent(cfg, { calendarUrl, ical: invite(uid, 'Resource name'), token: TOKEN })
+
+    const stored = await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })
+    expect(stored).not.toBeNull()
+
+    const href = stored?.url ?? ''
+    const resourceName = href.slice(href.lastIndexOf('/') + 1)
+    expect(resourceName).not.toContain('@')
+    expect(resourceName).not.toContain('%40')
+    // And it is unrelated to the UID, per RFC 4791 §5.3.2 / §11.
+    expect(resourceName).not.toContain('resource-name-')
+    expect(resourceName).toMatch(UUID_ICS_RE)
+
+    await deleteEvent(cfg, { token: TOKEN, url: href, ...(stored?.etag ? { etag: stored.etag } : {}) })
+  })
+
   test('fetchEvents lists every stored event regardless of filename', async () => {
     const a = `multi-a-${Date.now()}@mcp-it`
     const b = `multi-b-${Date.now()}@mcp-it`
-    await putEvent(cfg, { calendarUrl, ical: invite(a, 'A'), token: TOKEN, uid: a })
+    await putEvent(cfg, { calendarUrl, ical: invite(a, 'A'), token: TOKEN })
     await createCalendarObject({
       calendar: { url: calendarUrl },
       filename: `b-${Date.now()}.ics`,
@@ -274,7 +302,7 @@ live('caldav client against a live server', () => {
   // the client functions.
   test('list_calendar_events tool returns seeded events with their UIDs', async () => {
     const uid = `tool-list-${Date.now()}@mcp-it`
-    await putEvent(cfg, { calendarUrl, ical: invite(uid, 'Tool Listed'), token: TOKEN, uid })
+    await putEvent(cfg, { calendarUrl, ical: invite(uid, 'Tool Listed'), token: TOKEN })
 
     const result = await listCalendarEvents(makeListDeps(cfg), { args: { calendarUrl }, token: TOKEN })
     expect(result.isError).toBeUndefined()
@@ -303,7 +331,6 @@ live('caldav client against a live server', () => {
         uid,
       }),
       token: TOKEN,
-      uid,
     })
 
     const result = await listCalendarEvents(makeListDeps(cfg), { args: { calendarUrl }, token: TOKEN })
@@ -386,7 +413,6 @@ live('caldav client against a live server', () => {
         uid,
       }),
       token: TOKEN,
-      uid,
     })
 
     const seeded = await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })

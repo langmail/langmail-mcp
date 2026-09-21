@@ -238,7 +238,6 @@ live('update_calendar_event attendee deltas against live Stalwart', () => {
         uid,
       }),
       token: TOKEN,
-      uid,
     })
     const invited = await waitForNewMessage(stay.basic, stay.mail, 0)
     expect(invited).not.toBeNull()

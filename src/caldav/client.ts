@@ -189,14 +189,24 @@ export interface PutEventParams {
   calendarUrl: string
   ical: string
   token: string
-  uid: string
 }
+
+// The name of a freshly created `.ics` resource. RFC 4791 §5.3.2 says the
+// resource URL need bear no relationship to the object's properties, and §11
+// says the name MUST NOT expose data from inside the object — so it is a bare
+// UUID, generated independently of the event UID.
+//
+// Naming the resource after the UID is what made events created here invisible
+// in Apple Calendar: our UIDs carried a domain, and since Stalwart 0.16.19 a
+// `@` in a resource name is stored verbatim rather than percent-encoded. See
+// docs/upstream/stalwart/caldav-resource-name-encoding-asymmetric.md.
+export const newEventResourceName = (): string => `${crypto.randomUUID()}.ics`
 
 export const putEvent = async (cfg: CalDavConfig, p: PutEventParams): Promise<void> => {
   const res = await createCalendarObject({
     calendar: { url: withTrailingSlash(p.calendarUrl) },
     fetchOptions: deadline(),
-    filename: `${p.uid}.ics`,
+    filename: newEventResourceName(),
     headers: authHeaders(cfg, p.token),
     iCalString: p.ical,
   })
@@ -266,9 +276,10 @@ export interface FetchEventParams {
 }
 
 // Finds the stored object holding a given iCalendar UID among a collection's
-// objects. CalDAV resource names are server-assigned and need NOT equal the
-// UID (only events created by our own tool happen to be named `${uid}.ics`),
-// so we match on the parsed VEVENT UID rather than guessing the filename.
+// objects. CalDAV resource names are server-assigned and bear no relation to
+// the UID — including for events we create ourselves (see
+// newEventResourceName) — so we match on the parsed VEVENT UID rather than
+// guessing the filename.
 export const findEventObject = (objects: CalendarObject[], uid: string): CalendarObject | null =>
   objects.find((o) => parseEvents(o.data).some((e) => e.uid === uid)) ?? null
 

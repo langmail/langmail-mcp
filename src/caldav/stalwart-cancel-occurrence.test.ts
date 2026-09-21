@@ -221,7 +221,6 @@ live('delete_calendar_event single occurrence against live Stalwart', () => {
         uid,
       }),
       token: TOKEN,
-      uid,
     })
     // Wait for the initial series invitation to reach the attendee, so the cancel
     // fan-out is a genuine second delivery, not a race with the first.

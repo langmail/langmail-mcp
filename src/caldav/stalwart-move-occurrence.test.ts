@@ -228,7 +228,6 @@ live('update_calendar_event single-occurrence move against live Stalwart', () =>
         uid,
       }),
       token: TOKEN,
-      uid,
     })
     // Wait for the initial series invitation, so the move fan-out is a genuine
     // second delivery rather than a race with the first.

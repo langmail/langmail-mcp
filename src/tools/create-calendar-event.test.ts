@@ -2,7 +2,16 @@ import { describe, expect, test } from 'bun:test'
 
 import { type PutEventParams } from '../caldav/client.ts'
 import { type DiscoveredAccount } from '../caldav/types.ts'
-import { type CreateCalendarEventArgs, createCalendarEvent, createCalendarEventInput } from './create-calendar-event.ts'
+import {
+  type CreateCalendarEventArgs,
+  createCalendarEvent,
+  createCalendarEventInput,
+  eventUidSchema,
+} from './create-calendar-event.ts'
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u
+const UID_LINE_RE = /^UID:(.+)$/mu
+const FOLD_RE = /\r\n /gu
 
 const account = (over: Partial<DiscoveredAccount> = {}): DiscoveredAccount => ({
   calendars: [{ displayName: 'Default', url: 'https://m/dav/cal/u/default/' }],
@@ -86,6 +95,24 @@ describe('createCalendarEventInput schema', () => {
   })
 })
 
+describe('eventUidSchema', () => {
+  test('accepts a bare UUID, the form we now mint', () => {
+    expect(eventUidSchema.safeParse(crypto.randomUUID()).success).toBe(true)
+  })
+
+  // Events created before the UID became a bare UUID are still stored under —
+  // and addressed by — `<uuid>@<domain>`, so update/delete/RSVP must keep
+  // accepting it. This is the input contract for live data, not a shim.
+  test('accepts the legacy uuid@domain form', () => {
+    expect(eventUidSchema.safeParse(`${crypto.randomUUID()}@langmail.me`).success).toBe(true)
+  })
+
+  test('rejects path separators', () => {
+    expect(eventUidSchema.safeParse('../other/evt').success).toBe(false)
+    expect(eventUidSchema.safeParse('a\\b').success).toBe(false)
+  })
+})
+
 describe('createCalendarEvent', () => {
   test('PUTs an invite to the default calendar and reports the attendees', async () => {
     const captured: PutEventParams[] = []
@@ -99,7 +126,6 @@ describe('createCalendarEvent', () => {
     expect(ical).toContain('METHOD:REQUEST')
     expect(ical).toContain('host@langmail.me')
     expect(ical).toContain('guest@example.com')
-    expect(put?.uid).toContain('@langmail.me')
 
     const txt = result.content[0]?.text ?? ''
     expect(txt).toContain('Sync')
@@ -119,11 +145,38 @@ describe('createCalendarEvent', () => {
     // RFC 5546 REQUEST needs at least one attendee, so a personal event is a
     // plain calendar object — no scheduling METHOD at all.
     expect(ical).not.toContain('METHOD')
-    expect(ical).toContain('ORGANIZER')
+    // ORGANIZER follows METHOD: with nobody to schedule with, the VEVENT is a
+    // personal event rather than a scheduling object, so it names no organizer.
+    expect(ical).not.toContain('ORGANIZER')
 
     const txt = result.content[0]?.text ?? ''
     expect(txt).toContain('no attendees, no invitations sent')
     expect(txt).toContain('uid: ')
+  })
+
+  // RFC 7986 §5.3: a UID MUST NOT carry host or domain data. We used to mint
+  // `<uuid>@<mail domain>`, which both leaked the domain into every outgoing
+  // invitation and — because create named the `.ics` after the UID — put a raw
+  // `@` in the resource name, which Apple's clients silently drop.
+  describe('event UID', () => {
+    const uidOf = (ical: string): string => UID_LINE_RE.exec(ical.replace(FOLD_RE, ''))?.[1]?.trim() ?? ''
+
+    test('is a bare UUID carrying no domain', async () => {
+      const captured: PutEventParams[] = []
+      await createCalendarEvent(makeDeps(account(), captured), { args: args(), token: 'tok' })
+
+      const uid = uidOf(captured[0]?.ical ?? '')
+      expect(uid).toMatch(UUID_RE)
+      expect(uid).not.toContain('@')
+      expect(uid).not.toContain('langmail.me')
+    })
+
+    test('is reported back to the caller verbatim', async () => {
+      const captured: PutEventParams[] = []
+      const result = await createCalendarEvent(makeDeps(account(), captured), { args: args(), token: 'tok' })
+
+      expect(result.content[0]?.text).toContain(`uid: ${uidOf(captured[0]?.ical ?? '')}`)
+    })
   })
 
   test('treats an empty attendees array like a missing one', async () => {
@@ -305,7 +358,7 @@ describe('createCalendarEvent', () => {
     expect(input.attendees).toEqual([{ email: 'robin@northwind.example' }])
     expect(input.organizer).toBe('host@langmail.me')
     expect(input.selfAddress).toBe('host@langmail.me')
-    expect(input.uid).toContain('@langmail.me')
+    expect(input.uid).toMatch(UUID_RE)
   })
 
   test('no write-through call when the PUT fails', async () => {

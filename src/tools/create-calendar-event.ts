@@ -1,8 +1,9 @@
-// create_calendar_event tool — builds a VEVENT (METHOD:REQUEST) with the
-// authenticated principal as ORGANIZER and PUTs it to a CalDAV calendar.
-// Stalwart then fans out DKIM-signed iMIP invitations to the attendees, if
-// any: an attendee-less VEVENT is a personal event (a block of the user's
-// own time) and triggers no scheduling at all.
+// create_calendar_event tool — builds a VEVENT and PUTs it to a CalDAV
+// calendar. With attendees it is a scheduling object (METHOD:REQUEST, the
+// authenticated principal as ORGANIZER) and Stalwart fans out DKIM-signed
+// iMIP invitations to them. Without, it is a personal event — a block of the
+// user's own time — carrying neither METHOD nor ORGANIZER, and triggers no
+// scheduling at all.
 //
 // Logic sits behind a `Deps` interface (discover + putEvent) so it
 // unit-tests without live Stalwart; `makeLiveDeps` wires tsdav in.
@@ -31,11 +32,15 @@ import { OUTWARD_WRITE } from './annotations.ts'
 import { type AttendeeWriteThrough } from './contact-write-through.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
-// An event's iCalendar UID, as returned by create_calendar_event. Rejects
-// path separators: create names the `.ics` resource `${uid}.ics` on PUT (see
-// putEvent), so a `/` or `\` could otherwise escape the validated calendar
-// collection. (Reads no longer depend on the filename — they match by UID —
-// but the create-side PUT still does.)
+// An event's iCalendar UID, as accepted by the update/delete/RSVP tools and
+// returned by create_calendar_event. Deliberately permissive: it must keep
+// accepting the legacy `<uuid>@<domain>` form, because events created before
+// the UID became a bare UUID are still addressed by those UIDs.
+//
+// Path separators stay rejected. No code path derives a resource URL from a
+// UID any more (resources are resolved by parsed VEVENT UID, and created under
+// an independently generated name — see newEventResourceName), so this is
+// defence in depth rather than the load-bearing guard it once was.
 export const eventUidSchema = z
   .string()
   .min(1)
@@ -95,8 +100,6 @@ export interface CreateCalendarEventContext {
   token: string
 }
 
-const domainOf = (email: string): string => email.split('@')[1] ?? 'langmail.me'
-
 // One-line human summary of who the PUT invited (create-side counterpart of
 // update-calendar-event's deliverySummary).
 const deliverySummary = (attendees: string[], notify: 'all' | 'none' | undefined): string => {
@@ -136,25 +139,34 @@ export const createCalendarEvent = async (
   }
 
   const rrule = args.recurrence ? toRRule(args.recurrence) : undefined
-  // No attendees → a personal event: the VEVENT carries only the ORGANIZER, so
-  // Stalwart's scheduler has nobody to fan an iMIP invitation out to.
+  // No attendees → a personal event: a block of the user's own time rather
+  // than a scheduling object, so the VEVENT gets neither METHOD nor ORGANIZER
+  // and Stalwart's scheduler has nothing to fan out.
+  //
+  // Create is the only caller that may omit the ORGANIZER. An *edit* that
+  // leaves an event with no attendees must still name one — see the field's
+  // comment on InviteInput for the two ways that goes silently wrong.
   const attendees = args.attendees ?? []
-  const uid = `${crypto.randomUUID()}@${domainOf(account.organizer)}`
+  // A bare UUID: RFC 7986 §5.3 (2016) supersedes the RFC 5545 advice to
+  // qualify a UID with a domain — it MUST NOT carry host or domain data. Side
+  // benefit: the mail domain no longer leaks into every invitation sent to an
+  // external attendee.
+  const uid = crypto.randomUUID()
   const ical = buildInvite({
     attendees,
     end,
-    organizer: account.organizer,
     start,
     timeZone,
     title: args.title,
     uid,
+    ...(attendees.length > 0 ? { organizer: account.organizer } : {}),
     ...(args.description ? { description: args.description } : {}),
     ...(args.location ? { location: args.location } : {}),
     ...(rrule ? { rrule } : {}),
     ...(args.notify === 'none' ? { scheduleAgent: 'NONE' as const } : {}),
   })
 
-  await deps.putEvent({ calendarUrl, ical, token, uid })
+  await deps.putEvent({ calendarUrl, ical, token })
 
   await deps.collectAttendees?.({
     attendees: attendees.map((email) => ({ email })),
@@ -205,8 +217,8 @@ export const registerCreateCalendarEvent = (
       // detail lives on the docs site, because this string is indexed by tool
       // search and length costs ranking.
       description:
-        'Create, schedule or book a new calendar event or meeting on the user’s calendar, with the ' +
-        'authenticated user as organizer, and invite people to it. Attendees receive iMIP invitations ' +
+        'Create, schedule or book a new calendar event or meeting on the user’s calendar, and invite ' +
+        'people to it with the authenticated user as organizer. Attendees receive iMIP invitations ' +
         '(pass `notify: "none"` to suppress them); omit `attendees` for a personal event — a block of the ' +
         'user’s own time. Pass `recurrence` for a repeating series (e.g. a weekly team meeting) in one ' +
         'call. Defaults to the user’s default calendar.',

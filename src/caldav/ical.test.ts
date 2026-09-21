@@ -6,6 +6,11 @@ import { buildInvite, maxSequence, parseSequence } from './ical.ts'
 // so substring assertions don't trip over a folded email address.
 const unfold = (ics: string): string => ics.replace(/\r\n /gu, '')
 
+const DTSTAMP_LINE_RE = /^DTSTAMP.*$/mu
+// RFC 5545 §3.8.7.2: a UTC DATE-TIME — no TZID param, no floating form.
+const DTSTAMP_UTC_RE = /^DTSTAMP:\d{8}T\d{6}Z$/u
+const DTSTAMP_PARTS_RE = /^DTSTAMP:(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/u
+
 const baseInput = {
   attendees: ['guest@example.com'],
   end: new Date('2026-06-12T10:30:00Z'),
@@ -33,7 +38,56 @@ describe('buildInvite', () => {
     const ics = buildInvite({ ...baseInput, attendees: [] })
     expect(ics).not.toContain('METHOD')
     expect(ics).not.toContain('ATTENDEE')
+  })
+
+  test('omits ORGANIZER when the caller passes none', () => {
+    // RFC 5545 §3.8.4.3 scopes ORGANIZER to a group-scheduled component, so a
+    // freshly created personal event may leave it out. That is the caller's
+    // decision, expressed by omitting the field.
+    const { organizer: _organizer, ...personal } = baseInput
+    expect(buildInvite({ ...personal, attendees: [] })).not.toContain('ORGANIZER')
+  })
+
+  // Emitting it must not be inferred from the attendee list: an occurrence
+  // override of a series that has attendees, and an event everyone has just
+  // been uninvited from, both have none and both still require an ORGANIZER.
+  test('keeps ORGANIZER on an attendee-less event when the caller passes one', () => {
+    const ics = unfold(buildInvite({ ...baseInput, attendees: [] }))
+    expect(ics).toContain('ORGANIZER')
     expect(ics).toContain('mailto:host@langmail.me')
+  })
+
+  test('keeps ORGANIZER when there are attendees', () => {
+    const ics = unfold(buildInvite(baseInput))
+    expect(ics).toContain('ORGANIZER')
+    expect(ics).toContain('mailto:host@langmail.me')
+  })
+
+  // RFC 5545 §3.8.7.2: DTSTAMP is a UTC DATE-TIME. ical-generator formats it in
+  // the event's timezone, so a zoned event used to get a floating local
+  // timestamp whose meaning depended on the host clock.
+  describe('DTSTAMP', () => {
+    const dtstampOf = (ics: string): string => DTSTAMP_LINE_RE.exec(unfold(ics))?.[0] ?? ''
+
+    test('is UTC for a UTC event', () => {
+      expect(dtstampOf(buildInvite(baseInput))).toMatch(DTSTAMP_UTC_RE)
+    })
+
+    test('is UTC for a zoned event, with no TZID param', () => {
+      const line = dtstampOf(buildInvite({ ...baseInput, timeZone: 'Europe/Berlin' }))
+      expect(line).toMatch(DTSTAMP_UTC_RE)
+      expect(line).not.toContain('TZID')
+    })
+
+    test('stamps the current instant', () => {
+      const before = Date.now()
+      const line = dtstampOf(buildInvite({ ...baseInput, timeZone: 'Europe/Berlin' }))
+      const [, y, mo, d, h, mi, s] = DTSTAMP_PARTS_RE.exec(line) ?? []
+      const stamped = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s))
+      // Truncated to whole seconds, so allow the second `before` fell in.
+      expect(stamped).toBeGreaterThanOrEqual(before - 1000)
+      expect(stamped).toBeLessThanOrEqual(Date.now())
+    })
   })
 
   test('adds each attendee with RSVP and NEEDS-ACTION', () => {
