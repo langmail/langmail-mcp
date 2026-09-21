@@ -8,6 +8,7 @@
 // lifetime. The service runs from source on Bun everywhere (dev, tests,
 // container), so a build-time artifact would only add drift.
 
+import { type McpUiResourceMeta } from '@modelcontextprotocol/ext-apps'
 import { RESOURCE_MIME_TYPE, registerAppResource } from '@modelcontextprotocol/ext-apps/server'
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
@@ -77,7 +78,10 @@ export const emailViewerHtml = (): Promise<string> => {
 export const registerEmailViewerResource = (server: McpServer, publicUrl: string): void => {
   // CSP wants origins; MCP_PUBLIC_URL may carry a trailing slash or path.
   const origin = new URL(publicUrl).origin
-  const ui = {
+  // Annotated because ui is hoisted into a const to serve both sites below:
+  // excess-property checking only reaches fresh literals, so without the
+  // SDK's own shape a misspelled key would travel straight to the host.
+  const ui: McpUiResourceMeta = {
     // Images — cid capability URLs and proxied remote images — load from
     // this server only. No connectDomains: the view makes no fetches.
     csp: { resourceDomains: [origin] },
