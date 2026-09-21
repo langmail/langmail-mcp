@@ -1141,12 +1141,17 @@ describe('updateCalendarEvent — attendee delta', () => {
   test('adds the first attendee onto an event created without any', async () => {
     // The two-step blocker flow: create_calendar_event without attendees, then
     // invite once the address is known.
+    //
+    // The stored object deliberately carries no ORGANIZER, because that is
+    // what create_calendar_event now writes for a personal event. Promoting it
+    // to a scheduling object therefore has no stored organizer to reuse and
+    // must fall back to the discovered principal — without one, Stalwart has
+    // nothing to fan the invitation out from.
     const cap = captured()
     const personal = storedEvent({
       data: buildInvite({
         attendees: [],
         end: new Date('2026-08-03T13:00:00Z'),
-        organizer: 'host@langmail.me',
         sequence: 0,
         start: new Date('2026-08-03T12:00:00Z'),
         timeZone: 'UTC',
@@ -1154,11 +1159,17 @@ describe('updateCalendarEvent — attendee delta', () => {
         uid: UID,
       }),
     })
+    expect(personal.data).not.toContain('ORGANIZER')
+
     const result = await updateCalendarEvent(makeDeps(account(), personal, cap), {
       args: { addedAttendees: ['anna@example.com'], uid: UID },
       token: 'tok',
     })
-    expect(unfold(cap.updated[0]?.ical ?? '')).toContain('mailto:anna@example.com')
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    expect(ical).toContain('mailto:anna@example.com')
+    expect(ical).toContain('METHOD:REQUEST')
+    expect(ical).toContain('ORGANIZER')
+    expect(ical).toContain('mailto:host@langmail.me')
     expect(result.isError).toBeUndefined()
   })
 

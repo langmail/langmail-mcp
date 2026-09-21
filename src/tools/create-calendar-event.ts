@@ -217,8 +217,8 @@ export const registerCreateCalendarEvent = (
       // detail lives on the docs site, because this string is indexed by tool
       // search and length costs ranking.
       description:
-        'Create, schedule or book a new calendar event or meeting on the user’s calendar, with the ' +
-        'authenticated user as organizer, and invite people to it. Attendees receive iMIP invitations ' +
+        'Create, schedule or book a new calendar event or meeting on the user’s calendar, and invite ' +
+        'people to it with the authenticated user as organizer. Attendees receive iMIP invitations ' +
         '(pass `notify: "none"` to suppress them); omit `attendees` for a personal event — a block of the ' +
         'user’s own time. Pass `recurrence` for a repeating series (e.g. a weekly team meeting) in one ' +
         'call. Defaults to the user’s default calendar.',
