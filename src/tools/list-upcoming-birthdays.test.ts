@@ -139,6 +139,19 @@ describe('listUpcomingBirthdays', () => {
     expect(text).not.toContain('may be incomplete')
   })
 
+  test('a server returning pages shorter than asked is paged to the end', async () => {
+    // A query limit below PAGE_SIZE: every page is short, none is the last.
+    const cards = Array.from({ length: 250 }, (_, i) =>
+      person(`card-${i}`, `Person ${i}`, i === 249 ? birth({ day: 19, month: 9 }) : undefined)
+    )
+    const deps = makeDeps(cards)
+    const result = await listUpcomingBirthdays(
+      { ...deps, contactCardQuery: (p) => deps.contactCardQuery({ ...p, limit: 100 }) },
+      { args: args({ days: 7 }), token: 'tok' }
+    )
+    expect(result.content[0]?.text).toContain('Person 249 — 2026-09-19 (tomorrow)')
+  })
+
   test('a sweep that reaches the cap adds the incompleteness note', async () => {
     const cards = Array.from({ length: CARD_CAP + 1 }, (_, i) =>
       person(`card-${i}`, `Person ${i}`, i === 0 ? birth({ day: 20, month: 9 }) : undefined)
