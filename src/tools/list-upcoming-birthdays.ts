@@ -1,15 +1,16 @@
 // list_upcoming_birthdays tool — "whose birthday is coming up", answered from
 // the birthdays stored on contact cards across every address book.
 //
-// The candidate set is fetch-all-and-filter: one unfiltered ContactCard/query
-// capped at CARD_CAP ids, one ContactCard/get, then the pure date logic in
-// @langmail/contacts on every card. No server-side filter exists for an
-// anniversary month, and no index is worth building for address books of the
-// size this prototype sees. The cap is stated in the output when it is hit.
+// The candidate set is fetch-all-and-filter: unfiltered ContactCard/query
+// pages of PAGE_SIZE ids, one ContactCard/get per page, then the pure date
+// logic in @langmail/contacts on every card. No server-side filter exists for
+// an anniversary month, and no index is worth building for address books of
+// the size this prototype sees. It must page, since an unsorted first page
+// silently drops the rest. The cap is stated in the output when it is hit.
 //
-// TODO: when an account outgrows CARD_CAP, replace the sweep with a
-// per-account birthday index refreshed off ContactCard/changes, the way the
-// email-agent poller tails Email/changes.
+// TODO: when an account outgrows CARD_CAP or the sweep gets slow, replace it
+// with a per-account birthday index refreshed off ContactCard/changes, the
+// way the email-agent poller tails Email/changes.
 //
 // Only *stored* birthdays are listed. Collection never infers one from a
 // "happy birthday" subject line, so the field stays authoritative.
@@ -84,8 +85,12 @@ export interface ListUpcomingBirthdaysContext {
   token: string
 }
 
+// Ids per ContactCard/query page, and so per ContactCard/get — Stalwart's
+// default `maxObjectsInGet`.
+export const PAGE_SIZE = 500
+
 // Hard cap on the sweep. Past this, the list may be incomplete and says so.
-export const CARD_CAP = 500
+export const CARD_CAP = 10_000
 
 interface Upcoming {
   birthday: Birthday
@@ -136,8 +141,19 @@ export const listUpcomingBirthdays = async (
 
   // Every address book, collected and personal alike: update_contact edits
   // any card by id, so a birthday can legitimately live on a collected card.
-  const ids = await deps.contactCardQuery({ accountId, apiUrl: '', authorization, limit: CARD_CAP })
-  const cards = ids.length > 0 ? await deps.contactCardGet({ accountId, apiUrl: '', authorization, ids }) : []
+  // Paged until an empty page, not a short one: a server whose query limit is
+  // below PAGE_SIZE returns short pages that are not the end.
+  const call = { accountId, apiUrl: '', authorization }
+  const cards: ContactCard[] = []
+  let swept = 0
+  while (swept < CARD_CAP) {
+    const ids = await deps.contactCardQuery({ ...call, limit: Math.min(PAGE_SIZE, CARD_CAP - swept), position: swept })
+    if (ids.length === 0) {
+      break
+    }
+    cards.push(...(await deps.contactCardGet({ ...call, ids })))
+    swept += ids.length
+  }
 
   const upcoming: Upcoming[] = []
   for (const card of cards) {
@@ -158,7 +174,7 @@ export const listUpcomingBirthdays = async (
 
   const window = `the next ${args.days} day(s) from ${formatCalendarDate(from)}`
   const capNote =
-    ids.length >= CARD_CAP ? `\n\nThe address book has ${CARD_CAP} cards or more, so this list may be incomplete.` : ''
+    swept >= CARD_CAP ? `\n\nThe address book has ${CARD_CAP} cards or more, so this list may be incomplete.` : ''
   if (upcoming.length === 0) {
     return textResult(
       `No birthdays in ${window}. Only birthdays stored on contacts are listed — ` +

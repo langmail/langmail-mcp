@@ -8,6 +8,7 @@ import {
   type ListUpcomingBirthdaysDeps,
   listUpcomingBirthdays,
   listUpcomingBirthdaysInput,
+  PAGE_SIZE,
 } from './list-upcoming-birthdays.ts'
 
 const birth = (date: ContactCardAnniversary['date']): Record<string, ContactCardAnniversary> => ({
@@ -23,8 +24,14 @@ const person = (id: string, name: string, anniversaries?: Record<string, Contact
   })
 
 const makeDeps = (cards: ContactCard[], timeZone: string | null = null): ListUpcomingBirthdaysDeps => ({
-  contactCardGet: (p) => Promise.resolve(cards.filter((c) => p.ids.includes(c.id))),
-  contactCardQuery: (p) => Promise.resolve(cards.map((c) => c.id).slice(0, p.limit)),
+  contactCardGet: (p) => {
+    const wanted = new Set(p.ids)
+    return Promise.resolve(cards.filter((c) => wanted.has(c.id)))
+  },
+  contactCardQuery: (p) => {
+    const start = p.position ?? 0
+    return Promise.resolve(cards.map((c) => c.id).slice(start, start + (p.limit ?? cards.length)))
+  },
   resolveAccountId: () => Promise.resolve('acct'),
   resolveTimeZone: () => Promise.resolve(timeZone),
 })
@@ -122,12 +129,35 @@ describe('listUpcomingBirthdays', () => {
     expect(text).toContain('update_contact')
   })
 
-  test('a full query window adds the incompleteness note', async () => {
+  test('a birthday on a card past the first query page is found', async () => {
+    const cards = Array.from({ length: PAGE_SIZE * 2 + 1 }, (_, i) =>
+      person(`card-${i}`, `Person ${i}`, i === PAGE_SIZE * 2 ? birth({ day: 19, month: 9, year: 1985 }) : undefined)
+    )
+    const result = await listUpcomingBirthdays(makeDeps(cards), { args: args({ days: 7 }), token: 'tok' })
+    const text = result.content[0]?.text ?? ''
+    expect(text).toContain(`Person ${PAGE_SIZE * 2} — 2026-09-19 (tomorrow, turning 41)`)
+    expect(text).not.toContain('may be incomplete')
+  })
+
+  test('a sweep that reaches the cap adds the incompleteness note', async () => {
     const cards = Array.from({ length: CARD_CAP + 1 }, (_, i) =>
       person(`card-${i}`, `Person ${i}`, i === 0 ? birth({ day: 20, month: 9 }) : undefined)
     )
-    const result = await listUpcomingBirthdays(makeDeps(cards), { args: args(), token: 'tok' })
+    const deps = makeDeps(cards)
+    const fetched: string[] = []
+    const result = await listUpcomingBirthdays(
+      {
+        ...deps,
+        contactCardGet: (p) => {
+          fetched.push(...p.ids)
+          return deps.contactCardGet(p)
+        },
+      },
+      { args: args(), token: 'tok' }
+    )
     expect(result.content[0]?.text).toContain(`${CARD_CAP} cards or more`)
+    // The sweep stops at the cap rather than reading every card.
+    expect(fetched).toHaveLength(CARD_CAP)
   })
 
   test('limit truncates and says how to see the rest', async () => {
