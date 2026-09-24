@@ -64,13 +64,13 @@ export type SendReservation =
   // A send for this draft failed in a way that leaves delivery unknown.
   | { state: 'unknown' }
 
-// What a send reserves against: the tool, and an id that is identical on a retry
-// of the same logical send.
 // reply_to_message's tool name. Its subjects are the message being answered,
 // which the refusal text has to name differently; the tool keys its replay
 // cache under the same name.
 export const REPLY_TOOL = 'reply_to_message'
 
+// What a send reserves against: the tool, and an id that is identical on a retry
+// of the same logical send.
 export interface SendSubject {
   key: string
   tool: string

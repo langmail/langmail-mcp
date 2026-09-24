@@ -4,9 +4,11 @@
 #
 #   ./check.sh
 #
-# Two runs: the model itself, which must find no error, and a non-vacuity run,
-# which must find a message being sent — a spec that can never send anything
-# satisfies every "at most once" property trivially.
+# Three runs: the two models (MCSendProtocol, a sender and a reply;
+# MCTwoSenders, two independent senders of one draft), which must find no
+# error, and a non-vacuity run, which must find a message being sent — a spec
+# that can never send anything satisfies every "at most once" property
+# trivially.
 set -euo pipefail
 
 TLA_VERSION=1.7.4
@@ -25,23 +27,29 @@ if [[ ! -f "$jar" ]]; then
 fi
 echo "$TLA_SHA256  $jar" | sha256sum -c --quiet -
 
+# tlc <module> <config>
 tlc() {
-  java -XX:+UseParallelGC -cp "$jar" tlc2.TLC -workers auto -cleanup -metadir "$work/states" "$@" MCSendProtocol
+  java -XX:+UseParallelGC -cp "$jar" tlc2.TLC -workers auto -cleanup -metadir "$work/states-$1" -config "$2" "$1"
+}
+
+check() {
+  echo "== $1: safety and liveness"
+  if ! tlc "$1" "$1.cfg" | tee "$work/$1.log" | grep -v '^Picked up JAVA_TOOL_OPTIONS'; then
+    echo "TLC failed" >&2
+    exit 1
+  fi
+  grep -q '^Model checking completed. No error has been found.' "$work/$1.log"
 }
 
 cd "$here"
 
-echo "== SendProtocol: safety and liveness"
-if ! tlc -config MCSendProtocol.cfg | tee "$work/main.log" | grep -v '^Picked up JAVA_TOOL_OPTIONS'; then
-  echo "TLC failed" >&2
-  exit 1
-fi
-grep -q '^Model checking completed. No error has been found.' "$work/main.log"
+check MCSendProtocol
+check MCTwoSenders
 
 echo "== SendProtocol: non-vacuity (NothingEverSent must be violated)"
 sed '/^INVARIANTS/,$d' MCSendProtocol.cfg > "$work/vacuity.cfg"
 echo 'INVARIANT NothingEverSent' >> "$work/vacuity.cfg"
-tlc -config "$work/vacuity.cfg" > "$work/vacuity.log" 2>&1 || true
+tlc MCSendProtocol "$work/vacuity.cfg" > "$work/vacuity.log" 2>&1 || true
 if ! grep -q 'Invariant NothingEverSent is violated' "$work/vacuity.log"; then
   cat "$work/vacuity.log" >&2
   echo "the model never sends a message — its properties hold vacuously" >&2

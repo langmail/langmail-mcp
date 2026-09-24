@@ -32,14 +32,14 @@ CONSTANTS
     Fresh,        \* ids Email/set can mint for the drafts replies stage
     Requests,
     Target,       \* [Requests -> Drafts \cup Originals]
-    MaxAttempts,  \* tool calls per request, the first plus its retries
+    Tries,        \* [Requests -> Nat]: tool calls per request, the first plus its retries
     None
 
 ASSUME Target \in [Requests -> Drafts \cup Originals]
-ASSUME MaxAttempts \in Nat \ {0}
+ASSUME Tries \in [Requests -> Nat \ {0}]
 
 Emails == Drafts \cup Originals \cup Fresh
-Attempts == Requests \X (1 .. MaxAttempts)
+Attempts == UNION {{r} \X (1 .. Tries[r]) : r \in Requests}
 Req(a) == a[1]
 Prev(a) == <<a[1], a[2] - 1>>
 Earlier(a) == {<<a[1], j>> : j \in 1 .. (a[2] - 1)}

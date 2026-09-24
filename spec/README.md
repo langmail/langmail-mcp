@@ -12,7 +12,9 @@ documents referenced from `AGENTS.md` are design rationale, not TLA+.
 ## What it models
 
 - **Clients.** Each request is one intention: send draft `d`, or reply to
-  message `m`. A request can make up to three tool calls. A client retries
+  message `m`. A request can make up to three tool calls. `MCSendProtocol`
+  checks one sender and one reply; `MCTwoSenders` checks two independent
+  senders of the same draft, keyed differently or not at all. A client retries
   while its first call may still be running. An agent may also follow a
   failed reply's advice and `send_draft` the reply's staged draft.
 - **Interleaving.** Calls interleave only at awaits that do I/O, because the
@@ -53,8 +55,10 @@ counterexamples:
 1. **`send_draft` sent twice.** A retry read the draft as "still a draft"
    while the first call was in flight. The first call then finished and
    released its reservation. The retry reserved after that and submitted a
-   message that had already gone. The fix: reserve first, before the replay
-   lookup and the draft read.
+   message that had already gone. The fix: look up the replay and take the
+   reservation in one synchronous step, before the draft is read. (The
+   first version reserved before the lookup; see `RetriesReplayed` below
+   for why the lookup has to come first.)
 2. **`reply_to_message` sent twice with the same `idempotencyKey`.** The
    retry's replay lookup ran before the first call recorded its answer, and
    its reservation came after the first call released. It has the same fix.
