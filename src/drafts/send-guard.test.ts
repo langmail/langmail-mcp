@@ -82,6 +82,23 @@ describe('holdSend', () => {
     expect(guard.reserve(USER, SEND_D2)).toEqual({ state: 'unknown' })
   })
 
+  test('a call whose swept reservation ends unknown still blocks the next send', () => {
+    let now = 0
+    const guard = createSendGuard(() => now)
+    const first = holdSend(guard, USER, SEND_D1)
+    if (!('hold' in first)) {
+      throw new Error('expected the hold to be taken')
+    }
+    // Past the TTL, a reserve on any subject sweeps the first call's entry.
+    now += (SEND_RESERVATION_TTL_MINUTES + 1) * 60 * 1000
+    guard.reserve(USER, SEND_D2)
+    // The answer is then lost: delivery is unknown, and nobody else holds d1,
+    // so the unknown must be recorded rather than dropped with the entry.
+    first.hold.markUnknown()
+    first.hold.end()
+    expect(guard.reserve(USER, SEND_D1)).toEqual({ state: 'unknown' })
+  })
+
   test('a call that outlived its reservation cannot end the retry that took it over', () => {
     let now = 0
     const guard = createSendGuard(() => now)

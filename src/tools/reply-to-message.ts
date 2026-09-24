@@ -24,7 +24,7 @@ import { bearerAuthorization, type EmailComposeRecord, type EmailDraft } from '@
 import { logger } from '@langmail/logger'
 
 import { type IdempotencyStore } from '../drafts/idempotency.ts'
-import { holdSend, reservationRefusal, type SendGuard, type SendHold } from '../drafts/send-guard.ts'
+import { holdSend, REPLY_TOOL, reservationRefusal, type SendGuard, type SendHold } from '../drafts/send-guard.ts'
 import { describeError } from '../observability/errors.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import {
@@ -42,7 +42,7 @@ import { errorResult, type ToolResult, textResult } from './result.ts'
 import { formatSent, sendDraftSubject, submitDraft, wasRefused } from './send-draft.ts'
 
 // The replay cache is keyed per tool — see drafts/idempotency.ts.
-const TOOL_NAME = 'reply_to_message'
+const TOOL_NAME = REPLY_TOOL
 
 const MAX_RECIPIENTS = 50
 const MAX_BODY_CHARS = 100_000

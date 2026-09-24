@@ -19,9 +19,10 @@
 //   exception — the tool threw. No tool throws to express a designed answer,
 //     so a throw is always an upstream or programming fault. Stays at `error`.
 //
-// The one place a genuine fault used to reach the `tool_error` branch is
-// reply_to_message, which catches a failed submission to name the draft it
-// left behind; it now logs its own `error` line before returning that result.
+// Two tools catch a genuine fault to return it in-band: send_draft and
+// reply_to_message turn a failed submission into a result that says whether
+// the message may have gone out (and, for a reply, names the draft it left
+// behind). Both log their own `error` line before returning that result.
 //
 // The result text itself never appears in either line: tool results quote
 // event content and mailbox addresses, and these lines ship off-box.

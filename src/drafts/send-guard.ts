@@ -66,6 +66,11 @@ export type SendReservation =
 
 // What a send reserves against: the tool, and an id that is identical on a retry
 // of the same logical send.
+// reply_to_message's tool name. Its subjects are the message being answered,
+// which the refusal text has to name differently; the tool keys its replay
+// cache under the same name.
+export const REPLY_TOOL = 'reply_to_message'
+
 export interface SendSubject {
   key: string
   tool: string
@@ -91,9 +96,13 @@ const scopedKey = (principal: string, subject: SendSubject): string =>
 export const createSendGuard = (now: () => number = Date.now): SendGuard => {
   const entries = new Map<string, { expiresAt: number; owner?: symbol; state: SendReservation['state'] }>()
 
-  // Another call's entry is left alone; an unowned settle acts unconditionally.
-  const ownedBy = (key: string, owner: symbol | undefined): boolean =>
-    owner === undefined || entries.get(key)?.owner === owner
+  // Another call's live entry is left alone. An unowned settle acts
+  // unconditionally, and so does one whose entry has already been swept:
+  // dropping an `unknown` there would let the next call send a second copy.
+  const ownedBy = (key: string, owner: symbol | undefined): boolean => {
+    const held = entries.get(key)
+    return owner === undefined || held === undefined || held.owner === owner
+  }
 
   const sweep = (): void => {
     const t = now()
@@ -135,7 +144,7 @@ export const createSendGuard = (now: () => number = Date.now): SendGuard => {
 // being answered, and reading that back says nothing about the reply — so a
 // reply is pointed at the Sent folder, a draft at the draft itself.
 export const reservationRefusal = (subject: SendSubject, held: SendReservation): string => {
-  if (subject.tool === 'reply_to_message') {
+  if (subject.tool === REPLY_TOOL) {
     return held.state === 'in_flight'
       ? `A reply to ${subject.key} is already in progress. Nothing was sent by this call. Wait, then check ` +
           "the user's Sent folder to see whether it went out."
