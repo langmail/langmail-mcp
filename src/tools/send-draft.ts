@@ -10,7 +10,9 @@
 // clears `$draft` in the same round-trip (see @langmail/jmap `submission.ts`),
 // so a second call finds a message that is no longer a draft and refuses. The
 // cooperative one is `idempotencyKey`, which replays the first call's answer
-// when the client retries a call whose response it never saw.
+// when the client retries a call whose response it never saw. Both are checked
+// inside a reservation taken before either is read (see drafts/send-guard.ts);
+// the protocol is model-checked in `spec/SendProtocol.tla`.
 
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
@@ -18,7 +20,7 @@ import { z } from 'zod'
 import { bearerAuthorization, type EmailComposeRecord, type EmailDraft, JmapError } from '@langmail/jmap'
 
 import { type IdempotencyStore } from '../drafts/idempotency.ts'
-import { type SendGuard, type SendSubject } from '../drafts/send-guard.ts'
+import { holdSend, reservationRefusal, type SendGuard, type SendHold, type SendSubject } from '../drafts/send-guard.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import {
   countRecipients,
@@ -34,6 +36,10 @@ import { errorResult, type ToolResult, textResult } from './result.ts'
 
 // The replay cache is keyed per tool — see drafts/idempotency.ts.
 const TOOL_NAME = 'send_draft'
+
+// What a send of `draftId` reserves against. Exported because reply_to_message
+// also covers the draft it stages under this subject.
+export const sendDraftSubject = (draftId: string): SendSubject => ({ key: draftId, tool: TOOL_NAME })
 
 export const sendDraftInput = z.object({
   draftId: z
@@ -67,34 +73,20 @@ export interface SubmitParams {
   // The account's Drafts mailbox — the message leaves it on success. Not
   // nullable: a caller with no Drafts folder has nothing staged to send.
   draftsMailboxId: string
-  // Guards the window between "is it still a draft?" and the submission landing.
-  guard: SendGuard
+  // The caller's reservation, already covering this draft. submitDraft only
+  // marks it unknown when delivery can no longer be ruled out; the caller ends
+  // it, after recording its replay, so a retry never sees the reservation gone
+  // before the answer it should replay exists.
+  hold: SendHold
   identityId: string
-  principal: string
   // The account's Sent mailbox, when it has one.
   sentMailboxId?: string
-  // What the reservation is taken against — must be identical on a retry of the
-  // same logical send, which is not always the draft id. See send-guard.ts.
-  subject: SendSubject
 }
 
 // Submit a staged draft and report where the message ended up. Shared with
 // reply_to_message, which stages its own draft first and then lands here — the
 // send half must be identical on both paths or one of them drifts.
-export const submitDraft = async (deps: DraftToolDeps, p: SubmitParams): Promise<{ error: string } | string> => {
-  const held = p.guard.reserve(p.principal, p.subject)
-  if (held) {
-    return {
-      error:
-        held.state === 'in_flight'
-          ? `A send of ${p.subject.key} is already in progress. Nothing was sent by this call. Wait, then read ` +
-            'the message back with get_email to see whether it went out.'
-          : `An earlier send of ${p.subject.key} failed without saying whether the message went out, so it was ` +
-            'NOT sent again — a second attempt could deliver a duplicate. Read it back with get_email, or check ' +
-            "the user's Sent folder, before deciding.",
-    }
-  }
-
+export const submitDraft = async (deps: DraftToolDeps, p: SubmitParams): Promise<string> => {
   let submission: Awaited<ReturnType<typeof deps.emailSubmissionCreate>>
   try {
     submission = await deps.emailSubmissionCreate({
@@ -109,11 +101,9 @@ export const submitDraft = async (deps: DraftToolDeps, p: SubmitParams): Promise
   } catch (error) {
     // A JMAP method error means the server answered, and it answered no — so
     // nothing was sent and this stays retryable. Anything else (timeout, reset)
-    // may have been accepted with the answer lost: hold the reservation.
-    if (error instanceof JmapError && error.errorType !== undefined) {
-      p.guard.release(p.principal, p.subject)
-    } else {
-      p.guard.markUnknown(p.principal, p.subject)
+    // may have been accepted with the answer lost: keep the reservation.
+    if (!wasRefused(error)) {
+      p.hold.markUnknown()
     }
     throw error
   }
@@ -123,9 +113,8 @@ export const submitDraft = async (deps: DraftToolDeps, p: SubmitParams): Promise
   }
   if (submission.filed) {
     // The message is marked as no longer a draft, so that server-side flag now
-    // does the blocking and the reservation has nothing left to protect —
-    // releasing it keeps a deliberate later send of another draft unaffected.
-    p.guard.release(p.principal, p.subject)
+    // does the blocking and the reservation has nothing left to protect — the
+    // caller releases it, keeping a deliberate later send unaffected.
     lines.push(
       p.sentMailboxId
         ? 'The message is in Sent — read it back with get_email using the messageId above.'
@@ -139,7 +128,7 @@ export const submitDraft = async (deps: DraftToolDeps, p: SubmitParams): Promise
   // hold the reservation so a retry is refused rather than delivering a second
   // copy, and say so loudly — this is the one state where the usual "it's still a
   // draft, so it can't have been sent" reasoning is wrong.
-  p.guard.markUnknown(p.principal, p.subject)
+  p.hold.markUnknown()
   lines.push(
     'WARNING: the message WAS sent, but the mailbox could not be updated, so it still appears in Drafts and ' +
       'still looks unsent. Do NOT send it again — that would deliver a second copy. Tell the user it went out ' +
@@ -147,6 +136,10 @@ export const submitDraft = async (deps: DraftToolDeps, p: SubmitParams): Promise
   )
   return lines.join('\n')
 }
+
+// Whether a submission error is the server's "no" — nothing was sent — rather
+// than a transport failure that says nothing about delivery.
+export const wasRefused = (error: unknown): boolean => error instanceof JmapError && error.errorType !== undefined
 
 // The report both send paths return: the id of the mail that has now gone, the
 // message as it was sent, and where it landed. The Email id survives the move
@@ -226,6 +219,28 @@ export const sendDraft = async (
   guard: SendGuard,
   ctx: SendDraftContext
 ): Promise<ToolResult> => {
+  const { args, principal } = ctx
+  // Reserve before the replay lookup and the draft read, synchronously, so both
+  // run inside the reservation. A retry passes the same draftId, so it is the
+  // stable subject here.
+  const subject = sendDraftSubject(args.draftId)
+  const taken = holdSend(guard, principal, subject)
+  if ('refused' in taken) {
+    return errorResult(reservationRefusal(subject, taken.refused))
+  }
+  try {
+    return await sendHeld(deps, replays, taken.hold, ctx)
+  } finally {
+    taken.hold.end()
+  }
+}
+
+const sendHeld = async (
+  deps: DraftToolDeps,
+  replays: IdempotencyStore<string>,
+  hold: SendHold,
+  ctx: SendDraftContext
+): Promise<ToolResult> => {
   const { args, principal, token } = ctx
   if (args.idempotencyKey) {
     const replayed = replays.lookup(TOOL_NAME, principal, args.idempotencyKey)
@@ -270,16 +285,10 @@ export const sendDraft = async (
     authorization,
     draftId: args.draftId,
     draftsMailboxId: mailboxes.drafts,
-    guard,
+    hold,
     identityId: identity.identityId,
-    principal,
-    // A retry passes the same draftId, so it is the stable subject here.
-    subject: { key: args.draftId, tool: TOOL_NAME },
     ...(mailboxes.sent ? { sentMailboxId: mailboxes.sent } : {}),
   })
-  if (typeof outcome !== 'string') {
-    return errorResult(outcome.error)
-  }
   const summary = formatSent('Sent.', {
     draft: draftFromRecord(record),
     messageId: args.draftId,

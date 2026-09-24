@@ -8,11 +8,21 @@
 // "draft", because Stalwart hasn't applied the follow-up patch. Both calls
 // submit, and the recipient gets two copies.
 //
-// So a send reserves before it submits, and the reservation is keyed on
-// something that is *the same on a retry* rather than on the caller's optional
-// key — which is what makes it cover a client retrying blind, the likelier shape,
-// since a client retrying without a key is a client not thinking about
-// idempotency.
+// So a send reserves *first* — before the replay lookup and before it reads the
+// draft — and holds the reservation until the call ends. Both checks then run
+// inside the reservation, which is what makes them mean anything: a retry that
+// gets past `reserve` knows the earlier call has finished, so its replay lookup
+// sees whatever that call recorded, and its `isDraft` read sees the mailbox after
+// that call's submission. Reserving any later reopens the window: the retry reads
+// "still a draft" while the first call is in flight, waits on its own I/O, and
+// reserves after the first call has released — then submits a message that has
+// already gone. `spec/SendProtocol.tla` checks this ordering; change it there
+// first.
+//
+// The reservation is keyed on something that is *the same on a retry* rather
+// than on the caller's optional key — which is what makes it cover a client
+// retrying blind, the likelier shape, since a client retrying without a key is a
+// client not thinking about idempotency.
 //
 // What that stable thing is differs per tool, which is why the key is a
 // parameter and not a draft id:
@@ -21,7 +31,10 @@
 //   - reply_to_message is given the id of the message being answered, and mints
 //     a *fresh* draft on every call. Keying on the draft it just created would
 //     reserve a different key each time and guard nothing at all, so it reserves
-//     against the message it is replying to instead.
+//     against the message it is replying to instead — and then also covers the
+//     draft it staged under send_draft's key, because its result names that draft
+//     and a send_draft of it must not race, or follow an unknown outcome of, the
+//     reply's own submission.
 //
 // The tool name is part of the key: both ids come from the same Email id space,
 // so replying to message X and sending draft X must not collide.
@@ -99,6 +112,72 @@ export const createSendGuard = (now: () => number = Date.now): SendGuard => {
       }
       entries.set(key, { expiresAt: now() + SEND_RESERVATION_TTL_MS, state: 'in_flight' })
       return null
+    },
+  }
+}
+
+// Why a send was refused because another call holds its subject. Nothing was
+// sent by the refused call in either case.
+export const reservationRefusal = (subject: SendSubject, held: SendReservation): string =>
+  held.state === 'in_flight'
+    ? `A send of ${subject.key} is already in progress. Nothing was sent by this call. Wait, then read ` +
+      'the message back with get_email to see whether it went out.'
+    : `An earlier send of ${subject.key} failed without saying whether the message went out, so it was ` +
+      'NOT sent again — a second attempt could deliver a duplicate. Read it back with get_email, or check ' +
+      "the user's Sent folder, before deciding."
+
+// The reservations one tool call holds, from its first step until it returns.
+// Every subject it covers is settled together, exactly once, by `end`.
+export interface SendHold {
+  // Cover one more subject. Returns null when covered, or the reservation
+  // another call holds on it.
+  cover: (subject: SendSubject) => SendReservation | null
+  // Settle: release every subject, unless delivery was marked unknown — then
+  // they all stay blocked until the reservation expires.
+  end: () => void
+  // Delivery may have happened and the mailbox cannot be trusted to say so.
+  markUnknown: () => void
+}
+
+// Take the first reservation of a call. Must run before the call's first read of
+// the replay cache or the mailbox — see the header.
+export const holdSend = (
+  guard: SendGuard,
+  principal: string,
+  subject: SendSubject
+): { hold: SendHold } | { refused: SendReservation } => {
+  const refused = guard.reserve(principal, subject)
+  if (refused) {
+    return { refused }
+  }
+  const subjects = [subject]
+  let unknown = false
+  let ended = false
+  return {
+    hold: {
+      cover: (next) => {
+        const held = guard.reserve(principal, next)
+        if (!held) {
+          subjects.push(next)
+        }
+        return held
+      },
+      end: () => {
+        if (ended) {
+          return
+        }
+        ended = true
+        for (const s of subjects) {
+          if (unknown) {
+            guard.markUnknown(principal, s)
+          } else {
+            guard.release(principal, s)
+          }
+        }
+      },
+      markUnknown: () => {
+        unknown = true
+      },
     },
   }
 }

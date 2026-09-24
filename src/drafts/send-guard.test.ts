@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { createSendGuard, SEND_RESERVATION_TTL_MINUTES } from './send-guard.ts'
+import { createSendGuard, holdSend, SEND_RESERVATION_TTL_MINUTES } from './send-guard.ts'
 
 const USER = 'user@langmail.me'
 const SEND_D1 = { key: 'd1', tool: 'send_draft' }
@@ -46,5 +46,39 @@ describe('createSendGuard', () => {
     guard.reserve(USER, SEND_D1)
     now += (SEND_RESERVATION_TTL_MINUTES + 1) * 60 * 1000
     expect(guard.reserve(USER, SEND_D1)).toBeNull()
+  })
+})
+
+describe('holdSend', () => {
+  test('refuses when another call holds the first subject', () => {
+    const guard = createSendGuard()
+    guard.reserve(USER, REPLY_D1)
+    expect(holdSend(guard, USER, REPLY_D1)).toEqual({ refused: { state: 'in_flight' } })
+  })
+
+  test('ending the hold releases every subject it covered', () => {
+    const guard = createSendGuard()
+    const taken = holdSend(guard, USER, REPLY_D1)
+    if (!('hold' in taken)) {
+      throw new Error('expected the hold to be taken')
+    }
+    expect(taken.hold.cover(SEND_D2)).toBeNull()
+    // Covered subjects are held against everyone else until the hold ends.
+    expect(guard.reserve(USER, SEND_D2)).toEqual({ state: 'in_flight' })
+    taken.hold.end()
+    expect(guard.reserve(USER, REPLY_D1)).toBeNull()
+  })
+
+  test('an unknown outcome keeps every covered subject blocked', () => {
+    const guard = createSendGuard()
+    const taken = holdSend(guard, USER, REPLY_D1)
+    if (!('hold' in taken)) {
+      throw new Error('expected the hold to be taken')
+    }
+    taken.hold.cover(SEND_D2)
+    taken.hold.markUnknown()
+    taken.hold.end()
+    expect(guard.reserve(USER, REPLY_D1)).toEqual({ state: 'unknown' })
+    expect(guard.reserve(USER, SEND_D2)).toEqual({ state: 'unknown' })
   })
 })

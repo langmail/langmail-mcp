@@ -1,12 +1,21 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 
-import { type DraftCreateParams, type EmailSubmissionCreateParams } from '@langmail/jmap'
+import { type DraftCreateParams, type EmailSubmissionCreateParams, JmapError } from '@langmail/jmap'
 import { logger } from '@langmail/logger'
 
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
 import { createSendGuard } from '../drafts/send-guard.ts'
-import { type DraftDepsOptions, draftDeps, receivedMessage, TEST_PRINCIPAL } from './draft-test-fixtures.ts'
+import {
+  type DraftDepsOptions,
+  draftDeps,
+  gate,
+  receivedMessage,
+  settle,
+  stagedDraft,
+  TEST_PRINCIPAL,
+} from './draft-test-fixtures.ts'
 import { replyArgsError, replyToMessage, replyToMessageInput } from './reply-to-message.ts'
+import { sendDraft, sendDraftInput } from './send-draft.ts'
 
 const store = () => createIdempotencyStore<string>()
 
@@ -140,7 +149,9 @@ describe('replyToMessage', () => {
       // The reply exists even though the send failed; naming it is the difference
       // between a recoverable message and a lost one.
       expect(text).toContain(`staged as draft ${creates[0] ? 'dNew1' : ''}`)
-      expect(text).toContain('send_draft')
+      // A lost answer may hide a delivery, so it must not claim nothing went out.
+      expect(text).toContain('may already have gone out')
+      expect(text).not.toContain('Nothing was sent')
 
       expect(error).toHaveBeenCalledTimes(1)
       const fields = error.mock.calls[0]?.[0] as Record<string, unknown>
@@ -171,7 +182,7 @@ describe('replyToMessage', () => {
     expect(submissions).toEqual([])
   })
 
-  test('a concurrent duplicate reply is staged but not sent twice', async () => {
+  test('a concurrent duplicate reply is refused before it stages anything', async () => {
     const creates: DraftCreateParams[] = []
     const submissions: EmailSubmissionCreateParams[] = []
     const guard = createSendGuard()
@@ -181,7 +192,7 @@ describe('replyToMessage', () => {
       principal: TEST_PRINCIPAL,
       token: 'tok',
     }
-    // Each call stages its own draft with its own id, so a draft-keyed
+    // Each call would stage its own draft with its own id, so a draft-keyed
     // reservation would guard nothing — this only holds because the reservation
     // is keyed on the message being answered.
     const results = await Promise.all([
@@ -191,8 +202,112 @@ describe('replyToMessage', () => {
     expect(submissions).toHaveLength(1)
     const blocked = results.find((r) => r.isError)
     expect(blocked?.content[0]?.text ?? '').toContain('already in progress')
-    // The unsent reply is not lost — the result says where it is.
-    expect(blocked?.content[0]?.text ?? '').toContain('staged as draft')
+    // The reservation is taken before anything is staged, so the refused call
+    // leaves no stray draft behind.
+    expect(creates).toHaveLength(1)
+  })
+
+  test('a keyed retry that started before the first reply finished does not send a second one', async () => {
+    // The counterexample spec/SendProtocol.tla found: the retry's replay lookup
+    // runs while the first call is in flight and finds nothing, then the first
+    // call records and releases before the retry reaches the reservation.
+    // Reserving first puts the lookup inside the reservation.
+    const submissions: EmailSubmissionCreateParams[] = []
+    const firstSubmit = gate()
+    const secondStage = gate()
+    let stages = 0
+    const base = draftDeps({ records: { e1: receivedMessage() }, submissions })
+    const deps = {
+      ...base,
+      draftCreate: async (p: DraftCreateParams) => {
+        stages += 1
+        if (stages === 2) {
+          await secondStage.passed
+        }
+        return base.draftCreate(p)
+      },
+      emailSubmissionCreate: async (p: EmailSubmissionCreateParams) => {
+        await firstSubmit.passed
+        return base.emailSubmissionCreate(p)
+      },
+    }
+    const replays = store()
+    const guard = createSendGuard()
+    const ctx = {
+      args: replyToMessageInput.parse({ idempotencyKey: 'k1', messageId: 'e1', text: 'hi' }),
+      principal: TEST_PRINCIPAL,
+      token: 'tok',
+    }
+
+    const first = replyToMessage(deps, replays, guard, ctx)
+    await settle()
+    const retry = replyToMessage(deps, replays, guard, ctx)
+    await settle()
+    firstSubmit.open()
+    await first
+    secondStage.open()
+    await retry
+
+    expect(submissions).toHaveLength(1)
+  })
+
+  test('the staged draft of a reply with an unknown outcome cannot be sent with send_draft', async () => {
+    // Also found by the model: the reply's answer is lost while its submission is
+    // still queued, and send_draft of the staged draft races it. The reply
+    // covers its staged draft under send_draft's own reservation key.
+    const submissions: EmailSubmissionCreateParams[] = []
+    const guard = createSendGuard()
+    const lost = draftDeps({ records: { e1: receivedMessage() }, submitError: new Error('socket hang up') })
+    const error = spyOn(logger, 'error').mockImplementation(() => undefined)
+    try {
+      await replyToMessage(lost, store(), guard, {
+        args: replyToMessageInput.parse({ messageId: 'e1', text: 'hi' }),
+        principal: TEST_PRINCIPAL,
+        token: 'tok',
+      })
+    } finally {
+      error.mockRestore()
+    }
+
+    const staged = draftDeps({ records: { dNew1: stagedDraft({ id: 'dNew1' }) }, submissions })
+    const result = await sendDraft(staged, store(), guard, {
+      args: sendDraftInput.parse({ draftId: 'dNew1' }),
+      principal: TEST_PRINCIPAL,
+      token: 'tok',
+    })
+    expect(result.content[0]?.text ?? '').toContain('could deliver a duplicate')
+    expect(submissions).toEqual([])
+  })
+
+  test('a reply the server refused says nothing went out and leaves its draft sendable', async () => {
+    const submissions: EmailSubmissionCreateParams[] = []
+    const guard = createSendGuard()
+    const refused = draftDeps({
+      records: { e1: receivedMessage() },
+      submitError: new JmapError(200, 'EmailSubmission/set did not send dNew1: forbiddenFrom', 'forbiddenFrom'),
+    })
+    const error = spyOn(logger, 'error').mockImplementation(() => undefined)
+    let text = ''
+    try {
+      const result = await replyToMessage(refused, store(), guard, {
+        args: replyToMessageInput.parse({ messageId: 'e1', text: 'hi' }),
+        principal: TEST_PRINCIPAL,
+        token: 'tok',
+      })
+      text = result.content[0]?.text ?? ''
+    } finally {
+      error.mockRestore()
+    }
+    expect(text).toContain('Nothing was sent')
+    expect(text).toContain('send it with send_draft')
+
+    const staged = draftDeps({ records: { dNew1: stagedDraft({ id: 'dNew1' }) }, submissions })
+    await sendDraft(staged, store(), guard, {
+      args: sendDraftInput.parse({ draftId: 'dNew1' }),
+      principal: TEST_PRINCIPAL,
+      token: 'tok',
+    })
+    expect(submissions).toHaveLength(1)
   })
 
   test('falls back to the original thread when the new draft reports none', async () => {

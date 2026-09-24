@@ -99,3 +99,19 @@ export const stagedDraft = (overrides: Partial<EmailComposeRecord> = {}): EmailC
   to: [{ email: 'nadia@example.org' }],
   ...overrides,
 })
+
+// A door a test opens by hand. Awaiting `passed` inside a fake dep pins a call at
+// that await, so a test can run a second call past it and choose exactly how the
+// two interleave — which is how the duplicate sends `spec/SendProtocol.tla`
+// found are reproduced. `Promise.all` alone never produces them: fakes that
+// resolve at once let both calls reach the reservation together.
+export const gate = (): { open: () => void; passed: Promise<void> } => {
+  let open = (): void => undefined
+  const passed = new Promise<void>((resolve) => {
+    open = resolve
+  })
+  return { open, passed }
+}
+
+// Let every call already started run until it is blocked on a gate.
+export const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))

@@ -24,7 +24,7 @@ import { bearerAuthorization, type EmailComposeRecord, type EmailDraft } from '@
 import { logger } from '@langmail/logger'
 
 import { type IdempotencyStore } from '../drafts/idempotency.ts'
-import { type SendGuard } from '../drafts/send-guard.ts'
+import { holdSend, reservationRefusal, type SendGuard, type SendHold } from '../drafts/send-guard.ts'
 import { describeError } from '../observability/errors.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import {
@@ -39,7 +39,7 @@ import {
   resolveIdentity,
 } from './draft-common.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
-import { formatSent, submitDraft } from './send-draft.ts'
+import { formatSent, sendDraftSubject, submitDraft, wasRefused } from './send-draft.ts'
 
 // The replay cache is keyed per tool — see drafts/idempotency.ts.
 const TOOL_NAME = 'reply_to_message'
@@ -153,11 +153,35 @@ export const replyToMessage = async (
   guard: SendGuard,
   ctx: ReplyToMessageContext
 ): Promise<ToolResult> => {
-  const { args, principal, token } = ctx
+  const { args, principal } = ctx
   const argsError = replyArgsError(args)
   if (argsError) {
     return errorResult(argsError)
   }
+  // The reservation is taken against the message being answered, not the draft
+  // this call will stage: a retry mints a *different* draft, so a draft-keyed
+  // reservation would guard nothing. Two concurrent replies to one message are a
+  // duplicate, not two intentions. Taken before the replay lookup, synchronously,
+  // so the lookup runs inside it — see drafts/send-guard.ts.
+  const subject = { key: args.messageId, tool: TOOL_NAME }
+  const taken = holdSend(guard, principal, subject)
+  if ('refused' in taken) {
+    return errorResult(reservationRefusal(subject, taken.refused))
+  }
+  try {
+    return await replyHeld(deps, replays, taken.hold, ctx)
+  } finally {
+    taken.hold.end()
+  }
+}
+
+const replyHeld = async (
+  deps: DraftToolDeps,
+  replays: IdempotencyStore<string>,
+  hold: SendHold,
+  ctx: ReplyToMessageContext
+): Promise<ToolResult> => {
+  const { args, principal, token } = ctx
   if (args.idempotencyKey) {
     const replayed = replays.lookup(TOOL_NAME, principal, args.idempotencyKey)
     if (replayed) {
@@ -218,20 +242,23 @@ export const replyToMessage = async (
     draft: reply,
     mailboxId: mailboxes.drafts,
   })
-  // The reservation is taken against the message being answered, not the draft
-  // just staged: a retry of this call mints a *different* draft, so a draft-keyed
-  // reservation would guard nothing. Two concurrent replies to one message are a
-  // duplicate, not two intentions.
-  let outcome: Awaited<ReturnType<typeof submitDraft>>
+  // The result names the staged draft, so a send_draft of it must not slip past
+  // this call's reservation — racing the submission below, or following an
+  // outcome that is still unknown. Nobody else knows the fresh id yet, so the
+  // cover only fails if the server handed out an id another call is sending.
+  const draftSubject = sendDraftSubject(staged.id)
+  const clash = hold.cover(draftSubject)
+  if (clash) {
+    return errorResult(`${reservationRefusal(draftSubject, clash)} The reply is staged as draft ${staged.id}.`)
+  }
+  let outcome: string
   try {
     outcome = await submitDraft(deps, {
       authorization,
       draftId: staged.id,
       draftsMailboxId: mailboxes.drafts,
-      guard,
+      hold,
       identityId: identity.identityId,
-      principal,
-      subject: { key: args.messageId, tool: TOOL_NAME },
       ...(mailboxes.sent ? { sentMailboxId: mailboxes.sent } : {}),
     })
   } catch (error) {
@@ -240,17 +267,18 @@ export const replyToMessage = async (
     // is no", not "the send broke". Log it here so the fault still reaches error
     // tracking, redacted: the raw message routinely echoes the mailbox address.
     logger.error({ ...describeError(error), tool: TOOL_NAME }, 'reply submission failed after the draft was staged')
-    // The reply exists as a draft even though the send failed. Naming it is the
-    // difference between a recoverable message and a lost one.
+    // The reply exists as a draft either way. Naming it is the difference between
+    // a recoverable message and a lost one — but only the server's own "no" makes
+    // it safe to send: a lost answer may hide a delivery.
     const detail = error instanceof Error ? error.message : 'unknown error'
     return errorResult(
-      `The reply was composed but could not be sent (${detail}). It is staged as draft ${staged.id} — send it ` +
-        'with send_draft once the cause is resolved, or delete it.'
+      wasRefused(error)
+        ? `The reply was composed but the server refused to send it (${detail}). Nothing was sent. It is ` +
+            `staged as draft ${staged.id} — send it with send_draft once the cause is resolved, or delete it.`
+        : `The reply was staged as draft ${staged.id} and handed to the server, but the answer was lost ` +
+            `(${detail}), so it may already have gone out. Do NOT send it again yet: read it back with ` +
+            "get_email, or check the user's Sent folder, before deciding."
     )
-  }
-  if (typeof outcome !== 'string') {
-    // The reply is staged but unsent. Say where it is, so it isn't lost.
-    return errorResult(`${outcome.error} The reply is staged as draft ${staged.id}.`)
   }
 
   const summary = formatSent('Reply sent.', {

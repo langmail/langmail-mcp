@@ -4,7 +4,7 @@ import { type EmailSubmissionCreateParams, JmapError } from '@langmail/jmap'
 
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
 import { createSendGuard } from '../drafts/send-guard.ts'
-import { type DraftDepsOptions, draftDeps, stagedDraft, TEST_PRINCIPAL } from './draft-test-fixtures.ts'
+import { type DraftDepsOptions, draftDeps, gate, settle, stagedDraft, TEST_PRINCIPAL } from './draft-test-fixtures.ts'
 import { sendDraft, sendDraftInput } from './send-draft.ts'
 
 const store = () => createIdempotencyStore<string>()
@@ -195,6 +195,49 @@ describe('sendDraft', () => {
     // The reservation is keyed on the draft, not the caller's key, so a client
     // retrying blind — the likelier shape — is covered as well.
     await Promise.all([sendDraft(deps, store(), guard, ctx), sendDraft(deps, store(), guard, ctx)])
+    expect(submissions).toHaveLength(1)
+  })
+
+  test('a retry that read the draft before the first send landed does not send it again', async () => {
+    // The counterexample spec/SendProtocol.tla found. The retry reads "still a
+    // draft" while the first call is in flight, then the first call finishes and
+    // releases, and only then does the retry reach the reservation. Reserving
+    // after the read let it through; reserving first refuses it.
+    const submissions: EmailSubmissionCreateParams[] = []
+    const record = stagedDraft()
+    const firstSubmit = gate()
+    const secondMailboxes = gate()
+    let mailboxReads = 0
+    const base = draftDeps({ records: { d1: record }, submissions })
+    const deps = {
+      ...base,
+      emailSubmissionCreate: async (p: EmailSubmissionCreateParams) => {
+        await firstSubmit.passed
+        // The server moves the message out of Drafts with the send.
+        record.keywords = { $seen: true }
+        record.mailboxIds = { mbSent: true }
+        return base.emailSubmissionCreate(p)
+      },
+      resolveComposeMailboxes: async (authorization: string) => {
+        mailboxReads += 1
+        if (mailboxReads === 2) {
+          await secondMailboxes.passed
+        }
+        return base.resolveComposeMailboxes(authorization)
+      },
+    }
+    const guard = createSendGuard()
+    const ctx = { args: sendDraftInput.parse({ draftId: 'd1' }), principal: TEST_PRINCIPAL, token: 'tok' }
+
+    const first = sendDraft(deps, store(), guard, ctx)
+    await settle()
+    const retry = sendDraft(deps, store(), guard, ctx)
+    await settle()
+    firstSubmit.open()
+    await first
+    secondMailboxes.open()
+    await retry
+
     expect(submissions).toHaveLength(1)
   })
 
