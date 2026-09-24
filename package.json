@@ -9,6 +9,7 @@
     "smoke": "bun run scripts/smoke.ts",
     "smoke:agent-preview": "bun run scripts/smoke-agent-preview.ts",
     "smoke:agent-type-filter": "bun run scripts/smoke-agent-type-filter.ts",
+    "spec:check": "./spec/check.sh",
     "start": "NODE_ENV=production bun src/index.ts",
     "test": "bun test",
     "test:integration": "bun test caldav-integration",

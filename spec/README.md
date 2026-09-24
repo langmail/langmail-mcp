@@ -1,9 +1,10 @@
 # Send protocol spec
 
 `SendProtocol.tla` is a TLA+ model of what stops `send_draft` and
-`reply_to_message` from sending a message twice. Run `./check.sh` to check it
-with TLC. You need Java 11+, and the first run downloads a pinned
-`tla2tools.jar`. CI runs the same script (`.github/workflows/tla.yml`).
+`reply_to_message` from sending a message twice. Run `bun run spec:check`
+from `services/mcp` to check it with TLC. You need Java 11+, and the first run
+downloads a pinned `tla2tools.jar`. CI runs the same script
+(`.github/workflows/tla.yml`).
 
 ## What it models
 
@@ -30,7 +31,7 @@ with TLC. You need Java 11+, and the first run downloads a pinned
 | `AtMostOncePerEmail` | No Email reaches SMTP twice. |
 | `TruthfulResults` | A result that says nothing was sent is true, even after a late request lands. |
 | `NoLeakedReservation` | No return path leaves a reservation stuck `in_flight`. |
-| `RetriesReplayed` | A keyed retry whose key already has a recorded answer gets that answer back. |
+| `RetriesReplayed` | A keyed retry whose key already has a recorded answer gets that answer back. Holds by construction now; it guards the lookup-before-reserve order. |
 | `CallsReturn` | Every call that starts eventually returns. |
 
 The model does not cover three things. Nothing in the code prevents them:

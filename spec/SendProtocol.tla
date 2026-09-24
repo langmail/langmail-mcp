@@ -325,7 +325,9 @@ NoLeakedReservation ==
         guard[s] = "in_flight" => \E a \in Attempts : Running(a) /\ s \in held[a]
 
 \* A retry carrying a key that already has an answer gets that answer back —
-\* whatever state the reservation was left in.
+\* whatever state the reservation was left in. With the lookup first in Start
+\* this holds by construction; it is a regression guard that fails the moment
+\* Start reserves before the lookup, as an earlier fix did after an unfiled send.
 RetriesReplayed ==
     \A a \in Attempts :
         (pc[a] = "done" /\ Keyed(a) /\ seen[a]) => result[a] = "replayed"
