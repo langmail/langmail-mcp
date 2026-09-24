@@ -6,6 +6,9 @@ from `services/mcp` to check it with TLC. You need Java 11+, and the first run
 downloads a pinned `tla2tools.jar`. CI runs the same script
 (`.github/workflows/tla.yml`).
 
+This folder is a formal model of one protocol. The repo-root `spec/`
+documents referenced from `AGENTS.md` are design rationale, not TLA+.
+
 ## What it models
 
 - **Clients.** Each request is one intention: send draft `d`, or reply to
@@ -36,7 +39,8 @@ downloads a pinned `tla2tools.jar`. CI runs the same script
 
 The model does not cover three things. Nothing in the code prevents them:
 
-- Reservations expire after 10 minutes and the replay cache after 15.
+- Reservations expire after 10 minutes and the replay cache after 15. A call
+  that outlives its reservation cannot end a retry's: holds carry an owner.
 - A restart clears both.
 - A keyless reply may be retried after an earlier attempt returned "sent".
   Nothing can tell that apart from a deliberate second reply.

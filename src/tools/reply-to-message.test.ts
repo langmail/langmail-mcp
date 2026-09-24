@@ -202,6 +202,10 @@ describe('replyToMessage', () => {
     expect(submissions).toHaveLength(1)
     const blocked = results.find((r) => r.isError)
     expect(blocked?.content[0]?.text ?? '').toContain('already in progress')
+    // e1 is the message being answered: reading it back says nothing about
+    // whether the reply went out, so the refusal points at Sent instead.
+    expect(blocked?.content[0]?.text ?? '').toContain('A reply to e1')
+    expect(blocked?.content[0]?.text ?? '').toContain('Sent folder')
     // The reservation is taken before anything is staged, so the refused call
     // leaves no stray draft behind.
     expect(creates).toHaveLength(1)

@@ -1,6 +1,7 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
 
 import { type EmailSubmissionCreateParams, JmapError } from '@langmail/jmap'
+import { logger } from '@langmail/logger'
 
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
 import { createSendGuard } from '../drafts/send-guard.ts'
@@ -268,15 +269,30 @@ describe('sendDraft', () => {
     const refusingGuard = createSendGuard()
     const refusing = draftDeps({ records: { d1: stagedDraft() }, submitError: jmapRefusal })
     const ctx = { args: sendDraftInput.parse({ draftId: 'd1' }), principal: TEST_PRINCIPAL, token: 'tok' }
-    await expect(sendDraft(refusing, store(), refusingGuard, ctx)).rejects.toThrow('forbiddenFrom')
-    // The server answered "no", so nothing went out and the draft is free again.
-    expect(refusingGuard.reserve(TEST_PRINCIPAL, SUBJECT)).toBeNull()
+    const error = spyOn(logger, 'error').mockImplementation(() => undefined)
+    try {
+      const refused = await sendDraft(refusing, store(), refusingGuard, ctx)
+      expect(refused.isError).toBe(true)
+      expect(refused.content[0]?.text ?? '').toContain('forbiddenFrom')
+      expect(refused.content[0]?.text ?? '').toContain('Nothing was sent')
+      // The server answered "no", so nothing went out and the draft is free again.
+      expect(refusingGuard.reserve(TEST_PRINCIPAL, SUBJECT)).toBeNull()
 
-    const lostGuard = createSendGuard()
-    const lost = draftDeps({ records: { d1: stagedDraft() }, submitError: new Error('socket hang up') })
-    await expect(sendDraft(lost, store(), lostGuard, ctx)).rejects.toThrow('socket hang up')
-    // A lost answer might mean "delivered". Blocking is the safe direction.
-    expect(lostGuard.reserve(TEST_PRINCIPAL, SUBJECT)).toEqual({ state: 'unknown' })
+      const lostGuard = createSendGuard()
+      const lost = draftDeps({ records: { d1: stagedDraft() }, submitError: new Error('socket hang up') })
+      const unknown = await sendDraft(lost, store(), lostGuard, ctx)
+      // The agent's first report is the one the user acts on: it must say the
+      // message may have gone, not just relay the transport error.
+      expect(unknown.isError).toBe(true)
+      expect(unknown.content[0]?.text ?? '').toContain('may already have gone out')
+      expect(unknown.content[0]?.text ?? '').not.toContain('Nothing was sent')
+      // A lost answer might mean "delivered". Blocking is the safe direction.
+      expect(lostGuard.reserve(TEST_PRINCIPAL, SUBJECT)).toEqual({ state: 'unknown' })
+      // Both are real faults, so both still reach error tracking.
+      expect(error).toHaveBeenCalledTimes(2)
+    } finally {
+      error.mockRestore()
+    }
   })
 
   test('a send whose outcome is unknown is refused rather than retried', async () => {
@@ -332,7 +348,13 @@ describe('sendDraft', () => {
       principal: TEST_PRINCIPAL,
       token: 'tok',
     }
-    await expect(sendDraft(deps, replays, guard, ctx)).rejects.toThrow('smtp down')
+    const error = spyOn(logger, 'error').mockImplementation(() => undefined)
+    try {
+      const result = await sendDraft(deps, replays, guard, ctx)
+      expect(result.isError).toBe(true)
+    } finally {
+      error.mockRestore()
+    }
     // A failed send must stay retryable — the key can only shadow a success.
     expect(replays.lookup('send_draft', TEST_PRINCIPAL, 'k1')).toBeNull()
   })

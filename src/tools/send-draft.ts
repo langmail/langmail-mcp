@@ -18,9 +18,11 @@ import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
 import { bearerAuthorization, type EmailComposeRecord, type EmailDraft, JmapError } from '@langmail/jmap'
+import { logger } from '@langmail/logger'
 
 import { type IdempotencyStore } from '../drafts/idempotency.ts'
 import { holdSend, reservationRefusal, type SendGuard, type SendHold, type SendSubject } from '../drafts/send-guard.ts'
+import { describeError } from '../observability/errors.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import {
   countRecipients,
@@ -286,15 +288,31 @@ const sendHeld = async (
     return errorResult(identity.error)
   }
 
-  const outcome = await submitDraft(deps, {
-    authorization,
-    draftId: args.draftId,
-    draftsMailboxId: mailboxes.drafts,
-    hold,
-    identityId: identity.identityId,
-    submissionAccountId,
-    ...(mailboxes.sent ? { sentMailboxId: mailboxes.sent } : {}),
-  })
+  let outcome: string
+  try {
+    outcome = await submitDraft(deps, {
+      authorization,
+      draftId: args.draftId,
+      draftsMailboxId: mailboxes.drafts,
+      hold,
+      identityId: identity.identityId,
+      submissionAccountId,
+      ...(mailboxes.sent ? { sentMailboxId: mailboxes.sent } : {}),
+    })
+  } catch (error) {
+    // Returned in-band, so the agent is told what the failure means for delivery
+    // rather than handed a bare transport error. That would otherwise log as a
+    // `tool_error`, so log it here to keep it in error tracking, redacted.
+    logger.error({ ...describeError(error), tool: TOOL_NAME }, 'draft submission failed')
+    const detail = error instanceof Error ? error.message : 'unknown error'
+    return errorResult(
+      wasRefused(error)
+        ? `The server refused to send ${args.draftId} (${detail}). Nothing was sent; it is still a draft.`
+        : `${args.draftId} was handed to the server, but the answer was lost (${detail}), so it may already ` +
+            "have gone out. Do NOT send it again yet: read it back with get_email, or check the user's Sent " +
+            'folder, before deciding.'
+    )
+  }
   const summary = formatSent('Sent.', {
     draft: draftFromRecord(record),
     messageId: args.draftId,

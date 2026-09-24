@@ -81,4 +81,26 @@ describe('holdSend', () => {
     expect(guard.reserve(USER, REPLY_D1)).toEqual({ state: 'unknown' })
     expect(guard.reserve(USER, SEND_D2)).toEqual({ state: 'unknown' })
   })
+
+  test('a call that outlived its reservation cannot end the retry that took it over', () => {
+    let now = 0
+    const guard = createSendGuard(() => now)
+    const first = holdSend(guard, USER, SEND_D1)
+    if (!('hold' in first)) {
+      throw new Error('expected the hold to be taken')
+    }
+    // The first call runs past the TTL; its entry is swept and a retry takes it.
+    now += (SEND_RESERVATION_TTL_MINUTES + 1) * 60 * 1000
+    const second = holdSend(guard, USER, SEND_D1)
+    if (!('hold' in second)) {
+      throw new Error('expected the expired reservation to be taken over')
+    }
+    // Releasing by subject alone would drop the retry's live reservation and
+    // let a third call submit alongside it.
+    first.hold.end()
+    expect(guard.reserve(USER, SEND_D1)).toEqual({ state: 'in_flight' })
+    first.hold.markUnknown()
+    first.hold.end()
+    expect(guard.reserve(USER, SEND_D1)).toEqual({ state: 'in_flight' })
+  })
 })

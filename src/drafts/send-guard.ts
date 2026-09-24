@@ -71,21 +71,29 @@ export interface SendSubject {
   tool: string
 }
 
+// `owner` ties an entry to the call that took it. A call can outlive its
+// reservation's TTL, and by then a retry may hold the same subject: settling by
+// subject alone would release — or mark unknown — the retry's live entry. With
+// an owner, release and markUnknown only touch the caller's own entry.
 export interface SendGuard {
   // Keeps the reservation, marking delivery as unknown rather than in-flight.
-  markUnknown: (principal: string, subject: SendSubject) => void
+  markUnknown: (principal: string, subject: SendSubject, owner?: symbol) => void
   // Drops the reservation — a further attempt is safe.
-  release: (principal: string, subject: SendSubject) => void
+  release: (principal: string, subject: SendSubject, owner?: symbol) => void
   // Marks a send as running. Returns null when the caller may proceed, or the
   // existing reservation when it must not.
-  reserve: (principal: string, subject: SendSubject) => SendReservation | null
+  reserve: (principal: string, subject: SendSubject, owner?: symbol) => SendReservation | null
 }
 
 const scopedKey = (principal: string, subject: SendSubject): string =>
   `${subject.tool.length}:${subject.tool}${principal.length}:${principal}${subject.key}`
 
 export const createSendGuard = (now: () => number = Date.now): SendGuard => {
-  const entries = new Map<string, { expiresAt: number; state: SendReservation['state'] }>()
+  const entries = new Map<string, { expiresAt: number; owner?: symbol; state: SendReservation['state'] }>()
+
+  // Another call's entry is left alone; an unowned settle acts unconditionally.
+  const ownedBy = (key: string, owner: symbol | undefined): boolean =>
+    owner === undefined || entries.get(key)?.owner === owner
 
   const sweep = (): void => {
     const t = now()
@@ -97,34 +105,50 @@ export const createSendGuard = (now: () => number = Date.now): SendGuard => {
   }
 
   return {
-    markUnknown: (principal, subject) => {
-      entries.set(scopedKey(principal, subject), { expiresAt: now() + SEND_RESERVATION_TTL_MS, state: 'unknown' })
+    markUnknown: (principal, subject, owner) => {
+      const key = scopedKey(principal, subject)
+      if (ownedBy(key, owner)) {
+        entries.set(key, { expiresAt: now() + SEND_RESERVATION_TTL_MS, owner, state: 'unknown' })
+      }
     },
-    release: (principal, subject) => {
-      entries.delete(scopedKey(principal, subject))
+    release: (principal, subject, owner) => {
+      const key = scopedKey(principal, subject)
+      if (ownedBy(key, owner)) {
+        entries.delete(key)
+      }
     },
-    reserve: (principal, subject) => {
+    reserve: (principal, subject, owner) => {
       sweep()
       const key = scopedKey(principal, subject)
       const held = entries.get(key)
       if (held) {
         return { state: held.state }
       }
-      entries.set(key, { expiresAt: now() + SEND_RESERVATION_TTL_MS, state: 'in_flight' })
+      entries.set(key, { expiresAt: now() + SEND_RESERVATION_TTL_MS, owner, state: 'in_flight' })
       return null
     },
   }
 }
 
 // Why a send was refused because another call holds its subject. Nothing was
-// sent by the refused call in either case.
-export const reservationRefusal = (subject: SendSubject, held: SendReservation): string =>
-  held.state === 'in_flight'
+// sent by the refused call in either case. A reply's subject is the message
+// being answered, and reading that back says nothing about the reply — so a
+// reply is pointed at the Sent folder, a draft at the draft itself.
+export const reservationRefusal = (subject: SendSubject, held: SendReservation): string => {
+  if (subject.tool === 'reply_to_message') {
+    return held.state === 'in_flight'
+      ? `A reply to ${subject.key} is already in progress. Nothing was sent by this call. Wait, then check ` +
+          "the user's Sent folder to see whether it went out."
+      : `An earlier reply to ${subject.key} failed without saying whether it went out, so it was NOT sent ` +
+          "again — a second attempt could deliver a duplicate. Check the user's Sent folder before deciding."
+  }
+  return held.state === 'in_flight'
     ? `A send of ${subject.key} is already in progress. Nothing was sent by this call. Wait, then read ` +
-      'the message back with get_email to see whether it went out.'
+        'the message back with get_email to see whether it went out.'
     : `An earlier send of ${subject.key} failed without saying whether the message went out, so it was ` +
-      'NOT sent again — a second attempt could deliver a duplicate. Read it back with get_email, or check ' +
-      "the user's Sent folder, before deciding."
+        'NOT sent again — a second attempt could deliver a duplicate. Read it back with get_email, or check ' +
+        "the user's Sent folder, before deciding."
+}
 
 // The reservations one tool call holds, from its first step until it returns.
 // Every subject it covers is settled together, exactly once, by `end`.
@@ -146,7 +170,8 @@ export const holdSend = (
   principal: string,
   subject: SendSubject
 ): { hold: SendHold } | { refused: SendReservation } => {
-  const refused = guard.reserve(principal, subject)
+  const owner = Symbol('send')
+  const refused = guard.reserve(principal, subject, owner)
   if (refused) {
     return { refused }
   }
@@ -156,7 +181,7 @@ export const holdSend = (
   return {
     hold: {
       cover: (next) => {
-        const held = guard.reserve(principal, next)
+        const held = guard.reserve(principal, next, owner)
         if (!held) {
           subjects.push(next)
         }
@@ -169,9 +194,9 @@ export const holdSend = (
         ended = true
         for (const s of subjects) {
           if (unknown) {
-            guard.markUnknown(principal, s)
+            guard.markUnknown(principal, s, owner)
           } else {
-            guard.release(principal, s)
+            guard.release(principal, s, owner)
           }
         }
       },
