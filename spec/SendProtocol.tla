@@ -69,10 +69,11 @@ VARIABLES
     result,     \* [Attempts -> the tool result]
     advice,     \* [Attempts -> draft the result says to send_draft, or None]
     delivered,  \* [Emails -> Nat]: copies handed to SMTP
-    sentBy      \* [Attempts -> BOOLEAN]: the attempt's submission was delivered
+    sentBy,     \* [Attempts -> BOOLEAN]: the attempt's submission was delivered
+    seen        \* [Attempts -> BOOLEAN]: a replay was recorded when it started
 
 vars == <<hasKey, email, guard, replays, pc, tool, draft, held, unknown,
-          net, answer, result, advice, delivered, sentBy>>
+          net, answer, result, advice, delivered, sentBy, seen>>
 
 TypeOK ==
     /\ hasKey \in [Requests -> BOOLEAN]
@@ -84,6 +85,7 @@ TypeOK ==
     /\ answer \in [Attempts -> {"none", "rejected", "filed", "unfiled"}]
     /\ delivered \in [Emails -> Nat]
     /\ sentBy \in [Attempts -> BOOLEAN]
+    /\ seen \in [Attempts -> BOOLEAN]
 
 Init ==
     /\ hasKey \in [Requests -> BOOLEAN]
@@ -103,6 +105,7 @@ Init ==
     /\ advice = [a \in Attempts |-> None]
     /\ delivered = [e \in Emails |-> 0]
     /\ sentBy = [a \in Attempts |-> FALSE]
+    /\ seen = [a \in Attempts |-> FALSE]
 
 -----------------------------------------------------------------------------
 (* The client.                                                             *)
@@ -145,23 +148,25 @@ Return(a, res) ==
 Refusal(s) == IF guard[s] = "in_flight" THEN "refused_in_flight" ELSE "refused_unknown"
 
 -----------------------------------------------------------------------------
-(* The tools. Each starts with one synchronous step: holdSend, then the    *)
-(* replay lookup, before its first await.                                  *)
+(* The tools. Each starts with one synchronous step, before its first     *)
+(* await: the replay lookup, then holdSend.                                *)
 
 Start(a, t, d, s) ==
     /\ tool' = [tool EXCEPT ![a] = t]
     /\ draft' = [draft EXCEPT ![a] = d]
-    /\ IF guard[s] # "free"
-       THEN /\ Finish(a, Refusal(s))
-            /\ UNCHANGED <<guard, held>>
-       ELSE /\ held' = [held EXCEPT ![a] = {s}]
-            /\ IF hasKey[Req(a)] /\ replays[Req(a)] /\ t = IF Target[Req(a)] \in Drafts
-                                                             THEN "send_draft" ELSE "reply_to_message"
-               THEN /\ guard' = guard   \* reserved and released in one step
-                    /\ Finish(a, "replayed")
-               ELSE /\ guard' = [guard EXCEPT ![s] = "in_flight"]
-                    /\ pc' = [pc EXCEPT ![a] = IF t = "send_draft" THEN "load" ELSE "stage"]
-                    /\ UNCHANGED result
+    /\ seen' = [seen EXCEPT ![a] = replays[Req(a)]]
+    /\ LET keyed == hasKey[Req(a)] /\ t = IF Target[Req(a)] \in Drafts
+                                           THEN "send_draft" ELSE "reply_to_message"
+       IN IF keyed /\ replays[Req(a)]
+          THEN /\ Finish(a, "replayed")
+               /\ UNCHANGED <<guard, held>>
+          ELSE IF guard[s] # "free"
+          THEN /\ Finish(a, Refusal(s))
+               /\ UNCHANGED <<guard, held>>
+          ELSE /\ held' = [held EXCEPT ![a] = {s}]
+               /\ guard' = [guard EXCEPT ![s] = "in_flight"]
+               /\ pc' = [pc EXCEPT ![a] = IF t = "send_draft" THEN "load" ELSE "stage"]
+               /\ UNCHANGED result
 
 StartSendDraft(a, d) == Start(a, "send_draft", d, <<"send_draft", d>>)
 
@@ -190,7 +195,7 @@ Load(a) ==
                                           /\ UNCHANGED <<guard, result>>
          [] OTHER                      -> Return(a, "already_sent")
     /\ UNCHANGED <<hasKey, email, replays, tool, draft, held, unknown, net, answer,
-                   advice, delivered, sentBy>>
+                   advice, delivered, sentBy, seen>>
 
 \* reply_to_message: Email/set creates the reply as a draft; the hold then
 \* covers it under send_draft's subject.
@@ -209,7 +214,7 @@ Stage(a) ==
                  /\ guard' = [guard EXCEPT ![s] = "in_flight"]
                  /\ pc' = [pc EXCEPT ![a] = "submit"]
                  /\ UNCHANGED result
-    /\ UNCHANGED <<hasKey, replays, tool, unknown, net, answer, advice, delivered, sentBy>>
+    /\ UNCHANGED <<hasKey, replays, tool, unknown, net, answer, advice, delivered, sentBy, seen>>
 
 \* submitDraft hands the submission to the wire.
 Submit(a) ==
@@ -217,7 +222,7 @@ Submit(a) ==
     /\ net' = net \cup {[att |-> a, email |-> draft[a]]}
     /\ pc' = [pc EXCEPT ![a] = "wait"]
     /\ UNCHANGED <<hasKey, email, guard, replays, tool, draft, held, unknown, answer,
-                   result, advice, delivered, sentBy>>
+                   result, advice, delivered, sentBy, seen>>
 
 \* The answer arrives. The replay is recorded before the hold ends, in the same
 \* step: a retry that gets the reservation always finds it.
@@ -246,7 +251,7 @@ Receive(a) ==
                  /\ guard' = [s \in Subjects |-> IF s \in held[a] THEN "unknown" ELSE guard[s]]
                  /\ Finish(a, "sent_unfiled")
                  /\ UNCHANGED advice
-    /\ UNCHANGED <<hasKey, email, tool, draft, held, net, answer, delivered, sentBy>>
+    /\ UNCHANGED <<hasKey, email, tool, draft, held, net, answer, delivered, sentBy, seen>>
 
 \* Timeout, reset, a proxy 502, or an answer lost on the way back: delivery
 \* unknown. The request itself may still be on the wire.
@@ -256,7 +261,7 @@ Lose(a) ==
     /\ guard' = [s \in Subjects |-> IF s \in held[a] THEN "unknown" ELSE guard[s]]
     /\ Finish(a, IF tool[a] = "reply_to_message" THEN "reply_unknown" ELSE "unknown")
     /\ UNCHANGED <<hasKey, email, replays, tool, draft, held, net, answer, advice,
-                   delivered, sentBy>>
+                   delivered, sentBy, seen>>
 
 -----------------------------------------------------------------------------
 (* The server.                                                             *)
@@ -264,14 +269,14 @@ Lose(a) ==
 Process(m) ==
     /\ net' = net \ {m}
     /\ \/ /\ answer' = [answer EXCEPT ![m.att] = "rejected"]
-          /\ UNCHANGED <<email, delivered, sentBy>>
+          /\ UNCHANGED <<email, delivered, sentBy, seen>>
        \/ /\ delivered' = [delivered EXCEPT ![m.email] = @ + 1]
           /\ sentBy' = [sentBy EXCEPT ![m.att] = TRUE]
           /\ \/ /\ email' = [email EXCEPT ![m.email] = "sent"]
                 /\ answer' = [answer EXCEPT ![m.att] = "filed"]
              \/ /\ UNCHANGED email
                 /\ answer' = [answer EXCEPT ![m.att] = "unfiled"]
-    /\ UNCHANGED <<hasKey, guard, replays, pc, tool, draft, held, unknown, result, advice>>
+    /\ UNCHANGED <<hasKey, guard, replays, pc, tool, draft, held, unknown, result, advice, seen>>
 
 -----------------------------------------------------------------------------
 
@@ -318,6 +323,12 @@ TruthfulResults ==
 NoLeakedReservation ==
     \A s \in Subjects :
         guard[s] = "in_flight" => \E a \in Attempts : Running(a) /\ s \in held[a]
+
+\* A retry carrying a key that already has an answer gets that answer back —
+\* whatever state the reservation was left in.
+RetriesReplayed ==
+    \A a \in Attempts :
+        (pc[a] = "done" /\ Keyed(a) /\ seen[a]) => result[a] = "replayed"
 
 \* Every call that starts returns.
 CallsReturn == \A a \in Attempts : (pc[a] # "idle") ~> (pc[a] = "done")

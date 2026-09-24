@@ -241,6 +241,28 @@ describe('sendDraft', () => {
     expect(submissions).toHaveLength(1)
   })
 
+  test('a keyed retry after an unfiled send is replayed, not refused as unknown', async () => {
+    // Found by RetriesReplayed in spec/SendProtocol.tla: the unfiled path leaves
+    // the reservation `unknown`, and a retry refused on it was told the send
+    // "failed without saying whether the message went out" — although the
+    // first call said it went out, and recorded that answer under the key.
+    const submissions: EmailSubmissionCreateParams[] = []
+    const deps = draftDeps({ records: { d1: stagedDraft() }, submission: { filed: false, id: 's1' }, submissions })
+    const replays = store()
+    const guard = createSendGuard()
+    const ctx = {
+      args: sendDraftInput.parse({ draftId: 'd1', idempotencyKey: 'k1' }),
+      principal: TEST_PRINCIPAL,
+      token: 'tok',
+    }
+    await sendDraft(deps, replays, guard, ctx)
+    const retry = await sendDraft(deps, replays, guard, ctx)
+    const text = retry.content[0]?.text ?? ''
+    expect(text).toContain('WAS sent')
+    expect(text).toContain('was NOT sent again')
+    expect(submissions).toHaveLength(1)
+  })
+
   test('a server refusal stays retryable; a transport failure does not', async () => {
     const jmapRefusal = new JmapError(200, 'EmailSubmission/set did not send d1: forbiddenFrom', 'forbiddenFrom')
     const refusingGuard = createSendGuard()

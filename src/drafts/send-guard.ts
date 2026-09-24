@@ -8,16 +8,16 @@
 // "draft", because Stalwart hasn't applied the follow-up patch. Both calls
 // submit, and the recipient gets two copies.
 //
-// So a send reserves *first* — before the replay lookup and before it reads the
-// draft — and holds the reservation until the call ends. Both checks then run
-// inside the reservation, which is what makes them mean anything: a retry that
-// gets past `reserve` knows the earlier call has finished, so its replay lookup
-// sees whatever that call recorded, and its `isDraft` read sees the mailbox after
-// that call's submission. Reserving any later reopens the window: the retry reads
-// "still a draft" while the first call is in flight, waits on its own I/O, and
-// reserves after the first call has released — then submits a message that has
-// already gone. `spec/SendProtocol.tla` checks this ordering; change it there
-// first.
+// So a send reserves *first* — in the same synchronous step as its replay
+// lookup, before its first await — and holds the reservation until the call
+// ends, recording its replay before letting go. Both checks then mean
+// something: a retry that gets past `reserve` knows the earlier call has
+// finished, so the replay it looked up in that same step is already recorded,
+// and its `isDraft` read sees the mailbox after that call's submission.
+// Reserving any later reopens the window: the retry reads "still a draft" while
+// the first call is in flight, waits on its own I/O, and reserves after the
+// first call has released — then submits a message that has already gone.
+// `spec/SendProtocol.tla` checks this ordering; change it there first.
 //
 // The reservation is keyed on something that is *the same on a retry* rather
 // than on the caller's optional key — which is what makes it cover a client

@@ -279,6 +279,56 @@ describe('replyToMessage', () => {
     expect(submissions).toEqual([])
   })
 
+  test('a keyed retry after an unfiled reply is replayed, not refused as unknown', async () => {
+    const submissions: EmailSubmissionCreateParams[] = []
+    const deps = draftDeps({
+      records: { e1: receivedMessage() },
+      submission: { filed: false, id: 's1' },
+      submissions,
+    })
+    const replays = store()
+    const guard = createSendGuard()
+    const ctx = {
+      args: replyToMessageInput.parse({ idempotencyKey: 'k1', messageId: 'e1', text: 'hi' }),
+      principal: TEST_PRINCIPAL,
+      token: 'tok',
+    }
+    await replyToMessage(deps, replays, guard, ctx)
+    const retry = await replyToMessage(deps, replays, guard, ctx)
+    expect(retry.content[0]?.text ?? '').toContain('no second reply was sent')
+    expect(submissions).toHaveLength(1)
+  })
+
+  test('a failure before the submission is not reported as handed to the server', async () => {
+    // The submission account is resolved before anything is staged or sent, so
+    // a transport error there can only mean nothing was submitted.
+    const submissions: EmailSubmissionCreateParams[] = []
+    const deps = {
+      ...draftDeps({ records: { e1: receivedMessage() }, submissions }),
+      resolveSubmissionAccountId: () => Promise.reject(new Error('socket hang up')),
+    }
+    const guard = createSendGuard()
+    const ctx = {
+      args: replyToMessageInput.parse({ messageId: 'e1', text: 'hi' }),
+      principal: TEST_PRINCIPAL,
+      token: 'tok',
+    }
+    const error = spyOn(logger, 'error').mockImplementation(() => undefined)
+    let text = ''
+    try {
+      const result = await replyToMessage(deps, store(), guard, ctx)
+      text = result.content[0]?.text ?? ''
+    } catch (thrown) {
+      text = thrown instanceof Error ? thrown.message : ''
+    } finally {
+      error.mockRestore()
+    }
+    expect(text).not.toContain('handed to the server')
+    expect(submissions).toEqual([])
+    // Nothing went out, so a retry is not blocked as unknown.
+    expect(guard.reserve(TEST_PRINCIPAL, { key: 'e1', tool: 'reply_to_message' })).toBeNull()
+  })
+
   test('a reply the server refused says nothing went out and leaves its draft sendable', async () => {
     const submissions: EmailSubmissionCreateParams[] = []
     const guard = createSendGuard()

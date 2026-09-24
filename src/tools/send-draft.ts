@@ -81,6 +81,9 @@ export interface SubmitParams {
   identityId: string
   // The account's Sent mailbox, when it has one.
   sentMailboxId?: string
+  // Resolved by the caller: the submission call must be the only I/O here, so
+  // a transport failure here always means "maybe delivered".
+  submissionAccountId: string
 }
 
 // Submit a staged draft and report where the message ended up. Shared with
@@ -90,7 +93,7 @@ export const submitDraft = async (deps: DraftToolDeps, p: SubmitParams): Promise
   let submission: Awaited<ReturnType<typeof deps.emailSubmissionCreate>>
   try {
     submission = await deps.emailSubmissionCreate({
-      accountId: await deps.resolveSubmissionAccountId(p.authorization),
+      accountId: p.submissionAccountId,
       apiUrl: '',
       authorization: p.authorization,
       draftsMailboxId: p.draftsMailboxId,
@@ -220,9 +223,19 @@ export const sendDraft = async (
   ctx: SendDraftContext
 ): Promise<ToolResult> => {
   const { args, principal } = ctx
-  // Reserve before the replay lookup and the draft read, synchronously, so both
-  // run inside the reservation. A retry passes the same draftId, so it is the
-  // stable subject here.
+  // The replay lookup and the reservation run in one synchronous step, before
+  // the first await: a key that already has an answer gets it back whatever
+  // state the reservation was left in (an unfiled send leaves it `unknown`),
+  // and anything else reserves before the draft is read. A retry passes the
+  // same draftId, so it is the stable subject here.
+  if (args.idempotencyKey) {
+    const replayed = replays.lookup(TOOL_NAME, principal, args.idempotencyKey)
+    if (replayed) {
+      return textResult(
+        `${replayed}\n\n(Replayed: idempotencyKey "${args.idempotencyKey}" was already used — the message was NOT sent again.)`
+      )
+    }
+  }
   const subject = sendDraftSubject(args.draftId)
   const taken = holdSend(guard, principal, subject)
   if ('refused' in taken) {
@@ -242,15 +255,6 @@ const sendHeld = async (
   ctx: SendDraftContext
 ): Promise<ToolResult> => {
   const { args, principal, token } = ctx
-  if (args.idempotencyKey) {
-    const replayed = replays.lookup(TOOL_NAME, principal, args.idempotencyKey)
-    if (replayed) {
-      return textResult(
-        `${replayed}\n\n(Replayed: idempotencyKey "${args.idempotencyKey}" was already used — the message was NOT sent again.)`
-      )
-    }
-  }
-
   const authorization = bearerAuthorization(token)
   const accountId = await deps.resolveAccountId(authorization)
   const loaded = await loadSendableDraft(deps, { accountId, authorization, draftId: args.draftId })
@@ -271,8 +275,9 @@ const sendHeld = async (
   if (!sender) {
     return errorResult(`Draft ${args.draftId} has no sender address, so it cannot be sent.`)
   }
+  const submissionAccountId = await deps.resolveSubmissionAccountId(authorization)
   const identity = await resolveIdentity(deps, {
-    accountId: await deps.resolveSubmissionAccountId(authorization),
+    accountId: submissionAccountId,
     authorization,
     from: sender,
     principal,
@@ -287,6 +292,7 @@ const sendHeld = async (
     draftsMailboxId: mailboxes.drafts,
     hold,
     identityId: identity.identityId,
+    submissionAccountId,
     ...(mailboxes.sent ? { sentMailboxId: mailboxes.sent } : {}),
   })
   const summary = formatSent('Sent.', {

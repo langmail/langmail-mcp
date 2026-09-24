@@ -158,11 +158,19 @@ export const replyToMessage = async (
   if (argsError) {
     return errorResult(argsError)
   }
-  // The reservation is taken against the message being answered, not the draft
-  // this call will stage: a retry mints a *different* draft, so a draft-keyed
-  // reservation would guard nothing. Two concurrent replies to one message are a
-  // duplicate, not two intentions. Taken before the replay lookup, synchronously,
-  // so the lookup runs inside it — see drafts/send-guard.ts.
+  // The replay lookup and the reservation run in one synchronous step, before
+  // the first await — see drafts/send-guard.ts. The reservation is taken against
+  // the message being answered, not the draft this call will stage: a retry
+  // mints a *different* draft, so a draft-keyed reservation would guard nothing.
+  // Two concurrent replies to one message are a duplicate, not two intentions.
+  if (args.idempotencyKey) {
+    const replayed = replays.lookup(TOOL_NAME, principal, args.idempotencyKey)
+    if (replayed) {
+      return textResult(
+        `${replayed}\n\n(Replayed: idempotencyKey "${args.idempotencyKey}" was already used — no second reply was sent.)`
+      )
+    }
+  }
   const subject = { key: args.messageId, tool: TOOL_NAME }
   const taken = holdSend(guard, principal, subject)
   if ('refused' in taken) {
@@ -182,15 +190,6 @@ const replyHeld = async (
   ctx: ReplyToMessageContext
 ): Promise<ToolResult> => {
   const { args, principal, token } = ctx
-  if (args.idempotencyKey) {
-    const replayed = replays.lookup(TOOL_NAME, principal, args.idempotencyKey)
-    if (replayed) {
-      return textResult(
-        `${replayed}\n\n(Replayed: idempotencyKey "${args.idempotencyKey}" was already used — no second reply was sent.)`
-      )
-    }
-  }
-
   const recipients = parseRecipients({
     ...(args.to ? { to: args.to } : {}),
     ...(args.cc ? { cc: args.cc } : {}),
@@ -202,8 +201,9 @@ const replyHeld = async (
 
   const authorization = bearerAuthorization(token)
   const accountId = await deps.resolveAccountId(authorization)
+  const submissionAccountId = await deps.resolveSubmissionAccountId(authorization)
   const identity = await resolveIdentity(deps, {
-    accountId: await deps.resolveSubmissionAccountId(authorization),
+    accountId: submissionAccountId,
     authorization,
     principal,
   })
@@ -259,6 +259,7 @@ const replyHeld = async (
       draftsMailboxId: mailboxes.drafts,
       hold,
       identityId: identity.identityId,
+      submissionAccountId,
       ...(mailboxes.sent ? { sentMailboxId: mailboxes.sent } : {}),
     })
   } catch (error) {

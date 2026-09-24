@@ -30,6 +30,7 @@ with TLC. You need Java 11+, and the first run downloads a pinned
 | `AtMostOncePerEmail` | No Email reaches SMTP twice. |
 | `TruthfulResults` | A result that says nothing was sent is true, even after a late request lands. |
 | `NoLeakedReservation` | No return path leaves a reservation stuck `in_flight`. |
+| `RetriesReplayed` | A keyed retry whose key already has a recorded answer gets that answer back. |
 | `CallsReturn` | Every call that starts eventually returns. |
 
 The model does not cover three things. Nothing in the code prevents them:
@@ -58,6 +59,12 @@ counterexamples:
    second copy. A reply now says delivery is unknown in that case. Its
    reservation also covers the staged draft under `send_draft`'s key, so
    that send is refused until the outcome is known.
+
+`RetriesReplayed` was added after review and failed against the first fix.
+That fix reserved before the replay lookup. After a send that was delivered
+but left flagged `$draft`, a keyed retry was refused as "outcome unknown",
+although the answer was already recorded under its key. The lookup now runs
+first, in the same synchronous step as the reservation.
 
 ## Changing the protocol
 
