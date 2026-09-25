@@ -145,8 +145,9 @@ const hasAttendees = (object: CalendarObject): boolean => parseEvents(object.dat
 // given calendarUrl), so the remedy names both URLs and the argument. It is
 // also outward-destructive: attendees resolve its CANCEL by uid, which both
 // copies share, so deleting either one cancels the meeting for all of them.
-const duplicateRemedy = (dest: CalendarSummary, others: Location[]): string => {
-  const cancels = others.some((l) => hasAttendees(l.object))
+// Either copy may be the organized meeting, so both sides are checked.
+const duplicateRemedy = (dest: CalendarSummary, others: Location[], destCopies: Location[]): string => {
+  const cancels = [...others, ...destCopies].some((l) => hasAttendees(l.object))
     ? '. Warn the user first: the event has attendees and both copies share one uid, so deleting either ' +
       'copy cancels the meeting for all of them'
     : ''
@@ -175,7 +176,8 @@ const refusalReason = (
 ): string => {
   switch (outcome.kind) {
     case 'uidConflict':
-      return `uidConflict: ${duplicateRemedy(dest, [source])}`
+      // The destination held no copy when it was listed, so only the source is known.
+      return `uidConflict: ${duplicateRemedy(dest, [source], [])}`
     case 'nameConflict':
       return `nameConflict: "${calendarLabel(dest)}" already has an event stored under the same name; this cannot be resolved with these tools`
     case 'forbidden':
@@ -224,7 +226,9 @@ const formatResult = (
 
   const lines = [`Moved ${moved.length} event(s) to ${name}.`]
   if (already.length > 0) {
-    lines.push(`Already in ${name} (${already.length}): ${already.map(([uid]) => uid).join(', ')}.`)
+    // With a calendar unread, "nowhere else" was only checked where it could be.
+    const scope = unreadable.length > 0 ? ' (no other readable calendar holds these)' : ''
+    lines.push(`Already in ${name} (${already.length}): ${already.map(([uid]) => uid).join(', ')}${scope}.`)
   }
   if (notMoved.length > 0) {
     lines.push(`Not moved (${notMoved.length}): ${notMoved.map(([uid, o]) => `${uid} (${o.reason})`).join(', ')}.`)
@@ -284,7 +288,8 @@ const resolveSources = (
 }
 
 interface Listed {
-  inDest: Set<string>
+  // Destination copies by uid, kept whole so a duplicate's remedy can read them.
+  inDest: Map<string, Location[]>
   index: Map<string, Location[]>
   unreadable: CalendarSummary[]
 }
@@ -323,7 +328,7 @@ const listCalendarsInvolved = async (
   return {
     ok: true,
     value: {
-      inDest: new Set(destListing.value.flatMap(uidsOf)),
+      inDest: indexByUid([{ calendar: dest, objects: destListing.value }]),
       index: indexByUid(readable),
       unreadable: sources.filter((_, i) => sourceResults[i]?.status !== 'fulfilled'),
     },
@@ -339,14 +344,15 @@ const decide = (
   from: CalendarSummary | undefined
 ): Outcome | Location => {
   const locations = listed.index.get(uid) ?? []
-  if (listed.inDest.has(uid)) {
+  const destCopies = listed.inDest.get(uid)
+  if (destCopies) {
     // Only a uid that has left every source is done; one still in a source
     // is a duplicate, and calling it done would leave that copy behind.
     return locations.length === 0
       ? { kind: 'alreadyThere' }
       : {
           kind: 'notMoved',
-          reason: `duplicate: ${duplicateRemedy(dest, locations)}`,
+          reason: `duplicate: ${duplicateRemedy(dest, locations, destCopies)}`,
         }
   }
   const [only] = locations

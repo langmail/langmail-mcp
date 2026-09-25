@@ -237,6 +237,17 @@ describe('moveCalendarEvents', () => {
     expect(text(result)).toContain('cancels the meeting for all of them')
   })
 
+  test('the cancellation warning also fires when only the destination copy has attendees', async () => {
+    const h = makeHarness(
+      new Map([
+        [BUSINESS, [event(BUSINESS, 'lunch.ics', 'lunch')]],
+        [PRIVATE, [event(PRIVATE, 'lunch.ics', 'lunch', 0, 'client@example.org')]],
+      ])
+    )
+    const result = await run(h, { uids: ['lunch'] })
+    expect(text(result)).toContain('cancels the meeting for all of them')
+  })
+
   test('already-there wins over fromCalendar, so a repeated call finds its work done', async () => {
     const h = makeHarness(
       new Map([
@@ -395,6 +406,20 @@ describe('moveCalendarEvents', () => {
     expect(text(result)).toContain('Moved 1 event(s) to Private.')
     expect(text(result)).toContain('b (notFound:')
     expect(text(result)).toContain('Could not read "Shared Team"')
+  })
+
+  test('with a calendar unread, already-there is qualified to what was checked', async () => {
+    const h = makeHarness(
+      new Map([
+        [BUSINESS, []],
+        [PRIVATE, [event(PRIVATE, 'done.ics', 'done')]],
+        [SHARED, []],
+      ])
+    )
+    const listEvents = h.deps.listEvents
+    h.deps.listEvents = (token, url) => (url === SHARED.url ? Promise.reject(new Error('503')) : listEvents(token, url))
+    const result = await run(h, { uids: ['done'] })
+    expect(text(result)).toContain('Already in Private (1): done (no other readable calendar holds these).')
   })
 
   test('an unreadable destination moves nothing', async () => {
