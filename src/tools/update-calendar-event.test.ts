@@ -1417,7 +1417,7 @@ const ALARM_EMAIL = [
   'TRIGGER;VALUE=DATE-TIME:20260612T080000Z',
   'SUMMARY:Heads-up',
   'DESCRIPTION:Sync starts soon',
-  'ATTENDEE:mailto:host@langmail.me',
+  'ATTENDEE:mailto:host@example.com',
   'END:VALARM',
 ]
 const withAlarms = (ical: string, ...alarms: string[][]): string =>
@@ -1684,6 +1684,18 @@ describe('updateCalendarEvent — all-day events', () => {
     ])
   })
 
+  test('refuses a date-time recurrenceId on an all-day series instead of truncating it', async () => {
+    const cap = captured()
+    // 00:30 in UTC+2 is still the 23rd in UTC; slicing the string would read the 24th.
+    const result = await updateCalendarEvent(makeDeps(account(), allDayStored(), cap), {
+      args: { recurrenceId: '2026-06-24T00:30:00+02:00', title: 'Offsite', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('occurrence’s date')
+    expect(cap.updated).toHaveLength(0)
+  })
+
   test('rejects a date recurrenceId that is not an occurrence of the all-day series', async () => {
     const cap = captured()
     const result = await updateCalendarEvent(makeDeps(account(), allDayStored(), cap), {
@@ -1749,6 +1761,15 @@ describe('updateCalendarEvent — reminder', () => {
     expect(result.isError).toBeUndefined()
     expect(valarmBlocks(cap.updated[0]?.ical ?? '')).toEqual([])
     expect(result.content[0]?.text).toContain('reminders removed')
+  })
+
+  test('reports an all-day reminder as the clock time it fires', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), vacationStored(), cap), {
+      args: { reminderMinutesBefore: 900, uid: UID },
+      token: 'tok',
+    })
+    expect(result.content[0]?.text).toContain('reminder 09:00 the day before')
   })
 
   test('sets a reminder on one occurrence only', async () => {

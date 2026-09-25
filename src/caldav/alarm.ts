@@ -14,7 +14,7 @@ export const MAX_REMINDER_MINUTES = 4 * MINUTES_PER_WEEK
 const plural = (n: number, unit: string): string => `${n} ${unit}${n === 1 ? '' : 's'}`
 
 // 30 → "30 minutes", 60 → "1 hour", 1440 → "1 day"; the largest whole unit.
-export const formatMinutes = (minutes: number): string => {
+const formatMinutes = (minutes: number): string => {
   if (minutes > 0 && minutes % MINUTES_PER_WEEK === 0) {
     return plural(minutes / MINUTES_PER_WEEK, 'week')
   }
@@ -26,6 +26,12 @@ export const formatMinutes = (minutes: number): string => {
   }
   return plural(minutes, 'minute')
 }
+
+// A reminder `minutes` before the start, as tool output reads it back: "30
+// minutes before", or on an all-day event the clock time it fires ("09:00 the
+// day before"), matching list_calendar_events.
+export const describeReminder = (minutes: number, allDay: boolean): string =>
+  allDay ? allDayFiring(minutes) : `${formatMinutes(minutes)} before`
 
 // A relative TRIGGER (RFC 5545 §3.3.6 duration, e.g. `-PT30M`, `-P1D`,
 // `-P1W`, `PT0S`), as a signed number of minutes; undefined when it is not a

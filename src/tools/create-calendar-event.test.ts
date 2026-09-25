@@ -468,6 +468,22 @@ describe('createCalendarEvent — reminder', () => {
     expect(result.content[0]?.text).toContain('reminder 30 minutes before')
   })
 
+  test('a reminder of 0 minutes fires at the start', async () => {
+    const captured: PutEventParams[] = []
+    await createCalendarEvent(makeDeps(account(), captured), { args: args({ reminderMinutesBefore: 0 }), token: 'tok' })
+    expect(captured[0]?.ical).toContain('TRIGGER:PT0S')
+  })
+
+  test('an all-day reminder is reported as the clock time it fires', async () => {
+    const captured: PutEventParams[] = []
+    const result = await createCalendarEvent(makeDeps(account(), captured), {
+      args: { end: '2026-10-04', reminderMinutesBefore: 900, start: '2026-10-03', title: 'Day off' },
+      token: 'tok',
+    })
+    expect(captured[0]?.ical).toContain('TRIGGER:-PT15H')
+    expect(result.content[0]?.text).toContain('reminder 09:00 the day before')
+  })
+
   test('no reminder by default', async () => {
     const captured: PutEventParams[] = []
     await createCalendarEvent(makeDeps(account(), captured), { args: args(), token: 'tok' })

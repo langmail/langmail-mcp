@@ -12,7 +12,7 @@ import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
 import { type AccountTimeZoneResolver, makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
-import { formatMinutes, MAX_REMINDER_MINUTES } from '../caldav/alarm.ts'
+import { describeReminder, MAX_REMINDER_MINUTES } from '../caldav/alarm.ts'
 import {
   type CalDavConfig,
   discoverAccount,
@@ -117,9 +117,14 @@ export interface CreateCalendarEventContext {
 
 // One-line human summary of who the PUT invited (create-side counterpart of
 // update-calendar-event's deliverySummary).
-const deliverySummary = (attendees: string[], notify: 'all' | 'none' | undefined, reminder?: number): string => {
+const deliverySummary = (
+  attendees: string[],
+  notify: 'all' | 'none' | undefined,
+  allDay: boolean,
+  reminder?: number
+): string => {
   const invites = inviteSummary(attendees, notify)
-  return reminder === undefined ? invites : `${invites}; reminder ${formatMinutes(reminder)} before`
+  return reminder === undefined ? invites : `${invites}; reminder ${describeReminder(reminder, allDay)}`
 }
 
 const inviteSummary = (attendees: string[], notify: 'all' | 'none' | undefined): string => {
@@ -207,7 +212,7 @@ export const createCalendarEvent = async (
 
   return textResult(
     `${eventNoun(allDay, rrule !== undefined)} "${args.title}" created ` +
-      `(${deliverySummary(attendees, args.notify, args.reminderMinutesBefore)}).\n` +
+      `(${deliverySummary(attendees, args.notify, allDay, args.reminderMinutesBefore)}).\n` +
       // Surface the UID + calendar so a later turn can update_calendar_event /
       // delete_calendar_event this event.
       `uid: ${uid}\ncalendarUrl: ${calendarUrl}`

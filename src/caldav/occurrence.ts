@@ -254,7 +254,9 @@ const excludeInstant = (lines: string[], exdate: string, sequence: number): stri
 // Idempotent: if the master already excludes the instant (a double-cancel), the
 // input is returned unchanged so the caller can skip the PUT (no scheduling diff)
 // while still reporting success.
-export const spliceOccurrenceCancellation = (masterIcal: string, recurrenceId: string): string => {
+// `allDay` marks a master whose DTSTART is a DATE: the EXDATE must then be a
+// DATE too (RFC 5545 §3.8.5.1 — the value type of DTSTART).
+export const spliceOccurrenceCancellation = (masterIcal: string, recurrenceId: string, allDay = false): string => {
   const calendar = splitCalendar(masterIcal)
   const targetMs = new Date(recurrenceId).getTime()
 
@@ -271,7 +273,9 @@ export const spliceOccurrenceCancellation = (masterIcal: string, recurrenceId: s
   }
 
   const sequence = maxSequence(masterIcal) + 1
-  const exdate = `EXDATE:${toIcalUtc(recurrenceId)}`
+  const exdate = allDay
+    ? `EXDATE;VALUE=DATE:${toIcalUtc(recurrenceId).slice(0, 8)}`
+    : `EXDATE:${toIcalUtc(recurrenceId)}`
   const components = calendar.components
     // Drop any prior override for the cancelled instant.
     .filter((c) => !(c.name === 'VEVENT' && recurrenceIdMs(c) === targetMs))

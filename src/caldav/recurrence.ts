@@ -10,7 +10,7 @@ import { z } from 'zod'
 
 import { parseWallClockInZone } from '@langmail/ical'
 
-import { toWallClockIso } from './timezone.ts'
+import { dateOnlyToInstant, isDateOnly, toWallClockIso } from './timezone.ts'
 
 // RFC 5545 FREQ values we expose. Lowercase in the structured form for the
 // model's convenience; uppercased when emitted into the RRULE.
@@ -196,4 +196,34 @@ export const isSeriesOccurrence = (
   const rule = rrulestr(`DTSTART:${start}\nRRULE:${rrule}`)
   const at = timeZone ? new Date(`${toWallClockIso(new Date(recurrenceId), timeZone)}Z`) : new Date(recurrenceId)
   return rule.between(at, at, true).length > 0
+}
+
+// The occurrence a caller's `recurrenceId` names, as an ISO instant, for the
+// series `master` heads. An all-day series' occurrences start at a date, so it
+// takes the date (`2026-06-23`), resolved to its UTC midnight — the instant the
+// parser and the splice give a DATE RECURRENCE-ID or EXDATE. A timed series
+// takes the occurrence's original start date-time. The wrong kind is refused
+// in both directions rather than coerced: a date-time's calendar day depends
+// on its offset, so truncating one could name the neighbouring occurrence.
+export const resolveRecurrenceId = (
+  recurrenceId: string,
+  master: { allDay?: true; recurrence?: string } | undefined
+): { error: string; ok: false } | { ok: true; value: string } => {
+  const day = recurrenceId.slice(0, 10)
+  const dateOnly = isDateOnly(recurrenceId)
+  if (master?.allDay) {
+    return dateOnly
+      ? { ok: true, value: dateOnlyToInstant(recurrenceId).toISOString() }
+      : {
+          error: `This series is all-day; pass recurrenceId as the occurrence’s date (e.g. ${day}).`,
+          ok: false,
+        }
+  }
+  if (dateOnly && master?.recurrence !== undefined) {
+    return {
+      error: `This series is not all-day; pass recurrenceId as the occurrence’s original start date-time (e.g. ${day}T10:00:00Z).`,
+      ok: false,
+    }
+  }
+  return { ok: true, value: recurrenceId }
 }

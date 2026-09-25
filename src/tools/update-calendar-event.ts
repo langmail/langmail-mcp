@@ -28,7 +28,7 @@ import { type ParsedAttendee, type ParsedEvent, parseEvents } from '@langmail/ic
 import { hashEmail, logger } from '@langmail/logger'
 
 import { type AccountTimeZoneResolver, makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
-import { formatMinutes, MAX_REMINDER_MINUTES } from '../caldav/alarm.ts'
+import { describeReminder, MAX_REMINDER_MINUTES } from '../caldav/alarm.ts'
 import {
   type CalDavConfig,
   discoverAccount,
@@ -45,6 +45,7 @@ import {
   isSeriesOccurrence,
   recurrenceDescription,
   recurrenceSchema,
+  resolveRecurrenceId,
   startContradictsRule,
   toRRule,
 } from '../caldav/recurrence.ts'
@@ -318,20 +319,20 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
 
   return textResult(
     `Occurrence of "${title}" on ${args.recurrenceId ?? recurrenceId} updated ` +
-      `(${deliverySummary(attendees, scheduleAgent, removedAttendees.length > 0)}${reminderSummary(args)}). ` +
+      `(${deliverySummary(attendees, scheduleAgent, removedAttendees.length > 0)}${reminderSummary(args, allDay)}). ` +
       'The rest of the series is unchanged.'
   )
 }
 
 // The reminder change an edit made, for the result line; empty when the
 // stored reminders were kept.
-const reminderSummary = (args: UpdateCalendarEventArgs): string => {
+const reminderSummary = (args: UpdateCalendarEventArgs, allDay: boolean): string => {
   if (args.reminderMinutesBefore === undefined) {
     return ''
   }
   return args.reminderMinutesBefore === NO_REMINDER
     ? '; reminders removed'
-    : `; reminder ${formatMinutes(args.reminderMinutesBefore)} before`
+    : `; reminder ${describeReminder(args.reminderMinutesBefore, allDay)}`
 }
 
 // Audit line for the accepted PUT: the iMIP fan-out it triggers is otherwise
@@ -799,27 +800,6 @@ const occurrenceBase = (stored: ParsedEvent[], master: ParsedEvent | undefined, 
   return { ...base, end: zoned(new Date(targetMs + durationMs)), start: zoned(new Date(targetMs)) }
 }
 
-// The occurrence `recurrenceId` names, as an ISO instant. An all-day series'
-// occurrences start at a date, so its recurrenceId is taken as that date (a
-// date-time's own date part is accepted too) and resolved to its UTC midnight
-// — the instant the parser and the splice give a DATE RECURRENCE-ID. A timed
-// series needs the occurrence's actual start.
-const normalizeRecurrenceId = (
-  recurrenceId: string,
-  master: ParsedEvent | undefined
-): { error: string; ok: false } | { ok: true; value: string } => {
-  if (master?.allDay) {
-    return { ok: true, value: dateOnlyToInstant(recurrenceId.slice(0, 10)).toISOString() }
-  }
-  if (isDateOnly(recurrenceId) && master?.recurrence !== undefined) {
-    return {
-      error: `This series is not all-day; pass recurrenceId as the occurrence’s original start date-time (e.g. ${recurrenceId}T10:00:00Z).`,
-      ok: false,
-    }
-  }
-  return { ok: true, value: recurrenceId }
-}
-
 // What the edit targets: the whole event (merging against the master), or —
 // with `recurrenceId` — one occurrence, named by its normalized instant and
 // merging against that occurrence's own stored state.
@@ -831,7 +811,7 @@ const editScope = (
   if (args.recurrenceId === undefined) {
     return { base: baseOf(storedMaster) }
   }
-  const recurrenceId = normalizeRecurrenceId(args.recurrenceId, storedMaster)
+  const recurrenceId = resolveRecurrenceId(args.recurrenceId, storedMaster)
   if (!recurrenceId.ok) {
     return { error: recurrenceId.error }
   }
@@ -982,7 +962,7 @@ export const updateCalendarEvent = async (
 
   return textResult(
     `${rrule ? 'Recurring event' : 'Event'} "${f.title}" updated ` +
-      `(${deliverySummary(f.attendees, f.scheduleAgent, removed.length > 0)}${reminderSummary(args)}).`
+      `(${deliverySummary(f.attendees, f.scheduleAgent, removed.length > 0)}${reminderSummary(args, f.allDay)}).`
   )
 }
 

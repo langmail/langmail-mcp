@@ -22,6 +22,7 @@ import {
   createCalendarEvent,
   makeLiveDeps as makeCreateDeps,
 } from '../tools/create-calendar-event.ts'
+import { deleteCalendarEvent, makeLiveDeps as makeDeleteDeps } from '../tools/delete-calendar-event.ts'
 import { listCalendarEvents, makeLiveDeps as makeListDeps } from '../tools/list-calendar-events.ts'
 import {
   makeLiveDeps as makeUpdateDeps,
@@ -199,5 +200,15 @@ live('all-day events and reminders against live Stalwart', () => {
     // The override inherits the series' reminder; the master keeps its own.
     expect(edited.events.map((e) => e.alarms?.length)).toEqual([1, 1])
     expect(edited.events.find((e) => e.recurrence)?.title).toBe('Gym')
+
+    // Cancelling one day writes a DATE EXDATE Stalwart accepts, and keeps the override.
+    const cancelled = await deleteCalendarEvent(makeDeleteDeps(cfg), {
+      args: { recurrenceId: '2026-10-20', uid },
+      token: TOKEN,
+    })
+    expect(cancelled.isError).toBeUndefined()
+    const after = await stored(uid)
+    expect(after.events.find((e) => e.recurrence)?.excludedDates).toEqual(['2026-10-20'])
+    expect(after.events.filter((e) => e.recurrenceId !== undefined)).toHaveLength(1)
   })
 })
