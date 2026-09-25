@@ -65,12 +65,14 @@ const normalizeName = (name: string): string => name.trim().toLowerCase()
 // Every calendar sits on the one CalDAV server, so the decoded path alone
 // identifies it: an agent that decodes %40 to @, swaps the scheme, or
 // changes host case still lands on the same calendar.
-const urlKey = (url: string): string => {
-  const { pathname } = new URL(url, 'https://calendar.invalid')
+const urlKey = (url: string): string | null => {
   try {
+    const { pathname } = new URL(url, 'https://calendar.invalid')
     return withTrailingSlash(decodeURIComponent(pathname))
   } catch {
-    return withTrailingSlash(pathname)
+    // An unparseable URL or a malformed %-escape matches nothing; the miss
+    // error then lists the calendars.
+    return null
   }
 }
 
@@ -87,7 +89,10 @@ type Resolved = { calendar: CalendarSummary; ok: true } | { error: ToolResult; o
 const resolveCalendar = (calendars: CalendarSummary[], ref: string): Resolved => {
   const isUrl = URL_OR_PATH_RE.test(ref)
   const matches = isUrl
-    ? calendars.filter((c) => urlKey(c.url) === urlKey(ref))
+    ? calendars.filter((c) => {
+        const key = urlKey(ref)
+        return key !== null && urlKey(c.url) === key
+      })
     : calendars.filter((c) => normalizeName(c.displayName) === normalizeName(ref))
 
   const [only] = matches

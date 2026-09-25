@@ -111,6 +111,16 @@ describe('updateCalendar', () => {
     expect(msg).toContain(`Family — ${FAMILY.url}`)
   })
 
+  test('treats an unparseable URL as a miss rather than throwing', async () => {
+    const result = await updateCalendar(makeDeps([WORK]), {
+      args: { calendar: 'https://', name: 'Business' },
+      token: 'tok',
+    })
+
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain(`Work — ${WORK.url}`)
+  })
+
   test('on an unknown URL lists the calendars too', async () => {
     const result = await updateCalendar(makeDeps([WORK]), {
       args: { calendar: 'https://m/dav/cal/u/gone/', name: 'Business' },

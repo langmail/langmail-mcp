@@ -78,7 +78,8 @@ const authHeaders = (cfg: CalDavConfig, credential: string): Record<string, stri
 export const withTrailingSlash = (url: string): string => (url.endsWith('/') ? url : `${url}/`)
 
 const toSummary = (cal: DAVCalendar): CalendarSummary => ({
-  ...(cal.calendarColor ? { color: cal.calendarColor } : {}),
+  // Guarded like displayName: a color sent with attributes parses to an object.
+  ...(typeof cal.calendarColor === 'string' && cal.calendarColor ? { color: cal.calendarColor } : {}),
   displayName: typeof cal.displayName === 'string' ? cal.displayName : '',
   url: cal.url,
 })
@@ -202,17 +203,16 @@ export interface UpdateCalendarParams {
 
 type Propstat = { status?: string } | undefined
 
-// Status lines of every propstat in a parsed multistatus that is not 2xx.
-// tsdav merges only the successful propstats into `props` and marks the
-// response `ok` from the 207, so a refused property is otherwise invisible.
-const refusedPropstats = (raw: unknown): string[] => {
+// Status lines of every propstat in a parsed multistatus. tsdav merges only
+// the successful propstats into `props` and marks the response `ok` from the
+// 207, so a refused property is otherwise invisible.
+const propstatStatuses = (raw: unknown): string[] => {
   const multistatus = (raw as { multistatus?: { response?: unknown } } | undefined)?.multistatus
   const responses = [multistatus?.response].flat() as ({ propstat?: Propstat | Propstat[] } | undefined)[]
   return responses
     .flatMap((r) => [r?.propstat].flat())
     .filter((p) => p !== undefined)
     .map((p) => p.status ?? 'no status')
-    .filter((status) => !SUCCESS_STATUS_LINE_RE.test(`${status} `))
 }
 
 // Renames and/or recolors a calendar collection with one PROPPATCH of
@@ -248,9 +248,15 @@ export const updateCalendar = async (cfg: CalDavConfig, p: UpdateCalendarParams)
     throw new CalDavError(failed.status, `caldav PROPPATCH returned ${failed.status}`)
   }
   // tsdav hangs the whole parsed document off every response, so read it once.
-  const refused = refusedPropstats(res[0]?.raw)
+  const statuses = propstatStatuses(res[0]?.raw)
+  const refused = statuses.filter((status) => !SUCCESS_STATUS_LINE_RE.test(`${status} `))
   if (refused.length > 0) {
     throw new Error(`caldav PROPPATCH refused a property: ${refused.join(', ')}`)
+  }
+  // RFC 4918 §9.2.1 requires a propstat per property; a reply without any
+  // confirms nothing, so it is not taken as success.
+  if (statuses.length === 0) {
+    throw new Error('caldav PROPPATCH confirmed no property')
   }
 }
 

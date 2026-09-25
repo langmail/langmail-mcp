@@ -255,6 +255,22 @@ describe('updateCalendar', () => {
     expect(message.match(/403 Forbidden/gu)).toHaveLength(1)
   })
 
+  test('throws when a 207 confirms no property at all', async () => {
+    const bare =
+      '<?xml version="1.0" encoding="utf-8"?>' +
+      '<d:multistatus xmlns:d="DAV:"><d:response><d:href>/dav/cal/u/default/</d:href>' +
+      '<d:status>HTTP/1.1 200 OK</d:status></d:response></d:multistatus>'
+    let caught: unknown
+    await withServer(xml(bare), async (base) => {
+      caught = await updateCalendar(
+        { serverUrl: base },
+        { name: 'Business', token: 'tok', url: `${base}/dav/cal/u/default/` }
+      ).catch((err: unknown) => err)
+    })
+
+    expect(caught).toBeInstanceOf(Error)
+  })
+
   test('throws when the whole request is refused', async () => {
     let caught: unknown
     await withServer({ body: '', status: 404 }, async (base) => {
