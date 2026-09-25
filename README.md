@@ -367,9 +367,12 @@ notified (`ACCOUNT_WRITE`). Rescheduling is `update_calendar_event`'s job.
 
 Each UID is found wherever it is: the destination and every other calendar (or
 only `fromCalendar`, when given) are listed once, in parallel. A source calendar
-that cannot be read is named in the result rather than failing the call. An event already in the destination counts as done,
-so a re-run is a no-op. A UID present in more than one other calendar is
-refused as ambiguous until `fromCalendar` names the one to move it out of.
+that cannot be read is named in the result rather than failing the call. An
+event already in the destination counts as done, so a re-run is a no-op —
+unless another calendar still holds the same UID, which is reported as a
+`duplicate` naming both calendars' URLs rather than as done. A UID present in
+more than one other calendar is refused as ambiguous until `fromCalendar` names
+the one to move it out of.
 A refused `MOVE` changes nothing and never falls back to copy-and-delete.
 Moves run one at a time; none starts after 45 s, and the rest are reported as
 not attempted, so a call takes at most about 75 s (45 s plus one 30 s CalDAV
@@ -384,7 +387,7 @@ Parameters:
 
 Returns:
 
-- `Moved N event(s) to <calendar>.`, then one line each for UIDs already there, not moved (with the reason: `notFound`, `ambiguous`, `uidConflict`, `nameConflict`, `forbidden`, `failed`), whose outcome is unknown, and not attempted. It is an error only when nothing moved, nothing was already there and no outcome is unknown.
+- `Moved N event(s) to <calendar>.`, then one line each for UIDs already there, not moved (with the reason: `notFound`, `ambiguous`, `duplicate`, `uidConflict`, `nameConflict`, `forbidden`, `failed`), whose outcome is unknown, and not attempted. It is an error only when nothing moved, nothing was already there and no outcome is unknown.
 
 ### list_calendar_events
 

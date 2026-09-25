@@ -100,7 +100,7 @@ interface Location {
 
 type Outcome =
   | { kind: 'moved' }
-  | { alsoIn: CalendarSummary[]; kind: 'alreadyThere' }
+  | { kind: 'alreadyThere' }
   | { kind: 'notMoved'; reason: string }
   | { kind: 'indeterminate' }
   | { kind: 'notAttempted' }
@@ -134,13 +134,22 @@ const quotedNames = (calendars: CalendarSummary[]): string =>
 const namesWithUrls = (calendars: CalendarSummary[]): string =>
   calendars.map((c) => `"${calendarLabel(c)}" <${c.url}>`).join(' and ')
 
-const refusalReason = (outcome: Exclude<MoveEventOutcome, { kind: 'moved' }>, dest: CalendarSummary): string => {
+// A uid in both the destination and a source is two stored events, not one.
+// delete_calendar_event looks in one calendar only (the default one unless
+// given calendarUrl), so the remedy names both URLs and the argument.
+const duplicateRemedy = (dest: CalendarSummary, others: CalendarSummary[]): string =>
+  `"${calendarLabel(dest)}" <${dest.url}> already holds a separate copy of this event, and ` +
+  `${namesWithUrls(others)} still ${others.length > 1 ? 'hold' : 'holds'} one; ask the user which copy to keep ` +
+  'and delete the other with delete_calendar_event, passing its calendar URL as calendarUrl'
+
+const refusalReason = (
+  outcome: Exclude<MoveEventOutcome, { kind: 'moved' }>,
+  source: CalendarSummary,
+  dest: CalendarSummary
+): string => {
   switch (outcome.kind) {
     case 'uidConflict':
-      return (
-        `uidConflict: "${calendarLabel(dest)}" already holds a separate copy of this event; ask the user ` +
-        'which one to keep and delete the other with delete_calendar_event'
-      )
+      return `uidConflict: ${duplicateRemedy(dest, [source])}`
     case 'nameConflict':
       return `nameConflict: "${calendarLabel(dest)}" already has an event stored under the same name; this cannot be resolved with these tools`
     case 'forbidden':
@@ -162,7 +171,9 @@ const moveOne = async (
       token,
       url: source.object.url,
     })
-    return outcome.kind === 'moved' ? outcome : { kind: 'notMoved', reason: refusalReason(outcome, dest) }
+    return outcome.kind === 'moved'
+      ? outcome
+      : { kind: 'notMoved', reason: refusalReason(outcome, source.calendar, dest) }
   } catch {
     // davRequest never throws on an HTTP status, only when the exchange broke
     // off (a timeout, a dropped connection) — possibly after Stalwart had
@@ -187,10 +198,7 @@ const formatResult = (
 
   const lines = [`Moved ${moved.length} event(s) to ${name}.`]
   if (already.length > 0) {
-    const items = already.map(([uid, o]) =>
-      o.alsoIn.length > 0 ? `${uid} (a copy with this uid is also in ${quotedNames(o.alsoIn)})` : uid
-    )
-    lines.push(`Already in ${name} (${already.length}): ${items.join(', ')}.`)
+    lines.push(`Already in ${name} (${already.length}): ${already.map(([uid]) => uid).join(', ')}.`)
   }
   if (notMoved.length > 0) {
     lines.push(`Not moved (${notMoved.length}): ${notMoved.map(([uid, o]) => `${uid} (${o.reason})`).join(', ')}.`)
@@ -291,10 +299,25 @@ const listCalendarsInvolved = async (
 
 // The outcome decided without touching the server, or the one location to
 // move from. The first rule that applies wins, in this order.
-const decide = (uid: string, listed: Listed, from: CalendarSummary | undefined): Outcome | Location => {
+const decide = (
+  uid: string,
+  listed: Listed,
+  dest: CalendarSummary,
+  from: CalendarSummary | undefined
+): Outcome | Location => {
   const locations = listed.index.get(uid) ?? []
   if (listed.inDest.has(uid)) {
-    return { alsoIn: locations.map((l) => l.calendar), kind: 'alreadyThere' }
+    // Only a uid that has left every source is done; one still in a source
+    // is a duplicate, and calling it done would leave that copy behind.
+    return locations.length === 0
+      ? { kind: 'alreadyThere' }
+      : {
+          kind: 'notMoved',
+          reason: `duplicate: ${duplicateRemedy(
+            dest,
+            locations.map((l) => l.calendar)
+          )}`,
+        }
   }
   const [only] = locations
   if (!only) {
@@ -332,7 +355,7 @@ export const moveCalendarEvents = async (
 
   const outcomes: [string, Outcome][] = []
   for (const uid of args.uids) {
-    const decided = decide(uid, listed.value, sources.value.from)
+    const decided = decide(uid, listed.value, dest, sources.value.from)
     if ('kind' in decided) {
       outcomes.push([uid, decided])
     } else if (deps.now() - started >= MOVE_BUDGET_MS) {

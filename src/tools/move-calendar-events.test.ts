@@ -184,20 +184,35 @@ describe('moveCalendarEvents', () => {
     expect(h.moves).toEqual([])
   })
 
-  test('an event already in the destination counts as done, and a copy elsewhere is named', async () => {
+  test('an event already in the destination, and nowhere else, counts as done', async () => {
+    const h = makeHarness(
+      new Map([
+        [BUSINESS, []],
+        [PRIVATE, [event(PRIVATE, 'done.ics', 'done')]],
+      ])
+    )
+    const result = await run(h, { uids: ['done'] })
+
+    expect(result.isError).toBeUndefined()
+    expect(text(result)).toBe('Moved 0 event(s) to Private.\nAlready in Private (1): done.')
+    expect(h.moves).toEqual([])
+  })
+
+  test('a uid in the destination that a source still holds is a duplicate, not done', async () => {
     const h = makeHarness(
       new Map([
         [BUSINESS, [event(BUSINESS, 'dup.ics', 'dup')]],
-        [PRIVATE, [event(PRIVATE, 'done.ics', 'done'), event(PRIVATE, 'dup.ics', 'dup')]],
+        [PRIVATE, [event(PRIVATE, 'dup.ics', 'dup')]],
       ])
     )
-    const result = await run(h, { uids: ['done', 'dup'] })
+    const result = await run(h, { uids: ['dup'] })
 
-    expect(result.isError).toBeUndefined()
-    expect(text(result)).toBe(
-      'Moved 0 event(s) to Private.\n' +
-        'Already in Private (2): done, dup (a copy with this uid is also in "Business").'
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain(
+      `dup (duplicate: "Private" <${PRIVATE.url}> already holds a separate copy of this event, and ` +
+        `"Business" <${BUSINESS.url}> still holds one;`
     )
+    expect(text(result)).toContain('passing its calendar URL as calendarUrl')
     expect(h.moves).toEqual([])
   })
 
@@ -297,7 +312,9 @@ describe('moveCalendarEvents', () => {
     const body = text(result)
 
     expect(result.isError).toBe(true)
-    expect(body).toContain('a (uidConflict: "Private" already holds a separate copy of this event;')
+    expect(body).toContain(
+      `a (uidConflict: "Private" <${PRIVATE.url}> already holds a separate copy of this event, and "Business" <${BUSINESS.url}> still holds one;`
+    )
     expect(body).toContain('b (nameConflict:')
     expect(body).toContain('c (forbidden:')
     expect(body).toContain('d (failed: the server answered HTTP 500; re-run to retry)')
