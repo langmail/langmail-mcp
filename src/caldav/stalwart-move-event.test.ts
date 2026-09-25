@@ -86,14 +86,15 @@ const mailAccountId = async (basic: string): Promise<string> => {
   return id
 }
 
-const provision = async (localPart: string, domainId: string): Promise<Principal> => {
-  const created = await adminCall('x:Account/set', {
+const provision = async (localPart: string, domainId: string, created: string[]): Promise<Principal> => {
+  const made = await adminCall('x:Account/set', {
     create: { a1: { '@type': 'User', domainId, name: localPart, roles: { '@type': 'User' } } },
   })
-  const id = (created.created as { a1?: { id?: string } } | undefined)?.a1?.id
+  const id = (made.created as { a1?: { id?: string } } | undefined)?.a1?.id
   if (!id) {
-    throw new Error(`account not created: ${JSON.stringify(created)}`)
+    throw new Error(`account not created: ${JSON.stringify(made)}`)
   }
+  created.push(id)
   const minted = await adminCall('x:AppPassword/set', {
     accountId: id,
     create: { ap1: { allowedIps: {}, description: 'mcp move spike', permissions: { '@type': 'Inherit' } } },
@@ -266,10 +267,8 @@ live('CalDAV MOVE between calendars against live Stalwart (spike)', () => {
     if (!domainId) {
       throw new Error(`domain ${DOMAIN} missing — run services/auth's stalwart:setup first`)
     }
-    org = await provision(`mcp-mv-org-${run}`, domainId)
-    ids.push(org.id)
-    att = await provision(`mcp-mv-att-${run}`, domainId)
-    ids.push(att.id)
+    org = await provision(`mcp-mv-org-${run}`, domainId, ids)
+    att = await provision(`mcp-mv-att-${run}`, domainId, ids)
     orgPrivate = await createCalendar(org.cfg, { name: 'Private', token: TOKEN })
     attPrivate = await createCalendar(att.cfg, { name: 'Private', token: TOKEN })
   }, 60_000)
