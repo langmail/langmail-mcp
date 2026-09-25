@@ -237,6 +237,27 @@ describe('moveCalendarEvents', () => {
     expect(text(result)).toContain('cancels the meeting for all of them')
   })
 
+  test('an attendee the parser cannot reduce to an address still triggers the warning', async () => {
+    const withUrnAttendee = (calendar: CalendarSummary): CalendarObject => {
+      const base = event(calendar, 'offsite.ics', 'offsite')
+      return {
+        ...base,
+        data: base.data.replace(
+          'END:VEVENT',
+          'ATTENDEE;CUTYPE=INDIVIDUAL;EMAIL=guest@example.com:urn:uuid:5f1c2a4e-0000-4000-8000-000000000001\r\nEND:VEVENT'
+        ),
+      }
+    }
+    const h = makeHarness(
+      new Map([
+        [BUSINESS, [withUrnAttendee(BUSINESS)]],
+        [PRIVATE, [event(PRIVATE, 'offsite.ics', 'offsite')]],
+      ])
+    )
+    const result = await run(h, { uids: ['offsite'] })
+    expect(text(result)).toContain('cancels the meeting for all of them')
+  })
+
   test('the cancellation warning also fires when only the destination copy has attendees', async () => {
     const h = makeHarness(
       new Map([

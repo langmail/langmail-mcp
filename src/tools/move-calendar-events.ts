@@ -138,7 +138,11 @@ const quotedNames = (calendars: CalendarSummary[]): string =>
 const namesWithUrls = (calendars: CalendarSummary[]): string =>
   calendars.map((c) => `"${calendarLabel(c)}" <${c.url}>`).join(' and ')
 
-const hasAttendees = (object: CalendarObject): boolean => parseEvents(object.data).some((e) => e.attendees.length > 0)
+// An ATTENDEE the parser had to drop (a non-mailto cal-address) is still a
+// person the server will mail a CANCEL to, so it counts — as it does in
+// update_calendar_event's merge-safety check.
+const hasAttendees = (object: CalendarObject): boolean =>
+  parseEvents(object.data).some((e) => e.attendees.length > 0 || (e.unparsedAttendeeCount ?? 0) > 0)
 
 // A uid in both the destination and a source is two stored events, not one.
 // delete_calendar_event looks in one calendar only (the default one unless
