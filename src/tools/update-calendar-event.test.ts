@@ -1677,6 +1677,7 @@ describe('updateCalendarEvent — reminder', () => {
     expect(alarms).toHaveLength(1)
     expect(alarms[0]).toContain('TRIGGER:-PT10M')
     expect(alarms[0]).toContain('ACTION:DISPLAY')
+    expect(result.content[0]?.text).toContain('reminder 10 minutes before')
   })
 
   test('reminderMinutesBefore: "none" removes every stored alarm', async () => {
@@ -1688,6 +1689,7 @@ describe('updateCalendarEvent — reminder', () => {
     })
     expect(result.isError).toBeUndefined()
     expect(valarmBlocks(cap.updated[0]?.ical ?? '')).toEqual([])
+    expect(result.content[0]?.text).toContain('reminders removed')
   })
 
   test('sets a reminder on one occurrence only', async () => {

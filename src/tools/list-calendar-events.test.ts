@@ -199,8 +199,14 @@ describe('listCalendarEvents — all-day events and reminders', () => {
     expect(txt).not.toContain('T00:00')
   })
 
-  test('shows a single reminder', async () => {
-    expect(await list([vacation])).toContain('reminder: 1 day before start')
+  test('shows an all-day reminder as the clock time it fires', async () => {
+    // 1440 minutes before a 00:00 start is midnight, not "a day before" at a sensible hour.
+    expect(await list([vacation])).toContain('reminder: 00:00 the day before')
+  })
+
+  test('shows 900 minutes before an all-day event as 09:00 the day before', async () => {
+    const morning = { ...vacation, data: vacation.data.replace('TRIGGER:-P1D', 'TRIGGER:-PT15H') }
+    expect(await list([morning])).toContain('reminder: 09:00 the day before')
   })
 
   test('shows several reminders on one line', async () => {

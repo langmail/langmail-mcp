@@ -48,15 +48,35 @@ const durationMinutes = (value: string): number | undefined => {
 
 const RELATED_END_RE = /(?:^|;)RELATED=END(?:;|$)/iu
 
+const pad2 = (n: number): string => String(n).padStart(2, '0')
+
+// A reminder `minutes` before an all-day event's 00:00 start, as the clock
+// time it actually fires: "09:00 the day before", "00:00 on the day",
+// "18:00 2 days before". "1 day before start" would hide that it is midnight.
+const allDayFiring = (minutes: number): string => {
+  const daysBack = Math.ceil(minutes / MINUTES_PER_DAY)
+  const clock = daysBack * MINUTES_PER_DAY - minutes
+  const time = `${pad2(Math.floor(clock / MINUTES_PER_HOUR))}:${pad2(clock % MINUTES_PER_HOUR)}`
+  if (daysBack === 0) {
+    return `${time} on the day`
+  }
+  return `${time} ${daysBack === 1 ? 'the day' : `${daysBack} days`} before`
+}
+
 // One stored alarm in words: "30 minutes before start", "at start",
-// "1 hour after end", "at 2026-10-02T09:00:00Z" (absolute trigger).
-export const describeAlarm = (alarm: ParsedAlarm): string => {
+// "1 hour after end", "at 2026-10-02T09:00:00Z" (absolute trigger). On an
+// all-day event a reminder before the start is shown as the clock time it
+// fires ("09:00 the day before").
+export const describeAlarm = (alarm: ParsedAlarm, allDay = false): string => {
   const trigger = alarm.trigger ?? ''
   const minutes = durationMinutes(trigger)
   if (minutes === undefined) {
     return trigger ? `at ${icalDateToIso(trigger)}` : 'unknown trigger'
   }
   const anchor = RELATED_END_RE.test(alarm.triggerParams ?? '') ? 'end' : 'start'
+  if (allDay && anchor === 'start' && minutes <= 0) {
+    return allDayFiring(-minutes)
+  }
   if (minutes === 0) {
     return `at ${anchor}`
   }

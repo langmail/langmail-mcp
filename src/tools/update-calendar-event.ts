@@ -28,7 +28,7 @@ import { type ParsedAttendee, type ParsedEvent, parseEvents } from '@langmail/ic
 import { hashEmail, logger } from '@langmail/logger'
 
 import { type AccountTimeZoneResolver, makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
-import { MAX_REMINDER_MINUTES } from '../caldav/alarm.ts'
+import { formatMinutes, MAX_REMINDER_MINUTES } from '../caldav/alarm.ts'
 import {
   type CalDavConfig,
   discoverAccount,
@@ -93,8 +93,8 @@ export const updateCalendarEventInput = z.object({
   end: shared.end
     .optional()
     .describe(
-      'New end, ISO 8601 — a date for an all-day event, exclusive (the day after the last day). Omit to keep ' +
-        'the event’s length when moving `start`, its stored end otherwise.'
+      'New end, ISO 8601, or an exclusive date for an all-day event. Omit to keep the event’s length when ' +
+        'moving `start`, its stored end otherwise.'
     ),
   location: shared.location.describe('New location; `""` clears it. Omit to keep the stored one.'),
   notify: z
@@ -119,8 +119,8 @@ export const updateCalendarEventInput = z.object({
     .union([z.literal(NO_REMINDER), z.number().int().min(0).max(MAX_REMINDER_MINUTES)])
     .optional()
     .describe(
-      `Minutes before the start to remind the user; replaces any stored reminders. "${NO_REMINDER}" removes ` +
-        'them. Omit to keep the stored ones.'
+      'Minutes before the start to remind the user (all-day events start at 00:00, so 900 = 09:00 the day ' +
+        `before); replaces any stored reminders. "${NO_REMINDER}" removes them. Omit to keep the stored ones.`
     ),
   removedAttendees: z
     .array(z.email())
@@ -130,17 +130,13 @@ export const updateCalendarEventInput = z.object({
     .describe('Email addresses to uninvite (case-insensitive). Cannot be combined with `attendees`.'),
   start: shared.start
     .optional()
-    .describe(
-      'New start, ISO 8601, or a date (2026-10-03) for an all-day event. Omit to keep the stored start. ' +
-        'Switching between all-day and timed needs both `start` and `end`.'
-    ),
+    .describe('New start, ISO 8601, or a date (2026-10-03) for an all-day event. Omit to keep the stored start.'),
   // Not `shared.timeZone`: on update this zone governs the caller's own
   // start/end and the rebuilt event's rendering, and it defaults to the stored
   // event's own zone rather than the account's.
   timeZone: shared.timeZone.describe(
     'IANA zone for the start/end you pass, e.g. Europe/Berlin: their clock digits are read as wall-clock ' +
-      'time here, overriding any offset. Defaults to the event’s own stored zone. Times you omit keep theirs. ' +
-      'All-day dates ignore it.'
+      'time here, overriding any offset. Defaults to the event’s own stored zone. Times you omit keep theirs.'
   ),
   title: shared.title.optional().describe('New title. Omit to keep the stored one.'),
   uid: eventUidSchema,
@@ -259,13 +255,14 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
   } catch {
     return errorResult(
       `Could not evaluate this series' recurrence rule (${master.recurrence}) to validate ` +
-        `recurrenceId ${recurrenceId}.`
+        `recurrenceId ${args.recurrenceId ?? recurrenceId}. Nothing was changed.`
     )
   }
   if (!onOccurrence) {
     return errorResult(
-      `recurrenceId ${recurrenceId} does not match an occurrence of this series ` +
-        `(${master.recurrence}); it must equal an occurrence’s original start.`
+      `recurrenceId ${args.recurrenceId ?? recurrenceId} does not match an occurrence of this series ` +
+        `(${master.recurrence}); it must equal an occurrence’s original ${master.allDay ? 'date' : 'start'}. ` +
+        'Nothing was changed. Use list_calendar_events to see the series.'
     )
   }
 
@@ -321,9 +318,20 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
 
   return textResult(
     `Occurrence of "${title}" on ${args.recurrenceId ?? recurrenceId} updated ` +
-      `(${deliverySummary(attendees, scheduleAgent, removedAttendees.length > 0)}). ` +
+      `(${deliverySummary(attendees, scheduleAgent, removedAttendees.length > 0)}${reminderSummary(args)}). ` +
       'The rest of the series is unchanged.'
   )
+}
+
+// The reminder change an edit made, for the result line; empty when the
+// stored reminders were kept.
+const reminderSummary = (args: UpdateCalendarEventArgs): string => {
+  if (args.reminderMinutesBefore === undefined) {
+    return ''
+  }
+  return args.reminderMinutesBefore === NO_REMINDER
+    ? '; reminders removed'
+    : `; reminder ${formatMinutes(args.reminderMinutesBefore)} before`
 }
 
 // Audit line for the accepted PUT: the iMIP fan-out it triggers is otherwise
@@ -901,7 +909,7 @@ export const updateCalendarEvent = async (
 
   const scope = editScope(args, stored, storedMaster)
   if ('error' in scope) {
-    return errorResult(scope.error)
+    return errorResult(`${scope.error} Nothing was changed.`)
   }
   const { base, recurrenceId } = scope
 
@@ -912,7 +920,7 @@ export const updateCalendarEvent = async (
 
   const fields = resolveEditFields(args, isDelta, base, timeZone)
   if (!fields.ok) {
-    return errorResult(fields.error)
+    return errorResult(`${fields.error} Nothing was changed.`)
   }
   const f = fields.value
   const removed = removedAttendees(base.attendees, f.attendees)
@@ -971,7 +979,7 @@ export const updateCalendarEvent = async (
 
   return textResult(
     `${rrule ? 'Recurring event' : 'Event'} "${f.title}" updated ` +
-      `(${deliverySummary(f.attendees, f.scheduleAgent, removed.length > 0)}).`
+      `(${deliverySummary(f.attendees, f.scheduleAgent, removed.length > 0)}${reminderSummary(args)}).`
   )
 }
 

@@ -74,7 +74,9 @@ const formatEvent = (idx: number, ev: ParsedEvent): string => {
   }
   const alarms = ev.alarms ?? []
   if (alarms.length > 0) {
-    lines.push(`   ${alarms.length === 1 ? 'reminder' : 'reminders'}: ${alarms.map(describeAlarm).join(', ')}`)
+    lines.push(
+      `   ${alarms.length === 1 ? 'reminder' : 'reminders'}: ${alarms.map((a) => describeAlarm(a, ev.allDay === true)).join(', ')}`
+    )
   }
   // The attendee list is what makes an attendee edit safe: it's the current
   // stored membership update_calendar_event mutates, read straight from Langmail.

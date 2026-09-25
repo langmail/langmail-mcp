@@ -144,21 +144,21 @@ live('all-day events and reminders against live Stalwart', () => {
   })
 
   test('create → list → partial update → list keeps an all-day event all-day, reminder included', async () => {
-    const uid = await create({ end: '2026-10-11', reminderMinutesBefore: 1440, start: '2026-10-03', title: 'Vacation' })
+    const uid = await create({ end: '2026-10-11', reminderMinutesBefore: 900, start: '2026-10-03', title: 'Vacation' })
 
     const first = await stored(uid)
     expect(first.raw).toContain('DTSTART;VALUE=DATE:20261003')
     expect(first.raw).toContain('DTEND;VALUE=DATE:20261011')
-    expect(first.raw).toContain('TRIGGER:-P1D')
+    expect(first.raw).toContain('TRIGGER:-PT15H')
     expect(await listed(uid)).toContain('when: 2026-10-03 → 2026-10-11 (all day; end date exclusive)')
-    expect(await listed(uid)).toContain('reminder: 1 day before start')
+    expect(await listed(uid)).toContain('reminder: 09:00 the day before')
 
     // A rename touches neither the dates nor the reminder.
     await update({ title: 'Vacation (Lisbon)', uid })
     const renamed = await listed(uid)
     expect(renamed).toContain('Vacation (Lisbon)')
     expect(renamed).toContain('when: 2026-10-03 → 2026-10-11 (all day; end date exclusive)')
-    expect(renamed).toContain('reminder: 1 day before start')
+    expect(renamed).toContain('reminder: 09:00 the day before')
 
     // A date-only move keeps the eight days.
     await update({ start: '2026-10-17', uid })

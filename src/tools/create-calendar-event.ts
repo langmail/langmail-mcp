@@ -80,7 +80,10 @@ export const createCalendarEventInput = z.object({
     .min(0)
     .max(MAX_REMINDER_MINUTES)
     .optional()
-    .describe('Remind the user this many minutes before the start (e.g. 30); omit for no reminder.'),
+    .describe(
+      'Remind the user this many minutes before the start (e.g. 30); omit for no reminder. An all-day event ' +
+        'starts at 00:00, so 900 = 09:00 the day before.'
+    ),
   start: eventTimeSchema.describe(
     'Event start as ISO 8601 (see `timeZone`), or a date (2026-10-03) for an all-day event.'
   ),
@@ -246,7 +249,7 @@ export const registerCreateCalendarEvent = (
         'Create, schedule or book a new calendar event or meeting on the user’s calendar, and invite ' +
         'people to it with the authenticated user as organizer. Attendees receive iMIP invitations ' +
         '(pass `notify: "none"` to suppress them); omit `attendees` for a personal event — a block of the ' +
-        'user’s own time. For an all-day event (a day off, a vacation, a birthday) pass `start`/`end` as ' +
+        'user’s own time. For an all-day event (a day off, a vacation) pass `start`/`end` as ' +
         'dates. Pass `recurrence` for a repeating series (e.g. a weekly team meeting) in one call, and ' +
         '`reminderMinutesBefore` to be reminded. Defaults to the user’s default calendar.',
       inputSchema: createCalendarEventInput.shape,
