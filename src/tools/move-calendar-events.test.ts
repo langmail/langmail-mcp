@@ -15,13 +15,21 @@ const PRIVATE: CalendarSummary = { displayName: 'Private', url: 'https://m/dav/c
 const SHARED: CalendarSummary = { displayName: 'Shared Team', url: 'https://m/dav/cal/u/shared/' }
 
 // One stored object; extra VEVENTs with the same uid stand in for overrides.
-const event = (calendar: CalendarSummary, name: string, uid: string, overrides = 0): CalendarObject => {
+const event = (
+  calendar: CalendarSummary,
+  name: string,
+  uid: string,
+  overrides = 0,
+  attendee?: string
+): CalendarObject => {
+  const people = attendee ? ['ORGANIZER:mailto:host@example.com', `ATTENDEE;PARTSTAT=ACCEPTED:mailto:${attendee}`] : []
   const vevent = (extra: string) => [
     'BEGIN:VEVENT',
     `UID:${uid}`,
     'DTSTART:20261006T100000Z',
     'DTEND:20261006T110000Z',
     extra,
+    ...people,
     'END:VEVENT',
   ]
   const overrideBlocks = Array.from({ length: overrides }, (_, i) =>
@@ -213,7 +221,20 @@ describe('moveCalendarEvents', () => {
         `"Business" <${BUSINESS.url}> still holds one;`
     )
     expect(text(result)).toContain('passing its calendar URL as calendarUrl')
+    expect(text(result)).not.toContain('cancels the meeting')
     expect(h.moves).toEqual([])
+  })
+
+  test('a duplicate with attendees warns that deleting either copy cancels the meeting', async () => {
+    const h = makeHarness(
+      new Map([
+        [BUSINESS, [event(BUSINESS, 'lunch.ics', 'lunch', 0, 'client@example.org')]],
+        [PRIVATE, [event(PRIVATE, 'lunch.ics', 'lunch', 0, 'client@example.org')]],
+      ])
+    )
+    const result = await run(h, { uids: ['lunch'] })
+    expect(text(result)).toContain('Warn the user first: the event has attendees')
+    expect(text(result)).toContain('cancels the meeting for all of them')
   })
 
   test('already-there wins over fromCalendar, so a repeated call finds its work done', async () => {
@@ -300,15 +321,17 @@ describe('moveCalendarEvents', () => {
       'b.ics': { kind: 'nameConflict' },
       'c.ics': { kind: 'forbidden' },
       'd.ics': { kind: 'failed', status: 500 },
+      'e.ics': { kind: 'failed', status: 409 },
+      'f.ics': { kind: 'failed', status: 0 },
     }
     const h = makeHarness(
       new Map([
-        [BUSINESS, ['a', 'b', 'c', 'd'].map((u) => event(BUSINESS, `${u}.ics`, u))],
+        [BUSINESS, ['a', 'b', 'c', 'd', 'e', 'f'].map((u) => event(BUSINESS, `${u}.ics`, u))],
         [PRIVATE, []],
       ]),
       { reply: (p) => Promise.resolve(replies[p.url.slice(p.url.lastIndexOf('/') + 1)] ?? { kind: 'moved' }) }
     )
-    const result = await run(h, { uids: ['a', 'b', 'c', 'd'] })
+    const result = await run(h, { uids: ['a', 'b', 'c', 'd', 'e', 'f'] })
     const body = text(result)
 
     expect(result.isError).toBe(true)
@@ -318,6 +341,8 @@ describe('moveCalendarEvents', () => {
     expect(body).toContain('b (nameConflict:')
     expect(body).toContain('c (forbidden:')
     expect(body).toContain('d (failed: the server answered HTTP 500; re-run to retry)')
+    expect(body).toContain('e (failed: the destination calendar no longer exists; check it with list_calendars)')
+    expect(body).toContain('f (failed: the server gave no answer; re-run to retry)')
   })
 
   test('a MOVE that breaks off is reported as an unknown outcome, not as an error', async () => {

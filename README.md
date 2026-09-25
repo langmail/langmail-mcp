@@ -370,9 +370,10 @@ only `fromCalendar`, when given) are listed once, in parallel. A source calendar
 that cannot be read is named in the result rather than failing the call. An
 event already in the destination counts as done, so a re-run is a no-op —
 unless another calendar still holds the same UID, which is reported as a
-`duplicate` naming both calendars' URLs rather than as done. A UID present in
-more than one other calendar is refused as ambiguous until `fromCalendar` names
-the one to move it out of.
+`duplicate` naming both calendars' URLs rather than as done; when the event has
+attendees it warns that deleting either copy cancels the meeting for them. A
+UID present in more than one other calendar is refused as ambiguous until
+`fromCalendar` names the one to move it out of.
 A refused `MOVE` changes nothing and never falls back to copy-and-delete.
 Moves run one at a time; none starts after 45 s, and the rest are reported as
 not attempted, so a call takes at most about 75 s (45 s plus one 30 s CalDAV

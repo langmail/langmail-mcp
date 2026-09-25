@@ -57,8 +57,10 @@ export const resolveCalendar = (
 ): ResolvedCalendar => {
   const { argName, nothingDone } = wording
   const isUrl = URL_OR_PATH_RE.test(ref)
+  // An unparseable reference has no key, so it matches nothing and the miss below lists the calendars.
+  const refKey = isUrl ? urlKey(ref) : null
   const matches = isUrl
-    ? calendars.filter((c) => sameCalendarUrl(c.url, ref))
+    ? calendars.filter((c) => refKey !== null && urlKey(c.url) === refKey)
     : calendars.filter((c) => normalizeCalendarName(c.displayName) === normalizeCalendarName(ref))
 
   const [only] = matches

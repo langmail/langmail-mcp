@@ -17,6 +17,7 @@ import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
 import { parseEvents } from '@langmail/ical'
+import { logger } from '@langmail/logger'
 
 import {
   type CalDavConfig,
@@ -28,10 +29,13 @@ import {
   withTrailingSlash,
 } from '../caldav/client.ts'
 import { type CalendarObject, type CalendarSummary } from '../caldav/types.ts'
+import { describeError } from '../observability/errors.ts'
 import { ACCOUNT_WRITE } from './annotations.ts'
 import { calendarLabel, resolveCalendar, sameCalendarUrl } from './calendar-lookup.ts'
 import { eventUidSchema } from './create-calendar-event.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
+
+const TOOL_NAME = 'move_calendar_events'
 
 const MAX_MOVE_UIDS = 50
 
@@ -134,17 +138,39 @@ const quotedNames = (calendars: CalendarSummary[]): string =>
 const namesWithUrls = (calendars: CalendarSummary[]): string =>
   calendars.map((c) => `"${calendarLabel(c)}" <${c.url}>`).join(' and ')
 
+const hasAttendees = (object: CalendarObject): boolean => parseEvents(object.data).some((e) => e.attendees.length > 0)
+
 // A uid in both the destination and a source is two stored events, not one.
 // delete_calendar_event looks in one calendar only (the default one unless
-// given calendarUrl), so the remedy names both URLs and the argument.
-const duplicateRemedy = (dest: CalendarSummary, others: CalendarSummary[]): string =>
-  `"${calendarLabel(dest)}" <${dest.url}> already holds a separate copy of this event, and ` +
-  `${namesWithUrls(others)} still ${others.length > 1 ? 'hold' : 'holds'} one; ask the user which copy to keep ` +
-  'and delete the other with delete_calendar_event, passing its calendar URL as calendarUrl'
+// given calendarUrl), so the remedy names both URLs and the argument. It is
+// also outward-destructive: attendees resolve its CANCEL by uid, which both
+// copies share, so deleting either one cancels the meeting for all of them.
+const duplicateRemedy = (dest: CalendarSummary, others: Location[]): string => {
+  const cancels = others.some((l) => hasAttendees(l.object))
+    ? '. Warn the user first: the event has attendees and both copies share one uid, so deleting either ' +
+      'copy cancels the meeting for all of them'
+    : ''
+  return (
+    `"${calendarLabel(dest)}" <${dest.url}> already holds a separate copy of this event, and ` +
+    `${namesWithUrls(others.map((l) => l.calendar))} still ${others.length > 1 ? 'hold' : 'holds'} one; ask the ` +
+    `user which copy to keep and delete the other with delete_calendar_event, passing its calendar URL as calendarUrl${cancels}`
+  )
+}
+
+const failedReason = (status: number): string => {
+  if (status === 0) {
+    return 'failed: the server gave no answer; re-run to retry'
+  }
+  // The destination came from the listing, so a 409 means it was deleted since.
+  if (status === 409) {
+    return 'failed: the destination calendar no longer exists; check it with list_calendars'
+  }
+  return `failed: the server answered HTTP ${status}; re-run to retry`
+}
 
 const refusalReason = (
   outcome: Exclude<MoveEventOutcome, { kind: 'moved' }>,
-  source: CalendarSummary,
+  source: Location,
   dest: CalendarSummary
 ): string => {
   switch (outcome.kind) {
@@ -155,7 +181,7 @@ const refusalReason = (
     case 'forbidden':
       return 'forbidden: this account may not move events between these calendars'
     default:
-      return `failed: the server answered HTTP ${outcome.status}; re-run to retry`
+      return failedReason(outcome.status)
   }
 }
 
@@ -171,13 +197,13 @@ const moveOne = async (
       token,
       url: source.object.url,
     })
-    return outcome.kind === 'moved'
-      ? outcome
-      : { kind: 'notMoved', reason: refusalReason(outcome, source.calendar, dest) }
-  } catch {
+    return outcome.kind === 'moved' ? outcome : { kind: 'notMoved', reason: refusalReason(outcome, source, dest) }
+  } catch (error) {
     // davRequest never throws on an HTTP status, only when the exchange broke
     // off (a timeout, a dropped connection) — possibly after Stalwart had
     // already committed the move. So the outcome is unknown, never "not moved".
+    // Returned in-band, so log it here to keep it diagnosable.
+    logger.warn({ ...describeError(error), tool: TOOL_NAME }, 'calendar event MOVE broke off; outcome unknown')
     return { kind: 'indeterminate' }
   }
 }
@@ -263,10 +289,17 @@ interface Listed {
   unreadable: CalendarSummary[]
 }
 
-// Lists every calendar involved once, in parallel. The destination is always
-// listed: an event already there is a success, which makes a repeated call a
-// no-op. Without it nothing can be decided, but one unreadable source must
-// not block moves out of the others.
+// Lists every calendar involved once, in parallel, in full. A calendar-query
+// REPORT filtered on UID would fetch only the matching objects; the full
+// listing reuses fetchEvents and is fine at the scale of one person's
+// calendars, but its cost grows with every calendar's history, and on an
+// account slow enough to spend the whole budget here, every uid is reported
+// as not attempted on every re-run. Switch to the filtered REPORT if that
+// shows up.
+//
+// The destination is always listed: an event already there is a success,
+// which makes a repeated call a no-op. Without it nothing can be decided, but
+// one unreadable source must not block moves out of the others.
 const listCalendarsInvolved = async (
   deps: MoveCalendarEventsDeps,
   token: string,
@@ -313,10 +346,7 @@ const decide = (
       ? { kind: 'alreadyThere' }
       : {
           kind: 'notMoved',
-          reason: `duplicate: ${duplicateRemedy(
-            dest,
-            locations.map((l) => l.calendar)
-          )}`,
+          reason: `duplicate: ${duplicateRemedy(dest, locations)}`,
         }
   }
   const [only] = locations
@@ -386,7 +416,7 @@ export const registerMoveCalendarEvents = (
   getToken: () => string
 ): void => {
   server.registerTool(
-    'move_calendar_events',
+    TOOL_NAME,
     {
       annotations: ACCOUNT_WRITE,
       description:
