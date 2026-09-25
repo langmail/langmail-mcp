@@ -228,7 +228,10 @@ const rewriteSerialized = (generated: string, input: InviteInput, timeZone: stri
   // SCHEDULE-AGENT, for one).
   const preserved = (input.alarms ?? []).flatMap((alarm) => ('lines' in alarm ? alarm.lines : []))
   if (preserved.length > 0) {
-    serialized = serialized.replace(END_VEVENT_RE, `${preserved.map(foldLine).join(CRLF)}${CRLF}END:VEVENT`)
+    // A replacer function, not a string: stored text is arbitrary, and a
+    // replacement string would expand `$'`, `$&` and `$$` inside it.
+    const block = `${preserved.map(foldLine).join(CRLF)}${CRLF}END:VEVENT`
+    serialized = serialized.replace(END_VEVENT_RE, () => block)
   }
   return serialized
 }

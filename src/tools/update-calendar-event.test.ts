@@ -1421,7 +1421,7 @@ const ALARM_EMAIL = [
   'END:VALARM',
 ]
 const withAlarms = (ical: string, ...alarms: string[][]): string =>
-  ical.replace('END:VEVENT', `${alarms.map((a) => a.join('\r\n')).join('\r\n')}\r\nEND:VEVENT`)
+  ical.replace('END:VEVENT', () => `${alarms.map((a) => a.join('\r\n')).join('\r\n')}\r\nEND:VEVENT`)
 
 const valarmBlocks = (ical: string): string[] => unfold(ical).match(/BEGIN:VALARM[\s\S]*?END:VALARM/gu) ?? []
 
@@ -1436,6 +1436,17 @@ describe('updateCalendarEvent — alarms are preserved', () => {
     expect(result.isError).toBeUndefined()
     const alarms = valarmBlocks(cap.updated[0]?.ical ?? '')
     expect(alarms).toEqual([ALARM_DISPLAY.join('\r\n'), ALARM_EMAIL.join('\r\n')])
+  })
+
+  test('dollar sequences in a stored alarm are copied literally, not expanded', async () => {
+    const cap = captured()
+    const dollars = ['BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:-PT15M', "DESCRIPTION:Rent $' $& $$ due", 'END:VALARM']
+    const stored = storedEvent({ data: withAlarms(storedEvent().data, dollars) })
+    await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { title: 'Sync (renamed)', uid: UID },
+      token: 'tok',
+    })
+    expect(valarmBlocks(cap.updated[0]?.ical ?? '')).toEqual([dollars.join('\r\n')])
   })
 
   test('a reschedule keeps the stored VALARM', async () => {
