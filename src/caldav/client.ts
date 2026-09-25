@@ -253,9 +253,11 @@ export const updateCalendar = async (cfg: CalDavConfig, p: UpdateCalendarParams)
   if (refused.length > 0) {
     throw new Error(`caldav PROPPATCH refused a property: ${refused.join(', ')}`)
   }
-  // RFC 4918 §9.2.1 requires a propstat per property; a reply without any
-  // confirms nothing, so it is not taken as success.
-  if (statuses.length === 0) {
+  // RFC 4918 §9.2.1 requires a propstat per property, so a multistatus without
+  // any confirms nothing. A reply that is not a multistatus at all (a bare 2xx)
+  // is the server saying it applied the change, and passes.
+  const isMultistatus = typeof res[0]?.raw === 'object' && res[0]?.raw !== null && 'multistatus' in res[0].raw
+  if (isMultistatus && statuses.length === 0) {
     throw new Error('caldav PROPPATCH confirmed no property')
   }
 }

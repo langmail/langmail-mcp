@@ -88,11 +88,10 @@ type Resolved = { calendar: CalendarSummary; ok: true } | { error: ToolResult; o
 // calendar instead, which beats a guess when a person has a handful of them.
 const resolveCalendar = (calendars: CalendarSummary[], ref: string): Resolved => {
   const isUrl = URL_OR_PATH_RE.test(ref)
+  // An unparseable reference has no key, so it matches nothing and the miss below lists the calendars.
+  const refKey = isUrl ? urlKey(ref) : null
   const matches = isUrl
-    ? calendars.filter((c) => {
-        const key = urlKey(ref)
-        return key !== null && urlKey(c.url) === key
-      })
+    ? calendars.filter((c) => refKey !== null && urlKey(c.url) === refKey)
     : calendars.filter((c) => normalizeName(c.displayName) === normalizeName(ref))
 
   const [only] = matches

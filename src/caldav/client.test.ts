@@ -271,6 +271,18 @@ describe('updateCalendar', () => {
     expect(caught).toBeInstanceOf(Error)
   })
 
+  test('accepts a bare 200 with no multistatus body as applied', async () => {
+    let caught: unknown = 'none'
+    await withServer({ body: '', status: 200 }, async (base) => {
+      caught = await updateCalendar(
+        { serverUrl: base },
+        { name: 'Business', token: 'tok', url: `${base}/dav/cal/u/default/` }
+      ).catch((err: unknown) => err)
+    })
+
+    expect(caught).toBeUndefined()
+  })
+
   test('throws when the whole request is refused', async () => {
     let caught: unknown
     await withServer({ body: '', status: 404 }, async (base) => {
