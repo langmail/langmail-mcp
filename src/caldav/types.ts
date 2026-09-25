@@ -6,6 +6,8 @@
 // A calendar collection as surfaced to the agent: a human label and the
 // CalDAV URL used to address it (e.g. when PUTting an event).
 export interface CalendarSummary {
+  // Apple `calendar-color` hex (e.g. "#FF6600"), when the server has one.
+  color?: string
   displayName: string
   url: string
 }

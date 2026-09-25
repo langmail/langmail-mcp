@@ -18,8 +18,10 @@ import { type ToolResult, textResult } from './result.ts'
 
 // A hex color for the Apple `calendar-color` extension, e.g. "#FF6600" or
 // "#FF6600FF" (with alpha). Kept strict so a malformed value can't ride
-// straight into the MKCALENDAR body.
-const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/u, 'color must be a hex value like #FF6600')
+// straight into the MKCALENDAR body. Shared with update_calendar.
+export const colorSchema = z
+  .string()
+  .regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/u, 'color must be a hex value like #FF6600')
 
 export const createCalendarInput = z.object({
   // Optional, but recommended so a new calendar is visually distinct.
@@ -72,9 +74,11 @@ export const registerCreateCalendar = (
     {
       annotations: ACCOUNT_WRITE,
       description:
-        'Creates a new calendar for the authenticated user and returns its CalDAV URL ' +
-        '(pass that URL to create_calendar_event to add events to it). Use this when the ' +
-        'user wants to keep a workstream’s events separate from their other calendars.',
+        'Creates a new calendar for the authenticated user, with an optional color. Use this when the ' +
+        'user wants to keep a workstream’s events separate from their other calendars. Returns the new ' +
+        'calendar’s CalDAV URL; pass it to create_calendar_event to add events to it. Each call makes ' +
+        'another calendar, so check list_calendars first; to rename or recolor an existing calendar use ' +
+        'update_calendar instead.',
       inputSchema: createCalendarInput.shape,
       title: 'Create calendar',
     },

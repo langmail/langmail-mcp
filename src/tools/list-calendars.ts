@@ -1,5 +1,5 @@
 // list_calendars tool — returns the authenticated principal's calendars
-// (display name + CalDAV URL) via RFC 6764 discovery.
+// (display name, CalDAV URL, and color) via RFC 6764 discovery.
 //
 // Like search-emails.ts, the logic sits behind a `Deps` interface so it
 // unit-tests without live Stalwart; `makeLiveDeps` wires tsdav in.
@@ -24,7 +24,7 @@ export interface ListCalendarsContext {
 }
 
 const formatCalendar = (idx: number, cal: CalendarSummary): string =>
-  `${idx}. ${cal.displayName || '(unnamed)'}\n   url: ${cal.url}`
+  `${idx}. ${cal.displayName || '(unnamed)'}\n   url: ${cal.url}${cal.color ? `\n   color: ${cal.color}` : ''}`
 
 export const listCalendars = async (deps: ListCalendarsDeps, ctx: ListCalendarsContext): Promise<ToolResult> => {
   const calendars = await deps.listCalendars(ctx.token)
@@ -54,8 +54,11 @@ export const registerListCalendars = (
     {
       annotations: READ_ONLY,
       description:
-        "Lists the authenticated user's calendars. Returns each calendar's " +
-        'display name and CalDAV URL (the URL is what create_calendar_event takes).',
+        "Lists the authenticated user's calendars — the calendars themselves, not the events on them. " +
+        'Use this to see which calendars exist before adding an event to a specific one, or to find the ' +
+        'calendar to rename or recolor. Returns each calendar’s name, CalDAV URL, and color when it has ' +
+        'one; the URL is what create_calendar_event and update_calendar take. For the events on a ' +
+        'calendar use list_calendar_events; to rename or recolor one use update_calendar.',
       inputSchema: listCalendarsInput.shape,
       title: 'List calendars',
     },

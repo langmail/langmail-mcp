@@ -63,6 +63,7 @@ import { makeLiveDeps as makeSearchContactsDeps, registerSearchContacts } from '
 import { makeLiveDeps as makeSearchEmailsDeps, registerSearchEmails } from '../tools/search-emails.ts'
 import { registerSendDraft } from '../tools/send-draft.ts'
 import { registerTrashEmails } from '../tools/trash-emails.ts'
+import { makeLiveDeps as makeUpdateCalendarDeps, registerUpdateCalendar } from '../tools/update-calendar.ts'
 import {
   makeLiveDeps as makeUpdateCalendarEventDeps,
   registerUpdateCalendarEvent,
@@ -112,6 +113,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   }
   const listCalendarsDeps = makeListCalendarsDeps(caldavCfg)
   const createCalendarDeps = makeCreateCalendarDeps(caldavCfg)
+  const updateCalendarDeps = makeUpdateCalendarDeps(caldavCfg)
   const listCalendarEventsDeps = makeListCalendarEventsDeps(caldavCfg)
   // Contact write-through: scheduling actions upsert their attendees into
   // the collected address book (the Robin case) — shared across the three
@@ -160,6 +162,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     registerDeleteMailRule(server, mailRuleDeps, () => ctx.token)
     registerListCalendars(server, listCalendarsDeps, () => ctx.token)
     registerCreateCalendar(server, createCalendarDeps, () => ctx.token)
+    registerUpdateCalendar(server, updateCalendarDeps, () => ctx.token)
     registerListCalendarEvents(server, listCalendarEventsDeps, () => ctx.token)
     registerCreateCalendarEvent(server, createCalendarEventDeps, () => ctx.token)
     registerUpdateCalendarEvent(server, updateCalendarEventDeps, () => ctx.token)

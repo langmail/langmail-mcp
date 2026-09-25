@@ -23,6 +23,14 @@ describe('listCalendars', () => {
     expect(txt).toContain('Personal')
   })
 
+  test('shows a calendar color when the server has one', async () => {
+    const result = await listCalendars(
+      deps([{ color: '#FF6600', displayName: 'Work', url: 'https://m/dav/cal/u/default/' }]),
+      { token: 'tok' }
+    )
+    expect(result.content[0]?.text).toContain('color: #FF6600')
+  })
+
   test('labels an unnamed calendar', async () => {
     const result = await listCalendars(deps([{ displayName: '', url: 'https://m/dav/cal/u/x/' }]), { token: 'tok' })
     expect(result.content[0]?.text).toContain('(unnamed)')

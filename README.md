@@ -17,7 +17,7 @@
 - Authenticates clients via OAuth 2.0 — advertises its own authorization metadata and proxies dynamic client registration to Stalwart
 - Structured search over the authenticated user's mailbox — free-text combined with date-range, sender, email-type, and mailbox filters
 - Read a single message's full body, or every message in a thread
-- List and create the user's calendars
+- List, create, rename, and recolor the user's calendars
 - List, create, update, and delete calendar events — including recurring series — sending iMIP invitations and cancellations to attendees
 - RSVP to invitations (accept / decline / tentative), notifying the organizer automatically
 - Resolve a name, partial name, address, or organization to known contacts — collected automatically from mail headers and calendar attendees, ranked by interaction recency and frequency
@@ -309,14 +309,15 @@ Parameters:
 ### list_calendars
 
 Lists the authenticated user's calendars, returning each calendar's display
-name and CalDAV URL. Pass the URL to `create_calendar_event` to target a
-specific calendar.
+name, CalDAV URL, and color when one is set. Pass the URL to
+`create_calendar_event` to target a specific calendar, or to `update_calendar`
+to rename or recolor it.
 
 Parameters: none
 
 Returns:
 
-- A list of the user's calendars, each with its display name and CalDAV URL
+- A list of the user's calendars, each with its display name, CalDAV URL, and color
 
 ### create_calendar
 
@@ -333,6 +334,27 @@ Parameters:
 Returns:
 
 - A confirmation including the new `calendarUrl` (pass it to `create_calendar_event`)
+
+### update_calendar
+
+Renames and/or recolors one of the user's calendars with a CalDAV PROPPATCH of
+`displayname` and the Apple `calendar-color` extension. The calendar is picked
+by its current name (case-insensitive) or its URL. Resolution is strict: a miss
+lists every calendar with its URL, two calendars with the same name ask for the
+URL, and a new name another calendar already has is refused — each without
+changing anything.
+
+Parameters:
+
+- `calendar`: string — the current name or the CalDAV URL from `list_calendars` (percent-encoded or not)
+- `name`: string (optional) — the new name (1–200 characters)
+- `color`: string (optional) — the new hex color (e.g. `#2E6FD8`)
+
+At least one of `name` or `color` is required.
+
+Returns:
+
+- A confirmation naming the changes and the calendar's `calendarUrl`
 
 ### list_calendar_events
 

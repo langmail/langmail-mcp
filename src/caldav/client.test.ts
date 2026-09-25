@@ -7,6 +7,7 @@ import {
   pickDefaultCalendar,
   pickOrganizer,
   putEvent,
+  updateCalendar,
   withTrailingSlash,
 } from './client.ts'
 import { buildInvite } from './ical.ts'
@@ -14,6 +15,7 @@ import { type CalendarObject, type CalendarSummary } from './types.ts'
 
 const cal = (url: string, displayName = ''): CalendarSummary => ({ displayName, url })
 
+const ELEMENT_PREFIX_RE = /<\/?([a-z]+):/gu
 const UUID_ICS_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.ics$/u
 
 describe('pickDefaultCalendar', () => {
@@ -139,6 +141,130 @@ describe('putEvent', () => {
 
   test('names two PUTs of the same payload differently', async () => {
     expect(await capturePutUrl()).not.toBe(await capturePutUrl())
+  })
+})
+
+// PROPPATCH answers 207 even when it refuses a property; the refusal sits in a
+// per-property propstat, which tsdav drops without failing the response. The
+// loopback server lets each test choose that propstat status.
+describe('updateCalendar', () => {
+  const multistatus = (propStatus: string): string =>
+    '<?xml version="1.0" encoding="utf-8"?>' +
+    '<d:multistatus xmlns:d="DAV:" xmlns:a="http://apple.com/ns/ical/">' +
+    '<d:response><d:href>/dav/cal/u/default/</d:href>' +
+    `<d:propstat><d:prop><d:displayname/><a:calendar-color/></d:prop><d:status>${propStatus}</d:status></d:propstat>` +
+    '</d:response></d:multistatus>'
+
+  const withServer = async (
+    reply: { body: string; status: number },
+    run: (base: string) => Promise<void>
+  ): Promise<{ body: string; method: string }> => {
+    const seen = { body: '', method: '' }
+    const server = Bun.serve({
+      fetch: async (req) => {
+        seen.method = req.method
+        seen.body = await req.text()
+        return new Response(reply.body, {
+          headers: { 'content-type': 'application/xml; charset=utf-8' },
+          status: reply.status,
+        })
+      },
+      port: 0,
+    })
+    try {
+      await run(`http://127.0.0.1:${server.port}`)
+      return seen
+    } finally {
+      await server.stop(true)
+    }
+  }
+
+  const xml = (body: string, status = 207): { body: string; status: number } => ({ body, status })
+
+  test('PROPPATCHes the display name and color', async () => {
+    const seen = await withServer(xml(multistatus('HTTP/1.1 200 OK')), (base) =>
+      updateCalendar(
+        { serverUrl: base },
+        { color: '#2E6FD8', name: 'Business', token: 'tok', url: `${base}/dav/cal/u/default/` }
+      )
+    )
+
+    expect(seen.method).toBe('PROPPATCH')
+    expect(seen.body).toContain('Business</')
+    expect(seen.body).toContain('calendar-color')
+    expect(seen.body).toContain('#2E6FD8')
+  })
+
+  test('declares every namespace prefix the body uses', async () => {
+    const seen = await withServer(xml(multistatus('HTTP/1.1 200 OK')), (base) =>
+      updateCalendar(
+        { serverUrl: base },
+        { color: '#2E6FD8', name: 'Business', token: 'tok', url: `${base}/dav/cal/u/default/` }
+      )
+    )
+
+    // An unbound prefix is malformed XML; Stalwart answers it with 400.
+    const used = new Set([...seen.body.matchAll(ELEMENT_PREFIX_RE)].map((m) => m[1]))
+    for (const prefix of used) {
+      expect(seen.body).toContain(`xmlns:${prefix}=`)
+    }
+  })
+
+  test('sends only the properties that change', async () => {
+    const seen = await withServer(xml(multistatus('HTTP/1.1 200 OK')), (base) =>
+      updateCalendar({ serverUrl: base }, { name: 'Business', token: 'tok', url: `${base}/dav/cal/u/default/` })
+    )
+
+    expect(seen.body).toContain('displayname')
+    expect(seen.body).not.toContain('calendar-color')
+  })
+
+  test('throws when the server refuses a property inside a 207', async () => {
+    let caught: unknown
+    await withServer(xml(multistatus('HTTP/1.1 403 Forbidden')), async (base) => {
+      caught = await updateCalendar(
+        { serverUrl: base },
+        { name: 'Business', token: 'tok', url: `${base}/dav/cal/u/default/` }
+      ).catch((err: unknown) => err)
+    })
+
+    expect(caught).toBeInstanceOf(Error)
+    expect((caught as Error).message).toContain('403')
+  })
+
+  // What an RFC 4918 server sends when it refuses one property: that one 403,
+  // the rest 424 Failed Dependency, since PROPPATCH is all-or-nothing.
+  test('names each refused status once when the reply mixes success and failure', async () => {
+    const mixed =
+      '<?xml version="1.0" encoding="utf-8"?>' +
+      '<d:multistatus xmlns:d="DAV:" xmlns:a="http://apple.com/ns/ical/">' +
+      '<d:response><d:href>/dav/cal/u/default/</d:href>' +
+      '<d:propstat><d:prop><d:displayname/></d:prop><d:status>HTTP/1.1 424 Failed Dependency</d:status></d:propstat>' +
+      '<d:propstat><d:prop><a:calendar-color/></d:prop><d:status>HTTP/1.1 403 Forbidden</d:status></d:propstat>' +
+      '</d:response></d:multistatus>'
+    let caught: unknown
+    await withServer(xml(mixed), async (base) => {
+      caught = await updateCalendar(
+        { serverUrl: base },
+        { color: '#2E6FD8', name: 'Business', token: 'tok', url: `${base}/dav/cal/u/default/` }
+      ).catch((err: unknown) => err)
+    })
+
+    const message = (caught as Error).message
+    expect(message).toContain('424 Failed Dependency')
+    expect(message.match(/403 Forbidden/gu)).toHaveLength(1)
+  })
+
+  test('throws when the whole request is refused', async () => {
+    let caught: unknown
+    await withServer({ body: '', status: 404 }, async (base) => {
+      caught = await updateCalendar(
+        { serverUrl: base },
+        { name: 'Business', token: 'tok', url: `${base}/dav/cal/u/gone/` }
+      ).catch((err: unknown) => err)
+    })
+
+    expect((caught as Error).message).toContain('404')
   })
 })
 

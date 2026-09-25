@@ -13,10 +13,13 @@ import {
   type DAVAccount,
   type DAVCalendar,
   type DAVCalendarObject,
+  DAVNamespace,
   DAVNamespaceShort,
+  davRequest,
   deleteCalendarObject,
   fetchCalendarObjects,
   fetchCalendarUserAddresses,
+  getDAVAttribute,
   makeCalendar,
   updateCalendarObject,
 } from 'tsdav'
@@ -45,6 +48,8 @@ export interface CalDavConfig {
 
 const DEFAULT_CAL_RE = /\/default\/?$/u
 const MAILTO_RE = /^mailto:/iu
+// A 2xx code in a status line like "HTTP/1.1 200 OK" (padded, so "HTTP/1.1 200" matches too).
+const SUCCESS_STATUS_LINE_RE = / 2\d\d /u
 
 // Same order as the JMAP deadline (@langmail/jmap timeout.ts): enough for a
 // legitimately slow REPORT over a large calendar, short enough that a stalled
@@ -73,6 +78,7 @@ const authHeaders = (cfg: CalDavConfig, credential: string): Record<string, stri
 export const withTrailingSlash = (url: string): string => (url.endsWith('/') ? url : `${url}/`)
 
 const toSummary = (cal: DAVCalendar): CalendarSummary => ({
+  ...(cal.calendarColor ? { color: cal.calendarColor } : {}),
   displayName: typeof cal.displayName === 'string' ? cal.displayName : '',
   url: cal.url,
 })
@@ -183,6 +189,69 @@ export const createCalendar = async (cfg: CalDavConfig, p: CreateCalendarParams)
     throw new CalDavError(failed.status, `caldav MKCALENDAR returned ${failed.status}`)
   }
   return url
+}
+
+export interface UpdateCalendarParams {
+  // New Apple `calendar-color`; omitted leaves the stored color alone.
+  color?: string
+  // New `displayname`; omitted leaves the stored name alone.
+  name?: string
+  token: string
+  url: string
+}
+
+type Propstat = { status?: string } | undefined
+
+// Status lines of every propstat in a parsed multistatus that is not 2xx.
+// tsdav merges only the successful propstats into `props` and marks the
+// response `ok` from the 207, so a refused property is otherwise invisible.
+const refusedPropstats = (raw: unknown): string[] => {
+  const multistatus = (raw as { multistatus?: { response?: unknown } } | undefined)?.multistatus
+  const responses = [multistatus?.response].flat() as ({ propstat?: Propstat | Propstat[] } | undefined)[]
+  return responses
+    .flatMap((r) => [r?.propstat].flat())
+    .filter((p) => p !== undefined)
+    .map((p) => p.status ?? 'no status')
+    .filter((status) => !SUCCESS_STATUS_LINE_RE.test(`${status} `))
+}
+
+// Renames and/or recolors a calendar collection with one PROPPATCH of
+// `displayname` and Apple `calendar-color` — the two props createCalendar
+// sets on MKCALENDAR.
+export const updateCalendar = async (cfg: CalDavConfig, p: UpdateCalendarParams): Promise<void> => {
+  const res = await davRequest({
+    fetchOptions: deadline(),
+    init: {
+      body: {
+        propertyupdate: {
+          // tsdav's own prefix map, so the `ca:` on calendar-color is bound.
+          _attributes: getDAVAttribute([DAVNamespace.DAV, DAVNamespace.CALDAV_APPLE]),
+          set: {
+            prop: {
+              ...(p.name === undefined ? {} : { [`${DAVNamespaceShort.DAV}:displayname`]: { _text: p.name } }),
+              ...(p.color ? { [`${DAVNamespaceShort.CALDAV_APPLE}:calendar-color`]: { _text: p.color } } : {}),
+            },
+          },
+        },
+      },
+      headers: authHeaders(cfg, p.token),
+      method: 'PROPPATCH',
+      namespace: DAVNamespaceShort.DAV,
+    },
+    url: p.url,
+  })
+  if (res.length === 0) {
+    throw new Error('caldav PROPPATCH returned no response')
+  }
+  const failed = res.find((r) => !r.ok)
+  if (failed) {
+    throw new CalDavError(failed.status, `caldav PROPPATCH returned ${failed.status}`)
+  }
+  // tsdav hangs the whole parsed document off every response, so read it once.
+  const refused = refusedPropstats(res[0]?.raw)
+  if (refused.length > 0) {
+    throw new Error(`caldav PROPPATCH refused a property: ${refused.join(', ')}`)
+  }
 }
 
 export interface PutEventParams {
