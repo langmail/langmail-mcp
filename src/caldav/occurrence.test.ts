@@ -205,6 +205,20 @@ describe('spliceOccurrenceOverride', () => {
 const OCCURRENCE = '2026-06-23T10:00:00Z'
 
 describe('spliceOccurrenceCancellation', () => {
+  // RFC 5545 §3.6.1: `eventc = BEGIN:VEVENT eventprop *alarmc END:VEVENT` —
+  // properties come before sub-components, so the new EXDATE/SEQUENCE must not
+  // land after the master's VALARM.
+  test('inserts EXDATE and SEQUENCE before the master’s VALARM', () => {
+    const merged = unfold(
+      spliceOccurrenceCancellation(masterObject({ alarms: [{ minutesBefore: 15 }] }), '2026-06-23T10:00:00Z')
+    )
+    const lines = merged.split('\r\n')
+    const alarmAt = lines.indexOf('BEGIN:VALARM')
+    expect(alarmAt).toBeGreaterThan(0)
+    expect(lines.findIndex((l) => l.startsWith('EXDATE'))).toBeLessThan(alarmAt)
+    expect(lines.findIndex((l) => l.startsWith('SEQUENCE'))).toBeLessThan(alarmAt)
+  })
+
   test('excludes the instant on the master with an EXDATE and a bumped SEQUENCE', () => {
     const merged = unfold(spliceOccurrenceCancellation(masterObject({ sequence: 4 }), OCCURRENCE))
 
