@@ -188,6 +188,8 @@ interface ScanState {
 const BEGIN_RE = /^BEGIN:/iu
 const END_RE = /^END:/iu
 const BEGIN_VALARM_RE = /^BEGIN:VALARM\s*$/iu
+const BEGIN_VEVENT_RE = /^BEGIN:VEVENT\s*$/iu
+const END_VEVENT_RE = /^END:VEVENT\s*$/iu
 
 // A sub-component line (BEGIN:/END:/property) inside the current VEVENT. Only
 // VALARMs are kept, as raw lines; any other sub-component is skipped.
@@ -215,13 +217,13 @@ const scanNestedLine = (state: ScanState, block: ParsedBlock, line: string): voi
 }
 
 const scanLine = (state: ScanState, line: string): void => {
-  if (line === 'BEGIN:VEVENT') {
+  if (BEGIN_VEVENT_RE.test(line)) {
     state.current = { alarms: [], attendees: [], exdates: [], props: new Map() }
     state.nested = 0
     state.alarm = null
     return
   }
-  if (line === 'END:VEVENT') {
+  if (END_VEVENT_RE.test(line)) {
     if (state.current) {
       state.blocks.push(state.current)
     }

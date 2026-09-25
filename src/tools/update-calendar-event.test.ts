@@ -78,9 +78,9 @@ const unvibeStored = (over: Partial<CalendarObject> = {}): CalendarObject => ({
     attendees: [
       'me@langmail.me',
       'me@gmail.com',
-      'kai@atelier.example',
-      'mika.sandor@example.com',
-      'jo.brightwater@example.com',
+      'avery@example.org',
+      'synthetic.guest1@gmail.com',
+      'synthetic.guest2@gmail.com',
     ],
     description: 'Weekly unvibe',
     end: new Date('2026-06-16T10:30:00Z'),
@@ -1113,9 +1113,9 @@ describe('updateCalendarEvent — attendee delta', () => {
     const ical = unfold(cap.updated[0]?.ical ?? '')
     // The four intended attendees survive; the gmail duplicate is gone.
     expect(ical).toContain('mailto:me@langmail.me')
-    expect(ical).toContain('mailto:kai@atelier.example')
-    expect(ical).toContain('mailto:mika.sandor@example.com')
-    expect(ical).toContain('mailto:jo.brightwater@example.com')
+    expect(ical).toContain('mailto:avery@example.org')
+    expect(ical).toContain('mailto:synthetic.guest1@gmail.com')
+    expect(ical).toContain('mailto:synthetic.guest2@gmail.com')
     expect(ical).not.toContain('mailto:me@gmail.com')
     // Recurrence, title, time, location, description all preserved — not collapsed
     // or dropped by omission.
@@ -1136,7 +1136,7 @@ describe('updateCalendarEvent — attendee delta', () => {
     })
     const ical = unfold(cap.updated[0]?.ical ?? '')
     expect(ical).toContain('mailto:newcomer@example.com')
-    expect(ical).toContain('mailto:kai@atelier.example')
+    expect(ical).toContain('mailto:avery@example.org')
     expect(ical).toContain('RRULE:FREQ=WEEKLY;BYDAY=TU')
   })
 
@@ -1261,7 +1261,7 @@ describe('updateCalendarEvent — notify', () => {
   test('notify: none does not claim silence when a replacement list drops someone', async () => {
     const cap = captured()
     const result = await updateCalendarEvent(makeDeps(account({ organizer: 'me@langmail.me' }), unvibeStored(), cap), {
-      args: { attendees: ['me@langmail.me', 'kai@atelier.example'], notify: 'none', uid: UID },
+      args: { attendees: ['me@langmail.me', 'avery@example.org'], notify: 'none', uid: UID },
       token: 'tok',
     })
     expect(result.isError).toBeUndefined()

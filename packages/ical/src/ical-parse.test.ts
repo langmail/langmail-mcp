@@ -399,6 +399,11 @@ describe('parseEvents — alarms', () => {
     expect(event?.attendees.map((a) => a.email)).toEqual(['guest@example.com'])
   })
 
+  test('matches VEVENT delimiters case-insensitively', () => {
+    const lower = invite().replace('BEGIN:VEVENT', 'begin:vevent').replace('END:VEVENT', 'end:vevent')
+    expect(parseEvents(lower)[0]?.title).toBe('Sync')
+  })
+
   test('matches BEGIN:VALARM case-insensitively', () => {
     const lower = invite().replace(
       'END:VEVENT',
