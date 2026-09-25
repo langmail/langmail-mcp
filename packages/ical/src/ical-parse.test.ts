@@ -360,7 +360,7 @@ describe('parseEvents — alarms', () => {
       'SUMMARY:Heads-up',
       'DESCRIPTION:Long description that folds',
       ' across two lines',
-      'ATTENDEE:mailto:host@langmail.me',
+      'ATTENDEE:mailto:host@example.com',
       'END:VALARM',
       'END:VEVENT',
     ].join('\r\n')
@@ -382,7 +382,7 @@ describe('parseEvents — alarms', () => {
           'TRIGGER;VALUE=DATE-TIME:20260612T080000Z',
           'SUMMARY:Heads-up',
           'DESCRIPTION:Long description that foldsacross two lines',
-          'ATTENDEE:mailto:host@langmail.me',
+          'ATTENDEE:mailto:host@example.com',
           'END:VALARM',
         ],
         trigger: '20260612T080000Z',

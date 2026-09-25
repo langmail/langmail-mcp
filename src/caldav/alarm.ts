@@ -34,23 +34,25 @@ export const describeReminder = (minutes: number, allDay: boolean): string =>
   allDay ? allDayFiring(minutes) : `${formatMinutes(minutes)} before`
 
 // A relative TRIGGER (RFC 5545 §3.3.6 duration, e.g. `-PT30M`, `-P1D`,
-// `-P1W`, `PT0S`), as a signed number of minutes; undefined when it is not a
+// `-P1W`, `PT0S`), as a signed number of seconds; undefined when it is not a
 // duration.
 const DURATION_RE = /^([+-])?P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/iu
-const durationMinutes = (value: string): number | undefined => {
+const SECONDS_PER_MINUTE = 60
+const durationSeconds = (value: string): number | undefined => {
   const m = DURATION_RE.exec(value)
   if (!m) {
     return
   }
   const [, sign, w = '0', d = '0', h = '0', mi = '0', s = '0'] = m
-  const minutes =
-    Number(w) * MINUTES_PER_WEEK +
-    Number(d) * MINUTES_PER_DAY +
-    Number(h) * MINUTES_PER_HOUR +
-    Number(mi) +
-    Math.round(Number(s) / 60)
-  return sign === '-' ? -minutes : minutes
+  const minutes = Number(w) * MINUTES_PER_WEEK + Number(d) * MINUTES_PER_DAY + Number(h) * MINUTES_PER_HOUR + Number(mi)
+  const seconds = minutes * SECONDS_PER_MINUTE + Number(s)
+  return sign === '-' ? -seconds : seconds
 }
+
+// An offset in words, keeping seconds when it isn't a whole minute (a foreign
+// `-PT90S` is "90 seconds", not a rounded "2 minutes").
+const formatSeconds = (seconds: number): string =>
+  seconds % SECONDS_PER_MINUTE === 0 ? formatMinutes(seconds / SECONDS_PER_MINUTE) : plural(seconds, 'second')
 
 const RELATED_END_RE = /(?:^|;)RELATED=END(?:;|$)/iu
 
@@ -75,16 +77,16 @@ const allDayFiring = (minutes: number): string => {
 // fires ("09:00 the day before").
 export const describeAlarm = (alarm: ParsedAlarm, allDay = false): string => {
   const trigger = alarm.trigger ?? ''
-  const minutes = durationMinutes(trigger)
-  if (minutes === undefined) {
+  const seconds = durationSeconds(trigger)
+  if (seconds === undefined) {
     return trigger ? `at ${icalDateToIso(trigger)}` : 'unknown trigger'
   }
   const anchor = RELATED_END_RE.test(alarm.triggerParams ?? '') ? 'end' : 'start'
-  if (allDay && anchor === 'start' && minutes <= 0) {
-    return allDayFiring(-minutes)
+  if (allDay && anchor === 'start' && seconds <= 0 && seconds % SECONDS_PER_MINUTE === 0) {
+    return allDayFiring(-seconds / SECONDS_PER_MINUTE)
   }
-  if (minutes === 0) {
+  if (seconds === 0) {
     return `at ${anchor}`
   }
-  return `${formatMinutes(Math.abs(minutes))} ${minutes < 0 ? 'before' : 'after'} ${anchor}`
+  return `${formatSeconds(Math.abs(seconds))} ${seconds < 0 ? 'before' : 'after'} ${anchor}`
 }

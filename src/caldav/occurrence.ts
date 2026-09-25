@@ -288,3 +288,71 @@ export const spliceOccurrenceCancellation = (masterIcal: string, recurrenceId: s
 
   return [...head, ...components.flatMap((c) => c.lines), end].join(CRLF) + CRLF
 }
+
+const BEGIN_VALARM_RE = /^BEGIN:VALARM\s*$/iu
+const BEGIN_LINE_RE = /^BEGIN:/iu
+const END_LINE_RE = /^END:/iu
+const SUMMARY_LINE_RE = /^SUMMARY(?:;[^:]*)?:(.*)$/iu
+
+// A VEVENT's lines with every top-level VALARM removed, and its SUMMARY value
+// (still TEXT-escaped, folds joined) for the replacement alarm's DESCRIPTION.
+const stripAlarms = (lines: string[]): { kept: string[]; summary: string } => {
+  const kept: string[] = []
+  let summary = ''
+  let depth = 0
+  let skipping = false
+  let inSummary = false
+  for (const line of lines) {
+    if (inSummary && (line.startsWith(' ') || line.startsWith('\t'))) {
+      summary += line.slice(1)
+      kept.push(line)
+      continue
+    }
+    inSummary = false
+    if (BEGIN_LINE_RE.test(line)) {
+      depth += 1
+      skipping ||= depth === 2 && BEGIN_VALARM_RE.test(line)
+    }
+    if (!skipping) {
+      kept.push(line)
+      const match = depth === 1 ? SUMMARY_LINE_RE.exec(line) : null
+      if (match) {
+        summary = match[1] ?? ''
+        inSummary = true
+      }
+    }
+    if (END_LINE_RE.test(line)) {
+      depth -= 1
+      skipping &&= depth >= 2
+    }
+  }
+  return { kept, summary }
+}
+
+// Replaces the reminders on every VEVENT of a stored object — the master and
+// any overrides — with one DISPLAY alarm `minutesBefore` the start, or none
+// when `minutesBefore` is null. Every other line is kept verbatim: no SEQUENCE
+// bump, no rebuilt ATTENDEEs, so attendee responses survive and nobody is
+// re-invited over what is the organizer's own reminder.
+export const spliceAlarms = (ical: string, minutesBefore: number | null): string => {
+  const calendar = splitCalendar(ical)
+  const components = calendar.components.map((c) => {
+    if (c.name !== 'VEVENT') {
+      return c
+    }
+    const { kept, summary } = stripAlarms(c.lines)
+    if (minutesBefore === null) {
+      return { ...c, lines: kept }
+    }
+    const alarm = [
+      'BEGIN:VALARM',
+      'ACTION:DISPLAY',
+      `TRIGGER:${minutesBefore === 0 ? 'PT0S' : `-PT${minutesBefore}M`}`,
+      `DESCRIPTION:${summary || 'Reminder'}`,
+      'END:VALARM',
+    ]
+    return { ...c, lines: [...kept.slice(0, -1), ...alarm, ...kept.slice(-1)] }
+  })
+  const end = calendar.header.at(-1) ?? 'END:VCALENDAR'
+  return [...calendar.header.slice(0, -1), ...components.flatMap((c) => c.lines), end].join(CRLF) + CRLF
+}

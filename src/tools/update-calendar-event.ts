@@ -39,7 +39,7 @@ import {
   updateEvent,
 } from '../caldav/client.ts'
 import { buildInvite, type InviteAlarm, maxSequence, parseSequence } from '../caldav/ical.ts'
-import { spliceOccurrenceOverride } from '../caldav/occurrence.ts'
+import { spliceAlarms, spliceOccurrenceOverride } from '../caldav/occurrence.ts'
 import {
   alignUntil,
   isSeriesOccurrence,
@@ -800,6 +800,31 @@ const occurrenceBase = (stored: ParsedEvent[], master: ParsedEvent | undefined, 
   return { ...base, end: zoned(new Date(targetMs + durationMs)), start: zoned(new Date(targetMs)) }
 }
 
+// A whole-event edit that changes nothing but the reminder. It takes its own
+// path (spliceAlarms) instead of the rebuild: a rebuild re-creates every
+// ATTENDEE as NEEDS-ACTION and bumps SEQUENCE, so setting one's own reminder
+// would wipe the guests' responses and re-invite them.
+const isReminderOnly = (args: UpdateCalendarEventArgs): boolean =>
+  args.reminderMinutesBefore !== undefined &&
+  args.recurrenceId === undefined &&
+  MUTATING_FIELDS.every((field) => field === 'reminderMinutesBefore' || args[field] === undefined)
+
+const updateReminderOnly = async (
+  deps: UpdateCalendarEventDeps,
+  existing: CalendarObject,
+  master: ParsedEvent | undefined,
+  args: UpdateCalendarEventArgs,
+  token: string
+): Promise<ToolResult> => {
+  const minutes = args.reminderMinutesBefore === NO_REMINDER ? null : (args.reminderMinutesBefore ?? null)
+  const ical = spliceAlarms(existing.data, minutes)
+  await deps.updateEvent({ ical, token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
+  return textResult(
+    `Event "${master?.title ?? args.uid}" updated (no notifications sent${reminderSummary(args, master?.allDay === true)}); ` +
+      'only the reminder changed.'
+  )
+}
+
 // What the edit targets: the whole event (merging against the master), or —
 // with `recurrenceId` — one occurrence, named by its normalized instant and
 // merging against that occurrence's own stored state.
@@ -887,6 +912,10 @@ export const updateCalendarEvent = async (
   }
   const stored = parseEvents(existing.data)
   const storedMaster = stored.find((e) => e.recurrence !== undefined) ?? stored[0]
+
+  if (isReminderOnly(args)) {
+    return updateReminderOnly(deps, existing, storedMaster, args, token)
+  }
 
   const timeZone = args.timeZone ?? storedMaster?.startTzid ?? (await deps.resolveTimeZone(token)) ?? UTC_TIME_ZONE
 

@@ -29,7 +29,7 @@ import {
   type UpdateCalendarEventArgs,
   updateCalendarEvent,
 } from '../tools/update-calendar-event.ts'
-import { type CalDavConfig, discoverAccount, fetchEvent } from './client.ts'
+import { type CalDavConfig, discoverAccount, fetchEvent, updateEvent } from './client.ts'
 
 const ADMIN_URL = process.env.STALWART_ADMIN_URL
 const ADMIN_AUTH =
@@ -37,6 +37,7 @@ const ADMIN_AUTH =
 const DOMAIN = 'langmail.me'
 const TOKEN = 'e2e-basic-auth' // ignored — cfg.authHeaders carries Basic auth
 const UID_LINE_RE = /^uid: (.+)$/mu
+const SEQUENCE_RE = /^SEQUENCE:\d+/mu
 
 const live = ADMIN_URL ? describe : describe.skip
 
@@ -210,5 +211,34 @@ live('all-day events and reminders against live Stalwart', () => {
     const after = await stored(uid)
     expect(after.events.find((e) => e.recurrence)?.excludedDates).toEqual(['2026-10-20'])
     expect(after.events.filter((e) => e.recurrenceId !== undefined)).toHaveLength(1)
+  })
+
+  test('a reminder-only edit keeps an accepted attendee accepted and SEQUENCE unchanged', async () => {
+    const uid = await create({
+      attendees: ['guest@example.com'],
+      end: '2026-11-12T11:00:00',
+      notify: 'none',
+      start: '2026-11-12T10:00:00',
+      title: 'Planning',
+    })
+    // Stand in for the guest's REPLY: mark them accepted on the stored object.
+    const object = await fetchEvent(cfg, { calendarUrl, token: TOKEN, uid })
+    if (!object) {
+      throw new Error('event not stored')
+    }
+    await updateEvent(cfg, {
+      ical: object.data.replace('PARTSTAT=NEEDS-ACTION', 'PARTSTAT=ACCEPTED'),
+      token: TOKEN,
+      url: object.url,
+      ...(object.etag ? { etag: object.etag } : {}),
+    })
+    const before = await stored(uid)
+    expect(before.events[0]?.attendees[0]?.status).toBe('ACCEPTED')
+
+    await update({ reminderMinutesBefore: 15, uid })
+    const after = await stored(uid)
+    expect(after.events[0]?.attendees[0]?.status).toBe('ACCEPTED')
+    expect(after.raw.match(SEQUENCE_RE)?.[0]).toBe(before.raw.match(SEQUENCE_RE)?.[0])
+    expect(await listed(uid)).toContain('reminder: 15 minutes before start')
   })
 })

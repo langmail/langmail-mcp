@@ -1423,6 +1423,9 @@ const ALARM_EMAIL = [
 const withAlarms = (ical: string, ...alarms: string[][]): string =>
   ical.replace('END:VEVENT', () => `${alarms.map((a) => a.join('\r\n')).join('\r\n')}\r\nEND:VEVENT`)
 
+const VALARM_BLOCK_RE = /BEGIN:VALARM[\s\S]*?END:VALARM\r\n/gu
+const TRAILING_NEWLINE_RE = /\r?\n?$/u
+
 const valarmBlocks = (ical: string): string[] => unfold(ical).match(/BEGIN:VALARM[\s\S]*?END:VALARM/gu) ?? []
 
 describe('updateCalendarEvent — alarms are preserved', () => {
@@ -1770,6 +1773,43 @@ describe('updateCalendarEvent — reminder', () => {
       token: 'tok',
     })
     expect(result.content[0]?.text).toContain('reminder 09:00 the day before')
+  })
+
+  // A reminder is the organizer's own business: changing it must not rebuild
+  // the attendee list (which resets every PARTSTAT to NEEDS-ACTION) or bump
+  // SEQUENCE (which re-invites everyone).
+  test('a reminder-only edit keeps attendee responses and SEQUENCE', async () => {
+    const cap = captured()
+    const accepted = storedEvent().data.replace('PARTSTAT=NEEDS-ACTION', 'PARTSTAT=ACCEPTED')
+    expect(accepted).toContain('PARTSTAT=ACCEPTED')
+    const stored = storedEvent({ data: withAlarms(accepted, ALARM_DISPLAY) })
+    const result = await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { reminderMinutesBefore: 10, uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    expect(ical).toContain('PARTSTAT=ACCEPTED')
+    expect(ical).toContain('SEQUENCE:2')
+    expect(ical).not.toContain('SEQUENCE:3')
+    expect(valarmBlocks(ical)).toHaveLength(1)
+    expect(valarmBlocks(ical)[0]).toContain('TRIGGER:-PT10M')
+    expect(result.content[0]?.text).toContain('no notifications sent')
+    // Everything but the alarm is byte-identical to what was stored.
+    const withoutAlarms = (text: string): string => text.replace(VALARM_BLOCK_RE, '')
+    expect(withoutAlarms(ical)).toBe(withoutAlarms(unfold(stored.data)).replace(TRAILING_NEWLINE_RE, '\r\n'))
+  })
+
+  test('a reminder-only edit applies to every VEVENT of a series with overrides', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), seriesWithOverride(), cap), {
+      args: { reminderMinutesBefore: 'none', uid: UID },
+      token: 'tok',
+    })
+    // No customized-occurrence refusal: nothing is rebuilt, so nothing is flattened.
+    expect(result.isError).toBeUndefined()
+    expect(valarmBlocks(cap.updated[0]?.ical ?? '')).toEqual([])
+    expect((cap.updated[0]?.ical.match(/BEGIN:VEVENT/gu) ?? []).length).toBe(2)
   })
 
   test('sets a reminder on one occurrence only', async () => {
