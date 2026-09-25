@@ -19,9 +19,11 @@
 //      Only the local path is exercised: Stalwart processes a mailed iMIP only
 //      from an authenticated, non-spam sender (crates/email/src/message/
 //      ingest.rs), which the dev MTA cannot give an outside address. Both paths
-//      end in the same `itip_ingest`, which looks the UID up account-wide;
-//   6. with one UID in two calendars, that lookup updates only one copy — the
-//      regression guard for docs/upstream/stalwart/itip-ingest-picks-first-uid-match.md.
+//      end in the same `itip_ingest`, which looks the UID up account-wide.
+//
+// The cases pin the MOVE behaviour move_calendar_events relies on, so the file
+// outlives the proposal as that tool's e2e test. The related duplicate-UID
+// defect has its own permanent guard in stalwart-duplicate-uid-itip.test.ts.
 //
 // Skips unless STALWART_ADMIN_URL is set, so a normal `bun test` run stays
 // hermetic. Run locally against the shared dev compose
@@ -483,6 +485,7 @@ live('CalDAV MOVE between calendars against live Stalwart (spike)', () => {
         headers: { authorization: org.basic, 'content-type': 'text/calendar; charset=utf-8', 'if-none-match': '*' },
         method: 'PUT',
       })
+      expect(put.status).toBe(201)
       const listed = await objectUrl(org, org.defaultUrl, uid)
       const listedName = resourceName(listed)
       console.log(`[spike 4 ${c.label}] PUT ${put.status}; name written ${c.name}; listed as ${listedName}`)
@@ -582,63 +585,6 @@ live('CalDAV MOVE between calendars against live Stalwart (spike)', () => {
     )
     expect(status).toBe('ACCEPTED')
     expect(strayInDefault).toEqual([])
-  }, 120_000)
-
-  // Regression guard for docs/upstream/stalwart/itip-ingest-picks-first-uid-match.md.
-  // Not a move: another client can leave one UID in two calendars, and an
-  // incoming update then reaches only one copy. When upstream updates both (or
-  // refuses the duplicate), this goes red and the entry can be retired.
-  test('6. with one UID in two calendars, an organizer update reaches only one copy', async () => {
-    const uid = `dup-uid-update-${run}@mcp-e2e`
-    const before = await messageCount(att)
-    await putEvent(org.cfg, { calendarUrl: org.defaultUrl, ical: plainInvite(uid, org, att, 'Review'), token: TOKEN })
-    expect(await waitForMoreThan(att, before)).toBe(true)
-
-    let attUrl: string | null = null
-    for (let i = 0; i < 10 && !attUrl; i += 1) {
-      attUrl = (await fetchEvent(att.cfg, { calendarUrl: att.defaultUrl, token: TOKEN, uid }))?.url ?? null
-      if (!attUrl) {
-        await sleep(1000)
-      }
-    }
-    expect(attUrl).not.toBeNull()
-    // The invitee's second client files a copy of the same invitation elsewhere.
-    const copy = await get(att, attUrl as string)
-    const dup = await fetch(`${attPrivate}${crypto.randomUUID()}.ics`, {
-      body: copy.body,
-      headers: { authorization: att.basic, 'content-type': 'text/calendar; charset=utf-8', 'if-none-match': '*' },
-      method: 'PUT',
-    })
-    expect(dup.status).toBe(201)
-
-    const orgUrl = await objectUrl(org, org.defaultUrl, uid)
-    const orgObj = await get(org, orgUrl)
-    const baseline = await messageCount(att)
-    const renamed = orgObj.body.replace('SUMMARY:Review\r\n', 'SUMMARY:Review (moved to Friday)\r\n')
-    expect(renamed).not.toBe(orgObj.body)
-    const updated = renamed.includes('SEQUENCE:')
-      ? renamed.replace(SEQUENCE_RE, (_m, n: string) => `SEQUENCE:${Number(n) + 1}`)
-      : renamed.replace('SUMMARY:', 'SEQUENCE:1\r\nSUMMARY:')
-    await fetch(orgUrl, {
-      body: updated,
-      headers: {
-        authorization: org.basic,
-        'content-type': 'text/calendar; charset=utf-8',
-        ...(orgObj.etag ? { 'if-match': orgObj.etag } : {}),
-      },
-      method: 'PUT',
-    })
-    expect(await waitForMoreThan(att, baseline)).toBe(true)
-    await sleep(3000)
-
-    const copies = [
-      ...(await uidsIn(att, att.defaultUrl)).filter((e) => e.uid === uid).map((e) => ({ ...e, where: 'default' })),
-      ...(await uidsIn(att, attPrivate)).filter((e) => e.uid === uid).map((e) => ({ ...e, where: 'Private' })),
-    ]
-    console.log('[spike 6] copies after update', JSON.stringify(copies))
-    expect(copies).toHaveLength(2)
-    expect(copies.filter((c) => c.summary === 'Review (moved to Friday)')).toHaveLength(1)
-    expect(copies.filter((c) => c.summary === 'Review')).toHaveLength(1)
   }, 120_000)
 })
 
