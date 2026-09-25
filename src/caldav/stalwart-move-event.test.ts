@@ -19,7 +19,9 @@
 //      Only the local path is exercised: Stalwart processes a mailed iMIP only
 //      from an authenticated, non-spam sender (crates/email/src/message/
 //      ingest.rs), which the dev MTA cannot give an outside address. Both paths
-//      end in the same `itip_ingest`, which looks the UID up account-wide.
+//      end in the same `itip_ingest`, which looks the UID up account-wide;
+//   6. with one UID in two calendars, that lookup updates only one copy — the
+//      regression guard for docs/upstream/stalwart/itip-ingest-picks-first-uid-match.md.
 //
 // Skips unless STALWART_ADMIN_URL is set, so a normal `bun test` run stays
 // hermetic. Run locally against the shared dev compose
@@ -263,8 +265,9 @@ live('CalDAV MOVE between calendars against live Stalwart (spike)', () => {
       throw new Error(`domain ${DOMAIN} missing — run services/auth's stalwart:setup first`)
     }
     org = await provision(`mcp-mv-org-${run}`, domainId)
+    ids.push(org.id)
     att = await provision(`mcp-mv-att-${run}`, domainId)
-    ids.push(org.id, att.id)
+    ids.push(att.id)
     orgPrivate = await createCalendar(org.cfg, { name: 'Private', token: TOKEN })
     attPrivate = await createCalendar(att.cfg, { name: 'Private', token: TOKEN })
   }, 60_000)
@@ -308,6 +311,7 @@ live('CalDAV MOVE between calendars against live Stalwart (spike)', () => {
     // above is suppression, not a dead pipe — and the moved event is still a
     // live scheduling object.
     const edited = after.body.replace('SUMMARY:Back yoga\r\n', 'SUMMARY:Back yoga (edited)\r\n')
+    expect(edited).not.toBe(after.body)
     const put = await fetch(dest, {
       body: edited,
       headers: {
@@ -382,7 +386,9 @@ live('CalDAV MOVE between calendars against live Stalwart (spike)', () => {
     const destPath = new URL(`${orgPrivate}${resourceName(src)}`).pathname
     const moved = await move(org, src, destPath)
     console.log('[spike 3a] MOVE with path Destination', moved.status, JSON.stringify(moved.body.slice(0, 200)))
-  })
+    expect([201, 204]).toContain(moved.status)
+    expect(await fetchEvent(org.cfg, { calendarUrl: orgPrivate, token: TOKEN, uid })).not.toBeNull()
+  }, 60_000)
 
   test('3b. Overwrite: F onto an occupied resource name', async () => {
     const uidA = `move-occ-a-${run}@mcp-e2e`
@@ -400,7 +406,12 @@ live('CalDAV MOVE between calendars against live Stalwart (spike)', () => {
     const stillThere = await get(org, src)
     const target = await get(org, occupied)
     console.log('[spike 3b] source still', stillThere.status, '| target still B', target.body.includes(uidB))
-  })
+    // An empty body is what tells this 412 apart from no-uid-conflict (3c).
+    expect(moved.status).toBe(412)
+    expect(moved.body).toBe('')
+    expect(stillThere.status).toBe(200)
+    expect(target.body).toContain(uidB)
+  }, 60_000)
 
   test('3c. the target calendar already holds the same UID', async () => {
     const uid = `move-dup-${run}@mcp-e2e`
@@ -416,7 +427,12 @@ live('CalDAV MOVE between calendars against live Stalwart (spike)', () => {
     const src = await objectUrl(org, org.defaultUrl, uid)
     const moved = await move(org, src, `${orgPrivate}${resourceName(src)}`)
     console.log('[spike 3c] MOVE with UID already in target', moved.status, JSON.stringify(moved.body.slice(0, 300)))
-  })
+    // Uniqueness is per calendar, not per account: the duplicate PUT succeeds.
+    expect(dupPut).toBe('ok')
+    expect(moved.status).toBe(412)
+    expect(moved.body).toContain('no-uid-conflict')
+    expect((await get(org, src)).status).toBe(200)
+  }, 60_000)
 
   test('3d. tsdav davRequest carries a MOVE through', async () => {
     const uid = `move-tsdav-${run}@mcp-e2e`
@@ -434,8 +450,9 @@ live('CalDAV MOVE between calendars against live Stalwart (spike)', () => {
     console.log('[spike 3d] davRequest MOVE', JSON.stringify(res.map((r) => ({ ok: r.ok, status: r.status }))))
     const landed = await fetchEvent(org.cfg, { calendarUrl: orgPrivate, token: TOKEN, uid })
     console.log('[spike 3d] landed in Private', Boolean(landed))
+    expect(res.map((r) => r.status)).toEqual([201])
     expect(landed).not.toBeNull()
-  })
+  }, 60_000)
 
   test('3e. MOVE into a calendar that does not exist', async () => {
     const uid = `move-nowhere-${run}@mcp-e2e`
@@ -444,15 +461,20 @@ live('CalDAV MOVE between calendars against live Stalwart (spike)', () => {
     const home = orgPrivate.slice(0, orgPrivate.slice(0, -1).lastIndexOf('/') + 1)
     const moved = await move(org, src, `${home}no-such-calendar/${resourceName(src)}`)
     console.log('[spike 3e] MOVE into missing calendar', moved.status, JSON.stringify(moved.body.slice(0, 200)))
-  })
+    expect(moved.status).toBe(409)
+    expect((await get(org, src)).status).toBe(200)
+  }, 60_000)
 
   // docs/upstream/stalwart/caldav-resource-name-encoding-asymmetric.md: the
   // resource segment is emitted verbatim and never decoded, so the spelling of
   // a foreign client's resource name in Destination matters.
-  test('4. resource names with @ and non-ASCII move under the spelling the listing reports', async () => {
+  test('4. resource names with @ and percent-encoded bytes move under the spelling the listing reports', async () => {
+    // fetch() percent-encodes any non-ASCII in a URL, so a raw UTF-8 name
+    // cannot be put on the wire from here; the second case is the
+    // percent-encoded form a client would send for one.
     const cases = [
       { label: 'at-sign', name: `probe-${run}@example.com.ics` },
-      { label: 'non-ascii', name: encodeURIComponent(`termin-ärztin-${run}.ics`) },
+      { label: 'percent-encoded', name: encodeURIComponent(`termin-ärztin-${run}.ics`) },
     ]
     for (const c of cases) {
       const uid = `move-name-${c.label}-${run}@mcp-e2e`
@@ -471,10 +493,48 @@ live('CalDAV MOVE between calendars against live Stalwart (spike)', () => {
       console.log(
         `[spike 4 ${c.label}] MOVE ${moved.status}; lands as ${landed ? resourceName(landed) : 'nowhere'}; GET listed href ${readBack?.status}`
       )
+      expect(listedName).toBe(c.name)
       expect([201, 204]).toContain(moved.status)
       expect(readBack?.status).toBe(200)
     }
-  })
+
+    // The hazard the verbatim rule guards against: `@` and `%40` name two
+    // distinct resources, so a normalized source href misses the event.
+    const uidAt = `move-name-hazard-at-${run}@mcp-e2e`
+    const uidPct = `move-name-hazard-pct-${run}@mcp-e2e`
+    const atName = `hazard-${run}@example.com.ics`
+    const pctName = `hazard-${run}%40example.com.ics`
+    for (const [uid, name] of [
+      [uidAt, atName],
+      [uidPct, pctName],
+    ] as const) {
+      const put = await fetch(`${org.defaultUrl}${name}`, {
+        body: plainEvent(uid, 'Hazard'),
+        headers: { authorization: org.basic, 'content-type': 'text/calendar; charset=utf-8', 'if-none-match': '*' },
+        method: 'PUT',
+      })
+      expect(put.status).toBe(201)
+    }
+    // Both names coexist, each listed under its own spelling.
+    expect(resourceName(await objectUrl(org, org.defaultUrl, uidAt))).toBe(atName)
+    expect(resourceName(await objectUrl(org, org.defaultUrl, uidPct))).toBe(pctName)
+
+    // Normalizing the raw-@ href addresses the %40 resource instead: the MOVE
+    // succeeds, but it carries the wrong event.
+    const normalized = await move(org, `${org.defaultUrl}${encodeURIComponent(atName)}`, `${orgPrivate}${pctName}`)
+    const inPrivate = (await uidsIn(org, orgPrivate)).map((e) => e.uid)
+    console.log(
+      '[spike 4 hazard] MOVE of normalized @ href',
+      normalized.status,
+      '| %40 event moved',
+      inPrivate.includes(uidPct),
+      '| @ event moved',
+      inPrivate.includes(uidAt)
+    )
+    expect(normalized.status).toBe(201)
+    expect(inPrivate).toContain(uidPct)
+    expect(inPrivate).not.toContain(uidAt)
+  }, 60_000)
 
   test('5a. a local attendee reply reaches an organized event after it moved', async () => {
     const uid = `move-reply-local-${run}@mcp-e2e`
@@ -494,6 +554,7 @@ live('CalDAV MOVE between calendars against live Stalwart (spike)', () => {
         await sleep(1000)
       }
     }
+    expect(attUrl).not.toBeNull()
     const attObj = await get(att, attUrl as string)
     const accepted = unfold(attObj.body).replace(
       `PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${att.addr}`,
@@ -509,6 +570,7 @@ live('CalDAV MOVE between calendars against live Stalwart (spike)', () => {
       method: 'PUT',
     })
     console.log('[spike 5a] attendee RSVP PUT', rsvp.status, 'changed body', accepted !== unfold(attObj.body))
+    expect(accepted).not.toBe(unfold(attObj.body))
 
     const status = await waitForPartstat(org, orgPrivate, uid, att.addr, 'ACCEPTED')
     const strayInDefault = (await uidsIn(org, org.defaultUrl)).filter((e) => e.uid === uid)
@@ -520,6 +582,63 @@ live('CalDAV MOVE between calendars against live Stalwart (spike)', () => {
     )
     expect(status).toBe('ACCEPTED')
     expect(strayInDefault).toEqual([])
+  }, 120_000)
+
+  // Regression guard for docs/upstream/stalwart/itip-ingest-picks-first-uid-match.md.
+  // Not a move: another client can leave one UID in two calendars, and an
+  // incoming update then reaches only one copy. When upstream updates both (or
+  // refuses the duplicate), this goes red and the entry can be retired.
+  test('6. with one UID in two calendars, an organizer update reaches only one copy', async () => {
+    const uid = `dup-uid-update-${run}@mcp-e2e`
+    const before = await messageCount(att)
+    await putEvent(org.cfg, { calendarUrl: org.defaultUrl, ical: plainInvite(uid, org, att, 'Review'), token: TOKEN })
+    expect(await waitForMoreThan(att, before)).toBe(true)
+
+    let attUrl: string | null = null
+    for (let i = 0; i < 10 && !attUrl; i += 1) {
+      attUrl = (await fetchEvent(att.cfg, { calendarUrl: att.defaultUrl, token: TOKEN, uid }))?.url ?? null
+      if (!attUrl) {
+        await sleep(1000)
+      }
+    }
+    expect(attUrl).not.toBeNull()
+    // The invitee's second client files a copy of the same invitation elsewhere.
+    const copy = await get(att, attUrl as string)
+    const dup = await fetch(`${attPrivate}${crypto.randomUUID()}.ics`, {
+      body: copy.body,
+      headers: { authorization: att.basic, 'content-type': 'text/calendar; charset=utf-8', 'if-none-match': '*' },
+      method: 'PUT',
+    })
+    expect(dup.status).toBe(201)
+
+    const orgUrl = await objectUrl(org, org.defaultUrl, uid)
+    const orgObj = await get(org, orgUrl)
+    const baseline = await messageCount(att)
+    const renamed = orgObj.body.replace('SUMMARY:Review\r\n', 'SUMMARY:Review (moved to Friday)\r\n')
+    expect(renamed).not.toBe(orgObj.body)
+    const updated = renamed.includes('SEQUENCE:')
+      ? renamed.replace(SEQUENCE_RE, (_m, n: string) => `SEQUENCE:${Number(n) + 1}`)
+      : renamed.replace('SUMMARY:', 'SEQUENCE:1\r\nSUMMARY:')
+    await fetch(orgUrl, {
+      body: updated,
+      headers: {
+        authorization: org.basic,
+        'content-type': 'text/calendar; charset=utf-8',
+        ...(orgObj.etag ? { 'if-match': orgObj.etag } : {}),
+      },
+      method: 'PUT',
+    })
+    expect(await waitForMoreThan(att, baseline)).toBe(true)
+    await sleep(3000)
+
+    const copies = [
+      ...(await uidsIn(att, att.defaultUrl)).filter((e) => e.uid === uid).map((e) => ({ ...e, where: 'default' })),
+      ...(await uidsIn(att, attPrivate)).filter((e) => e.uid === uid).map((e) => ({ ...e, where: 'Private' })),
+    ]
+    console.log('[spike 6] copies after update', JSON.stringify(copies))
+    expect(copies).toHaveLength(2)
+    expect(copies.filter((c) => c.summary === 'Review (moved to Friday)')).toHaveLength(1)
+    expect(copies.filter((c) => c.summary === 'Review')).toHaveLength(1)
   }, 120_000)
 })
 
