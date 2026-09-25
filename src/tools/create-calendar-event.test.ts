@@ -375,3 +375,106 @@ describe('createCalendarEvent', () => {
     expect(collected).toHaveLength(0)
   })
 })
+
+describe('createCalendarEvent — all-day events', () => {
+  const allDay = (over: Partial<CreateCalendarEventArgs> = {}): CreateCalendarEventArgs => ({
+    end: '2026-10-04',
+    start: '2026-10-03',
+    title: 'Day off',
+    ...over,
+  })
+  const put = async (over: Partial<CreateCalendarEventArgs> = {}, tz: string | null = 'Europe/Berlin') => {
+    const captured: PutEventParams[] = []
+    const result = await createCalendarEvent(
+      { ...makeDeps(account(), captured), resolveTimeZone: () => Promise.resolve(tz) },
+      { args: allDay(over), token: 'tok' }
+    )
+    return { ical: (captured[0]?.ical ?? '').replace(FOLD_RE, ''), result }
+  }
+
+  test('the schema accepts date-only start and end', () => {
+    expect(createCalendarEventInput.safeParse(allDay()).success).toBe(true)
+  })
+
+  test('writes DATE values with an exclusive DTEND and no clock time', async () => {
+    const { ical, result } = await put()
+    expect(result.isError).toBeUndefined()
+    expect(ical).toContain('DTSTART;VALUE=DATE:20261003')
+    expect(ical).toContain('DTEND;VALUE=DATE:20261004')
+    // Floating dates need no VTIMEZONE, whatever the account zone.
+    expect(ical).not.toContain('BEGIN:VTIMEZONE')
+    expect(result.content[0]?.text).toContain('All-day event "Day off" created')
+  })
+
+  test('a multi-day vacation spans to the day after its last day', async () => {
+    const { ical } = await put({ end: '2026-10-11', start: '2026-10-03', title: 'Vacation' })
+    expect(ical).toContain('DTSTART;VALUE=DATE:20261003')
+    expect(ical).toContain('DTEND;VALUE=DATE:20261011')
+  })
+
+  test('refuses end equal to start, naming the exclusive end', async () => {
+    const { ical, result } = await put({ end: '2026-10-03' })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('2026-10-04')
+    expect(ical).toBe('')
+  })
+
+  test('refuses a date start with a date-time end', async () => {
+    const { result } = await put({ end: '2026-10-03T18:00:00' })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('both')
+  })
+
+  test('a recurring all-day series gets a DATE UNTIL from a structured date', async () => {
+    const { ical } = await put({ recurrence: { frequency: 'yearly', until: '2030-10-03' } })
+    expect(ical).toContain('RRULE:FREQ=YEARLY;UNTIL=20301003')
+  })
+
+  test('a date-time UNTIL is converted to a DATE on an all-day series', async () => {
+    // 23:30 Berlin on Oct 31 is Oct 31 in the account zone, not Nov 1 or Oct 30.
+    const { ical } = await put({ recurrence: 'FREQ=WEEKLY;UNTIL=20261031T223000Z' })
+    expect(ical).toContain('RRULE:FREQ=WEEKLY;UNTIL=20261031')
+  })
+})
+
+describe('createCalendarEvent — UNTIL follows DTSTART on timed series', () => {
+  test('a date-only UNTIL on a timed series runs to the end of that day in the event zone', async () => {
+    const captured: PutEventParams[] = []
+    await createCalendarEvent(makeDeps(account(), captured), {
+      args: args({
+        end: '2026-06-12T10:30:00',
+        recurrence: { frequency: 'weekly', until: '2026-12-31' },
+        start: '2026-06-12T10:00:00',
+        timeZone: 'Europe/Berlin',
+      }),
+      token: 'tok',
+    })
+    // 2026-12-31T23:59:59 Berlin (CET, +01:00) = 22:59:59Z.
+    expect(captured[0]?.ical).toContain('RRULE:FREQ=WEEKLY;UNTIL=20261231T225959Z')
+  })
+})
+
+describe('createCalendarEvent — reminder', () => {
+  test('reminderMinutesBefore adds one DISPLAY alarm that many minutes before the start', async () => {
+    const captured: PutEventParams[] = []
+    const result = await createCalendarEvent(makeDeps(account(), captured), {
+      args: args({ reminderMinutesBefore: 30 }),
+      token: 'tok',
+    })
+    const ical = captured[0]?.ical ?? ''
+    expect(ical.match(/BEGIN:VALARM/gu)).toHaveLength(1)
+    expect(ical).toContain('ACTION:DISPLAY')
+    expect(ical).toContain('TRIGGER:-PT30M')
+    expect(result.content[0]?.text).toContain('reminder 30 minutes before')
+  })
+
+  test('no reminder by default', async () => {
+    const captured: PutEventParams[] = []
+    await createCalendarEvent(makeDeps(account(), captured), { args: args(), token: 'tok' })
+    expect(captured[0]?.ical).not.toContain('BEGIN:VALARM')
+  })
+
+  test('the schema rejects a negative reminder', () => {
+    expect(createCalendarEventInput.safeParse(args({ reminderMinutesBefore: -5 })).success).toBe(false)
+  })
+})

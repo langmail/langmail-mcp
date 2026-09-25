@@ -10,6 +10,7 @@ import { z } from 'zod'
 
 import { type ParsedEvent, parseEvents } from '@langmail/ical'
 
+import { describeAlarm } from '../caldav/alarm.ts'
 import {
   type CalDavConfig,
   discoverAccount,
@@ -50,17 +51,30 @@ const formatAttendee = (attendee: ParsedEvent['attendees'][number]): string =>
     ? `${attendee.email} (${attendee.status.toLowerCase()})`
     : attendee.email
 
-const formatEvent = (idx: number, ev: ParsedEvent): string => {
+// The `when:` value. An all-day event prints its dates exactly as stored and
+// as create/update accept them — no invented clock time — and says the end is
+// exclusive, since `2026-10-03 → 2026-10-04` otherwise reads as two days.
+const formatWhen = (ev: ParsedEvent): string => {
   const range = ev.end ? `${ev.start} → ${ev.end}` : ev.start
+  if (ev.allDay) {
+    return ev.end ? `${range} (all day; end date exclusive)` : `${range} (all day)`
+  }
   // Surface the event's own zone so a naive `…T10:00:00` (a TZID event) isn't
   // silently read as UTC; a UTC event carries its `Z` and needs no annotation.
-  const when = ev.startTzid ? `${range} (${ev.startTzid})` : range
-  const lines = [`${idx}. ${ev.title || '(no title)'}`, `   when: ${when}`]
+  return ev.startTzid ? `${range} (${ev.startTzid})` : range
+}
+
+const formatEvent = (idx: number, ev: ParsedEvent): string => {
+  const lines = [`${idx}. ${ev.title || '(no title)'}`, `   when: ${formatWhen(ev)}`]
   if (ev.location) {
     lines.push(`   location: ${ev.location}`)
   }
   if (ev.recurrence) {
     lines.push(`   repeats: ${ev.recurrence}`)
+  }
+  const alarms = ev.alarms ?? []
+  if (alarms.length > 0) {
+    lines.push(`   ${alarms.length === 1 ? 'reminder' : 'reminders'}: ${alarms.map(describeAlarm).join(', ')}`)
   }
   // The attendee list is what makes an attendee edit safe: it's the current
   // stored membership update_calendar_event mutates, read straight from Langmail.
@@ -131,8 +145,8 @@ export const registerListCalendarEvents = (
       annotations: READ_ONLY,
       description:
         'Read the user’s calendar, agenda or schedule — what’s on their calendar, what meetings they ' +
-        'have, when they are busy or free. Lists events with each event’s title, time, ' +
-        'location, attendees (with their response status), and uid. Pass the uid to ' +
+        'have, when they are busy or free. Lists events with each event’s title, time (dates only for ' +
+        'all-day events), location, reminders, attendees (with their response status), and uid. Pass the uid to ' +
         'update_calendar_event or delete_calendar_event; the returned attendee list is ' +
         'the current membership those tools edit, so read it here before removing or ' +
         'adding attendees rather than guessing. Optionally bound the results with a ' +
