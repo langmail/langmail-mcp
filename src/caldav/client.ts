@@ -431,8 +431,8 @@ const NO_UID_CONFLICT_RE = /no-uid-conflict/u
 // stays byte-identical and no attendee hears about it. Only the ETag changes.
 // `Overwrite: F` means a name collision refuses instead of replacing.
 //
-// A timeout throws (see isTimeoutError): the server may have committed the
-// move before the client gave up.
+// Throws only when the exchange broke off (a timeout, a dropped connection);
+// the server may have committed the move by then.
 export const moveEvent = async (cfg: CalDavConfig, p: MoveEventParams): Promise<MoveEventOutcome> => {
   const [res] = await davRequest({
     fetchOptions: deadline(),
@@ -450,8 +450,9 @@ export const moveEvent = async (cfg: CalDavConfig, p: MoveEventParams): Promise<
   }
   if (status === 412) {
     // The UID precondition carries its element in the body; a name collision
-    // answers with an empty one.
-    const body = typeof res?.raw === 'string' ? res.raw : JSON.stringify(res?.raw ?? '')
+    // answers with an empty one. davRequest hands back the raw text for any
+    // non-2xx reply, so `raw` is a string here.
+    const body = typeof res?.raw === 'string' ? res.raw : ''
     return NO_UID_CONFLICT_RE.test(body) ? { kind: 'uidConflict' } : { kind: 'nameConflict' }
   }
   if (status === 403) {
@@ -459,7 +460,3 @@ export const moveEvent = async (cfg: CalDavConfig, p: MoveEventParams): Promise<
   }
   return { kind: 'failed', status }
 }
-
-// Whether a request was cut off by the CALDAV_TIMEOUT_MS deadline.
-export const isTimeoutError = (err: unknown): boolean =>
-  typeof err === 'object' && err !== null && 'name' in err && err.name === 'TimeoutError'

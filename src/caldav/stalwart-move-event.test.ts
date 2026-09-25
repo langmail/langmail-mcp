@@ -255,7 +255,7 @@ const uidsIn = async (p: Principal, calendarUrl: string): Promise<{ summary: str
     parseEvents(o.data).map((e) => ({ summary: e.title, uid: e.uid }))
   )
 
-live('CalDAV MOVE between calendars against live Stalwart (spike)', () => {
+live('CalDAV MOVE between calendars against live Stalwart', () => {
   const run = Date.now()
   const ids: string[] = []
   let org: Principal
@@ -540,37 +540,6 @@ live('CalDAV MOVE between calendars against live Stalwart (spike)', () => {
     expect(inPrivate).not.toContain(uidAt)
   }, 60_000)
 
-  test('6. move_calendar_events end to end: moves, re-runs as a no-op, and refuses an ambiguous uid', async () => {
-    const rich = `tool-rich-${run}@mcp-e2e`
-    const plain = `tool-plain-${run}@mcp-e2e`
-    const twin = `tool-twin-${run}@mcp-e2e`
-    await putEvent(org.cfg, { calendarUrl: org.defaultUrl, ical: richSeries(rich, org, null), token: TOKEN })
-    await putEvent(org.cfg, { calendarUrl: org.defaultUrl, ical: plainEvent(plain, 'Tool plain'), token: TOKEN })
-    const work = await createCalendar(org.cfg, { name: `Work ${run}`, token: TOKEN })
-    for (const calendarUrl of [org.defaultUrl, work]) {
-      await putEvent(org.cfg, { calendarUrl, ical: plainEvent(twin, 'Twin'), token: TOKEN })
-    }
-    const before = await get(org, await objectUrl(org, org.defaultUrl, rich))
-
-    const deps = makeLiveDeps(org.cfg)
-    const call = (args: Record<string, unknown>) =>
-      moveCalendarEvents(deps, { args: moveCalendarEventsInput.parse(args), token: TOKEN })
-    const text = (r: { content: { text: string }[] }) => r.content[0]?.text ?? ''
-
-    const first = await call({ calendar: 'private', uids: [rich, plain, twin] })
-    console.log('[tool 6] first call\n', text(first))
-    expect(text(first)).toContain('Moved 2 event(s) to Private.')
-    expect(text(first)).toContain(`${twin} (ambiguous:`)
-    expect((await get(org, await objectUrl(org, orgPrivate, rich))).body).toBe(before.body)
-
-    const again = await call({ calendar: orgPrivate, uids: [rich, plain] })
-    expect(text(again)).toBe(`Moved 0 event(s) to Private.\nAlready in Private (2): ${rich}, ${plain}.`)
-
-    const picked = await call({ calendar: 'Private', fromCalendar: work, uids: [twin] })
-    expect(text(picked)).toBe('Moved 1 event(s) to Private.')
-    expect((await uidsIn(org, work)).map((e) => e.uid)).not.toContain(twin)
-  }, 60_000)
-
   test('5a. a local attendee reply reaches an organized event after it moved', async () => {
     const uid = `move-reply-local-${run}@mcp-e2e`
     const before = await messageCount(att)
@@ -618,6 +587,36 @@ live('CalDAV MOVE between calendars against live Stalwart (spike)', () => {
     expect(status).toBe('ACCEPTED')
     expect(strayInDefault).toEqual([])
   }, 120_000)
+
+  test('6. move_calendar_events end to end: moves, re-runs as a no-op, and refuses an ambiguous uid', async () => {
+    const rich = `tool-rich-${run}@mcp-e2e`
+    const plain = `tool-plain-${run}@mcp-e2e`
+    const twin = `tool-twin-${run}@mcp-e2e`
+    await putEvent(org.cfg, { calendarUrl: org.defaultUrl, ical: richSeries(rich, org, null), token: TOKEN })
+    await putEvent(org.cfg, { calendarUrl: org.defaultUrl, ical: plainEvent(plain, 'Tool plain'), token: TOKEN })
+    const work = await createCalendar(org.cfg, { name: `Work ${run}`, token: TOKEN })
+    for (const calendarUrl of [org.defaultUrl, work]) {
+      await putEvent(org.cfg, { calendarUrl, ical: plainEvent(twin, 'Twin'), token: TOKEN })
+    }
+    const before = await get(org, await objectUrl(org, org.defaultUrl, rich))
+
+    const deps = makeLiveDeps(org.cfg)
+    const call = (args: Record<string, unknown>) =>
+      moveCalendarEvents(deps, { args: moveCalendarEventsInput.parse(args), token: TOKEN })
+    const text = (r: { content: { text: string }[] }) => r.content[0]?.text ?? ''
+
+    const first = await call({ calendar: 'private', uids: [rich, plain, twin] })
+    expect(text(first)).toContain('Moved 2 event(s) to Private.')
+    expect(text(first)).toContain(`${twin} (ambiguous:`)
+    expect((await get(org, await objectUrl(org, orgPrivate, rich))).body).toBe(before.body)
+
+    const again = await call({ calendar: orgPrivate, uids: [rich, plain] })
+    expect(text(again)).toBe(`Moved 0 event(s) to Private.\nAlready in Private (2): ${rich}, ${plain}.`)
+
+    const picked = await call({ calendar: 'Private', fromCalendar: work, uids: [twin] })
+    expect(text(picked)).toBe('Moved 1 event(s) to Private.')
+    expect((await uidsIn(org, work)).map((e) => e.uid)).not.toContain(twin)
+  }, 60_000)
 })
 
 const FOLD_RE = /\r\n[ \t]/gu

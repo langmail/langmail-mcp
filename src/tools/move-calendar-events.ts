@@ -22,7 +22,6 @@ import {
   type CalDavConfig,
   fetchCalendarList,
   fetchEvents,
-  isTimeoutError,
   type MoveEventOutcome,
   type MoveEventParams,
   moveEvent,
@@ -131,16 +130,23 @@ const resourceName = (url: string): string => url.slice(url.lastIndexOf('/') + 1
 const quotedNames = (calendars: CalendarSummary[]): string =>
   calendars.map((c) => `"${calendarLabel(c)}"`).join(' and ')
 
+// With URLs, so the next call can pass fromCalendar even when two calendars share a name.
+const namesWithUrls = (calendars: CalendarSummary[]): string =>
+  calendars.map((c) => `"${calendarLabel(c)}" <${c.url}>`).join(' and ')
+
 const refusalReason = (outcome: Exclude<MoveEventOutcome, { kind: 'moved' }>, dest: CalendarSummary): string => {
   switch (outcome.kind) {
     case 'uidConflict':
-      return `uidConflict: "${calendarLabel(dest)}" already holds another event with this uid`
+      return (
+        `uidConflict: "${calendarLabel(dest)}" already holds a separate copy of this event; ask the user ` +
+        'which one to keep and delete the other with delete_calendar_event'
+      )
     case 'nameConflict':
-      return `nameConflict: "${calendarLabel(dest)}" already has an event stored under the same name`
+      return `nameConflict: "${calendarLabel(dest)}" already has an event stored under the same name; this cannot be resolved with these tools`
     case 'forbidden':
       return 'forbidden: this account may not move events between these calendars'
     default:
-      return `failed: the server answered HTTP ${outcome.status}`
+      return `failed: the server answered HTTP ${outcome.status}; re-run to retry`
   }
 }
 
@@ -157,16 +163,19 @@ const moveOne = async (
       url: source.object.url,
     })
     return outcome.kind === 'moved' ? outcome : { kind: 'notMoved', reason: refusalReason(outcome, dest) }
-  } catch (err) {
-    if (isTimeoutError(err)) {
-      return { kind: 'indeterminate' }
-    }
-    const reason = err instanceof Error ? err.message : String(err)
-    return { kind: 'notMoved', reason: `failed: ${reason}` }
+  } catch {
+    // davRequest never throws on an HTTP status, only when the exchange broke
+    // off (a timeout, a dropped connection) — possibly after Stalwart had
+    // already committed the move. So the outcome is unknown, never "not moved".
+    return { kind: 'indeterminate' }
   }
 }
 
-const formatResult = (dest: CalendarSummary, outcomes: [string, Outcome][]): ToolResult => {
+const formatResult = (
+  dest: CalendarSummary,
+  outcomes: [string, Outcome][],
+  unreadable: CalendarSummary[]
+): ToolResult => {
   const name = calendarLabel(dest)
   const of = <K extends Outcome['kind']>(kind: K) =>
     outcomes.filter((o): o is [string, Extract<Outcome, { kind: K }>] => o[1].kind === kind)
@@ -188,8 +197,8 @@ const formatResult = (dest: CalendarSummary, outcomes: [string, Outcome][]): Too
   }
   if (indeterminate.length > 0) {
     lines.push(
-      `Outcome unknown (${indeterminate.length}): ${indeterminate.map(([uid]) => uid).join(', ')} — the server did ` +
-        'not answer in time and may have moved them. Re-run with these uids to find out.'
+      `Outcome unknown (${indeterminate.length}): ${indeterminate.map(([uid]) => uid).join(', ')} — the connection ` +
+        'broke off before the server answered, so they may have moved. Re-run with these uids to find out.'
     )
   }
   if (notAttempted.length > 0) {
@@ -198,9 +207,105 @@ const formatResult = (dest: CalendarSummary, outcomes: [string, Outcome][]): Too
         'Re-run with these uids.'
     )
   }
+  if (unreadable.length > 0) {
+    lines.push(
+      `Could not read ${quotedNames(unreadable)}, so events there were not found; re-run later, or pass ` +
+        'fromCalendar to look in one calendar only.'
+    )
+  }
   const text = lines.join('\n')
-  // A partial batch is a normal result; only a call that achieved nothing is an error.
-  return moved.length + already.length === 0 ? errorResult(text) : textResult(text)
+  // A partial batch is a normal result; only a call that certainly achieved
+  // nothing is an error — an unknown outcome may have been a move.
+  return moved.length + already.length + indeterminate.length === 0 ? errorResult(text) : textResult(text)
+}
+
+type Step<T> = { ok: true; value: T } | { error: ToolResult; ok: false }
+
+// The calendars to look in: only fromCalendar when given, else every calendar
+// but the destination. fetchCalendarList reads the principal's own calendar
+// home only, so every source and destination belongs to this account — the
+// case the silent, copy-free MOVE is verified for.
+const resolveSources = (
+  calendars: CalendarSummary[],
+  dest: CalendarSummary,
+  fromCalendar: string | undefined
+): Step<{ from?: CalendarSummary; sources: CalendarSummary[] }> => {
+  if (fromCalendar === undefined) {
+    return { ok: true, value: { sources: calendars.filter((c) => !sameCalendarUrl(c.url, dest.url)) } }
+  }
+  const resolved = resolveCalendar(calendars, fromCalendar, { argName: 'fromCalendar', nothingDone: NOTHING_MOVED })
+  if (!resolved.ok) {
+    return resolved
+  }
+  if (sameCalendarUrl(resolved.calendar.url, dest.url)) {
+    return {
+      error: errorResult(
+        `fromCalendar and calendar both name "${calendarLabel(dest)}". ${NOTHING_MOVED} ` +
+          'Pass the calendar the events are in now as fromCalendar, or omit it.'
+      ),
+      ok: false,
+    }
+  }
+  return { ok: true, value: { from: resolved.calendar, sources: [resolved.calendar] } }
+}
+
+interface Listed {
+  inDest: Set<string>
+  index: Map<string, Location[]>
+  unreadable: CalendarSummary[]
+}
+
+// Lists every calendar involved once, in parallel. The destination is always
+// listed: an event already there is a success, which makes a repeated call a
+// no-op. Without it nothing can be decided, but one unreadable source must
+// not block moves out of the others.
+const listCalendarsInvolved = async (
+  deps: MoveCalendarEventsDeps,
+  token: string,
+  dest: CalendarSummary,
+  sources: CalendarSummary[]
+): Promise<Step<Listed>> => {
+  const [destListing, ...sourceResults] = await Promise.allSettled(
+    [dest, ...sources].map((calendar) => deps.listEvents(token, calendar.url))
+  )
+  if (destListing?.status !== 'fulfilled') {
+    const reason = destListing?.reason instanceof Error ? destListing.reason.message : String(destListing?.reason)
+    return {
+      error: errorResult(`Could not read "${calendarLabel(dest)}": ${reason}. ${NOTHING_MOVED} Re-run later.`),
+      ok: false,
+    }
+  }
+  const readable = sources.flatMap((calendar, i) => {
+    const r = sourceResults[i]
+    return r?.status === 'fulfilled' ? [{ calendar, objects: r.value }] : []
+  })
+  return {
+    ok: true,
+    value: {
+      inDest: new Set(destListing.value.flatMap(uidsOf)),
+      index: indexByUid(readable),
+      unreadable: sources.filter((_, i) => sourceResults[i]?.status !== 'fulfilled'),
+    },
+  }
+}
+
+// The outcome decided without touching the server, or the one location to
+// move from. The first rule that applies wins, in this order.
+const decide = (uid: string, listed: Listed, from: CalendarSummary | undefined): Outcome | Location => {
+  const locations = listed.index.get(uid) ?? []
+  if (listed.inDest.has(uid)) {
+    return { alsoIn: locations.map((l) => l.calendar), kind: 'alreadyThere' }
+  }
+  const [only] = locations
+  if (!only) {
+    const where = from ? `not in "${calendarLabel(from)}"` : 'in none of your calendars'
+    return { kind: 'notMoved', reason: `notFound: ${where}; check the uid with list_calendar_events` }
+  }
+  if (locations.length > 1) {
+    const reason = `ambiguous: in ${namesWithUrls(locations.map((l) => l.calendar))}; pass one as fromCalendar`
+    return { kind: 'notMoved', reason }
+  }
+  return only
 }
 
 export const moveCalendarEvents = async (
@@ -216,61 +321,28 @@ export const moveCalendarEvents = async (
     return destResolved.error
   }
   const dest = destResolved.calendar
-
-  let from: CalendarSummary | undefined
-  if (args.fromCalendar !== undefined) {
-    const fromResolved = resolveCalendar(calendars, args.fromCalendar, {
-      argName: 'fromCalendar',
-      nothingDone: NOTHING_MOVED,
-    })
-    if (!fromResolved.ok) {
-      return fromResolved.error
-    }
-    if (sameCalendarUrl(fromResolved.calendar.url, dest.url)) {
-      return errorResult(
-        `fromCalendar and calendar both name "${calendarLabel(dest)}". ${NOTHING_MOVED} ` +
-          'Pass the calendar the events are in now as fromCalendar, or omit it.'
-      )
-    }
-    from = fromResolved.calendar
+  const sources = resolveSources(calendars, dest, args.fromCalendar)
+  if (!sources.ok) {
+    return sources.error
   }
-  const sources = from ? [from] : calendars.filter((c) => !sameCalendarUrl(c.url, dest.url))
-
-  // The destination is always listed: an event already there is a success,
-  // which makes a repeated call a no-op.
-  const listings = await Promise.all(
-    [dest, ...sources].map(async (calendar) => ({ calendar, objects: await deps.listEvents(token, calendar.url) }))
-  )
-  const [destListing, ...sourceListings] = listings
-  const inDest = new Set(destListing?.objects.flatMap(uidsOf))
-  const index = indexByUid(sourceListings)
+  const listed = await listCalendarsInvolved(deps, token, dest, sources.value.sources)
+  if (!listed.ok) {
+    return listed.error
+  }
 
   const outcomes: [string, Outcome][] = []
   for (const uid of args.uids) {
-    const locations = index.get(uid) ?? []
-    if (inDest.has(uid)) {
-      outcomes.push([uid, { alsoIn: locations.map((l) => l.calendar), kind: 'alreadyThere' }])
-      continue
-    }
-    const [only] = locations
-    if (!only) {
-      const where = from ? `not in "${calendarLabel(from)}"` : 'in none of your calendars'
-      outcomes.push([uid, { kind: 'notMoved', reason: `notFound: ${where}` }])
-      continue
-    }
-    if (locations.length > 1) {
-      const reason = `ambiguous: in ${quotedNames(locations.map((l) => l.calendar))}; pass fromCalendar`
-      outcomes.push([uid, { kind: 'notMoved', reason }])
-      continue
-    }
-    if (deps.now() - started >= MOVE_BUDGET_MS) {
+    const decided = decide(uid, listed.value, sources.value.from)
+    if ('kind' in decided) {
+      outcomes.push([uid, decided])
+    } else if (deps.now() - started >= MOVE_BUDGET_MS) {
       outcomes.push([uid, { kind: 'notAttempted' }])
-      continue
+    } else {
+      outcomes.push([uid, await moveOne(deps, token, decided, dest)])
     }
-    outcomes.push([uid, await moveOne(deps, token, only, dest)])
   }
 
-  return formatResult(dest, outcomes)
+  return formatResult(dest, outcomes, listed.value.unreadable)
 }
 
 // --- live-deps wiring ----------------------------------------------------

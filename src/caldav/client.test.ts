@@ -3,7 +3,6 @@ import { describe, expect, test } from 'bun:test'
 import {
   findEventObject,
   isEmptyCollectionError,
-  isTimeoutError,
   moveEvent,
   newEventResourceName,
   pickDefaultCalendar,
@@ -405,19 +404,5 @@ describe('moveEvent', () => {
   test('maps 403 to forbidden and anything else to failed with its status', async () => {
     expect((await withServer({ body: '', status: 403 })).outcome).toEqual({ kind: 'forbidden' })
     expect((await withServer({ body: '', status: 409 })).outcome).toEqual({ kind: 'failed', status: 409 })
-  })
-})
-
-describe('isTimeoutError', () => {
-  test('recognises the error AbortSignal.timeout raises', async () => {
-    const signal = AbortSignal.timeout(0)
-    await Bun.sleep(5)
-    const err = await fetch('http://127.0.0.1:9', { signal }).catch((e: unknown) => e)
-    expect(isTimeoutError(err)).toBe(true)
-  })
-
-  test('does not treat other errors as timeouts', () => {
-    expect(isTimeoutError(new Error('boom'))).toBe(false)
-    expect(isTimeoutError('TimeoutError')).toBe(false)
   })
 })

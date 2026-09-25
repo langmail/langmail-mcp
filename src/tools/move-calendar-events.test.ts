@@ -224,7 +224,8 @@ describe('moveCalendarEvents', () => {
 
     expect(result.isError).toBe(true)
     expect(text(result)).toContain(
-      'Not moved (1): inv (ambiguous: in "Business" and "Shared Team"; pass fromCalendar).'
+      `Not moved (1): inv (ambiguous: in "Business" <${BUSINESS.url}> and "Shared Team" <${SHARED.url}>; ` +
+        'pass one as fromCalendar).'
     )
     expect(h.moves).toEqual([])
 
@@ -247,7 +248,8 @@ describe('moveCalendarEvents', () => {
 
     expect(result.isError).toBeUndefined()
     expect(text(result)).toBe(
-      'Moved 1 event(s) to Private.\nNot moved (1): ghost (notFound: in none of your calendars).'
+      'Moved 1 event(s) to Private.\n' +
+        'Not moved (1): ghost (notFound: in none of your calendars; check the uid with list_calendar_events).'
     )
   })
 
@@ -295,26 +297,79 @@ describe('moveCalendarEvents', () => {
     const body = text(result)
 
     expect(result.isError).toBe(true)
-    expect(body).toContain('a (uidConflict: "Private" already holds another event with this uid)')
+    expect(body).toContain('a (uidConflict: "Private" already holds a separate copy of this event;')
     expect(body).toContain('b (nameConflict:')
     expect(body).toContain('c (forbidden:')
-    expect(body).toContain('d (failed: the server answered HTTP 500)')
+    expect(body).toContain('d (failed: the server answered HTTP 500; re-run to retry)')
   })
 
-  test('a timed-out MOVE is reported as indeterminate, not as a failure', async () => {
-    const timeout = Object.assign(new Error('The operation timed out.'), { name: 'TimeoutError' })
+  test('a MOVE that breaks off is reported as an unknown outcome, not as an error', async () => {
+    for (const err of [
+      Object.assign(new Error('The operation timed out.'), { name: 'TimeoutError' }),
+      new Error('The socket connection was closed unexpectedly.'),
+    ]) {
+      const h = makeHarness(
+        new Map([
+          [BUSINESS, [event(BUSINESS, 'a.ics', 'a')]],
+          [PRIVATE, []],
+        ]),
+        {
+          reply: () => Promise.reject(err),
+        }
+      )
+      const result = await run(h, { uids: ['a'] })
+      expect(text(result)).toContain('Outcome unknown (1): a')
+      expect(text(result)).toContain('may have moved')
+      expect(result.isError).toBeUndefined()
+    }
+  })
+
+  test('a call where every uid is missing is an error', async () => {
+    const h = makeHarness(
+      new Map([
+        [BUSINESS, []],
+        [PRIVATE, []],
+      ])
+    )
+    const result = await run(h, { uids: ['ghost'] })
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain('ghost (notFound:')
+  })
+
+  test('an unreadable source calendar does not block moves out of the others', async () => {
     const h = makeHarness(
       new Map([
         [BUSINESS, [event(BUSINESS, 'a.ics', 'a')]],
         [PRIVATE, []],
-      ]),
-      {
-        reply: () => Promise.reject(timeout),
-      }
+        [SHARED, []],
+      ])
     )
+    const listEvents = h.deps.listEvents
+    h.deps.listEvents = (token, url) => (url === SHARED.url ? Promise.reject(new Error('503')) : listEvents(token, url))
+    const result = await run(h, { uids: ['a', 'b'] })
+
+    expect(result.isError).toBeUndefined()
+    expect(h.moves).toHaveLength(1)
+    expect(text(result)).toContain('Moved 1 event(s) to Private.')
+    expect(text(result)).toContain('b (notFound:')
+    expect(text(result)).toContain('Could not read "Shared Team"')
+  })
+
+  test('an unreadable destination moves nothing', async () => {
+    const h = makeHarness(
+      new Map([
+        [BUSINESS, [event(BUSINESS, 'a.ics', 'a')]],
+        [PRIVATE, []],
+      ])
+    )
+    const listEvents = h.deps.listEvents
+    h.deps.listEvents = (token, url) =>
+      url === PRIVATE.url ? Promise.reject(new Error('503')) : listEvents(token, url)
     const result = await run(h, { uids: ['a'] })
-    expect(text(result)).toContain('Outcome unknown (1): a')
-    expect(text(result)).toContain('may have moved them')
+
+    expect(result.isError).toBe(true)
+    expect(text(result)).toBe('Could not read "Private": 503. Nothing was moved. Re-run later.')
+    expect(h.moves).toEqual([])
   })
 
   test('stops starting moves once the time budget is spent and names the rest', async () => {
