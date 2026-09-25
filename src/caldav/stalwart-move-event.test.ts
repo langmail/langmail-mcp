@@ -1,7 +1,7 @@
-// Spike for move_calendar_events (docs/proposals/2026-09-25-move-calendar-events)
-// against a REAL Stalwart. Reading crates/dav/src/calendar/copy_move.rs says a
-// same-account CalDAV MOVE only re-parents the stored event — no copy, no iTIP.
-// This checks that reading on the wire before the tool is built:
+// Live-Stalwart e2e for move_calendar_events. Reading
+// crates/dav/src/calendar/copy_move.rs says a same-account CalDAV MOVE only
+// re-parents the stored event — no copy, no iTIP. These cases pin that on the
+// wire (summarized in docs/reference/stalwart/observed-behaviour.md):
 //   1. fidelity and silence — a recurring organizer event with an override, a
 //      VALARM, TRANSP and an X- property moves byte-identically, and the local
 //      attendee receives nothing; a later edit in the new calendar still
@@ -19,11 +19,12 @@
 //      Only the local path is exercised: Stalwart processes a mailed iMIP only
 //      from an authenticated, non-spam sender (crates/email/src/message/
 //      ingest.rs), which the dev MTA cannot give an outside address. Both paths
-//      end in the same `itip_ingest`, which looks the UID up account-wide.
+//      end in the same `itip_ingest`, which looks the UID up account-wide;
+//   6. the tool itself, through its live deps: a move, a re-run, and an
+//      ambiguous uid resolved by fromCalendar.
 //
-// The cases pin the MOVE behaviour move_calendar_events relies on, so the file
-// outlives the proposal as that tool's e2e test. The related duplicate-UID
-// defect has its own permanent guard in stalwart-duplicate-uid-itip.test.ts.
+// The related duplicate-UID defect has its own guard in
+// stalwart-duplicate-uid-itip.test.ts.
 //
 // Skips unless STALWART_ADMIN_URL is set, so a normal `bun test` run stays
 // hermetic. Run locally against the shared dev compose
@@ -36,6 +37,7 @@ import { davRequest } from 'tsdav'
 
 import { parseEvents } from '@langmail/ical'
 
+import { makeLiveDeps, moveCalendarEvents, moveCalendarEventsInput } from '../tools/move-calendar-events.ts'
 import { type CalDavConfig, createCalendar, discoverAccount, fetchEvent, fetchEvents, putEvent } from './client.ts'
 
 const ADMIN_URL = process.env.STALWART_ADMIN_URL
@@ -536,6 +538,37 @@ live('CalDAV MOVE between calendars against live Stalwart (spike)', () => {
     expect(normalized.status).toBe(201)
     expect(inPrivate).toContain(uidPct)
     expect(inPrivate).not.toContain(uidAt)
+  }, 60_000)
+
+  test('6. move_calendar_events end to end: moves, re-runs as a no-op, and refuses an ambiguous uid', async () => {
+    const rich = `tool-rich-${run}@mcp-e2e`
+    const plain = `tool-plain-${run}@mcp-e2e`
+    const twin = `tool-twin-${run}@mcp-e2e`
+    await putEvent(org.cfg, { calendarUrl: org.defaultUrl, ical: richSeries(rich, org, null), token: TOKEN })
+    await putEvent(org.cfg, { calendarUrl: org.defaultUrl, ical: plainEvent(plain, 'Tool plain'), token: TOKEN })
+    const work = await createCalendar(org.cfg, { name: `Work ${run}`, token: TOKEN })
+    for (const calendarUrl of [org.defaultUrl, work]) {
+      await putEvent(org.cfg, { calendarUrl, ical: plainEvent(twin, 'Twin'), token: TOKEN })
+    }
+    const before = await get(org, await objectUrl(org, org.defaultUrl, rich))
+
+    const deps = makeLiveDeps(org.cfg)
+    const call = (args: Record<string, unknown>) =>
+      moveCalendarEvents(deps, { args: moveCalendarEventsInput.parse(args), token: TOKEN })
+    const text = (r: { content: { text: string }[] }) => r.content[0]?.text ?? ''
+
+    const first = await call({ calendar: 'private', uids: [rich, plain, twin] })
+    console.log('[tool 6] first call\n', text(first))
+    expect(text(first)).toContain('Moved 2 event(s) to Private.')
+    expect(text(first)).toContain(`${twin} (ambiguous:`)
+    expect((await get(org, await objectUrl(org, orgPrivate, rich))).body).toBe(before.body)
+
+    const again = await call({ calendar: orgPrivate, uids: [rich, plain] })
+    expect(text(again)).toBe(`Moved 0 event(s) to Private.\nAlready in Private (2): ${rich}, ${plain}.`)
+
+    const picked = await call({ calendar: 'Private', fromCalendar: work, uids: [twin] })
+    expect(text(picked)).toBe('Moved 1 event(s) to Private.')
+    expect((await uidsIn(org, work)).map((e) => e.uid)).not.toContain(twin)
   }, 60_000)
 
   test('5a. a local attendee reply reaches an organized event after it moved', async () => {

@@ -848,7 +848,8 @@ export const registerUpdateCalendarEvent = (
         'field you omit keeps its stored value, so rescheduling needs nothing but `uid` and `start`. ' +
         'Attendees are re-notified by iMIP unless you pass `notify: "none"`. To change one occurrence ' +
         'of a repeating series instead of the whole series, pass `recurrenceId`. To rename or recolor ' +
-        'a calendar itself, use update_calendar.',
+        'a calendar itself, use update_calendar. To put an event on a different calendar, use ' +
+        'move_calendar_events.',
       inputSchema: updateCalendarEventInput.shape,
       title: 'Update calendar event',
     },

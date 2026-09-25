@@ -1,10 +1,7 @@
 // update_calendar tool — renames and/or recolors one of the principal's
 // calendars with a CalDAV PROPPATCH of `displayname` and `calendar-color`.
 //
-// The calendar is picked by its current name or its URL, so an agent that
-// skipped list_calendars still lands on the right one — and when it does not,
-// the error lists every calendar with its URL so the next call can succeed
-// without a separate lookup.
+// The calendar is picked by its current name or its URL; see calendar-lookup.ts.
 //
 // Like the other CalDAV tools, the logic sits behind a `Deps` interface so it
 // unit-tests without live Stalwart; `makeLiveDeps` wires tsdav in.
@@ -17,15 +14,12 @@ import {
   fetchCalendarList,
   type UpdateCalendarParams,
   updateCalendar as updateCalendarCollection,
-  withTrailingSlash,
 } from '../caldav/client.ts'
 import { type CalendarSummary } from '../caldav/types.ts'
 import { ACCOUNT_WRITE } from './annotations.ts'
+import { calendarLabel, normalizeCalendarName, resolveCalendar } from './calendar-lookup.ts'
 import { colorSchema } from './create-calendar.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
-
-// A URL or a server-absolute path ("/dav/cal/…"), as opposed to a name.
-const URL_OR_PATH_RE = /^(?:https?:\/\/|\/)/iu
 
 const updateCalendarShape = {
   calendar: z
@@ -60,61 +54,6 @@ export interface UpdateCalendarContext {
   token: string
 }
 
-const normalizeName = (name: string): string => name.trim().toLowerCase()
-
-// Every calendar sits on the one CalDAV server, so the decoded path alone
-// identifies it: an agent that decodes %40 to @, swaps the scheme, or
-// changes host case still lands on the same calendar.
-const urlKey = (url: string): string | null => {
-  try {
-    const { pathname } = new URL(url, 'https://calendar.invalid')
-    return withTrailingSlash(decodeURIComponent(pathname))
-  } catch {
-    // An unparseable URL or a malformed %-escape matches nothing; the miss
-    // error then lists the calendars.
-    return null
-  }
-}
-
-const label = (cal: CalendarSummary): string => cal.displayName || '(unnamed)'
-
-const calendarLines = (calendars: CalendarSummary[]): string =>
-  calendars.map((c, i) => `${i + 1}. ${label(c)} — ${c.url}`).join('\n')
-
-type Resolved = { calendar: CalendarSummary; ok: true } | { error: ToolResult; ok: false }
-
-// Strict resolution: an exact URL (modulo trailing slash) or an exact name
-// (modulo case and outer spaces). No fuzzy matching — a miss lists every
-// calendar instead, which beats a guess when a person has a handful of them.
-const resolveCalendar = (calendars: CalendarSummary[], ref: string): Resolved => {
-  const isUrl = URL_OR_PATH_RE.test(ref)
-  // An unparseable reference has no key, so it matches nothing and the miss below lists the calendars.
-  const refKey = isUrl ? urlKey(ref) : null
-  const matches = isUrl
-    ? calendars.filter((c) => refKey !== null && urlKey(c.url) === refKey)
-    : calendars.filter((c) => normalizeName(c.displayName) === normalizeName(ref))
-
-  const [only] = matches
-  if (only && matches.length === 1) {
-    return { calendar: only, ok: true }
-  }
-  if (matches.length > 1) {
-    return {
-      error: errorResult(
-        `${matches.length} calendars are named "${ref}". Nothing was changed. ` +
-          `Pass the URL of the one you mean as calendar:\n${calendarLines(matches)}`
-      ),
-      ok: false,
-    }
-  }
-  const miss = isUrl ? `No calendar at ${ref}.` : `No calendar named "${ref}".`
-  const available =
-    calendars.length === 0
-      ? 'This account has no calendars; use create_calendar to make one.'
-      : `Your calendars:\n${calendarLines(calendars)}\nPass one of these names or URLs as calendar.`
-  return { error: errorResult(`${miss} Nothing was changed. ${available}`), ok: false }
-}
-
 const describeChanges = (args: UpdateCalendarArgs): string =>
   [
     ...(args.name === undefined ? [] : [`name → "${args.name}"`]),
@@ -128,7 +67,10 @@ export const updateCalendar = async (deps: UpdateCalendarDeps, ctx: UpdateCalend
   }
 
   const calendars = await deps.listCalendars(token)
-  const resolved = resolveCalendar(calendars, args.calendar)
+  const resolved = resolveCalendar(calendars, args.calendar, {
+    argName: 'calendar',
+    nothingDone: 'Nothing was changed.',
+  })
   if (!resolved.ok) {
     return resolved.error
   }
@@ -137,7 +79,9 @@ export const updateCalendar = async (deps: UpdateCalendarDeps, ctx: UpdateCalend
   // A duplicate name would make every later lookup by that name ambiguous.
   if (args.name !== undefined) {
     const newName = args.name
-    const taken = calendars.find((c) => c.url !== target.url && normalizeName(c.displayName) === normalizeName(newName))
+    const taken = calendars.find(
+      (c) => c.url !== target.url && normalizeCalendarName(c.displayName) === normalizeCalendarName(newName)
+    )
     if (taken) {
       return errorResult(
         `Another calendar is already named "${taken.displayName}" (${taken.url}). Nothing was changed. ` +
@@ -152,12 +96,14 @@ export const updateCalendar = async (deps: UpdateCalendarDeps, ctx: UpdateCalend
     const reason = err instanceof Error ? err.message : String(err)
     // PROPPATCH is all-or-nothing (RFC 4918 §9.2), so a refusal changed nothing.
     return errorResult(
-      `Could not update calendar "${label(target)}": ${reason}. Nothing was changed. ` +
+      `Could not update calendar "${calendarLabel(target)}": ${reason}. Nothing was changed. ` +
         'The calendar may be read-only for this account; check it with list_calendars.'
     )
   }
 
-  return textResult(`Calendar "${label(target)}" updated: ${describeChanges(args)}.\ncalendarUrl: ${target.url}`)
+  return textResult(
+    `Calendar "${calendarLabel(target)}" updated: ${describeChanges(args)}.\ncalendarUrl: ${target.url}`
+  )
 }
 
 // --- live-deps wiring ----------------------------------------------------

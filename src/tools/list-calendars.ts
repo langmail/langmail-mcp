@@ -57,8 +57,9 @@ export const registerListCalendars = (
         "Lists the authenticated user's calendars — the calendars themselves, not the events on them. " +
         'Use this to see which calendars exist before adding an event to a specific one, or to find the ' +
         'calendar to rename or recolor. Returns each calendar’s name, CalDAV URL, and color when it has ' +
-        'one; the URL is what create_calendar_event and update_calendar take. For the events on a ' +
-        'calendar use list_calendar_events; to rename or recolor one use update_calendar.',
+        'one; the URL is what create_calendar_event, update_calendar and move_calendar_events take. ' +
+        'For the events on a calendar use list_calendar_events; to rename or recolor one use ' +
+        'update_calendar; to move events onto one use move_calendar_events.',
       inputSchema: listCalendarsInput.shape,
       title: 'List calendars',
     },

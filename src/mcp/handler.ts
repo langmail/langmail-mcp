@@ -54,6 +54,10 @@ import { makeLiveDeps as makeListCalendarsDeps, registerListCalendars } from '..
 import { registerListMailRules } from '../tools/list-mail-rules.ts'
 import { registerListUpcomingBirthdays } from '../tools/list-upcoming-birthdays.ts'
 import { type MailRuleToolDeps } from '../tools/mail-rule-common.ts'
+import {
+  makeLiveDeps as makeMoveCalendarEventsDeps,
+  registerMoveCalendarEvents,
+} from '../tools/move-calendar-events.ts'
 import { registerMoveEmails } from '../tools/move-emails.ts'
 import { makeLiveDeps as makePreviewEmailDeps, registerPreviewEmail } from '../tools/preview-email.ts'
 import { registerPreviewMailRule } from '../tools/preview-mail-rule.ts'
@@ -122,6 +126,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   const createCalendarEventDeps = makeCreateCalendarEventDeps(caldavCfg, resolveTimeZone, collectAttendees)
   const updateCalendarEventDeps = makeUpdateCalendarEventDeps(caldavCfg, resolveTimeZone, collectAttendees)
   const deleteCalendarEventDeps = makeDeleteCalendarEventDeps(caldavCfg)
+  const moveCalendarEventsDeps = makeMoveCalendarEventsDeps(caldavCfg)
   const respondToEventDeps = makeRespondToEventDeps(caldavCfg, collectAttendees)
   const searchContactsDeps = makeSearchContactsDeps(jmapLive, caldavCfg)
   // The write side of the address book. Same JMAP session cache as the read
@@ -167,6 +172,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     registerCreateCalendarEvent(server, createCalendarEventDeps, () => ctx.token)
     registerUpdateCalendarEvent(server, updateCalendarEventDeps, () => ctx.token)
     registerDeleteCalendarEvent(server, deleteCalendarEventDeps, () => ctx.token)
+    registerMoveCalendarEvents(server, moveCalendarEventsDeps, () => ctx.token)
     registerRespondToEvent(server, respondToEventDeps, () => ctx.token)
     registerSearchContacts(server, searchContactsDeps, () => ctx.token)
     // Reads through the write bundle (query + get) plus the account zone the

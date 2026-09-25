@@ -403,3 +403,63 @@ export const deleteEvent = async (cfg: CalDavConfig, p: DeleteEventParams): Prom
     throw new CalDavError(res.status, `caldav DELETE returned ${res.status}`)
   }
 }
+
+export interface MoveEventParams {
+  // Absolute URL the event should live at afterwards: the destination
+  // calendar's URL followed by the event's resource name.
+  destination: string
+  token: string
+  // The event's current URL, verbatim as the listing returned it.
+  url: string
+}
+
+// What the server did with one MOVE. Every refusal left the event where it was.
+export type MoveEventOutcome =
+  | { kind: 'moved' }
+  // The destination calendar already holds an event with this UID (CALDAV:no-uid-conflict).
+  | { kind: 'uidConflict' }
+  // The destination calendar already has a resource by this name (Overwrite: F).
+  | { kind: 'nameConflict' }
+  | { kind: 'forbidden' }
+  | { kind: 'failed'; status: number }
+
+const NO_UID_CONFLICT_RE = /no-uid-conflict/u
+
+// Re-files one event in another calendar with a WebDAV MOVE (RFC 4918 §9.9).
+// Stalwart re-parents the stored event without copying it and without an
+// iTIP step: the iCalendar data, and with it the UID, overrides and alarms,
+// stays byte-identical and no attendee hears about it. Only the ETag changes.
+// `Overwrite: F` means a name collision refuses instead of replacing.
+//
+// A timeout throws (see isTimeoutError): the server may have committed the
+// move before the client gave up.
+export const moveEvent = async (cfg: CalDavConfig, p: MoveEventParams): Promise<MoveEventOutcome> => {
+  const [res] = await davRequest({
+    fetchOptions: deadline(),
+    init: {
+      body: null,
+      headers: { ...authHeaders(cfg, p.token), destination: p.destination, overwrite: 'F' },
+      method: 'MOVE',
+      namespace: DAVNamespaceShort.DAV,
+    },
+    url: p.url,
+  })
+  const status = res?.status ?? 0
+  if (status === 201 || status === 204) {
+    return { kind: 'moved' }
+  }
+  if (status === 412) {
+    // The UID precondition carries its element in the body; a name collision
+    // answers with an empty one.
+    const body = typeof res?.raw === 'string' ? res.raw : JSON.stringify(res?.raw ?? '')
+    return NO_UID_CONFLICT_RE.test(body) ? { kind: 'uidConflict' } : { kind: 'nameConflict' }
+  }
+  if (status === 403) {
+    return { kind: 'forbidden' }
+  }
+  return { kind: 'failed', status }
+}
+
+// Whether a request was cut off by the CALDAV_TIMEOUT_MS deadline.
+export const isTimeoutError = (err: unknown): boolean =>
+  typeof err === 'object' && err !== null && 'name' in err && err.name === 'TimeoutError'

@@ -3,6 +3,8 @@ import { describe, expect, test } from 'bun:test'
 import {
   findEventObject,
   isEmptyCollectionError,
+  isTimeoutError,
+  moveEvent,
   newEventResourceName,
   pickDefaultCalendar,
   pickOrganizer,
@@ -341,5 +343,81 @@ describe('isEmptyCollectionError', () => {
   test('does not match unrelated errors or non-errors', () => {
     expect(isEmptyCollectionError(new Error('network unreachable'))).toBe(false)
     expect(isEmptyCollectionError('Collection query failed: 404')).toBe(false)
+  })
+})
+
+// The MOVE move_calendar_events sends, and how each reply Stalwart gives
+// (stalwart-move-event.test.ts pins those replies) maps to an outcome.
+describe('moveEvent', () => {
+  const NO_UID_CONFLICT =
+    '<?xml version="1.0" encoding="utf-8"?><D:error xmlns:D="DAV:" xmlns:A="urn:ietf:params:xml:ns:caldav">' +
+    '<A:no-uid-conflict><D:href>/dav/cal/u/private/other.ics</D:href></A:no-uid-conflict></D:error>'
+
+  const withServer = async (reply: { body: string; status: number }) => {
+    const seen = { destination: '', method: '', overwrite: '', path: '' }
+    const server = Bun.serve({
+      fetch: (req) => {
+        seen.method = req.method
+        seen.path = new URL(req.url).pathname
+        seen.destination = req.headers.get('destination') ?? ''
+        seen.overwrite = req.headers.get('overwrite') ?? ''
+        return new Response(reply.body, {
+          headers: reply.body ? { 'content-type': 'application/xml; charset=utf-8' } : {},
+          status: reply.status,
+        })
+      },
+      port: 0,
+    })
+    try {
+      const base = `http://127.0.0.1:${server.port}`
+      const outcome = await moveEvent(
+        { serverUrl: base },
+        {
+          destination: `${base}/dav/cal/u/private/probe@example.com.ics`,
+          token: 'tok',
+          url: `${base}/dav/cal/u/default/probe@example.com.ics`,
+        }
+      )
+      return { base, outcome, seen }
+    } finally {
+      await server.stop(true)
+    }
+  }
+
+  test('sends MOVE with the destination verbatim and Overwrite: F', async () => {
+    const { base, outcome, seen } = await withServer({ body: '', status: 201 })
+    expect(outcome).toEqual({ kind: 'moved' })
+    expect(seen.method).toBe('MOVE')
+    expect(seen.path).toBe('/dav/cal/u/default/probe@example.com.ics')
+    expect(seen.destination).toBe(`${base}/dav/cal/u/private/probe@example.com.ics`)
+    expect(seen.overwrite).toBe('F')
+  })
+
+  test('maps 204 to moved', async () => {
+    expect((await withServer({ body: '', status: 204 })).outcome).toEqual({ kind: 'moved' })
+  })
+
+  test('tells the two 412s apart by body', async () => {
+    expect((await withServer({ body: NO_UID_CONFLICT, status: 412 })).outcome).toEqual({ kind: 'uidConflict' })
+    expect((await withServer({ body: '', status: 412 })).outcome).toEqual({ kind: 'nameConflict' })
+  })
+
+  test('maps 403 to forbidden and anything else to failed with its status', async () => {
+    expect((await withServer({ body: '', status: 403 })).outcome).toEqual({ kind: 'forbidden' })
+    expect((await withServer({ body: '', status: 409 })).outcome).toEqual({ kind: 'failed', status: 409 })
+  })
+})
+
+describe('isTimeoutError', () => {
+  test('recognises the error AbortSignal.timeout raises', async () => {
+    const signal = AbortSignal.timeout(0)
+    await Bun.sleep(5)
+    const err = await fetch('http://127.0.0.1:9', { signal }).catch((e: unknown) => e)
+    expect(isTimeoutError(err)).toBe(true)
+  })
+
+  test('does not treat other errors as timeouts', () => {
+    expect(isTimeoutError(new Error('boom'))).toBe(false)
+    expect(isTimeoutError('TimeoutError')).toBe(false)
   })
 })

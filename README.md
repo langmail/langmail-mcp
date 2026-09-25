@@ -310,8 +310,8 @@ Parameters:
 
 Lists the authenticated user's calendars, returning each calendar's display
 name, CalDAV URL, and color when one is set. Pass the URL to
-`create_calendar_event` to target a specific calendar, or to `update_calendar`
-to rename or recolor it.
+`create_calendar_event` to target a specific calendar, to `update_calendar`
+to rename or recolor it, or to `move_calendar_events` to move events onto it.
 
 Parameters: none
 
@@ -355,6 +355,33 @@ At least one of `name` or `color` is required.
 Returns:
 
 - A confirmation naming the changes and the calendar's `calendarUrl`
+
+### move_calendar_events
+
+Moves events onto another of the user's calendars — "move the private events
+to Private" — without changing their time or content. Each event is re-filed
+with one CalDAV `MOVE` (`Overwrite: F`), which Stalwart performs without
+copying: the UID, every changed occurrence of a series, reminders and any
+property another client wrote stay as they are, and attendees are not
+notified (`ACCOUNT_WRITE`). Rescheduling is `update_calendar_event`'s job.
+
+Each UID is found wherever it is: the destination and every other calendar are
+listed once, in parallel. An event already in the destination counts as done,
+so a re-run is a no-op. A UID present in more than one other calendar is
+refused as ambiguous until `fromCalendar` names the one to move it out of.
+A refused `MOVE` changes nothing and never falls back to copy-and-delete.
+Moves run one at a time; none starts after 45 s, and the rest are reported as
+not attempted.
+
+Parameters:
+
+- `uids`: string[] — 1–50 event UIDs from `list_calendar_events`; duplicates are collapsed
+- `calendar`: string — the destination, by name (case-insensitive) or CalDAV URL from `list_calendars`; never created
+- `fromCalendar`: string (optional) — only when a UID is in more than one calendar: the one to move it out of
+
+Returns:
+
+- `Moved N event(s) to <calendar>.`, then one line each for UIDs already there, not moved (with the reason: `notFound`, `ambiguous`, `uidConflict`, `nameConflict`, `forbidden`, `failed`), whose outcome is unknown after a timeout, and not attempted. It is an error only when nothing moved and nothing was already there.
 
 ### list_calendar_events
 
