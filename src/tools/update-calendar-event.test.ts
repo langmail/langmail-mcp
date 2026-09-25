@@ -1448,6 +1448,26 @@ describe('updateCalendarEvent — alarms are preserved', () => {
     expect(valarmBlocks(cap.updated[0]?.ical ?? '')).toEqual([ALARM_DISPLAY.join('\r\n')])
   })
 
+  test('an EMAIL alarm’s ATTENDEE does not make a personal series a scheduling object', async () => {
+    const cap = captured()
+    const personal = buildInvite({
+      attendees: [],
+      end: new Date('2026-06-16T10:30:00Z'),
+      rrule: 'FREQ=WEEKLY;BYDAY=TU',
+      start: new Date('2026-06-16T10:00:00Z'),
+      timeZone: 'UTC',
+      title: 'Focus',
+      uid: UID,
+    })
+    const stored = recurringStored({ data: withAlarms(personal, ALARM_EMAIL) })
+    const result = await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { recurrenceId: '2026-06-23T10:00:00Z', title: 'Focus (moved)', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(cap.updated[0]?.ical).not.toContain('METHOD:')
+  })
+
   test('an occurrence edit inherits the master’s VALARM', async () => {
     const cap = captured()
     const stored = recurringStored({ data: withAlarms(recurringStored().data, ALARM_DISPLAY) })
@@ -1657,6 +1677,34 @@ describe('updateCalendarEvent — all-day events', () => {
     const cap = captured()
     const result = await updateCalendarEvent(makeDeps(account(), allDayStored(), cap), {
       args: { recurrenceId: '2026-06-24', title: 'Offsite', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(cap.updated).toHaveLength(0)
+  })
+})
+
+describe('updateCalendarEvent — DURATION-only series occurrence', () => {
+  // A series stored with DURATION and no DTEND has no occurrence slot to merge
+  // against; carrying the master's first DTSTART over would silently stretch
+  // the override back to the series' first day.
+  test('refuses an occurrence edit that passes only end', async () => {
+    const cap = captured()
+    const durationSeries = storedEvent({
+      data: [
+        'BEGIN:VCALENDAR',
+        'BEGIN:VEVENT',
+        `UID:${UID}`,
+        'SUMMARY:Weekly focus',
+        'DTSTART;VALUE=DATE:20260601',
+        'DURATION:P1D',
+        'RRULE:FREQ=WEEKLY',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n'),
+    })
+    const result = await updateCalendarEvent(makeDeps(account(), durationSeries, cap), {
+      args: { end: '2026-06-17', recurrenceId: '2026-06-15', uid: UID },
       token: 'tok',
     })
     expect(result.isError).toBe(true)

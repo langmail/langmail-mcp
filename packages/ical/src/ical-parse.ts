@@ -183,18 +183,24 @@ interface ScanState {
   nested: number
 }
 
+// Component delimiters. Names are case-insensitive (RFC 5545 §3.1), and some
+// producers emit lowercase ones.
+const BEGIN_RE = /^BEGIN:/iu
+const END_RE = /^END:/iu
+const BEGIN_VALARM_RE = /^BEGIN:VALARM\s*$/iu
+
 // A sub-component line (BEGIN:/END:/property) inside the current VEVENT. Only
 // VALARMs are kept, as raw lines; any other sub-component is skipped.
 const scanNestedLine = (state: ScanState, block: ParsedBlock, line: string): void => {
-  if (line.startsWith('BEGIN:')) {
-    if (state.nested === 0 && line === 'BEGIN:VALARM') {
+  if (BEGIN_RE.test(line)) {
+    if (state.nested === 0 && BEGIN_VALARM_RE.test(line)) {
       state.alarm = []
     }
     state.alarm?.push(line)
     state.nested += 1
     return
   }
-  if (line.startsWith('END:')) {
+  if (END_RE.test(line)) {
     state.alarm?.push(line)
     state.nested = Math.max(0, state.nested - 1)
     if (state.nested === 0 && state.alarm) {
@@ -225,7 +231,7 @@ const scanLine = (state: ScanState, line: string): void => {
   if (!state.current) {
     return
   }
-  if (state.nested === 0 && !line.startsWith('BEGIN:') && !line.startsWith('END:')) {
+  if (state.nested === 0 && !BEGIN_RE.test(line) && !END_RE.test(line)) {
     recordProperty(state.current, line)
     return
   }

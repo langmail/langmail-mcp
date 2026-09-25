@@ -781,9 +781,12 @@ const occurrenceBase = (stored: ParsedEvent[], master: ParsedEvent | undefined, 
     }
   }
   if (base.start === undefined || base.end === undefined || !(hasClockTime(base.start) && hasClockTime(base.end))) {
-    // DURATION-only master: leave the times as stored so mergeSafetyError
-    // refuses with its actionable "pass start and end".
-    return base
+    // DURATION-only master: the occurrence has no slot we can derive, and the
+    // master's own DTSTART is the series' *first* day, not this occurrence's.
+    // Drop both times so mergeSafetyError refuses unless the caller passes
+    // `start` and `end`.
+    const { end: _end, start: _start, ...rest } = base
+    return rest
   }
   // The occurrence's own start/end, expressed exactly the way the master's are
   // — wall clock in the master's zone, or the `…Z` form when it has none — so

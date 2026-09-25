@@ -399,6 +399,14 @@ describe('parseEvents — alarms', () => {
     expect(event?.attendees.map((a) => a.email)).toEqual(['guest@example.com'])
   })
 
+  test('matches BEGIN:VALARM case-insensitively', () => {
+    const lower = invite().replace(
+      'END:VEVENT',
+      'begin:valarm\r\nACTION:DISPLAY\r\nTRIGGER:-PT5M\r\nend:valarm\r\nEND:VEVENT'
+    )
+    expect(parseEvents(lower)[0]?.alarms?.[0]?.trigger).toBe('-PT5M')
+  })
+
   test('an event without alarms has no alarms field', () => {
     expect(parseEvents(invite())[0]?.alarms).toBeUndefined()
   })

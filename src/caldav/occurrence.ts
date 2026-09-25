@@ -121,8 +121,24 @@ const overrideVevent = (override: SplitCalendar): Component => {
 // folded continuations keep their leading space and never do.
 const ATTENDEE_LINE_RE = /^ATTENDEE[;:]/iu
 
+// Only the VEVENT's own ATTENDEE lines count: an EMAIL VALARM carries its
+// recipient as an ATTENDEE too, and that is no one to schedule.
+const veventHasAttendee = (lines: string[]): boolean => {
+  let depth = 0
+  for (const line of lines) {
+    if (line.startsWith('BEGIN:')) {
+      depth += 1
+    } else if (line.startsWith('END:')) {
+      depth -= 1
+    } else if (depth === 1 && ATTENDEE_LINE_RE.test(line)) {
+      return true
+    }
+  }
+  return false
+}
+
 const hasAttendee = (components: Component[]): boolean =>
-  components.some((c) => c.name === 'VEVENT' && c.lines.some((line) => ATTENDEE_LINE_RE.test(line)))
+  components.some((c) => c.name === 'VEVENT' && veventHasAttendee(c.lines))
 
 // Re-emits the calendar-level property block (everything before END:VCALENDAR).
 // METHOD:REQUEST is forced when the object still names an attendee: stored
