@@ -18,7 +18,29 @@ export interface ParsedAttendee {
   status?: string
 }
 
+// One VALARM of a VEVENT (RFC 5545 §3.6.6). `lines` are its unfolded content
+// lines, BEGIN/END inclusive, exactly as stored: update_calendar_event splices
+// them back verbatim into a rebuilt VEVENT, so an alarm of any shape (EMAIL,
+// AUDIO, an absolute trigger, vendor X- properties) survives an edit without
+// being re-serialized from the handful of fields read here. `trigger` is the
+// TRIGGER value (`-PT30M`, `20261002T090000Z`) and `triggerParams` its raw
+// parameter list (`;VALUE=DATE-TIME`, `;RELATED=END`), for display.
+export interface ParsedAlarm {
+  action?: string
+  lines: string[]
+  trigger?: string
+  triggerParams?: string
+}
+
 export interface ParsedEvent {
+  // VALARMs nested in the VEVENT, in source order. Present (and non-empty) only
+  // when the VEVENT carries any.
+  alarms?: ParsedAlarm[]
+  // True when DTSTART is a DATE rather than a DATE-TIME (`DTSTART;VALUE=DATE`):
+  // an all-day event. `start`/`end` are then date-only ISO strings
+  // (`2026-10-03`), and `end` is exclusive — the day after the last day
+  // (RFC 5545 §3.6.1). Absent on timed events.
+  allDay?: true
   // Every ATTENDEE on the VEVENT, in source order. Empty when the event has
   // none (an attendee-less personal event).
   attendees: ParsedAttendee[]
@@ -114,6 +136,8 @@ interface ParsedProperty {
 // plus the multi-valued ATTENDEE lines collected in source order — a Map would
 // clobber all but the last, and an event's whole point can be its attendee list.
 interface ParsedBlock {
+  // Raw VALARM sub-components, each as its content lines (BEGIN/END inclusive).
+  alarms: string[][]
   attendees: ParsedProperty[]
   // EXDATE is multi-valued twice over — it may repeat, and each line may carry
   // a comma-separated list (RFC 5545 §3.8.5.1) — so it is collected like
@@ -148,30 +172,94 @@ const recordProperty = (block: ParsedBlock, line: string): void => {
   }
 }
 
-const eventBlocks = (ical: string): ParsedBlock[] => {
-  const blocks: ParsedBlock[] = []
-  let current: ParsedBlock | null = null
+// Scanner state while walking one VCALENDAR's lines.
+interface ScanState {
+  // The top-level VALARM being collected, if any; everything nested inside it
+  // belongs to it verbatim.
+  alarm: string[] | null
+  blocks: ParsedBlock[]
+  current: ParsedBlock | null
   // Nesting depth of sub-components inside the current VEVENT (VALARM, …).
-  let nested = 0
+  nested: number
+}
 
+// A sub-component line (BEGIN:/END:/property) inside the current VEVENT. Only
+// VALARMs are kept, as raw lines; any other sub-component is skipped.
+const scanNestedLine = (state: ScanState, block: ParsedBlock, line: string): void => {
+  if (line.startsWith('BEGIN:')) {
+    if (state.nested === 0 && line === 'BEGIN:VALARM') {
+      state.alarm = []
+    }
+    state.alarm?.push(line)
+    state.nested += 1
+    return
+  }
+  if (line.startsWith('END:')) {
+    state.alarm?.push(line)
+    state.nested = Math.max(0, state.nested - 1)
+    if (state.nested === 0 && state.alarm) {
+      block.alarms.push(state.alarm)
+      state.alarm = null
+    }
+    return
+  }
+  if (line !== '') {
+    state.alarm?.push(line)
+  }
+}
+
+const scanLine = (state: ScanState, line: string): void => {
+  if (line === 'BEGIN:VEVENT') {
+    state.current = { alarms: [], attendees: [], exdates: [], props: new Map() }
+    state.nested = 0
+    state.alarm = null
+    return
+  }
+  if (line === 'END:VEVENT') {
+    if (state.current) {
+      state.blocks.push(state.current)
+    }
+    state.current = null
+    return
+  }
+  if (!state.current) {
+    return
+  }
+  if (state.nested === 0 && !line.startsWith('BEGIN:') && !line.startsWith('END:')) {
+    recordProperty(state.current, line)
+    return
+  }
+  scanNestedLine(state, state.current, line)
+}
+
+const eventBlocks = (ical: string): ParsedBlock[] => {
+  const state: ScanState = { alarm: null, blocks: [], current: null, nested: 0 }
   for (const line of unfold(ical).split(LINE_RE)) {
-    if (line === 'BEGIN:VEVENT') {
-      current = { attendees: [], exdates: [], props: new Map() }
-      nested = 0
-    } else if (line === 'END:VEVENT') {
-      if (current) {
-        blocks.push(current)
+    scanLine(state, line)
+  }
+  return state.blocks
+}
+
+// The ACTION and TRIGGER of a raw VALARM, read off its own top-level lines.
+const ALARM_PROPERTY_RE = /^(ACTION|TRIGGER)((?:;[^:]*)?):(.*)$/iu
+const parseAlarm = (lines: string[]): ParsedAlarm => {
+  const alarm: ParsedAlarm = { lines }
+  for (const line of lines) {
+    const match = ALARM_PROPERTY_RE.exec(line)
+    if (!match) {
+      continue
+    }
+    const [, name = '', params = '', value = ''] = match
+    if (name.toUpperCase() === 'ACTION') {
+      alarm.action = value.trim().toUpperCase()
+    } else {
+      alarm.trigger = value.trim()
+      if (params) {
+        alarm.triggerParams = params
       }
-      current = null
-    } else if (current && line.startsWith('BEGIN:')) {
-      nested += 1
-    } else if (current && line.startsWith('END:')) {
-      nested = Math.max(0, nested - 1)
-    } else if (current && nested === 0) {
-      recordProperty(current, line)
     }
   }
-  return blocks
+  return alarm
 }
 
 // Bare organizer email from a first-colon-split ORGANIZER value. The
@@ -271,6 +359,13 @@ const parseExcludedDates = (exdates: ParsedProperty[]): string[] =>
       .filter(Boolean)
   )
 
+// A DATE (not DATE-TIME) property value: `;VALUE=DATE`, or a bare 8-digit value
+// from a producer that omits the (technically required) parameter.
+const VALUE_DATE_RE = /(?:^|;)VALUE=DATE(?:;|$)/iu
+const DATE_ONLY_VALUE_RE = /^\d{8}$/u
+const isDateValue = (property: ParsedProperty | undefined): boolean =>
+  property !== undefined && (VALUE_DATE_RE.test(property.params) || DATE_ONLY_VALUE_RE.test(property.value.trim()))
+
 // Parses every VEVENT in a VCALENDAR. Blocks without a UID are skipped —
 // an event we can't address with update/delete isn't useful to list.
 // The fields a VEVENT only carries sometimes. Split out from parseEvents so the
@@ -286,7 +381,10 @@ const optionalFields = (block: ParsedBlock, attendees: ParsedAttendee[]): Partia
   const recurrenceId = parseRecurrenceInstant(block.props.get('RECURRENCE-ID'))
   const excludedDates = parseExcludedDates(block.exdates)
   const unparsedAttendeeCount = block.attendees.length - attendees.length
+  const allDay = isDateValue(block.props.get('DTSTART'))
   return {
+    ...(block.alarms.length > 0 ? { alarms: block.alarms.map(parseAlarm) } : {}),
+    ...(allDay ? { allDay: true as const } : {}),
     ...(description ? { description: unescapeText(description) } : {}),
     ...(excludedDates.length > 0 ? { excludedDates } : {}),
     ...(location ? { location: unescapeText(location) } : {}),

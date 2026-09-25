@@ -4,7 +4,7 @@
 // invite shape onto it.
 
 import { getVtimezoneComponent } from '@touch4it/ical-timezones'
-import ical, { ICalAttendeeRole, ICalAttendeeStatus, ICalCalendarMethod } from 'ical-generator'
+import ical, { ICalAlarmType, ICalAttendeeRole, ICalAttendeeStatus, ICalCalendarMethod } from 'ical-generator'
 
 import { toZonedDate, UTC_TIME_ZONE } from './timezone.ts'
 
@@ -23,7 +23,50 @@ const DTSTAMP_LINE_RE = /^DTSTAMP(?:;[^:]*)?:.*$/gmu
 // continuation lines (leading space) are not.
 const ATTENDEE_LINE_START_RE = /^ATTENDEE(?=[;:])/gmu
 
+// A VALARM on the built VEVENT. `minutesBefore` writes a fresh DISPLAY alarm
+// that fires that many minutes before the start (the reminder the tools
+// accept); `lines` is a stored VALARM carried across an edit verbatim (its
+// unfolded content lines, BEGIN/END inclusive — see ParsedAlarm), so an alarm
+// another client wrote survives a rebuild in whatever shape it had.
+export type InviteAlarm = { lines: string[] } | { minutesBefore: number }
+
+// The END:VEVENT line; buildInvite emits exactly one VEVENT, so the first match
+// is the only one.
+const END_VEVENT_RE = /^END:VEVENT$/mu
+const CRLF = '\r\n'
+// RFC 5545 §3.1: content lines SHOULD NOT exceed 75 octets.
+const MAX_LINE_OCTETS = 75
+
+// Folds one unfolded content line at 75 octets (continuations start with a
+// space, which counts toward their own limit). Splits on code points so a
+// multi-byte character is never cut in half.
+const foldLine = (line: string): string => {
+  const encoder = new TextEncoder()
+  const out: string[] = []
+  let current = ''
+  let octets = 0
+  for (const ch of line) {
+    const size = encoder.encode(ch).length
+    if (octets + size > MAX_LINE_OCTETS) {
+      out.push(current)
+      current = ' '
+      octets = 1
+    }
+    current += ch
+    octets += size
+  }
+  out.push(current)
+  return out.join(CRLF)
+}
+
 export interface InviteInput {
+  // VALARMs to attach, in order. See InviteAlarm.
+  alarms?: InviteAlarm[]
+  // An all-day event: DTSTART/DTEND are written as DATE values
+  // (`DTSTART;VALUE=DATE:20261003`) and `end` is exclusive — the day after the
+  // last day (RFC 5545 §3.6.1). `start`/`end` must then be UTC midnights (see
+  // dateOnlyToInstant); `timeZone` is ignored, since dates are floating.
+  allDay?: boolean
   attendees: string[]
   description?: string
   end: Date
@@ -47,14 +90,18 @@ export interface InviteInput {
   //     when the principal is the organizer, so an object naming no organizer
   //     gives the RFC 6638 diff nothing to anchor the CANCEL fan-out on.
   organizer?: string
+  // RECURRENCE-ID must use the same timezone/value form as the master's DTSTART,
+  // even when the edited occurrence's new start/end use a different timezone —
+  // or a different value type: an override of an all-day series carries a DATE
+  // RECURRENCE-ID (`recurrenceAllDay`) even when the occurrence becomes timed,
+  // and vice versa.
+  recurrenceAllDay?: boolean
   // When set, this VEVENT is a single-occurrence override of a recurring
   // series: it carries a RECURRENCE-ID naming the instance it replaces (its
   // *original* start), while start/end are that occurrence's new times.
   // Mutually exclusive with `rrule` — an override is one instance, not a
   // series — so `rrule` is ignored when this is present. See caldav/occurrence.ts.
   recurrenceId?: Date
-  // RECURRENCE-ID must use the same timezone/value form as the master's DTSTART,
-  // even when the edited occurrence's new start/end use a different timezone.
   recurrenceTimeZone?: string
   // Raw RRULE (no `RRULE:` prefix), e.g. `FREQ=WEEKLY;BYDAY=TH`. Present →
   // the VEVENT becomes a recurring series; start/end are the first
@@ -87,7 +134,9 @@ export interface InviteInput {
 // least one ATTENDEE on a REQUEST — so a personal event is serialized as a
 // plain calendar object with no METHOD at all.
 export const buildInvite = (input: InviteInput): string => {
-  const timeZone = input.timeZone ?? UTC_TIME_ZONE
+  // All-day dates are floating: formatting them in UTC turns the UTC-midnight
+  // instants back into exactly the calendar dates they stand for.
+  const timeZone = input.allDay ? UTC_TIME_ZONE : (input.timeZone ?? UTC_TIME_ZONE)
   const cal = ical({
     prodId: { company: 'Langmail', product: 'MCP' },
     ...(input.attendees.length > 0 ? { method: ICalCalendarMethod.REQUEST } : {}),
@@ -102,6 +151,7 @@ export const buildInvite = (input: InviteInput): string => {
     start: toZonedDate(input.start, timeZone),
     summary: input.title,
     timezone: timeZone,
+    ...(input.allDay ? { allDay: true } : {}),
     ...(input.organizer ? { organizer: { email: input.organizer, name: input.organizer } } : {}),
     ...(input.description ? { description: input.description } : {}),
     ...(input.location ? { location: input.location } : {}),
@@ -118,6 +168,12 @@ export const buildInvite = (input: InviteInput): string => {
     event.repeating(input.rrule)
   }
 
+  for (const alarm of input.alarms ?? []) {
+    if ('minutesBefore' in alarm) {
+      event.createAlarm({ description: input.title, trigger: alarm.minutesBefore * 60, type: ICalAlarmType.display })
+    }
+  }
+
   for (const email of input.attendees) {
     event.createAttendee({
       email,
@@ -127,17 +183,27 @@ export const buildInvite = (input: InviteInput): string => {
     })
   }
 
+  return rewriteSerialized(cal.toString(), input, timeZone)
+}
+
+// The fixes ical-generator's output needs on the way out, in order. Each one
+// rewrites serialized lines because ical-generator offers no lever for it.
+const rewriteSerialized = (generated: string, input: InviteInput, timeZone: string): string => {
   // RFC 5545 §3.8.7.2: DTSTAMP is a UTC DATE-TIME — it has no TZID param and no
   // floating form. ical-generator formats it in the event's timezone, so a
   // zoned event gets a floating local timestamp whose meaning depends on the
   // host clock. Restamp it in UTC. (Rewriting the serialized line is the only
   // lever: ical-generator has no per-property timezone.)
-  let serialized = cal.toString().replace(DTSTAMP_LINE_RE, `DTSTAMP:${formatUtcTimestamp(new Date())}`)
+  let serialized = generated.replace(DTSTAMP_LINE_RE, `DTSTAMP:${formatUtcTimestamp(new Date())}`)
 
-  if (input.recurrenceId && input.recurrenceTimeZone && input.recurrenceTimeZone !== timeZone) {
+  // ical-generator formats RECURRENCE-ID like the override's own DTSTART; it
+  // must match the *master's* DTSTART instead (zone and value type).
+  if (input.recurrenceId) {
     serialized = serialized.replace(
       RECURRENCE_ID_LINE_RE,
-      formatRecurrenceId(input.recurrenceId, input.recurrenceTimeZone)
+      input.recurrenceAllDay
+        ? `RECURRENCE-ID;VALUE=DATE:${formatUtcDate(input.recurrenceId)}`
+        : formatRecurrenceId(input.recurrenceId, input.recurrenceTimeZone ?? timeZone)
     )
   }
 
@@ -155,7 +221,16 @@ export const buildInvite = (input: InviteInput): string => {
   // only strips a lowercase `mailto:` to derive the SMTP recipient, so the
   // uppercase scheme leaks into `RCPT TO:<mailto:…>` and the invite bounces.
   // Normalize the value-position scheme to lowercase on every line.
-  return serialized.replaceAll(':MAILTO:', ':mailto:')
+  serialized = serialized.replaceAll(':MAILTO:', ':mailto:')
+
+  // Stored alarms go in last, after every rewrite above, so they stay exactly
+  // as another client wrote them (an EMAIL alarm's ATTENDEE must not pick up
+  // SCHEDULE-AGENT, for one).
+  const preserved = (input.alarms ?? []).flatMap((alarm) => ('lines' in alarm ? alarm.lines : []))
+  if (preserved.length > 0) {
+    serialized = serialized.replace(END_VEVENT_RE, `${preserved.map(foldLine).join(CRLF)}${CRLF}END:VEVENT`)
+  }
+  return serialized
 }
 
 const pad = (value: number, length = 2): string => String(value).padStart(length, '0')
@@ -164,6 +239,10 @@ const pad = (value: number, length = 2): string => String(value).padStart(length
 const formatUtcTimestamp = (instant: Date): string =>
   `${pad(instant.getUTCFullYear(), 4)}${pad(instant.getUTCMonth() + 1)}${pad(instant.getUTCDate())}` +
   `T${pad(instant.getUTCHours())}${pad(instant.getUTCMinutes())}${pad(instant.getUTCSeconds())}Z`
+
+// An instant's UTC calendar date as an RFC 5545 DATE value (`YYYYMMDD`).
+const formatUtcDate = (instant: Date): string =>
+  `${pad(instant.getUTCFullYear(), 4)}${pad(instant.getUTCMonth() + 1)}${pad(instant.getUTCDate())}`
 
 const formatRecurrenceId = (instant: Date, timeZone: string): string => {
   if (timeZone === UTC_TIME_ZONE) {

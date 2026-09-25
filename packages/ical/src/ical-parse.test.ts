@@ -315,3 +315,91 @@ describe('parseEvents', () => {
     expect(parseEvents(ics)[0]?.recurrenceId).toBeUndefined()
   })
 })
+
+describe('parseEvents — all-day events', () => {
+  const allDay = [
+    'BEGIN:VCALENDAR',
+    'BEGIN:VEVENT',
+    'UID:vacation-1',
+    'SUMMARY:Vacation',
+    'DTSTART;VALUE=DATE:20261003',
+    'DTEND;VALUE=DATE:20261011',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n')
+
+  test('flags a DATE-valued DTSTART as all-day with date-only start/end', () => {
+    const [event] = parseEvents(allDay)
+    expect(event?.allDay).toBe(true)
+    expect(event?.start).toBe('2026-10-03')
+    expect(event?.end).toBe('2026-10-11')
+  })
+
+  test('flags a bare 8-digit DTSTART without VALUE=DATE as all-day', () => {
+    const [event] = parseEvents(allDay.replace('DTSTART;VALUE=DATE:', 'DTSTART:'))
+    expect(event?.allDay).toBe(true)
+  })
+
+  test('leaves a timed event unflagged', () => {
+    expect(parseEvents(invite())[0]?.allDay).toBeUndefined()
+  })
+})
+
+describe('parseEvents — alarms', () => {
+  const withAlarms = invite().replace(
+    'END:VEVENT',
+    [
+      'BEGIN:VALARM',
+      'ACTION:DISPLAY',
+      'TRIGGER:-PT30M',
+      'DESCRIPTION:Sync',
+      'END:VALARM',
+      'BEGIN:VALARM',
+      'ACTION:EMAIL',
+      'TRIGGER;VALUE=DATE-TIME:20260612T080000Z',
+      'SUMMARY:Heads-up',
+      'DESCRIPTION:Long description that folds',
+      ' across two lines',
+      'ATTENDEE:mailto:host@langmail.me',
+      'END:VALARM',
+      'END:VEVENT',
+    ].join('\r\n')
+  )
+
+  test('collects each VALARM verbatim (unfolded) with its action and trigger', () => {
+    const [event] = parseEvents(withAlarms)
+    expect(event?.alarms).toEqual([
+      {
+        action: 'DISPLAY',
+        lines: ['BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:-PT30M', 'DESCRIPTION:Sync', 'END:VALARM'],
+        trigger: '-PT30M',
+      },
+      {
+        action: 'EMAIL',
+        lines: [
+          'BEGIN:VALARM',
+          'ACTION:EMAIL',
+          'TRIGGER;VALUE=DATE-TIME:20260612T080000Z',
+          'SUMMARY:Heads-up',
+          'DESCRIPTION:Long description that foldsacross two lines',
+          'ATTENDEE:mailto:host@langmail.me',
+          'END:VALARM',
+        ],
+        trigger: '20260612T080000Z',
+        triggerParams: ';VALUE=DATE-TIME',
+      },
+    ])
+  })
+
+  test('alarm properties never leak onto the event', () => {
+    const [event] = parseEvents(withAlarms)
+    expect(event?.title).toBe('Sync')
+    expect(event?.description).toBeUndefined()
+    // The alarm's ATTENDEE is its email recipient, not an event attendee.
+    expect(event?.attendees.map((a) => a.email)).toEqual(['guest@example.com'])
+  })
+
+  test('an event without alarms has no alarms field', () => {
+    expect(parseEvents(invite())[0]?.alarms).toBeUndefined()
+  })
+})

@@ -1404,3 +1404,56 @@ describe('scheduling handover audit log', () => {
     }
   })
 })
+
+// A timed event carrying two reminders written by another client: a display
+// alarm 15 minutes before and an absolute-trigger email alarm. A rebuild must
+// carry both across verbatim — they are never re-serialized from parsed fields.
+const ALARM_DISPLAY = ['BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:-PT15M', 'DESCRIPTION:Sync', 'END:VALARM']
+const ALARM_EMAIL = [
+  'BEGIN:VALARM',
+  'ACTION:EMAIL',
+  'TRIGGER;VALUE=DATE-TIME:20260612T080000Z',
+  'SUMMARY:Heads-up',
+  'DESCRIPTION:Sync starts soon',
+  'ATTENDEE:mailto:host@langmail.me',
+  'END:VALARM',
+]
+const withAlarms = (ical: string, ...alarms: string[][]): string =>
+  ical.replace('END:VEVENT', `${alarms.map((a) => a.join('\r\n')).join('\r\n')}\r\nEND:VEVENT`)
+
+const valarmBlocks = (ical: string): string[] => unfold(ical).match(/BEGIN:VALARM[\s\S]*?END:VALARM/gu) ?? []
+
+describe('updateCalendarEvent — alarms are preserved', () => {
+  test('a title-only edit keeps every stored VALARM', async () => {
+    const cap = captured()
+    const stored = storedEvent({ data: withAlarms(storedEvent().data, ALARM_DISPLAY, ALARM_EMAIL) })
+    const result = await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { title: 'Sync (renamed)', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    const alarms = valarmBlocks(cap.updated[0]?.ical ?? '')
+    expect(alarms).toEqual([ALARM_DISPLAY.join('\r\n'), ALARM_EMAIL.join('\r\n')])
+  })
+
+  test('a reschedule keeps the stored VALARM', async () => {
+    const cap = captured()
+    const stored = storedEvent({ data: withAlarms(storedEvent().data, ALARM_DISPLAY) })
+    await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { start: '2026-06-12T14:00:00Z', uid: UID },
+      token: 'tok',
+    })
+    expect(valarmBlocks(cap.updated[0]?.ical ?? '')).toEqual([ALARM_DISPLAY.join('\r\n')])
+  })
+
+  test('an occurrence edit inherits the master’s VALARM', async () => {
+    const cap = captured()
+    const stored = recurringStored({ data: withAlarms(recurringStored().data, ALARM_DISPLAY) })
+    await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { recurrenceId: '2026-06-23T10:00:00Z', title: 'Moved sync', uid: UID },
+      token: 'tok',
+    })
+    // One on the untouched master, one copied onto the new override.
+    expect(valarmBlocks(cap.updated[0]?.ical ?? '')).toEqual([ALARM_DISPLAY.join('\r\n'), ALARM_DISPLAY.join('\r\n')])
+  })
+})

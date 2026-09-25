@@ -37,7 +37,7 @@ import {
   type UpdateEventParams,
   updateEvent,
 } from '../caldav/client.ts'
-import { buildInvite, maxSequence, parseSequence } from '../caldav/ical.ts'
+import { buildInvite, type InviteAlarm, maxSequence, parseSequence } from '../caldav/ical.ts'
 import { spliceOccurrenceOverride } from '../caldav/occurrence.ts'
 import {
   isSeriesOccurrence,
@@ -161,6 +161,7 @@ export interface UpdateCalendarEventContext {
 // stored value) rather than read off `args`, so this path and the whole-event
 // path agree on what "the edited event" is.
 interface OccurrenceUpdate {
+  alarms: InviteAlarm[]
   args: UpdateCalendarEventArgs
   attendees: string[]
   deps: UpdateCalendarEventDeps
@@ -188,6 +189,7 @@ interface OccurrenceUpdate {
 // the stored object alongside the untouched master before PUTting it back.
 const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
   const {
+    alarms,
     args,
     attendees,
     deps,
@@ -238,6 +240,7 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
   // any prior edit of the same instance.
   const sequence = maxSequence(existing.data) + 1
   const override = buildInvite({
+    alarms,
     attendees,
     end,
     // The master's stored ORGANIZER wins over the discovered principal: an
@@ -355,6 +358,9 @@ const deliverySummary = (attendees: string[], scheduleAgent?: 'NONE', removedAny
 // state, so editing an already-customized occurrence never reverts it to the
 // master's title/time.
 interface EditBase {
+  // The stored VALARMs as raw content lines, carried into the rebuilt VEVENT
+  // verbatim unless the caller replaces them (see resolveAlarms).
+  alarms: string[][]
   attendees: string[]
   description?: string
   // ISO wall-clock (or `…Z`) strings exactly as stored, not yet resolved against
@@ -379,6 +385,7 @@ interface EditBase {
 }
 
 const baseOf = (event: ParsedEvent | undefined): EditBase => ({
+  alarms: (event?.alarms ?? []).map((a) => a.lines),
   attendees: (event?.attendees ?? []).map((a) => a.email),
   hasExcludedDates: (event?.excludedDates?.length ?? 0) > 0,
   unparsedAttendeeCount: event?.unparsedAttendeeCount ?? 0,
@@ -394,6 +401,7 @@ const baseOf = (event: ParsedEvent | undefined): EditBase => ({
 // The event fields an edit resolves to, once the caller's values and the
 // preserved stored values have been reconciled.
 interface ResolvedFields {
+  alarms: InviteAlarm[]
   attendees: string[]
   description?: string
   end: Date
@@ -560,6 +568,7 @@ const resolveEditFields = (
   return {
     ok: true,
     value: {
+      alarms: base.alarms.map((lines) => ({ lines })),
       attendees: attendees.attendees,
       end,
       start,
@@ -680,6 +689,7 @@ interface RebuildEvent {
 // Serializes the whole-event edit as a single VEVENT.
 const rebuildEvent = ({ args, f, organizer, rrule, sequence, stored, timeZone }: RebuildEvent): string =>
   buildInvite({
+    alarms: f.alarms,
     attendees: f.attendees,
     end: f.end,
     // Keep the stored ORGANIZER (see updateOccurrence): re-stamping the freshly
