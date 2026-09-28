@@ -835,12 +835,13 @@ const occurrenceReminderPath = (
   stored: ParsedEvent[],
   master: ParsedEvent | undefined,
   recurrenceId: string
-): 'splice' | 'rebuild' | 'refuse' => {
+): { override: ParsedEvent; path: 'splice' } | { path: 'rebuild' | 'refuse' } => {
   const targetMs = Date.parse(recurrenceId)
-  if (stored.some((e) => e.recurrenceId !== undefined && Date.parse(e.recurrenceId) === targetMs)) {
-    return 'splice'
+  const override = stored.find((e) => e.recurrenceId !== undefined && Date.parse(e.recurrenceId) === targetMs)
+  if (override) {
+    return { override, path: 'splice' }
   }
-  return (master?.attendees.length ?? 0) > 0 ? 'refuse' : 'rebuild'
+  return { path: (master?.attendees.length ?? 0) > 0 ? 'refuse' : 'rebuild' }
 }
 
 const updateReminderOnly = async (
@@ -890,18 +891,19 @@ const reminderOnlyResult = (e: ReminderOnlyEdit): Promise<ToolResult> | ToolResu
     const kind = e.stored.length > 1 ? 'series' : 'event'
     return updateReminderOnly(e.deps, e.existing, e.storedMaster, e.args, e.token, { kind })
   }
-  const path = occurrenceReminderPath(e.stored, e.storedMaster, e.recurrenceId)
-  if (path === 'splice') {
+  const target = occurrenceReminderPath(e.stored, e.storedMaster, e.recurrenceId)
+  if (target.path === 'splice') {
     // Report from the override being changed: its title and kind (a timed
-    // override of an all-day series) can differ from the master's.
-    const targetMs = Date.parse(e.recurrenceId)
-    const override = e.stored.find((s) => s.recurrenceId !== undefined && Date.parse(s.recurrenceId) === targetMs)
-    return updateReminderOnly(e.deps, e.existing, override ?? e.storedMaster, e.args, e.token, {
+    // override of an all-day series) can differ from the master's. A foreign
+    // override may omit SUMMARY (the parser then yields ''), so fall back to
+    // the series title rather than report `Event ""`.
+    const described = { ...target.override, title: target.override.title || (e.storedMaster?.title ?? '') }
+    return updateReminderOnly(e.deps, e.existing, described, e.args, e.token, {
       kind: 'occurrence',
       recurrenceId: e.recurrenceId,
     })
   }
-  if (path === 'refuse') {
+  if (target.path === 'refuse') {
     return errorResult(
       'This occurrence has no individual changes yet, so setting its reminder alone would reset the attendees’ ' +
         'responses to it. Set the reminder on the whole series instead (omit `recurrenceId`). Nothing was changed.'

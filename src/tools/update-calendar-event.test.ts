@@ -1907,6 +1907,17 @@ describe('updateCalendarEvent — reminder', () => {
     expect(result.content[0]?.text).toContain('reminder 1 hour before')
   })
 
+  test('an override without a SUMMARY is reported under the series title', async () => {
+    const cap = captured()
+    const bare = seriesWithOverride().data.replace('SUMMARY:Weekly Sync (moved)\r\n', '')
+    expect(bare).not.toContain('Weekly Sync (moved)')
+    const result = await updateCalendarEvent(makeDeps(account(), storedEvent({ data: bare }), cap), {
+      args: { recurrenceId: OVERRIDDEN_OCCURRENCE, reminderMinutesBefore: 5, uid: UID },
+      token: 'tok',
+    })
+    expect(result.content[0]?.text).toContain('Event "Weekly Sync" updated')
+  })
+
   test('refuses a reminder-only edit of an un-overridden occurrence of a series with attendees', async () => {
     const cap = captured()
     const result = await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
