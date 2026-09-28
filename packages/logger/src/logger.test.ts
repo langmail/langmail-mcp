@@ -154,21 +154,19 @@ beforeAll(async () => {
   // client would target the real ingest endpoint; and the empty LOG_LEVEL
   // makes the level assertion below deterministic under `LOG_LEVEL=debug`.
   //
-  // This import must be the FIRST load of logger.ts in the bun process, or the
-  // pinning above is a no-op against an already-cached module — which would
-  // both fail the assertions below and silently restore the live-log
+  // This import must be the FIRST load of logger.ts in the bun process, or
+  // the pinning above is a no-op against an already-cached module — which
+  // would fail the assertions below and silently restore the live-log
   // truncation this deferral exists to prevent. `bun test` runs every file in
   // one process, and `src/require-env.ts` and `src/index.ts` import ./logger
-  // statically, so a future test file in this package that pulls in either
-  // (a `require-env.test.ts`, say) and sorts before this one would break it.
-  // Nothing in the package does today — which is also what makes afterAll's
-  // sweep of the in-process log file safe: nothing else here imports
-  // ./logger, so nobody logs after it. Note the caching cuts the OTHER way
-  // for that half. A later importer would get this same cached instance
-  // back, still holding a `sync: true` destination on the inode the sweep
-  // unlinked, so its file writes would succeed into nothing rather than
-  // reopen the path. Both halves fail together the moment something else
-  // in this package imports the logger.
+  // statically, so a future test file here that pulls in either (a
+  // `require-env.test.ts`, say) could load it first. Nothing does today.
+  //
+  // afterAll's sweep of the in-process log file rests on the same "nothing
+  // else imports ./logger" fact, by a different route: anything that logs
+  // after the sweep holds this cached instance, whose `sync: true` fd still
+  // points at the inode the sweep unlinked, so those writes would vanish.
+  // Whoever changes that fact should re-check both.
   process.env.SERVICE_NAME = INPROCESS_SERVICE
   process.env.NODE_ENV = 'test'
   process.env.BETTERSTACK_SOURCE_TOKEN = ''
@@ -202,8 +200,9 @@ describe('logger', () => {
   test('stamps every record with SERVICE_NAME as the base `service` field', () => {
     const records = parseRecords(run({ serviceName: DEV_SERVICE }).stdout)
 
-    expect(records).toHaveLength(2)
-    expect(records.every((record) => record.service === DEV_SERVICE)).toBe(true)
+    // Compared as a projection rather than `.every(...)`: a regression then
+    // reports which service name it actually got, instead of `false`.
+    expect(records.map((record) => record.service)).toEqual([DEV_SERVICE, DEV_SERVICE])
   })
 
   // `process.env.SERVICE_NAME || 'unknown'` — note `||`, not `??`, so an empty
