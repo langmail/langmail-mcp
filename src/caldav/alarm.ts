@@ -50,15 +50,15 @@ const durationSeconds = (value: string): number | undefined => {
 }
 
 // An offset in words, keeping seconds when it isn't a whole minute (a foreign
-// `-PT90S` is "90 seconds", not a rounded "2 minutes"; `-PT1H1M30S` is "61
-// minutes 30 seconds").
+// `-PT90S` is "1 minute 30 seconds", not a rounded "2 minutes"; `-PT29S` is
+// "29 seconds", not "at start"; `-PT1H1M30S` is "61 minutes 30 seconds").
 const formatSeconds = (seconds: number): string => {
   const minutes = Math.floor(seconds / SECONDS_PER_MINUTE)
   const rest = seconds % SECONDS_PER_MINUTE
   if (rest === 0) {
     return formatMinutes(minutes)
   }
-  if (minutes <= 1) {
+  if (minutes === 0) {
     return plural(seconds, 'second')
   }
   return `${plural(minutes, 'minute')} ${plural(rest, 'second')}`

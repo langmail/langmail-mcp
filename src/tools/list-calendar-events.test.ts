@@ -218,7 +218,7 @@ describe('listCalendarEvents — all-day events and reminders', () => {
       ...sync,
       data: sync.data.replace('TRIGGER:-PT30M', 'TRIGGER:-PT90S').replace('TRIGGER:-PT5M', 'TRIGGER:-PT29S'),
     }
-    expect(await list([odd])).toContain('reminders: 90 seconds before start, 29 seconds before start')
+    expect(await list([odd])).toContain('reminders: 1 minute 30 seconds before start, 29 seconds before start')
   })
 
   test('renders a mixed duration as minutes plus the leftover seconds', async () => {

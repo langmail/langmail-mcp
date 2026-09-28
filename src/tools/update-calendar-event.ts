@@ -899,9 +899,8 @@ const reminderOnlyResult = (e: ReminderOnlyEdit): Promise<ToolResult> | ToolResu
   }
   if (path === 'refuse') {
     return errorResult(
-      'This occurrence has no individual changes yet, so setting its reminder alone would re-send it to the ' +
-        'attendees and reset their responses. Set the reminder on the whole series instead (omit `recurrenceId`). ' +
-        'Nothing was changed.'
+      'This occurrence has no individual changes yet, so setting its reminder alone would reset the attendees’ ' +
+        'responses to it. Set the reminder on the whole series instead (omit `recurrenceId`). Nothing was changed.'
     )
   }
   return

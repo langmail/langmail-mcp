@@ -236,8 +236,6 @@ const masterExcludes = (master: Component, targetMs: number): boolean => {
 // Rewrites the master's lines to exclude one instant: replace its SEQUENCE line
 // with the bumped value (or add one when the master carried none) and splice the
 // EXDATE in just before END:VEVENT. Every other line is preserved verbatim.
-const FIRST_NESTED_RE = /^BEGIN:/iu
-
 const excludeInstant = (lines: string[], exdate: string, sequence: number): string[] => {
   let sequenceSeen = false
   const rewritten = lines.map((line) => {
@@ -250,7 +248,7 @@ const excludeInstant = (lines: string[], exdate: string, sequence: number): stri
   // splitCalendar keeps the component BEGIN/END inclusive. Insert the new
   // content lines before the first sub-component (e.g. a VALARM), else before
   // END:VEVENT: RFC 5545 §3.6.1 puts a VEVENT's properties before its alarms.
-  const firstNested = rewritten.findIndex((line, i) => i > 0 && FIRST_NESTED_RE.test(line))
+  const firstNested = rewritten.findIndex((line, i) => i > 0 && BEGIN_DELIMITER_RE.test(line))
   const at = firstNested === -1 ? rewritten.length - 1 : firstNested
   const inserts = sequenceSeen ? [exdate] : [`SEQUENCE:${sequence}`, exdate]
   return [...rewritten.slice(0, at), ...inserts, ...rewritten.slice(at)]
@@ -308,8 +306,6 @@ export const spliceOccurrenceCancellation = (masterIcal: string, recurrenceId: s
 }
 
 const BEGIN_VALARM_RE = /^BEGIN:VALARM\s*$/iu
-const BEGIN_LINE_RE = /^BEGIN:/iu
-const END_LINE_RE = /^END:/iu
 const SUMMARY_LINE_RE = /^SUMMARY(?:;[^:]*)?:(.*)$/iu
 
 // A VEVENT's lines with every top-level VALARM removed, and its SUMMARY value
@@ -329,7 +325,7 @@ const stripAlarms = (lines: string[]): { kept: string[]; summary: string } => {
       continue
     }
     inSummary = false
-    if (BEGIN_LINE_RE.test(line)) {
+    if (BEGIN_DELIMITER_RE.test(line)) {
       depth += 1
       skipping ||= depth === 2 && BEGIN_VALARM_RE.test(line)
     }
@@ -341,7 +337,7 @@ const stripAlarms = (lines: string[]): { kept: string[]; summary: string } => {
         inSummary = true
       }
     }
-    if (END_LINE_RE.test(line)) {
+    if (END_DELIMITER_RE.test(line)) {
       depth -= 1
       skipping &&= depth >= 2
     }
