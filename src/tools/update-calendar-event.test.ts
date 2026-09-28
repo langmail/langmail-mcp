@@ -1716,8 +1716,8 @@ describe('updateCalendarEvent — all-day events', () => {
     })
     expect(result.isError).toBe(true)
     expect(result.content[0]?.text).toContain('occurrence’s date')
-    // The hint names the day the instant falls on in UTC, not the truncated string.
-    expect(result.content[0]?.text).toContain('e.g. 2026-06-23')
+    // The hint names the UTC day of the instant passed, and says that is what it is.
+    expect(result.content[0]?.text).toContain('falls on 2026-06-23 in UTC')
     expect(cap.updated).toHaveLength(0)
   })
 

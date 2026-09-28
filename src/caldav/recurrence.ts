@@ -209,21 +209,23 @@ export const resolveRecurrenceId = (
   recurrenceId: string,
   master: { allDay?: true; recurrence?: string } | undefined
 ): { error: string; ok: false } | { ok: true; value: string } => {
-  const day = recurrenceId.slice(0, 10)
   const dateOnly = isDateOnly(recurrenceId)
   if (master?.allDay) {
     return dateOnly
       ? { ok: true, value: dateOnlyToInstant(recurrenceId).toISOString() }
       : {
-          // The day the instant falls on in UTC — the one the caller named —
-          // not the leading digits, which an offset can put a day off.
-          error: `This series is all-day; pass recurrenceId as the occurrence’s date (e.g. ${new Date(recurrenceId).toISOString().slice(0, 10)}).`,
+          // Name the UTC day of the instant and say so: whether that or the
+          // leading digits is the day the caller meant depends on how they
+          // computed the value, so the hint must not pass a guess off as fact.
+          error:
+            'This series is all-day; pass recurrenceId as the occurrence’s date (YYYY-MM-DD). The instant you ' +
+            `passed falls on ${new Date(recurrenceId).toISOString().slice(0, 10)} in UTC.`,
           ok: false,
         }
   }
   if (dateOnly && master?.recurrence !== undefined) {
     return {
-      error: `This series is not all-day; pass recurrenceId as the occurrence’s original start date-time (e.g. ${day}T10:00:00Z).`,
+      error: `This series is not all-day; pass recurrenceId as the occurrence’s original start date-time (e.g. ${recurrenceId}T10:00:00Z).`,
       ok: false,
     }
   }
