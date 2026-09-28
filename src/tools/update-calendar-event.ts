@@ -892,7 +892,11 @@ const reminderOnlyResult = (e: ReminderOnlyEdit): Promise<ToolResult> | ToolResu
   }
   const path = occurrenceReminderPath(e.stored, e.storedMaster, e.recurrenceId)
   if (path === 'splice') {
-    return updateReminderOnly(e.deps, e.existing, e.storedMaster, e.args, e.token, {
+    // Report from the override being changed: its title and kind (a timed
+    // override of an all-day series) can differ from the master's.
+    const targetMs = Date.parse(e.recurrenceId)
+    const override = e.stored.find((s) => s.recurrenceId !== undefined && Date.parse(s.recurrenceId) === targetMs)
+    return updateReminderOnly(e.deps, e.existing, override ?? e.storedMaster, e.args, e.token, {
       kind: 'occurrence',
       recurrenceId: e.recurrenceId,
     })

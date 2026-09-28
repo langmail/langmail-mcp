@@ -64,9 +64,9 @@ export type Recurrence = z.infer<typeof recurrenceSchema>
 export const recurrenceDescription =
   'Either a raw RFC 5545 RRULE ("FREQ=WEEKLY;BYDAY=TH", "FREQ=DAILY;COUNT=10") or ' +
   '{frequency, interval?, byDay?, until?|count?}. Use at most one of until/count; ' +
-  'UNTIL may be a date (20261231) or a UTC date-time (20261231T000000Z) and is converted to match ' +
-  'the event (a date on an all-day series). A raw rule is only lightly validated, so a malformed one ' +
-  'fails later at the server.'
+  'The object’s `until` is ISO (2026-12-31 or 2026-12-31T00:00:00Z); a raw UNTIL is compact ' +
+  '(20261231 or 20261231T000000Z). Either is converted to match the event (a date on an all-day series). ' +
+  'A raw rule is only lightly validated, so a malformed one fails later at the server.'
 
 // ISO `2026-12-31T00:00:00.000Z` → iCalendar `20261231T000000Z`: drop the
 // date/time separators, then the milliseconds.

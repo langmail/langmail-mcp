@@ -1882,6 +1882,31 @@ describe('updateCalendarEvent — reminder', () => {
     expect(override).toContain('TRIGGER:-PT5M')
   })
 
+  test('an occurrence reminder is reported from the override, not the master', async () => {
+    const cap = captured()
+    // A timed override (09:00–10:00Z, its own title) of an all-day series.
+    const override = buildInvite({
+      attendees: ['a@x.com', 'b@x.com'],
+      end: new Date('2026-06-23T10:00:00Z'),
+      organizer: 'host@langmail.me',
+      recurrenceAllDay: true,
+      recurrenceId: new Date('2026-06-23T00:00:00Z'),
+      sequence: 1,
+      start: new Date('2026-06-23T09:00:00Z'),
+      timeZone: 'UTC',
+      title: 'Offsite (morning only)',
+      uid: UID,
+    })
+    const stored = storedEvent({ data: `${allDayStored().data}\r\n${override}` })
+    const result = await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { recurrenceId: '2026-06-23', reminderMinutesBefore: 60, uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(result.content[0]?.text).toContain('"Offsite (morning only)"')
+    expect(result.content[0]?.text).toContain('reminder 1 hour before')
+  })
+
   test('refuses a reminder-only edit of an un-overridden occurrence of a series with attendees', async () => {
     const cap = captured()
     const result = await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
