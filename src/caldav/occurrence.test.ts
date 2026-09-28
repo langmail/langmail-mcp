@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { parseEvents } from '@langmail/ical'
 
 import { buildInvite } from './ical.ts'
-import { spliceOccurrenceCancellation, spliceOccurrenceOverride } from './occurrence.ts'
+import { spliceAlarms, spliceOccurrenceCancellation, spliceOccurrenceOverride } from './occurrence.ts'
 
 const UID = 'series-1@langmail.me'
 
@@ -353,5 +353,29 @@ describe('spliceOccurrenceCancellation', () => {
       '',
     ].join('\r\n')
     expect(() => spliceOccurrenceCancellation(malformed, OCCURRENCE)).toThrow()
+  })
+})
+
+describe('spliceAlarms', () => {
+  // RFC 5545 §3.1: component names are case-insensitive, and some producers
+  // write them in lowercase. A miss here would PUT the object back unchanged
+  // while the tool reported the reminder as changed.
+  test('sets the reminder on a VEVENT with lowercase delimiters', () => {
+    const lower = masterObject().replace('BEGIN:VEVENT', 'begin:vevent').replace('END:VEVENT', 'end:vevent')
+    const out = spliceAlarms(lower, 10)
+    expect(out).toContain('TRIGGER:-PT10M')
+    expect(parseEvents(out)[0]?.alarms?.[0]?.trigger).toBe('-PT10M')
+  })
+
+  test('folds the alarm DESCRIPTION built from a long title', () => {
+    const out = spliceAlarms(masterObject({ title: 'A'.repeat(90) }), 10)
+    for (const line of out.split('\r\n')) {
+      expect(new TextEncoder().encode(line).length).toBeLessThanOrEqual(75)
+    }
+    expect(unfold(out)).toContain(`DESCRIPTION:${'A'.repeat(90)}`)
+  })
+
+  test('throws rather than silently no-op when there is no VEVENT', () => {
+    expect(() => spliceAlarms('BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n', 10)).toThrow()
   })
 })

@@ -40,7 +40,7 @@ const MAX_LINE_OCTETS = 75
 // Folds one unfolded content line at 75 octets (continuations start with a
 // space, which counts toward their own limit). Splits on code points so a
 // multi-byte character is never cut in half.
-const foldLine = (line: string): string => {
+export const foldLine = (line: string): string => {
   const encoder = new TextEncoder()
   const out: string[] = []
   let current = ''

@@ -266,6 +266,14 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
         'Nothing was changed. Use list_calendar_events to see the series.'
     )
   }
+  // An EXDATE on the master cancels the instant; an override for it would be
+  // an orphan the series never shows, while this tool reported success.
+  if (isExcluded(master, recurrenceId)) {
+    return errorResult(
+      `The occurrence on ${args.recurrenceId ?? recurrenceId} was cancelled, so there is nothing to edit. ` +
+        'Nothing was changed.'
+    )
+  }
 
   // Bump past every SEQUENCE already in the object so this override supersedes
   // any prior edit of the same instance.
@@ -800,29 +808,90 @@ const occurrenceBase = (stored: ParsedEvent[], master: ParsedEvent | undefined, 
   return { ...base, end: zoned(new Date(targetMs + durationMs)), start: zoned(new Date(targetMs)) }
 }
 
-// A whole-event edit that changes nothing but the reminder. It takes its own
-// path (spliceAlarms) instead of the rebuild: a rebuild re-creates every
-// ATTENDEE as NEEDS-ACTION and bumps SEQUENCE, so setting one's own reminder
-// would wipe the guests' responses and re-invite them.
+// True when the master's EXDATEs cancel the instant `recurrenceId` names.
+// Compared by instant, so a DATE exclusion matches the UTC midnight an
+// all-day recurrenceId resolves to.
+const isExcluded = (master: ParsedEvent, recurrenceId: string): boolean => {
+  const targetMs = Date.parse(recurrenceId)
+  return (master.excludedDates ?? []).some((excluded) => Date.parse(excluded) === targetMs)
+}
+
+// An edit that changes nothing but the reminder. It takes its own path
+// (spliceAlarms) instead of the rebuild: a rebuild re-creates every ATTENDEE
+// as NEEDS-ACTION and bumps SEQUENCE, so setting one's own reminder would wipe
+// the guests' responses and re-invite them.
 const isReminderOnly = (args: UpdateCalendarEventArgs): boolean =>
   args.reminderMinutesBefore !== undefined &&
-  args.recurrenceId === undefined &&
   MUTATING_FIELDS.every((field) => field === 'reminderMinutesBefore' || args[field] === undefined)
+
+// The reminder-only path for one occurrence. An existing override already
+// holds that occurrence's attendee state, so its alarms are spliced like the
+// whole event's. Without one, an override has to be created, which hands the
+// occurrence to Stalwart's scheduler as a fresh REQUEST with every response
+// reset — acceptable for a personal series (nobody to re-invite, so the
+// caller falls through to the normal occurrence path) but not for one with
+// attendees.
+const occurrenceReminderPath = (
+  stored: ParsedEvent[],
+  master: ParsedEvent | undefined,
+  recurrenceId: string
+): 'splice' | 'rebuild' | 'refuse' => {
+  const targetMs = Date.parse(recurrenceId)
+  if (stored.some((e) => e.recurrenceId !== undefined && Date.parse(e.recurrenceId) === targetMs)) {
+    return 'splice'
+  }
+  return (master?.attendees.length ?? 0) > 0 ? 'refuse' : 'rebuild'
+}
 
 const updateReminderOnly = async (
   deps: UpdateCalendarEventDeps,
   existing: CalendarObject,
   master: ParsedEvent | undefined,
   args: UpdateCalendarEventArgs,
-  token: string
+  token: string,
+  recurrenceId?: string
 ): Promise<ToolResult> => {
   const minutes = args.reminderMinutesBefore === NO_REMINDER ? null : (args.reminderMinutesBefore ?? null)
-  const ical = spliceAlarms(existing.data, minutes)
+  const ical = spliceAlarms(existing.data, minutes, recurrenceId)
   await deps.updateEvent({ ical, token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
   return textResult(
     `Event "${master?.title ?? args.uid}" updated (no notifications sent${reminderSummary(args, master?.allDay === true)}); ` +
       'only the reminder changed.'
   )
+}
+
+interface ReminderOnlyEdit {
+  args: UpdateCalendarEventArgs
+  deps: UpdateCalendarEventDeps
+  existing: CalendarObject
+  recurrenceId: string | undefined
+  stored: ParsedEvent[]
+  storedMaster: ParsedEvent | undefined
+  token: string
+}
+
+// The result of a reminder-only edit, or undefined when the edit is not one
+// (or is one for a personal series' un-overridden occurrence, which the
+// normal occurrence path handles without anyone to re-invite).
+const reminderOnlyResult = (e: ReminderOnlyEdit): Promise<ToolResult> | ToolResult | undefined => {
+  if (!isReminderOnly(e.args)) {
+    return
+  }
+  if (e.recurrenceId === undefined) {
+    return updateReminderOnly(e.deps, e.existing, e.storedMaster, e.args, e.token)
+  }
+  const path = occurrenceReminderPath(e.stored, e.storedMaster, e.recurrenceId)
+  if (path === 'splice') {
+    return updateReminderOnly(e.deps, e.existing, e.storedMaster, e.args, e.token, e.recurrenceId)
+  }
+  if (path === 'refuse') {
+    return errorResult(
+      'This occurrence has no individual changes yet, so setting its reminder alone would re-send it to the ' +
+        'attendees and reset their responses. Set the reminder on the whole series instead (omit `recurrenceId`). ' +
+        'Nothing was changed.'
+    )
+  }
+  return
 }
 
 // What the edit targets: the whole event (merging against the master), or —
@@ -913,10 +982,6 @@ export const updateCalendarEvent = async (
   const stored = parseEvents(existing.data)
   const storedMaster = stored.find((e) => e.recurrence !== undefined) ?? stored[0]
 
-  if (isReminderOnly(args)) {
-    return updateReminderOnly(deps, existing, storedMaster, args, token)
-  }
-
   const timeZone = args.timeZone ?? storedMaster?.startTzid ?? (await deps.resolveTimeZone(token)) ?? UTC_TIME_ZONE
 
   const scope = editScope(args, stored, storedMaster)
@@ -924,6 +989,11 @@ export const updateCalendarEvent = async (
     return errorResult(`${scope.error} Nothing was changed.`)
   }
   const { base, recurrenceId } = scope
+
+  const reminderOnly = await reminderOnlyResult({ args, deps, existing, recurrenceId, stored, storedMaster, token })
+  if (reminderOnly) {
+    return reminderOnly
+  }
 
   const unsafe = mergeSafetyError(stored, base, args)
   if (unsafe) {

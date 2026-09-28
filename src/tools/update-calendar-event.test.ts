@@ -1812,14 +1812,97 @@ describe('updateCalendarEvent — reminder', () => {
     expect((cap.updated[0]?.ical.match(/BEGIN:VEVENT/gu) ?? []).length).toBe(2)
   })
 
-  test('sets a reminder on one occurrence only', async () => {
+  test('sets a reminder on one occurrence of a personal series', async () => {
     const cap = captured()
-    await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
+    const personal = recurringStored({
+      data: buildInvite({
+        attendees: [],
+        end: new Date('2026-06-16T10:30:00Z'),
+        rrule: 'FREQ=WEEKLY;BYDAY=TU',
+        start: new Date('2026-06-16T10:00:00Z'),
+        timeZone: 'UTC',
+        title: 'Focus',
+        uid: UID,
+      }),
+    })
+    const result = await updateCalendarEvent(makeDeps(account(), personal, cap), {
       args: { recurrenceId: '2026-06-23T10:00:00Z', reminderMinutesBefore: 60, uid: UID },
       token: 'tok',
     })
+    expect(result.isError).toBeUndefined()
     const alarms = valarmBlocks(cap.updated[0]?.ical ?? '')
     expect(alarms).toHaveLength(1)
     expect(alarms[0]).toContain('TRIGGER:-PT1H')
+  })
+
+  // An existing override already carries the attendees' responses for that
+  // occurrence; a reminder change splices its alarms like the whole-event path.
+  test('a reminder-only edit of an overridden occurrence keeps responses and SEQUENCE', async () => {
+    const cap = captured()
+    const stored = seriesWithOverride()
+    const accepted = storedEvent({ data: stored.data.replaceAll('PARTSTAT=NEEDS-ACTION', 'PARTSTAT=ACCEPTED') })
+    const result = await updateCalendarEvent(makeDeps(account(), accepted, cap), {
+      args: { recurrenceId: OVERRIDDEN_OCCURRENCE, reminderMinutesBefore: 5, uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    expect(ical).not.toContain('PARTSTAT=NEEDS-ACTION')
+    expect(ical).toContain('SEQUENCE:2')
+    expect(ical).toContain('SEQUENCE:3')
+    expect(ical).not.toContain('SEQUENCE:4')
+    // Only the override got the alarm; the master is untouched.
+    const alarms = valarmBlocks(ical)
+    expect(alarms).toHaveLength(1)
+    expect(alarms[0]).toContain('TRIGGER:-PT5M')
+    const override = ical.slice(ical.lastIndexOf('BEGIN:VEVENT'))
+    expect(override).toContain('RECURRENCE-ID')
+    expect(override).toContain('TRIGGER:-PT5M')
+  })
+
+  test('refuses a reminder-only edit of an un-overridden occurrence of a series with attendees', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
+      args: { recurrenceId: '2026-06-23T10:00:00Z', reminderMinutesBefore: 60, uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('omit `recurrenceId`')
+    expect(cap.updated).toHaveLength(0)
+  })
+})
+
+describe('updateCalendarEvent — cancelled occurrences', () => {
+  test('refuses to edit an occurrence of an all-day series that was cancelled', async () => {
+    const cap = captured()
+    const cancelled = storedEvent({
+      data: allDayStored().data.replace(
+        'RRULE:FREQ=WEEKLY;BYDAY=TU',
+        'RRULE:FREQ=WEEKLY;BYDAY=TU\r\nEXDATE;VALUE=DATE:20260623'
+      ),
+    })
+    const result = await updateCalendarEvent(makeDeps(account(), cancelled, cap), {
+      args: { recurrenceId: '2026-06-23', title: 'Back on', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('cancelled')
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('refuses to edit a cancelled occurrence of a timed series', async () => {
+    const cap = captured()
+    const cancelled = recurringStored({
+      data: recurringStored().data.replace(
+        'RRULE:FREQ=WEEKLY;BYDAY=TU',
+        'RRULE:FREQ=WEEKLY;BYDAY=TU\r\nEXDATE:20260623T100000Z'
+      ),
+    })
+    const result = await updateCalendarEvent(makeDeps(account(), cancelled, cap), {
+      args: { recurrenceId: '2026-06-23T10:00:00Z', title: 'Back on', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(cap.updated).toHaveLength(0)
   })
 })

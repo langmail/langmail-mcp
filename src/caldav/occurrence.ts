@@ -14,7 +14,7 @@
 
 import { icalDateToIso, parseWallClockInZone } from '@langmail/ical'
 
-import { maxSequence } from './ical.ts'
+import { foldLine, maxSequence } from './ical.ts'
 import { toIcalUtc } from './recurrence.ts'
 
 const CRLF = '\r\n'
@@ -58,6 +58,10 @@ interface SplitCalendar {
 // components, tracking BEGIN/END depth so a nested VALARM never ends a VEVENT
 // early. Blank lines are dropped (iCalendar has none; a trailing newline would
 // otherwise leak an empty line back on re-join).
+const BEGIN_DELIMITER_RE = /^BEGIN:/iu
+const END_DELIMITER_RE = /^END:/iu
+const BEGIN_VCALENDAR_RE = /^BEGIN:VCALENDAR\s*$/iu
+
 const splitCalendar = (ical: string): SplitCalendar => {
   const header: string[] = []
   const components: Component[] = []
@@ -68,11 +72,14 @@ const splitCalendar = (ical: string): SplitCalendar => {
     if (line === '') {
       continue
     }
+    // Component names are case-insensitive (RFC 5545 §3.1) and some producers
+    // write them in lowercase; `name` is normalized to uppercase so every
+    // `c.name === 'VEVENT'` check below sees them.
     if (current) {
       current.lines.push(line)
-      if (line.startsWith('BEGIN:')) {
+      if (BEGIN_DELIMITER_RE.test(line)) {
         depth += 1
-      } else if (line.startsWith('END:')) {
+      } else if (END_DELIMITER_RE.test(line)) {
         depth -= 1
         if (depth === 0) {
           components.push(current)
@@ -81,8 +88,8 @@ const splitCalendar = (ical: string): SplitCalendar => {
       }
       continue
     }
-    if (line.startsWith('BEGIN:') && line !== 'BEGIN:VCALENDAR') {
-      current = { lines: [line], name: line.slice('BEGIN:'.length) }
+    if (BEGIN_DELIMITER_RE.test(line) && !BEGIN_VCALENDAR_RE.test(line)) {
+      current = { lines: [line], name: line.slice('BEGIN:'.length).trim().toUpperCase() }
       depth = 1
       continue
     }
@@ -335,13 +342,24 @@ const stripAlarms = (lines: string[]): { kept: string[]; summary: string } => {
 
 // Replaces the reminders on every VEVENT of a stored object — the master and
 // any overrides — with one DISPLAY alarm `minutesBefore` the start, or none
-// when `minutesBefore` is null. Every other line is kept verbatim: no SEQUENCE
+// when `minutesBefore` is null. With `recurrenceId`, only the override for that
+// instant is touched. Every other line is kept verbatim: no SEQUENCE
 // bump, no rebuilt ATTENDEEs, so attendee responses survive and nobody is
 // re-invited over what is the organizer's own reminder.
-export const spliceAlarms = (ical: string, minutesBefore: number | null): string => {
+//
+// Throws when the object holds no VEVENT: returning it unchanged would let the
+// caller report a reminder change that never happened (same stance as
+// spliceOccurrenceCancellation).
+export const spliceAlarms = (ical: string, minutesBefore: number | null, recurrenceId?: string): string => {
   const calendar = splitCalendar(ical)
+  const targetMs = recurrenceId === undefined ? undefined : new Date(recurrenceId).getTime()
+  const isTarget = (c: Component): boolean =>
+    c.name === 'VEVENT' && (targetMs === undefined || recurrenceIdMs(c) === targetMs)
+  if (!calendar.components.some(isTarget)) {
+    throw new Error('spliceAlarms: no matching VEVENT found')
+  }
   const components = calendar.components.map((c) => {
-    if (c.name !== 'VEVENT') {
+    if (!isTarget(c)) {
       return c
     }
     const { kept, summary } = stripAlarms(c.lines)
@@ -354,7 +372,7 @@ export const spliceAlarms = (ical: string, minutesBefore: number | null): string
       `TRIGGER:${minutesBefore === 0 ? 'PT0S' : `-PT${minutesBefore}M`}`,
       `DESCRIPTION:${summary || 'Reminder'}`,
       'END:VALARM',
-    ]
+    ].map(foldLine)
     return { ...c, lines: [...kept.slice(0, -1), ...alarm, ...kept.slice(-1)] }
   })
   const end = calendar.header.at(-1) ?? 'END:VCALENDAR'
