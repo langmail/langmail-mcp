@@ -363,6 +363,10 @@ export const spliceAlarms = (ical: string, minutesBefore: number | null, recurre
   if (!calendar.components.some(isTarget)) {
     throw new Error('spliceAlarms: no matching VEVENT found')
   }
+  // An override may omit SUMMARY (a foreign client's minimal override); its
+  // alarm then takes the series title from the master rather than "Reminder".
+  const masterComponent = calendar.components.find((c) => c.name === 'VEVENT' && recurrenceIdMs(c) === null)
+  const seriesTitle = masterComponent ? stripAlarms(masterComponent.lines).summary : ''
   const components = calendar.components.map((c) => {
     if (!isTarget(c)) {
       return c
@@ -375,7 +379,7 @@ export const spliceAlarms = (ical: string, minutesBefore: number | null, recurre
       'BEGIN:VALARM',
       'ACTION:DISPLAY',
       `TRIGGER:${minutesBefore === 0 ? 'PT0S' : `-PT${minutesBefore}M`}`,
-      `DESCRIPTION:${summary || 'Reminder'}`,
+      `DESCRIPTION:${summary || seriesTitle || 'Reminder'}`,
       'END:VALARM',
     ].map(foldLine)
     return { ...c, lines: [...kept.slice(0, -1), ...alarm, ...kept.slice(-1)] }

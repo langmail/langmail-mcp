@@ -1886,7 +1886,7 @@ describe('updateCalendarEvent — reminder', () => {
     const cap = captured()
     // A timed override (09:00–10:00Z, its own title) of an all-day series.
     const override = buildInvite({
-      attendees: ['a@x.com', 'b@x.com'],
+      attendees: ['guest.a@example.com', 'guest.b@example.com'],
       end: new Date('2026-06-23T10:00:00Z'),
       organizer: 'host@langmail.me',
       recurrenceAllDay: true,
@@ -1916,6 +1916,21 @@ describe('updateCalendarEvent — reminder', () => {
       token: 'tok',
     })
     expect(result.content[0]?.text).toContain('Event "Weekly Sync" updated')
+    // The alarm the user sees carries the series title too, not "Reminder".
+    const override = unfold(cap.updated[0]?.ical ?? '').slice(
+      unfold(cap.updated[0]?.ical ?? '').lastIndexOf('BEGIN:VEVENT')
+    )
+    expect(override).toContain('DESCRIPTION:Weekly Sync\r\n')
+  })
+
+  test('a reminder-only edit of an event without a SUMMARY names it by uid', async () => {
+    const cap = captured()
+    const untitled = storedEvent({ data: storedEvent().data.replace('SUMMARY:Sync\r\n', '') })
+    const result = await updateCalendarEvent(makeDeps(account(), untitled, cap), {
+      args: { reminderMinutesBefore: 5, uid: UID },
+      token: 'tok',
+    })
+    expect(result.content[0]?.text).toContain(`Event "${UID}" updated`)
   })
 
   test('refuses a reminder-only edit of an un-overridden occurrence of a series with attendees', async () => {

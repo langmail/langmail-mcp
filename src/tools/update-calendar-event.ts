@@ -856,7 +856,7 @@ const updateReminderOnly = async (
   const ical = spliceAlarms(existing.data, minutes, scope.kind === 'occurrence' ? scope.recurrenceId : undefined)
   await deps.updateEvent({ ical, token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
   return textResult(
-    `Event "${master?.title ?? args.uid}" updated (no notifications sent${reminderSummary(args, master?.allDay === true)}); ` +
+    `Event "${master?.title || args.uid}" updated (no notifications sent${reminderSummary(args, master?.allDay === true)}); ` +
       REMINDER_SCOPE_NOTE[scope.kind]
   )
 }
