@@ -366,6 +366,14 @@ describe('spliceOccurrenceCancellation — TZID exclusions', () => {
   })
 })
 
+describe('spliceOccurrenceCancellation — folded EXDATE', () => {
+  test('sees an instant on a folded continuation of a long EXDATE line', () => {
+    const exdate = 'EXDATE:20260616T100000Z,20260630T100000Z,20260707T100000Z,\r\n 20260623T100000Z'
+    const master = masterObject().replace('RRULE:FREQ=WEEKLY;BYDAY=TU', `RRULE:FREQ=WEEKLY;BYDAY=TU\r\n${exdate}`)
+    expect(spliceOccurrenceCancellation(master, '2026-06-23T10:00:00Z')).toBe(master)
+  })
+})
+
 describe('spliceOccurrenceCancellation — lowercase property names', () => {
   // Property names are case-insensitive (RFC 5545 §3.1). A producer that
   // lowercases them must still get its override dropped and SEQUENCE bumped.

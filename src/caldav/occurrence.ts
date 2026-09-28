@@ -31,8 +31,8 @@ const TZID_RE = /(?:^|;)TZID=([^;:]+)/iu
 const METHOD_RE = /^METHOD:/iu
 const VTIMEZONE_TZID_RE = /^TZID:(.*)$/iu
 // An EXDATE content line, capturing the (possibly comma-separated) values after
-// the first colon. Like RECURRENCE-ID above, our own single-instant EXDATEs are
-// short and never folded, so one physical line is enough.
+// the first colon. Matched against an unfolded line (see unfoldLines): a
+// foreign series with many cancelled days folds its EXDATE list.
 const EXDATE_RE = /^EXDATE(?:;[^:]*)?:(.*)$/iu
 const SEQUENCE_RE = /^SEQUENCE:/iu
 const RRULE_RE = /^RRULE[:;]/iu
@@ -210,8 +210,20 @@ const isMaster = (component: Component): boolean =>
 // by instant (same UTC invariant as recurrenceIdMs) so a re-cancel is detected
 // regardless of value formatting. EXDATE is multi-valued (RFC 5545 §3.8.5.1),
 // so each comma-separated instant on the line is checked.
+// A component's physical lines with RFC 5545 folds joined back into logical
+// lines, for reading. (Splices keep writing `lines` verbatim.)
+const unfoldLines = (lines: string[]): string[] =>
+  lines.reduce<string[]>((acc, line) => {
+    if ((line.startsWith(' ') || line.startsWith('\t')) && acc.length > 0) {
+      acc[acc.length - 1] += line.slice(1)
+    } else {
+      acc.push(line)
+    }
+    return acc
+  }, [])
+
 const masterExcludes = (master: Component, targetMs: number): boolean => {
-  for (const line of master.lines) {
+  for (const line of unfoldLines(master.lines)) {
     const match = EXDATE_RE.exec(line)
     if (!match) {
       continue
