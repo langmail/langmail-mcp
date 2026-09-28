@@ -119,11 +119,11 @@ const logFileFor = (serviceName: string): string => path.join(LOGS_DIR, `${servi
 // make the "does not touch /logs" assertion fail on the next run until someone
 // hand-deleted a gitignored file.
 //
-// `logs/unknown.log` is deliberately NOT swept: the empty-SERVICE_NAME case
-// below makes logger.ts write it, but that filename is chosen by logger.ts
-// rather than by this suite, and any number of other packages' test runs write
-// the same path. Deleting it would mean deleting a file this suite does not
-// own. Nothing here asserts on it, and /logs is gitignored.
+// `logs/unknown.log` is absent from the list because nothing here writes it:
+// the two cases that would resolve the service name to `unknown` — the
+// empty-SERVICE_NAME subprocess and the in-process import — are both kept off
+// that path deliberately, since it is the one filename this suite cannot make
+// unique and a local service running without a SERVICE_NAME owns it.
 const sweepFixtures = (): void => {
   for (const service of [DEV_SERVICE, TRUNCATE_SERVICE, LEVEL_SERVICE, PROD_SERVICE, INPROCESS_SERVICE]) {
     fs.rmSync(logFileFor(service), { force: true })
@@ -184,8 +184,15 @@ describe('logger', () => {
 
   // `process.env.SERVICE_NAME || 'unknown'` — note `||`, not `??`, so an empty
   // SERVICE_NAME is treated as unset rather than producing a blank service tag.
+  //
+  // Runs in production mode purely to keep it off the filesystem: the service
+  // name is resolved before the env branch, so the assertion is unaffected,
+  // but the dev branch would open `logs/unknown.log` with `flag: 'w'` and
+  // truncate the live log of any local service running without a
+  // SERVICE_NAME. That file is the one name this suite cannot make unique, so
+  // the fix is not to write it at all.
   test('falls back to the service name "unknown" when SERVICE_NAME is empty', () => {
-    const records = parseRecords(run({ serviceName: '' }).stdout)
+    const records = parseRecords(run({ nodeEnv: 'production', serviceName: '' }).stdout)
 
     expect(records[0]).toMatchObject({ service: 'unknown' })
   })
