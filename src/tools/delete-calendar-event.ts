@@ -42,7 +42,7 @@ import {
   updateEvent,
 } from '../caldav/client.ts'
 import { spliceOccurrenceCancellation } from '../caldav/occurrence.ts'
-import { isSeriesOccurrence } from '../caldav/recurrence.ts'
+import { isSeriesOccurrence, resolveRecurrenceId } from '../caldav/recurrence.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import { eventUidSchema } from './create-calendar-event.ts'
@@ -51,7 +51,7 @@ import { errorResult, type ToolResult, textResult } from './result.ts'
 const recurrenceIdDescription =
   'Optional ISO 8601 instant that scopes this deletion to a single occurrence of ' +
   'a recurring series, identified by that occurrence’s original start (e.g. ' +
-  '2026-06-16T10:00:00Z). When set, only that one occurrence is cancelled — the ' +
+  '2026-06-16T10:00:00Z), or its date for an all-day series (2026-06-16). When set, only that one occurrence is cancelled — the ' +
   'master rule and every other occurrence stay exactly as they are — and ' +
   'attendees get a cancellation scoped to just that instance. The instant must ' +
   'land on an actual occurrence of the series. Omit to delete the whole event ' +
@@ -61,7 +61,10 @@ export const deleteCalendarEventInput = z.object({
   // Optional CalDAV URL from list_calendars; defaults to the principal's
   // discovered default calendar (where create_calendar_event also lands).
   calendarUrl: z.url().optional(),
-  recurrenceId: z.iso.datetime({ offset: true }).optional().describe(recurrenceIdDescription),
+  recurrenceId: z
+    .union([z.iso.date(), z.iso.datetime({ offset: true })])
+    .optional()
+    .describe(recurrenceIdDescription),
   uid: eventUidSchema,
 })
 
@@ -96,7 +99,7 @@ interface OccurrenceCancellation {
 // ORGANIZER or any other VEVENT field — it only excludes an instant — so there
 // is nothing an organizer check would validate and none is needed.
 const cancelOccurrence = async (c: OccurrenceCancellation): Promise<ToolResult> => {
-  const { args, deps, existing, recurrenceId, token } = c
+  const { args, deps, existing, token } = c
 
   // The stored object holds the master (the only VEVENT with an RRULE) plus any
   // overrides. The master identifies the series we validate against.
@@ -104,6 +107,11 @@ const cancelOccurrence = async (c: OccurrenceCancellation): Promise<ToolResult> 
   if (!master?.recurrence) {
     return errorResult(`Event ${args.uid} is not a recurring series; omit recurrenceId to delete it.`)
   }
+  const resolved = resolveRecurrenceId(c.recurrenceId, master)
+  if (!resolved.ok) {
+    return errorResult(`${resolved.error} Nothing was cancelled.`)
+  }
+  const recurrenceId = resolved.value
 
   // A raw master RRULE is only lightly validated on create, so `rrule` may
   // reject one Stalwart happily stored. Treat an unparseable rule as a clean
@@ -114,17 +122,18 @@ const cancelOccurrence = async (c: OccurrenceCancellation): Promise<ToolResult> 
   } catch {
     return errorResult(
       `Could not evaluate this series' recurrence rule (${master.recurrence}) to validate ` +
-        `recurrenceId ${recurrenceId}.`
+        `recurrenceId ${c.recurrenceId}.`
     )
   }
   if (!onOccurrence) {
     return errorResult(
-      `recurrenceId ${recurrenceId} does not match an occurrence of this series ` +
-        `(${master.recurrence}); it must equal an occurrence’s original start.`
+      `recurrenceId ${c.recurrenceId} does not match an occurrence of this series ` +
+        `(${master.recurrence}); it must equal an occurrence’s original ${master.allDay ? 'date' : 'start'}. ` +
+        'Nothing was cancelled. Use list_calendar_events to see the series.'
     )
   }
 
-  const ical = spliceOccurrenceCancellation(existing.data, recurrenceId)
+  const ical = spliceOccurrenceCancellation(existing.data, recurrenceId, master.allDay === true)
   // A double-cancel leaves the object byte-for-byte unchanged (the instant is
   // already excluded): skip the PUT — no scheduling diff, no round-trip — while
   // still reporting success, so "cancel today's standup" twice is not an error.
@@ -133,7 +142,7 @@ const cancelOccurrence = async (c: OccurrenceCancellation): Promise<ToolResult> 
   }
 
   return textResult(
-    `Occurrence of ${args.uid} on ${recurrenceId} cancelled; attendees are notified so ` +
+    `Occurrence of ${args.uid} on ${c.recurrenceId} cancelled; attendees are notified so ` +
       'just that instance is removed from their calendars. The rest of the series is unchanged.'
   )
 }

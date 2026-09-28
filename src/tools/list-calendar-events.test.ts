@@ -164,3 +164,95 @@ describe('listCalendarEvents', () => {
     expect(result.content[0]?.text).toContain('ghost')
   })
 })
+
+describe('listCalendarEvents — all-day events and reminders', () => {
+  const vacation: CalendarObject = {
+    data: buildInvite({
+      alarms: [{ minutesBefore: 1440 }],
+      allDay: true,
+      attendees: [],
+      end: new Date('2026-10-11T00:00:00Z'),
+      start: new Date('2026-10-03T00:00:00Z'),
+      title: 'Vacation',
+      uid: 'vacation-1',
+    }),
+    url: `${CAL}vacation-1.ics`,
+  }
+  const sync: CalendarObject = {
+    data: buildInvite({
+      alarms: [{ minutesBefore: 30 }, { minutesBefore: 5 }],
+      attendees: [],
+      end: new Date('2026-10-02T10:30:00Z'),
+      start: new Date('2026-10-02T10:00:00Z'),
+      title: 'Sync',
+      uid: 'sync-1',
+    }),
+    url: `${CAL}sync-1.ics`,
+  }
+
+  const list = async (objects: CalendarObject[]): Promise<string> =>
+    (await listCalendarEvents(makeDeps(account(), objects), { args: {}, token: 'tok' })).content[0]?.text ?? ''
+
+  test('an all-day event shows its dates, no clock time, and says the end is exclusive', async () => {
+    const txt = await list([vacation])
+    expect(txt).toContain('when: 2026-10-03 → 2026-10-11 (all day; end date exclusive)')
+    expect(txt).not.toContain('T00:00')
+  })
+
+  test('shows an all-day reminder as the clock time it fires', async () => {
+    // 1440 minutes before a 00:00 start is midnight, not "a day before" at a sensible hour.
+    expect(await list([vacation])).toContain('reminder: 00:00 the day before')
+  })
+
+  test('shows 900 minutes before an all-day event as 09:00 the day before', async () => {
+    const morning = { ...vacation, data: vacation.data.replace('TRIGGER:-P1D', 'TRIGGER:-PT15H') }
+    expect(await list([morning])).toContain('reminder: 09:00 the day before')
+  })
+
+  test('shows several reminders on one line', async () => {
+    expect(await list([sync])).toContain('reminders: 30 minutes before start, 5 minutes before start')
+  })
+
+  test('keeps sub-minute precision instead of rounding', async () => {
+    const odd = {
+      ...sync,
+      data: sync.data.replace('TRIGGER:-PT30M', 'TRIGGER:-PT90S').replace('TRIGGER:-PT5M', 'TRIGGER:-PT29S'),
+    }
+    expect(await list([odd])).toContain('reminders: 1 minute 30 seconds before start, 29 seconds before start')
+  })
+
+  test('renders a mixed duration as minutes plus the leftover seconds', async () => {
+    const odd = { ...sync, data: sync.data.replace('TRIGGER:-PT30M', 'TRIGGER:-PT1H1M30S') }
+    expect(await list([odd])).toContain('61 minutes 30 seconds before start')
+  })
+
+  test('an event without alarms has no reminder line', async () => {
+    const txt = await list([event('plain', 'Plain', '2026-06-12T09:00:00Z', '2026-06-12T10:00:00Z')])
+    expect(txt).not.toContain('reminder')
+  })
+
+  test('an absolute trigger is shown as an instant', async () => {
+    const absolute: CalendarObject = {
+      ...sync,
+      data: buildInvite({
+        alarms: [
+          {
+            lines: [
+              'BEGIN:VALARM',
+              'ACTION:DISPLAY',
+              'TRIGGER;VALUE=DATE-TIME:20261002T090000Z',
+              'DESCRIPTION:Sync',
+              'END:VALARM',
+            ],
+          },
+        ],
+        attendees: [],
+        end: new Date('2026-10-02T10:30:00Z'),
+        start: new Date('2026-10-02T10:00:00Z'),
+        title: 'Sync',
+        uid: 'sync-1',
+      }),
+    }
+    expect(await list([absolute])).toContain('reminder: at 2026-10-02T09:00:00Z')
+  })
+})

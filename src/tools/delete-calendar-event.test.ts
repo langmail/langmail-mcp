@@ -272,3 +272,64 @@ describe('deleteCalendarEvent — single occurrence (recurrenceId)', () => {
     expect(cap.updated).toHaveLength(0)
   })
 })
+
+describe('deleteCalendarEvent — all-day series occurrence', () => {
+  const allDaySeries = (): CalendarObject =>
+    storedEvent({
+      data: buildInvite({
+        allDay: true,
+        attendees: [],
+        end: new Date('2026-06-17T00:00:00Z'),
+        rrule: 'FREQ=WEEKLY;BYDAY=TU;UNTIL=20261229',
+        start: new Date('2026-06-16T00:00:00Z'),
+        title: 'Gym',
+        uid: UID,
+      }),
+    })
+
+  test('the schema accepts a date recurrenceId', () => {
+    expect(deleteCalendarEventInput.safeParse(args({ recurrenceId: '2026-06-23' })).success).toBe(true)
+  })
+
+  test('cancels one day with a DATE-valued EXDATE matching the master', async () => {
+    const cap = captured()
+    const result = await deleteCalendarEvent(makeDeps(account(), allDaySeries(), cap), {
+      args: args({ recurrenceId: '2026-06-23' }),
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(cap.updated[0]?.ical).toContain('EXDATE;VALUE=DATE:20260623')
+    expect(result.content[0]?.text).toContain('on 2026-06-23 cancelled')
+  })
+
+  test('a date off the all-day series is refused naming the date form', async () => {
+    const cap = captured()
+    const result = await deleteCalendarEvent(makeDeps(account(), allDaySeries(), cap), {
+      args: args({ recurrenceId: '2026-06-24' }),
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('original date')
+    expect(result.content[0]?.text).toContain('list_calendar_events')
+  })
+
+  test('refuses a date-time recurrenceId on an all-day series', async () => {
+    const cap = captured()
+    const result = await deleteCalendarEvent(makeDeps(account(), allDaySeries(), cap), {
+      args: args({ recurrenceId: '2026-06-23T00:00:00Z' }),
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('refuses a date recurrenceId on a timed series', async () => {
+    const cap = captured()
+    const result = await deleteCalendarEvent(makeDeps(account(), recurringStored(), cap), {
+      args: args({ recurrenceId: '2026-06-23' }),
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(cap.updated).toHaveLength(0)
+  })
+})

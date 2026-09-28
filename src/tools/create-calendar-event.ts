@@ -12,6 +12,7 @@ import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
 import { type AccountTimeZoneResolver, makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
+import { describeReminder, MAX_REMINDER_MINUTES } from '../caldav/alarm.ts'
 import {
   type CalDavConfig,
   discoverAccount,
@@ -20,13 +21,8 @@ import {
   resolveCalendarUrl,
 } from '../caldav/client.ts'
 import { buildInvite } from '../caldav/ical.ts'
-import { recurrenceDescription, recurrenceSchema, toRRule } from '../caldav/recurrence.ts'
-import {
-  dateTimeWithOptionalOffsetSchema,
-  resolveInputDateTime,
-  timeZoneSchema,
-  UTC_TIME_ZONE,
-} from '../caldav/timezone.ts'
+import { alignUntil, recurrenceDescription, recurrenceSchema, toRRule } from '../caldav/recurrence.ts'
+import { eventTimeSchema, resolveEventTimes, timeZoneSchema, UTC_TIME_ZONE } from '../caldav/timezone.ts'
 import { type DiscoveredAccount } from '../caldav/types.ts'
 import { OUTWARD_WRITE } from './annotations.ts'
 import { type AttendeeWriteThrough } from './contact-write-through.ts'
@@ -62,7 +58,14 @@ export const createCalendarEventInput = z.object({
   description: z.string().max(5000).optional(),
   // The timezone rule is stated once, on `timeZone`, rather than repeated on
   // start/end: all three strings are indexed by tool search.
-  end: dateTimeWithOptionalOffsetSchema.describe('Event end as ISO 8601 (see `timeZone`).'),
+  //
+  // All-day is expressed by the value type (a bare date), not an `allDay`
+  // flag: a flag would make `allDay: true` + a clock time representable, and
+  // an update would need a third "keep" state. See resolveEventTimes.
+  end: eventTimeSchema.describe(
+    'Event end as ISO 8601 (see `timeZone`). For an all-day event a date, exclusive: the day after the ' +
+      'last day (a day off on 2026-10-03 ends 2026-10-04).'
+  ),
   location: z.string().max(500).optional(),
   notify: z
     .enum(['all', 'none'])
@@ -71,7 +74,19 @@ export const createCalendarEventInput = z.object({
   recurrence: recurrenceSchema
     .describe(`Repeat rule; omit for a one-off event. start/end are its first occurrence. ${recurrenceDescription}`)
     .optional(),
-  start: dateTimeWithOptionalOffsetSchema.describe('Event start as ISO 8601 (see `timeZone`).'),
+  reminderMinutesBefore: z
+    .number()
+    .int()
+    .min(0)
+    .max(MAX_REMINDER_MINUTES)
+    .optional()
+    .describe(
+      'Remind the user this many minutes before the start (e.g. 30); omit for no reminder. An all-day event ' +
+        'starts at 00:00, so 900 = 09:00 the day before.'
+    ),
+  start: eventTimeSchema.describe(
+    'Event start as ISO 8601 (see `timeZone`), or a date (2026-10-03) for an all-day event.'
+  ),
   timeZone: timeZoneSchema
     .optional()
     .describe(
@@ -102,12 +117,28 @@ export interface CreateCalendarEventContext {
 
 // One-line human summary of who the PUT invited (create-side counterpart of
 // update-calendar-event's deliverySummary).
-const deliverySummary = (attendees: string[], notify: 'all' | 'none' | undefined): string => {
+const deliverySummary = (
+  attendees: string[],
+  notify: 'all' | 'none' | undefined,
+  allDay: boolean,
+  reminder?: number
+): string => {
+  const invites = inviteSummary(attendees, notify)
+  return reminder === undefined ? invites : `${invites}; reminder ${describeReminder(reminder, allDay)}`
+}
+
+const inviteSummary = (attendees: string[], notify: 'all' | 'none' | undefined): string => {
   if (attendees.length === 0) {
     return 'no attendees, no invitations sent'
   }
   const roster = `${attendees.length} attendee(s): ${attendees.join(', ')}`
   return notify === 'none' ? `no invitations sent to the ${roster}` : `invitations sent to ${roster}`
+}
+
+// "Event", "Recurring event", "All-day event", "Recurring all-day event".
+const eventNoun = (allDay: boolean, recurring: boolean): string => {
+  const noun = `${recurring ? 'recurring ' : ''}${allDay ? 'all-day ' : ''}event`
+  return `${noun.charAt(0).toUpperCase()}${noun.slice(1)}`
 }
 
 export const createCalendarEvent = async (
@@ -132,13 +163,13 @@ export const createCalendarEvent = async (
   const calendarUrl = resolved.url
 
   const timeZone = args.timeZone ?? (await deps.resolveTimeZone(token)) ?? UTC_TIME_ZONE
-  const start = resolveInputDateTime(args.start, timeZone, args.timeZone !== undefined)
-  const end = resolveInputDateTime(args.end, timeZone, args.timeZone !== undefined)
-  if (end <= start) {
-    return errorResult('Event end must be after its start.')
+  const times = resolveEventTimes(args.start, args.end, timeZone, args.timeZone !== undefined)
+  if (!times.ok) {
+    return errorResult(`${times.error} Nothing was created.`)
   }
+  const { allDay, end, start } = times.value
 
-  const rrule = args.recurrence ? toRRule(args.recurrence) : undefined
+  const rrule = args.recurrence ? alignUntil(toRRule(args.recurrence), allDay, timeZone) : undefined
   // No attendees → a personal event: a block of the user's own time rather
   // than a scheduling object, so the VEVENT gets neither METHOD nor ORGANIZER
   // and Stalwart's scheduler has nothing to fan out.
@@ -153,6 +184,7 @@ export const createCalendarEvent = async (
   // external attendee.
   const uid = crypto.randomUUID()
   const ical = buildInvite({
+    allDay,
     attendees,
     end,
     start,
@@ -164,6 +196,7 @@ export const createCalendarEvent = async (
     ...(args.location ? { location: args.location } : {}),
     ...(rrule ? { rrule } : {}),
     ...(args.notify === 'none' ? { scheduleAgent: 'NONE' as const } : {}),
+    ...(args.reminderMinutesBefore === undefined ? {} : { alarms: [{ minutesBefore: args.reminderMinutesBefore }] }),
   })
 
   await deps.putEvent({ calendarUrl, ical, token })
@@ -178,7 +211,8 @@ export const createCalendarEvent = async (
   })
 
   return textResult(
-    `${rrule ? 'Recurring event' : 'Event'} "${args.title}" created (${deliverySummary(attendees, args.notify)}).\n` +
+    `${eventNoun(allDay, rrule !== undefined)} "${args.title}" created ` +
+      `(${deliverySummary(attendees, args.notify, allDay, args.reminderMinutesBefore)}).\n` +
       // Surface the UID + calendar so a later turn can update_calendar_event /
       // delete_calendar_event this event.
       `uid: ${uid}\ncalendarUrl: ${calendarUrl}`
@@ -220,8 +254,9 @@ export const registerCreateCalendarEvent = (
         'Create, schedule or book a new calendar event or meeting on the user’s calendar, and invite ' +
         'people to it with the authenticated user as organizer. Attendees receive iMIP invitations ' +
         '(pass `notify: "none"` to suppress them); omit `attendees` for a personal event — a block of the ' +
-        'user’s own time. Pass `recurrence` for a repeating series (e.g. a weekly team meeting) in one ' +
-        'call. Defaults to the user’s default calendar.',
+        'user’s own time. For an all-day event (a day off, a vacation) pass `start`/`end` as ' +
+        'dates. Pass `recurrence` for a repeating series (e.g. a weekly team meeting) in one call, and ' +
+        '`reminderMinutesBefore` to be reminded. Defaults to the user’s default calendar.',
       inputSchema: createCalendarEventInput.shape,
       title: 'Create calendar event',
     },

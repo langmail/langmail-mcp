@@ -14,7 +14,7 @@
 
 import { icalDateToIso, parseWallClockInZone } from '@langmail/ical'
 
-import { maxSequence } from './ical.ts'
+import { foldLine, maxSequence } from './ical.ts'
 import { toIcalUtc } from './recurrence.ts'
 
 const CRLF = '\r\n'
@@ -26,15 +26,15 @@ const LINE_RE = /\r\n|\r|\n/u
 // A RECURRENCE-ID content line, with optional parameters (e.g. `;VALUE=DATE`,
 // `;TZID=…`), capturing the value after the first colon. Datetime values are
 // short and never folded, so a single physical line is enough.
-const RECURRENCE_ID_RE = /^RECURRENCE-ID(?:;[^:]*)?:(.*)$/u
+const RECURRENCE_ID_RE = /^RECURRENCE-ID(?:;[^:]*)?:(.*)$/iu
 const TZID_RE = /(?:^|;)TZID=([^;:]+)/iu
 const METHOD_RE = /^METHOD:/iu
 const VTIMEZONE_TZID_RE = /^TZID:(.*)$/iu
 // An EXDATE content line, capturing the (possibly comma-separated) values after
-// the first colon. Like RECURRENCE-ID above, our own single-instant EXDATEs are
-// short and never folded, so one physical line is enough.
-const EXDATE_RE = /^EXDATE(?:;[^:]*)?:(.*)$/u
-const SEQUENCE_RE = /^SEQUENCE:/u
+// the first colon. Matched against an unfolded line (see unfoldLines): a
+// foreign series with many cancelled days folds its EXDATE list.
+const EXDATE_RE = /^EXDATE(?:;[^:]*)?:(.*)$/iu
+const SEQUENCE_RE = /^SEQUENCE:/iu
 const RRULE_RE = /^RRULE[:;]/iu
 
 // A top-level VCALENDAR component (VEVENT, VTIMEZONE, …) as its raw lines,
@@ -58,6 +58,10 @@ interface SplitCalendar {
 // components, tracking BEGIN/END depth so a nested VALARM never ends a VEVENT
 // early. Blank lines are dropped (iCalendar has none; a trailing newline would
 // otherwise leak an empty line back on re-join).
+const BEGIN_DELIMITER_RE = /^BEGIN:/iu
+const END_DELIMITER_RE = /^END:/iu
+const BEGIN_VCALENDAR_RE = /^BEGIN:VCALENDAR\s*$/iu
+
 const splitCalendar = (ical: string): SplitCalendar => {
   const header: string[] = []
   const components: Component[] = []
@@ -68,11 +72,14 @@ const splitCalendar = (ical: string): SplitCalendar => {
     if (line === '') {
       continue
     }
+    // Component names are case-insensitive (RFC 5545 §3.1) and some producers
+    // write them in lowercase; `name` is normalized to uppercase so every
+    // `c.name === 'VEVENT'` check below sees them.
     if (current) {
       current.lines.push(line)
-      if (line.startsWith('BEGIN:')) {
+      if (BEGIN_DELIMITER_RE.test(line)) {
         depth += 1
-      } else if (line.startsWith('END:')) {
+      } else if (END_DELIMITER_RE.test(line)) {
         depth -= 1
         if (depth === 0) {
           components.push(current)
@@ -81,8 +88,8 @@ const splitCalendar = (ical: string): SplitCalendar => {
       }
       continue
     }
-    if (line.startsWith('BEGIN:') && line !== 'BEGIN:VCALENDAR') {
-      current = { lines: [line], name: line.slice('BEGIN:'.length) }
+    if (BEGIN_DELIMITER_RE.test(line) && !BEGIN_VCALENDAR_RE.test(line)) {
+      current = { lines: [line], name: line.slice('BEGIN:'.length).trim().toUpperCase() }
       depth = 1
       continue
     }
@@ -121,8 +128,24 @@ const overrideVevent = (override: SplitCalendar): Component => {
 // folded continuations keep their leading space and never do.
 const ATTENDEE_LINE_RE = /^ATTENDEE[;:]/iu
 
+// Only the VEVENT's own ATTENDEE lines count: an EMAIL VALARM carries its
+// recipient as an ATTENDEE too, and that is no one to schedule.
+const veventHasAttendee = (lines: string[]): boolean => {
+  let depth = 0
+  for (const line of lines) {
+    if (BEGIN_DELIMITER_RE.test(line)) {
+      depth += 1
+    } else if (END_DELIMITER_RE.test(line)) {
+      depth -= 1
+    } else if (depth === 1 && ATTENDEE_LINE_RE.test(line)) {
+      return true
+    }
+  }
+  return false
+}
+
 const hasAttendee = (components: Component[]): boolean =>
-  components.some((c) => c.name === 'VEVENT' && c.lines.some((line) => ATTENDEE_LINE_RE.test(line)))
+  components.some((c) => c.name === 'VEVENT' && veventHasAttendee(c.lines))
 
 // Re-emits the calendar-level property block (everything before END:VCALENDAR).
 // METHOD:REQUEST is forced when the object still names an attendee: stored
@@ -183,18 +206,37 @@ export const spliceOccurrenceOverride = (masterIcal: string, overrideIcal: strin
 const isMaster = (component: Component): boolean =>
   component.name === 'VEVENT' && recurrenceIdMs(component) === null && component.lines.some((l) => RRULE_RE.test(l))
 
+// A component's physical lines with RFC 5545 folds joined back into logical
+// lines, for reading. (Splices keep writing `lines` verbatim.)
+const unfoldLines = (lines: string[]): string[] =>
+  lines.reduce<string[]>((acc, line) => {
+    if ((line.startsWith(' ') || line.startsWith('\t')) && acc.length > 0) {
+      acc[acc.length - 1] += line.slice(1)
+    } else {
+      acc.push(line)
+    }
+    return acc
+  }, [])
+
 // True when the master already carries an EXDATE for `targetMs`. Comparison is
 // by instant (same UTC invariant as recurrenceIdMs) so a re-cancel is detected
 // regardless of value formatting. EXDATE is multi-valued (RFC 5545 §3.8.5.1),
-// so each comma-separated instant on the line is checked.
+// so each comma-separated instant on the logical line is checked.
 const masterExcludes = (master: Component, targetMs: number): boolean => {
-  for (const line of master.lines) {
+  for (const line of unfoldLines(master.lines)) {
     const match = EXDATE_RE.exec(line)
     if (!match) {
       continue
     }
+    // A TZID-qualified value is wall clock in that zone (same resolution as
+    // recurrenceIdMs); without it `Date.parse` would read it as local time.
+    const timeZone = TZID_RE.exec(line.slice(0, line.indexOf(':')))?.[1]?.replace(/^"|"$/gu, '')
     for (const value of (match[1] ?? '').split(',')) {
-      const ms = Date.parse(icalDateToIso(value.trim()))
+      const iso = icalDateToIso(value.trim())
+      const ms =
+        timeZone && iso.includes('T') && !iso.endsWith('Z')
+          ? parseWallClockInZone(iso, timeZone).getTime()
+          : Date.parse(iso)
       if (!Number.isNaN(ms) && ms === targetMs) {
         return true
       }
@@ -215,11 +257,13 @@ const excludeInstant = (lines: string[], exdate: string, sequence: number): stri
     }
     return line
   })
-  // splitCalendar keeps the component BEGIN/END inclusive, so the last line is
-  // END:VEVENT; insert the new content lines before it.
-  const endIndex = rewritten.length - 1
+  // splitCalendar keeps the component BEGIN/END inclusive. Insert the new
+  // content lines before the first sub-component (e.g. a VALARM), else before
+  // END:VEVENT: RFC 5545 §3.6.1 puts a VEVENT's properties before its alarms.
+  const firstNested = rewritten.findIndex((line, i) => i > 0 && BEGIN_DELIMITER_RE.test(line))
+  const at = firstNested === -1 ? rewritten.length - 1 : firstNested
   const inserts = sequenceSeen ? [exdate] : [`SEQUENCE:${sequence}`, exdate]
-  return [...rewritten.slice(0, endIndex), ...inserts, ...rewritten.slice(endIndex)]
+  return [...rewritten.slice(0, at), ...inserts, ...rewritten.slice(at)]
 }
 
 // Removes a single occurrence from a stored recurring object by excluding its
@@ -238,7 +282,9 @@ const excludeInstant = (lines: string[], exdate: string, sequence: number): stri
 // Idempotent: if the master already excludes the instant (a double-cancel), the
 // input is returned unchanged so the caller can skip the PUT (no scheduling diff)
 // while still reporting success.
-export const spliceOccurrenceCancellation = (masterIcal: string, recurrenceId: string): string => {
+// `allDay` marks a master whose DTSTART is a DATE: the EXDATE must then be a
+// DATE too (RFC 5545 §3.8.5.1 — the value type of DTSTART).
+export const spliceOccurrenceCancellation = (masterIcal: string, recurrenceId: string, allDay = false): string => {
   const calendar = splitCalendar(masterIcal)
   const targetMs = new Date(recurrenceId).getTime()
 
@@ -255,7 +301,9 @@ export const spliceOccurrenceCancellation = (masterIcal: string, recurrenceId: s
   }
 
   const sequence = maxSequence(masterIcal) + 1
-  const exdate = `EXDATE:${toIcalUtc(recurrenceId)}`
+  const exdate = allDay
+    ? `EXDATE;VALUE=DATE:${toIcalUtc(recurrenceId).slice(0, 8)}`
+    : `EXDATE:${toIcalUtc(recurrenceId)}`
   const components = calendar.components
     // Drop any prior override for the cancelled instant.
     .filter((c) => !(c.name === 'VEVENT' && recurrenceIdMs(c) === targetMs))
@@ -267,4 +315,87 @@ export const spliceOccurrenceCancellation = (masterIcal: string, recurrenceId: s
   const head = calendarPropertyLines(calendar.header, components)
 
   return [...head, ...components.flatMap((c) => c.lines), end].join(CRLF) + CRLF
+}
+
+const BEGIN_VALARM_RE = /^BEGIN:VALARM\s*$/iu
+const SUMMARY_LINE_RE = /^SUMMARY(?:;[^:]*)?:(.*)$/iu
+
+// A VEVENT's lines with every top-level VALARM removed, and its SUMMARY value
+// (still TEXT-escaped, folds joined) for the replacement alarm's DESCRIPTION.
+// Both are TEXT, so the escaped value is copied as is — escaping it again
+// would double every backslash.
+const stripAlarms = (lines: string[]): { kept: string[]; summary: string } => {
+  const kept: string[] = []
+  let summary = ''
+  let depth = 0
+  let skipping = false
+  let inSummary = false
+  for (const line of lines) {
+    if (inSummary && (line.startsWith(' ') || line.startsWith('\t'))) {
+      summary += line.slice(1)
+      kept.push(line)
+      continue
+    }
+    inSummary = false
+    if (BEGIN_DELIMITER_RE.test(line)) {
+      depth += 1
+      skipping ||= depth === 2 && BEGIN_VALARM_RE.test(line)
+    }
+    if (!skipping) {
+      kept.push(line)
+      const match = depth === 1 ? SUMMARY_LINE_RE.exec(line) : null
+      if (match) {
+        summary = match[1] ?? ''
+        inSummary = true
+      }
+    }
+    if (END_DELIMITER_RE.test(line)) {
+      depth -= 1
+      skipping &&= depth >= 2
+    }
+  }
+  return { kept, summary }
+}
+
+// Replaces the reminders on every VEVENT of a stored object — the master and
+// any overrides — with one DISPLAY alarm `minutesBefore` the start, or none
+// when `minutesBefore` is null. With `recurrenceId`, only the override for that
+// instant is touched. Every other line is kept verbatim: no SEQUENCE
+// bump, no rebuilt ATTENDEEs, so attendee responses survive and nobody is
+// re-invited over what is the organizer's own reminder.
+//
+// Throws when the object holds no VEVENT: returning it unchanged would let the
+// caller report a reminder change that never happened (same stance as
+// spliceOccurrenceCancellation).
+export const spliceAlarms = (ical: string, minutesBefore: number | null, recurrenceId?: string): string => {
+  const calendar = splitCalendar(ical)
+  const targetMs = recurrenceId === undefined ? undefined : new Date(recurrenceId).getTime()
+  const isTarget = (c: Component): boolean =>
+    c.name === 'VEVENT' && (targetMs === undefined || recurrenceIdMs(c) === targetMs)
+  if (!calendar.components.some(isTarget)) {
+    throw new Error('spliceAlarms: no matching VEVENT found')
+  }
+  // An override may omit SUMMARY (a foreign client's minimal override); its
+  // alarm then takes the series title from the master rather than "Reminder".
+  const masterComponent = calendar.components.find((c) => c.name === 'VEVENT' && recurrenceIdMs(c) === null)
+  const seriesTitle = masterComponent ? stripAlarms(masterComponent.lines).summary : ''
+  const components = calendar.components.map((c) => {
+    if (!isTarget(c)) {
+      return c
+    }
+    const { kept, summary } = stripAlarms(c.lines)
+    if (minutesBefore === null) {
+      return { ...c, lines: kept }
+    }
+    const alarm = [
+      'BEGIN:VALARM',
+      'ACTION:DISPLAY',
+      `TRIGGER:${minutesBefore === 0 ? 'PT0S' : `-PT${minutesBefore}M`}`,
+      `DESCRIPTION:${summary || seriesTitle || 'Reminder'}`,
+      'END:VALARM',
+    ].map(foldLine)
+    return { ...c, lines: [...kept.slice(0, -1), ...alarm, ...kept.slice(-1)] }
+  })
+  const end = calendar.header.at(-1) ?? 'END:VCALENDAR'
+  return [...calendar.header.slice(0, -1), ...components.flatMap((c) => c.lines), end].join(CRLF) + CRLF
 }

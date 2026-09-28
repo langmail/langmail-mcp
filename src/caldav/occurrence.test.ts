@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { parseEvents } from '@langmail/ical'
 
 import { buildInvite } from './ical.ts'
-import { spliceOccurrenceCancellation, spliceOccurrenceOverride } from './occurrence.ts'
+import { spliceAlarms, spliceOccurrenceCancellation, spliceOccurrenceOverride } from './occurrence.ts'
 
 const UID = 'series-1@langmail.me'
 
@@ -205,6 +205,20 @@ describe('spliceOccurrenceOverride', () => {
 const OCCURRENCE = '2026-06-23T10:00:00Z'
 
 describe('spliceOccurrenceCancellation', () => {
+  // RFC 5545 §3.6.1: `eventc = BEGIN:VEVENT eventprop *alarmc END:VEVENT` —
+  // properties come before sub-components, so the new EXDATE/SEQUENCE must not
+  // land after the master's VALARM.
+  test('inserts EXDATE and SEQUENCE before the master’s VALARM', () => {
+    const merged = unfold(
+      spliceOccurrenceCancellation(masterObject({ alarms: [{ minutesBefore: 15 }] }), '2026-06-23T10:00:00Z')
+    )
+    const lines = merged.split('\r\n')
+    const alarmAt = lines.indexOf('BEGIN:VALARM')
+    expect(alarmAt).toBeGreaterThan(0)
+    expect(lines.findIndex((l) => l.startsWith('EXDATE'))).toBeLessThan(alarmAt)
+    expect(lines.findIndex((l) => l.startsWith('SEQUENCE'))).toBeLessThan(alarmAt)
+  })
+
   test('excludes the instant on the master with an EXDATE and a bumped SEQUENCE', () => {
     const merged = unfold(spliceOccurrenceCancellation(masterObject({ sequence: 4 }), OCCURRENCE))
 
@@ -339,5 +353,68 @@ describe('spliceOccurrenceCancellation', () => {
       '',
     ].join('\r\n')
     expect(() => spliceOccurrenceCancellation(malformed, OCCURRENCE)).toThrow()
+  })
+})
+
+describe('spliceOccurrenceCancellation — TZID exclusions', () => {
+  test('treats an instant already excluded by a TZID-qualified EXDATE as a no-op re-cancel', () => {
+    const master = masterObject().replace(
+      'RRULE:FREQ=WEEKLY;BYDAY=TU',
+      'RRULE:FREQ=WEEKLY;BYDAY=TU\r\nEXDATE;TZID=Europe/Berlin:20260623T120000'
+    )
+    expect(spliceOccurrenceCancellation(master, '2026-06-23T10:00:00Z')).toBe(master)
+  })
+})
+
+describe('spliceOccurrenceCancellation — folded EXDATE', () => {
+  test('sees an instant on a folded continuation of a long EXDATE line', () => {
+    const exdate = 'EXDATE:20260616T100000Z,20260630T100000Z,20260707T100000Z,\r\n 20260623T100000Z'
+    const master = masterObject().replace('RRULE:FREQ=WEEKLY;BYDAY=TU', `RRULE:FREQ=WEEKLY;BYDAY=TU\r\n${exdate}`)
+    expect(spliceOccurrenceCancellation(master, '2026-06-23T10:00:00Z')).toBe(master)
+  })
+})
+
+describe('spliceOccurrenceCancellation — lowercase property names', () => {
+  // Property names are case-insensitive (RFC 5545 §3.1). A producer that
+  // lowercases them must still get its override dropped and SEQUENCE bumped.
+  test('drops a lowercase override, bumps a lowercase SEQUENCE, and writes one SEQUENCE', () => {
+    const lower = (ics: string): string =>
+      ics.replace(
+        /^(RECURRENCE-ID|SEQUENCE|EXDATE)([;:])/gmu,
+        (_m, name: string, sep: string) => `${name.toLowerCase()}${sep}`
+      )
+    const master = masterObject({ sequence: 9 })
+    const override = overrideObject({ sequence: 10 })
+    const object = lower(spliceOccurrenceOverride(master, override, '2026-06-23T10:00:00Z'))
+    expect(object).toContain('recurrence-id:')
+    const out = spliceOccurrenceCancellation(object, '2026-06-23T10:00:00Z')
+    expect(parseEvents(out).filter((e) => e.recurrenceId !== undefined)).toHaveLength(0)
+    const masterEvent = out.slice(out.indexOf('BEGIN:VEVENT'))
+    expect(masterEvent.match(/^sequence:/gimu)).toHaveLength(1)
+    expect(masterEvent).toContain('SEQUENCE:11')
+  })
+})
+
+describe('spliceAlarms', () => {
+  // RFC 5545 §3.1: component names are case-insensitive, and some producers
+  // write them in lowercase. A miss here would PUT the object back unchanged
+  // while the tool reported the reminder as changed.
+  test('sets the reminder on a VEVENT with lowercase delimiters', () => {
+    const lower = masterObject().replace('BEGIN:VEVENT', 'begin:vevent').replace('END:VEVENT', 'end:vevent')
+    const out = spliceAlarms(lower, 10)
+    expect(out).toContain('TRIGGER:-PT10M')
+    expect(parseEvents(out)[0]?.alarms?.[0]?.trigger).toBe('-PT10M')
+  })
+
+  test('folds the alarm DESCRIPTION built from a long title', () => {
+    const out = spliceAlarms(masterObject({ title: 'A'.repeat(90) }), 10)
+    for (const line of out.split('\r\n')) {
+      expect(new TextEncoder().encode(line).length).toBeLessThanOrEqual(75)
+    }
+    expect(unfold(out)).toContain(`DESCRIPTION:${'A'.repeat(90)}`)
+  })
+
+  test('throws rather than silently no-op when there is no VEVENT', () => {
+    expect(() => spliceAlarms('BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n', 10)).toThrow()
   })
 })

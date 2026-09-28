@@ -78,9 +78,9 @@ const unvibeStored = (over: Partial<CalendarObject> = {}): CalendarObject => ({
     attendees: [
       'me@langmail.me',
       'me@gmail.com',
-      'kai@atelier.example',
-      'mika.sandor@example.com',
-      'jo.brightwater@example.com',
+      'avery@example.org',
+      'synthetic.guest1@gmail.com',
+      'synthetic.guest2@gmail.com',
     ],
     description: 'Weekly unvibe',
     end: new Date('2026-06-16T10:30:00Z'),
@@ -694,22 +694,24 @@ describe('updateCalendarEvent — safety guards on preserved state', () => {
     expect(unfold(cap.updated[0]?.ical ?? '')).toContain('RRULE:FREQ=WEEKLY;BYDAY=TU')
   })
 
-  test('refuses a partial edit of an all-day event', async () => {
+  // A DURATION-only event has no DTEND to carry over, so a partial edit still
+  // needs both times — unlike an all-day event, which has both as dates.
+  test('still refuses a partial edit of a DURATION-only event', async () => {
     const cap = captured()
-    const result = await updateCalendarEvent(makeDeps(account(), allDayStored(), cap), {
-      args: { title: 'Renamed', uid: UID },
-      token: 'tok',
+    const durationOnly = storedEvent({
+      data: [
+        'BEGIN:VCALENDAR',
+        'BEGIN:VEVENT',
+        `UID:${UID}`,
+        'SUMMARY:Focus',
+        'DTSTART:20260616T100000Z',
+        'DURATION:PT1H',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n'),
     })
-    expect(result.isError).toBe(true)
-    expect(result.content[0]?.text).toContain('no explicit start time')
-    expect(cap.updated).toHaveLength(0)
-  })
-
-  test('refuses an all-day edit that supplies only a start', async () => {
-    const cap = captured()
-    // `end` would have to come from a stored duration that doesn't exist.
-    const result = await updateCalendarEvent(makeDeps(account(), allDayStored(), cap), {
-      args: { start: '2026-06-16T10:00:00Z', uid: UID },
+    const result = await updateCalendarEvent(makeDeps(account(), durationOnly, cap), {
+      args: { title: 'Renamed', uid: UID },
       token: 'tok',
     })
     expect(result.isError).toBe(true)
@@ -1111,9 +1113,9 @@ describe('updateCalendarEvent — attendee delta', () => {
     const ical = unfold(cap.updated[0]?.ical ?? '')
     // The four intended attendees survive; the gmail duplicate is gone.
     expect(ical).toContain('mailto:me@langmail.me')
-    expect(ical).toContain('mailto:kai@atelier.example')
-    expect(ical).toContain('mailto:mika.sandor@example.com')
-    expect(ical).toContain('mailto:jo.brightwater@example.com')
+    expect(ical).toContain('mailto:avery@example.org')
+    expect(ical).toContain('mailto:synthetic.guest1@gmail.com')
+    expect(ical).toContain('mailto:synthetic.guest2@gmail.com')
     expect(ical).not.toContain('mailto:me@gmail.com')
     // Recurrence, title, time, location, description all preserved — not collapsed
     // or dropped by omission.
@@ -1134,7 +1136,7 @@ describe('updateCalendarEvent — attendee delta', () => {
     })
     const ical = unfold(cap.updated[0]?.ical ?? '')
     expect(ical).toContain('mailto:newcomer@example.com')
-    expect(ical).toContain('mailto:kai@atelier.example')
+    expect(ical).toContain('mailto:avery@example.org')
     expect(ical).toContain('RRULE:FREQ=WEEKLY;BYDAY=TU')
   })
 
@@ -1259,7 +1261,7 @@ describe('updateCalendarEvent — notify', () => {
   test('notify: none does not claim silence when a replacement list drops someone', async () => {
     const cap = captured()
     const result = await updateCalendarEvent(makeDeps(account({ organizer: 'me@langmail.me' }), unvibeStored(), cap), {
-      args: { attendees: ['me@langmail.me', 'kai@atelier.example'], notify: 'none', uid: UID },
+      args: { attendees: ['me@langmail.me', 'avery@example.org'], notify: 'none', uid: UID },
       token: 'tok',
     })
     expect(result.isError).toBeUndefined()
@@ -1402,5 +1404,597 @@ describe('scheduling handover audit log', () => {
     } finally {
       info.mockRestore()
     }
+  })
+})
+
+// A timed event carrying two reminders written by another client: a display
+// alarm 15 minutes before and an absolute-trigger email alarm. A rebuild must
+// carry both across verbatim — they are never re-serialized from parsed fields.
+const ALARM_DISPLAY = ['BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:-PT15M', 'DESCRIPTION:Sync', 'END:VALARM']
+const ALARM_EMAIL = [
+  'BEGIN:VALARM',
+  'ACTION:EMAIL',
+  'TRIGGER;VALUE=DATE-TIME:20260612T080000Z',
+  'SUMMARY:Heads-up',
+  'DESCRIPTION:Sync starts soon',
+  'ATTENDEE:mailto:host@example.com',
+  'END:VALARM',
+]
+const withAlarms = (ical: string, ...alarms: string[][]): string =>
+  ical.replace('END:VEVENT', () => `${alarms.map((a) => a.join('\r\n')).join('\r\n')}\r\nEND:VEVENT`)
+
+const VALARM_BLOCK_RE = /BEGIN:VALARM[\s\S]*?END:VALARM\r\n/gu
+const TRAILING_NEWLINE_RE = /\r?\n?$/u
+
+const valarmBlocks = (ical: string): string[] => unfold(ical).match(/BEGIN:VALARM[\s\S]*?END:VALARM/gu) ?? []
+
+describe('updateCalendarEvent — alarms are preserved', () => {
+  test('a title-only edit keeps every stored VALARM', async () => {
+    const cap = captured()
+    const stored = storedEvent({ data: withAlarms(storedEvent().data, ALARM_DISPLAY, ALARM_EMAIL) })
+    const result = await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { title: 'Sync (renamed)', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    const alarms = valarmBlocks(cap.updated[0]?.ical ?? '')
+    expect(alarms).toEqual([ALARM_DISPLAY.join('\r\n'), ALARM_EMAIL.join('\r\n')])
+  })
+
+  test('dollar sequences in a stored alarm are copied literally, not expanded', async () => {
+    const cap = captured()
+    const dollars = ['BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:-PT15M', "DESCRIPTION:Rent $' $& $$ due", 'END:VALARM']
+    const stored = storedEvent({ data: withAlarms(storedEvent().data, dollars) })
+    await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { title: 'Sync (renamed)', uid: UID },
+      token: 'tok',
+    })
+    expect(valarmBlocks(cap.updated[0]?.ical ?? '')).toEqual([dollars.join('\r\n')])
+  })
+
+  test('a reschedule keeps the stored VALARM', async () => {
+    const cap = captured()
+    const stored = storedEvent({ data: withAlarms(storedEvent().data, ALARM_DISPLAY) })
+    await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { start: '2026-06-12T14:00:00Z', uid: UID },
+      token: 'tok',
+    })
+    expect(valarmBlocks(cap.updated[0]?.ical ?? '')).toEqual([ALARM_DISPLAY.join('\r\n')])
+  })
+
+  test('a lowercase VALARM’s ATTENDEE does not make a personal series a scheduling object', async () => {
+    const cap = captured()
+    const personal = buildInvite({
+      attendees: [],
+      end: new Date('2026-06-16T10:30:00Z'),
+      rrule: 'FREQ=WEEKLY;BYDAY=TU',
+      start: new Date('2026-06-16T10:00:00Z'),
+      timeZone: 'UTC',
+      title: 'Focus',
+      uid: UID,
+    })
+    const lowerEmail = ALARM_EMAIL.map((l) => (l.startsWith('BEGIN:') || l.startsWith('END:') ? l.toLowerCase() : l))
+    const stored = recurringStored({ data: withAlarms(personal, lowerEmail) })
+    await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { recurrenceId: '2026-06-23T10:00:00Z', title: 'Focus (moved)', uid: UID },
+      token: 'tok',
+    })
+    expect(cap.updated[0]?.ical).not.toContain('METHOD:')
+  })
+
+  test('an EMAIL alarm’s ATTENDEE does not make a personal series a scheduling object', async () => {
+    const cap = captured()
+    const personal = buildInvite({
+      attendees: [],
+      end: new Date('2026-06-16T10:30:00Z'),
+      rrule: 'FREQ=WEEKLY;BYDAY=TU',
+      start: new Date('2026-06-16T10:00:00Z'),
+      timeZone: 'UTC',
+      title: 'Focus',
+      uid: UID,
+    })
+    const stored = recurringStored({ data: withAlarms(personal, ALARM_EMAIL) })
+    const result = await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { recurrenceId: '2026-06-23T10:00:00Z', title: 'Focus (moved)', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(cap.updated[0]?.ical).not.toContain('METHOD:')
+  })
+
+  test('an occurrence edit inherits the master’s VALARM', async () => {
+    const cap = captured()
+    const stored = recurringStored({ data: withAlarms(recurringStored().data, ALARM_DISPLAY) })
+    await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { recurrenceId: '2026-06-23T10:00:00Z', title: 'Moved sync', uid: UID },
+      token: 'tok',
+    })
+    // One on the untouched master, one copied onto the new override.
+    expect(valarmBlocks(cap.updated[0]?.ical ?? '')).toEqual([ALARM_DISPLAY.join('\r\n'), ALARM_DISPLAY.join('\r\n')])
+  })
+})
+
+// A three-day, attendee-less vacation stored as DATE values (DTEND exclusive).
+const vacationStored = (): CalendarObject =>
+  storedEvent({
+    data: [
+      'BEGIN:VCALENDAR',
+      'BEGIN:VEVENT',
+      `UID:${UID}`,
+      'SUMMARY:Vacation',
+      'DTSTART;VALUE=DATE:20261003',
+      'DTEND;VALUE=DATE:20261006',
+      'SEQUENCE:1',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n'),
+  })
+
+const DT_LINE_RE = /^(DTSTART|DTEND|RECURRENCE-ID|RRULE)/u
+const dtLines = (ical: string): string[] =>
+  unfold(ical)
+    .split('\r\n')
+    .filter((l) => DT_LINE_RE.test(l))
+
+describe('updateCalendarEvent — all-day events', () => {
+  test('the schema accepts date-only start, end and recurrenceId', () => {
+    expect(
+      updateCalendarEventInput.safeParse({
+        end: '2026-10-04',
+        recurrenceId: '2026-10-03',
+        start: '2026-10-03',
+        uid: UID,
+      }).success
+    ).toBe(true)
+  })
+
+  test('a rename keeps an all-day series all-day, with its rule and attendees', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), allDayStored(), cap), {
+      args: { title: 'Renamed', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    const ical = cap.updated[0]?.ical ?? ''
+    expect(dtLines(ical)).toEqual([
+      'DTSTART;VALUE=DATE:20260616',
+      'DTEND;VALUE=DATE:20260617',
+      'RRULE:FREQ=WEEKLY;BYDAY=TU',
+    ])
+    expect(unfold(ical)).toContain('SUMMARY:Renamed')
+    expect(unfold(ical)).toContain('mailto:a@x.com')
+    expect(unfold(ical)).not.toContain('BEGIN:VTIMEZONE')
+  })
+
+  test('a rename ignores a timeZone the caller passes', async () => {
+    const cap = captured()
+    await updateCalendarEvent(makeDeps(account(), vacationStored(), cap), {
+      args: { timeZone: 'Pacific/Auckland', title: 'Holiday', uid: UID },
+      token: 'tok',
+    })
+    expect(dtLines(cap.updated[0]?.ical ?? '')).toEqual(['DTSTART;VALUE=DATE:20261003', 'DTEND;VALUE=DATE:20261006'])
+  })
+
+  test('moving only the start date keeps the length in days', async () => {
+    const cap = captured()
+    await updateCalendarEvent(makeDeps(account(), vacationStored(), cap), {
+      args: { start: '2026-10-10', uid: UID },
+      token: 'tok',
+    })
+    expect(dtLines(cap.updated[0]?.ical ?? '')).toEqual(['DTSTART;VALUE=DATE:20261010', 'DTEND;VALUE=DATE:20261013'])
+  })
+
+  test('changing only the end date extends it and keeps the start', async () => {
+    const cap = captured()
+    await updateCalendarEvent(makeDeps(account(), vacationStored(), cap), {
+      args: { end: '2026-10-11', uid: UID },
+      token: 'tok',
+    })
+    expect(dtLines(cap.updated[0]?.ical ?? '')).toEqual(['DTSTART;VALUE=DATE:20261003', 'DTEND;VALUE=DATE:20261011'])
+  })
+
+  test('turns an all-day event into a timed one with start and end', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), vacationStored(), cap), {
+      args: { end: '2026-10-03T12:00:00Z', start: '2026-10-03T09:00:00Z', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(dtLines(cap.updated[0]?.ical ?? '')).toEqual(['DTSTART:20261003T090000Z', 'DTEND:20261003T120000Z'])
+  })
+
+  test('turns a timed event into an all-day one with start and end dates', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), storedEvent(), cap), {
+      args: { end: '2026-06-13', start: '2026-06-12', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    const ical = cap.updated[0]?.ical ?? ''
+    expect(dtLines(ical)).toEqual(['DTSTART;VALUE=DATE:20260612', 'DTEND;VALUE=DATE:20260613'])
+    // Everything else survives the switch.
+    expect(unfold(ical)).toContain('SUMMARY:Sync')
+    expect(unfold(ical)).toContain('mailto:guest@example.com')
+  })
+
+  test('switching between all-day and timed with only one side is refused', async () => {
+    for (const [stored, start] of [
+      [vacationStored(), '2026-10-03T09:00:00Z'],
+      [storedEvent(), '2026-06-12'],
+    ] as const) {
+      const cap = captured()
+      const result = await updateCalendarEvent(makeDeps(account(), stored, cap), {
+        args: { start, uid: UID },
+        token: 'tok',
+      })
+      expect(result.isError).toBe(true)
+      expect(result.content[0]?.text).toContain('pass both `start` and `end`')
+      expect(cap.updated).toHaveLength(0)
+    }
+  })
+
+  test('a date start with a date-time end is refused', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), vacationStored(), cap), {
+      args: { end: '2026-10-03T18:00:00Z', start: '2026-10-03', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('an all-day end on its start day is refused, naming the exclusive end', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), vacationStored(), cap), {
+      args: { end: '2026-10-03', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('2026-10-04')
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('switching an all-day series to timed re-types its date UNTIL', async () => {
+    const cap = captured()
+    const bounded = storedEvent({
+      data: allDayStored().data.replace('RRULE:FREQ=WEEKLY;BYDAY=TU', 'RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20261229'),
+    })
+    const result = await updateCalendarEvent(makeDeps(account(), bounded, cap), {
+      args: { end: '2026-06-16T10:30:00Z', start: '2026-06-16T10:00:00Z', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(unfold(cap.updated[0]?.ical ?? '')).toContain('RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20261229T235959Z')
+  })
+
+  test('re-ruling an all-day series writes a DATE UNTIL', async () => {
+    const cap = captured()
+    await updateCalendarEvent(makeDeps(account(), allDayStored(), cap), {
+      args: { recurrence: { byDay: ['TU'], frequency: 'weekly', until: '2026-12-29T00:00:00Z' }, uid: UID },
+      token: 'tok',
+    })
+    expect(unfold(cap.updated[0]?.ical ?? '')).toContain('RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20261229')
+  })
+
+  test('edits one occurrence of an all-day series with a date recurrenceId', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), allDayStored(), cap), {
+      args: { recurrenceId: '2026-06-23', title: 'Offsite', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(dtLines(cap.updated[0]?.ical ?? '')).toEqual([
+      'DTSTART;VALUE=DATE:20260616',
+      'DTEND;VALUE=DATE:20260617',
+      'RRULE:FREQ=WEEKLY;BYDAY=TU',
+      'DTSTART;VALUE=DATE:20260623',
+      'DTEND;VALUE=DATE:20260624',
+      'RECURRENCE-ID;VALUE=DATE:20260623',
+    ])
+  })
+
+  test('an occurrence of an all-day series made timed keeps a DATE RECURRENCE-ID', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), allDayStored(), cap), {
+      args: { end: '2026-06-23T12:00:00Z', recurrenceId: '2026-06-23', start: '2026-06-23T09:00:00Z', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(dtLines(cap.updated[0]?.ical ?? '').slice(3)).toEqual([
+      'DTSTART:20260623T090000Z',
+      'DTEND:20260623T120000Z',
+      'RECURRENCE-ID;VALUE=DATE:20260623',
+    ])
+  })
+
+  test('refuses a date-time recurrenceId on an all-day series instead of truncating it', async () => {
+    const cap = captured()
+    // 00:30 in UTC+2 is still the 23rd in UTC; slicing the string would read the 24th.
+    const result = await updateCalendarEvent(makeDeps(account(), allDayStored(), cap), {
+      args: { recurrenceId: '2026-06-24T00:30:00+02:00', title: 'Offsite', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('occurrence’s date')
+    // The hint names the UTC day of the instant passed, and says that is what it is.
+    expect(result.content[0]?.text).toContain('falls on 2026-06-23 in UTC')
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('rejects a date recurrenceId that is not an occurrence of the all-day series', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), allDayStored(), cap), {
+      args: { recurrenceId: '2026-06-24', title: 'Offsite', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(cap.updated).toHaveLength(0)
+  })
+})
+
+describe('updateCalendarEvent — DURATION-only series occurrence', () => {
+  // A series stored with DURATION and no DTEND has no occurrence slot to merge
+  // against; carrying the master's first DTSTART over would silently stretch
+  // the override back to the series' first day.
+  test('refuses an occurrence edit that passes only end', async () => {
+    const cap = captured()
+    const durationSeries = storedEvent({
+      data: [
+        'BEGIN:VCALENDAR',
+        'BEGIN:VEVENT',
+        `UID:${UID}`,
+        'SUMMARY:Weekly focus',
+        'DTSTART;VALUE=DATE:20260601',
+        'DURATION:P1D',
+        'RRULE:FREQ=WEEKLY',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n'),
+    })
+    const result = await updateCalendarEvent(makeDeps(account(), durationSeries, cap), {
+      args: { end: '2026-06-17', recurrenceId: '2026-06-15', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(cap.updated).toHaveLength(0)
+  })
+})
+
+describe('updateCalendarEvent — reminder', () => {
+  test('reminderMinutesBefore replaces every stored alarm with one', async () => {
+    const cap = captured()
+    const stored = storedEvent({ data: withAlarms(storedEvent().data, ALARM_DISPLAY, ALARM_EMAIL) })
+    const result = await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { reminderMinutesBefore: 10, uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    const alarms = valarmBlocks(cap.updated[0]?.ical ?? '')
+    expect(alarms).toHaveLength(1)
+    expect(alarms[0]).toContain('TRIGGER:-PT10M')
+    expect(alarms[0]).toContain('ACTION:DISPLAY')
+    expect(result.content[0]?.text).toContain('reminder 10 minutes before')
+  })
+
+  test('reminderMinutesBefore: "none" removes every stored alarm', async () => {
+    const cap = captured()
+    const stored = storedEvent({ data: withAlarms(storedEvent().data, ALARM_DISPLAY, ALARM_EMAIL) })
+    const result = await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { reminderMinutesBefore: 'none', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(valarmBlocks(cap.updated[0]?.ical ?? '')).toEqual([])
+    expect(result.content[0]?.text).toContain('reminders removed')
+  })
+
+  test('reports an all-day reminder as the clock time it fires', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), vacationStored(), cap), {
+      args: { reminderMinutesBefore: 900, uid: UID },
+      token: 'tok',
+    })
+    expect(result.content[0]?.text).toContain('reminder 09:00 the day before')
+  })
+
+  // A reminder is the organizer's own business: changing it must not rebuild
+  // the attendee list (which resets every PARTSTAT to NEEDS-ACTION) or bump
+  // SEQUENCE (which re-invites everyone).
+  test('a reminder-only edit keeps attendee responses and SEQUENCE', async () => {
+    const cap = captured()
+    const accepted = storedEvent().data.replace('PARTSTAT=NEEDS-ACTION', 'PARTSTAT=ACCEPTED')
+    expect(accepted).toContain('PARTSTAT=ACCEPTED')
+    const stored = storedEvent({ data: withAlarms(accepted, ALARM_DISPLAY) })
+    const result = await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { reminderMinutesBefore: 10, uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    expect(ical).toContain('PARTSTAT=ACCEPTED')
+    expect(ical).toContain('SEQUENCE:2')
+    expect(ical).not.toContain('SEQUENCE:3')
+    expect(valarmBlocks(ical)).toHaveLength(1)
+    expect(valarmBlocks(ical)[0]).toContain('TRIGGER:-PT10M')
+    expect(result.content[0]?.text).toContain('no notifications sent')
+    // Everything but the alarm is byte-identical to what was stored.
+    const withoutAlarms = (text: string): string => text.replace(VALARM_BLOCK_RE, '')
+    expect(withoutAlarms(ical)).toBe(withoutAlarms(unfold(stored.data)).replace(TRAILING_NEWLINE_RE, '\r\n'))
+  })
+
+  test('a reminder-only edit applies to every VEVENT of a series with overrides', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), seriesWithOverride(), cap), {
+      args: { reminderMinutesBefore: 'none', uid: UID },
+      token: 'tok',
+    })
+    // No customized-occurrence refusal: nothing is rebuilt, so nothing is flattened.
+    expect(result.isError).toBeUndefined()
+    // …but every occurrence's own reminder was replaced, and the result says so.
+    expect(result.content[0]?.text).toContain('every occurrence')
+    expect(valarmBlocks(cap.updated[0]?.ical ?? '')).toEqual([])
+    expect((cap.updated[0]?.ical.match(/BEGIN:VEVENT/gu) ?? []).length).toBe(2)
+  })
+
+  test('sets a reminder on one occurrence of a personal series', async () => {
+    const cap = captured()
+    const personal = recurringStored({
+      data: buildInvite({
+        attendees: [],
+        end: new Date('2026-06-16T10:30:00Z'),
+        rrule: 'FREQ=WEEKLY;BYDAY=TU',
+        start: new Date('2026-06-16T10:00:00Z'),
+        timeZone: 'UTC',
+        title: 'Focus',
+        uid: UID,
+      }),
+    })
+    const result = await updateCalendarEvent(makeDeps(account(), personal, cap), {
+      args: { recurrenceId: '2026-06-23T10:00:00Z', reminderMinutesBefore: 60, uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    const alarms = valarmBlocks(cap.updated[0]?.ical ?? '')
+    expect(alarms).toHaveLength(1)
+    expect(alarms[0]).toContain('TRIGGER:-PT1H')
+  })
+
+  // An existing override already carries the attendees' responses for that
+  // occurrence; a reminder change splices its alarms like the whole-event path.
+  test('a reminder-only edit of an overridden occurrence keeps responses and SEQUENCE', async () => {
+    const cap = captured()
+    const stored = seriesWithOverride()
+    const accepted = storedEvent({ data: stored.data.replaceAll('PARTSTAT=NEEDS-ACTION', 'PARTSTAT=ACCEPTED') })
+    const result = await updateCalendarEvent(makeDeps(account(), accepted, cap), {
+      args: { recurrenceId: OVERRIDDEN_OCCURRENCE, reminderMinutesBefore: 5, uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    expect(ical).not.toContain('PARTSTAT=NEEDS-ACTION')
+    expect(ical).toContain('SEQUENCE:2')
+    expect(ical).toContain('SEQUENCE:3')
+    expect(ical).not.toContain('SEQUENCE:4')
+    // Only the override got the alarm; the master is untouched.
+    const alarms = valarmBlocks(ical)
+    expect(alarms).toHaveLength(1)
+    expect(alarms[0]).toContain('TRIGGER:-PT5M')
+    const override = ical.slice(ical.lastIndexOf('BEGIN:VEVENT'))
+    expect(override).toContain('RECURRENCE-ID')
+    expect(override).toContain('TRIGGER:-PT5M')
+  })
+
+  test('an occurrence reminder is reported from the override, not the master', async () => {
+    const cap = captured()
+    // A timed override (09:00–10:00Z, its own title) of an all-day series.
+    const override = buildInvite({
+      attendees: ['guest.a@example.com', 'guest.b@example.com'],
+      end: new Date('2026-06-23T10:00:00Z'),
+      organizer: 'host@langmail.me',
+      recurrenceAllDay: true,
+      recurrenceId: new Date('2026-06-23T00:00:00Z'),
+      sequence: 1,
+      start: new Date('2026-06-23T09:00:00Z'),
+      timeZone: 'UTC',
+      title: 'Offsite (morning only)',
+      uid: UID,
+    })
+    const stored = storedEvent({ data: `${allDayStored().data}\r\n${override}` })
+    const result = await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { recurrenceId: '2026-06-23', reminderMinutesBefore: 60, uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(result.content[0]?.text).toContain('"Offsite (morning only)"')
+    expect(result.content[0]?.text).toContain('reminder 1 hour before')
+  })
+
+  test('an override without a SUMMARY is reported under the series title', async () => {
+    const cap = captured()
+    const bare = seriesWithOverride().data.replace('SUMMARY:Weekly Sync (moved)\r\n', '')
+    expect(bare).not.toContain('Weekly Sync (moved)')
+    const result = await updateCalendarEvent(makeDeps(account(), storedEvent({ data: bare }), cap), {
+      args: { recurrenceId: OVERRIDDEN_OCCURRENCE, reminderMinutesBefore: 5, uid: UID },
+      token: 'tok',
+    })
+    expect(result.content[0]?.text).toContain('Event "Weekly Sync" updated')
+    // The alarm the user sees carries the series title too, not "Reminder".
+    const override = unfold(cap.updated[0]?.ical ?? '').slice(
+      unfold(cap.updated[0]?.ical ?? '').lastIndexOf('BEGIN:VEVENT')
+    )
+    expect(override).toContain('DESCRIPTION:Weekly Sync\r\n')
+  })
+
+  test('a reminder-only edit of an event without a SUMMARY names it by uid', async () => {
+    const cap = captured()
+    const untitled = storedEvent({ data: storedEvent().data.replace('SUMMARY:Sync\r\n', '') })
+    const result = await updateCalendarEvent(makeDeps(account(), untitled, cap), {
+      args: { reminderMinutesBefore: 5, uid: UID },
+      token: 'tok',
+    })
+    expect(result.content[0]?.text).toContain(`Event "${UID}" updated`)
+  })
+
+  test('refuses a reminder-only edit of an un-overridden occurrence of a series with attendees', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
+      args: { recurrenceId: '2026-06-23T10:00:00Z', reminderMinutesBefore: 60, uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('omit `recurrenceId`')
+    expect(cap.updated).toHaveLength(0)
+  })
+})
+
+describe('updateCalendarEvent — cancelled occurrences', () => {
+  test('refuses to edit an occurrence of an all-day series that was cancelled', async () => {
+    const cap = captured()
+    const cancelled = storedEvent({
+      data: allDayStored().data.replace(
+        'RRULE:FREQ=WEEKLY;BYDAY=TU',
+        'RRULE:FREQ=WEEKLY;BYDAY=TU\r\nEXDATE;VALUE=DATE:20260623'
+      ),
+    })
+    const result = await updateCalendarEvent(makeDeps(account(), cancelled, cap), {
+      args: { recurrenceId: '2026-06-23', title: 'Back on', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('cancelled')
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('refuses to edit an occurrence cancelled by a TZID-qualified EXDATE', async () => {
+    const cap = captured()
+    // A foreign client's form: 12:00 Berlin (CEST) is the 10:00Z occurrence.
+    const cancelled = recurringStored({
+      data: recurringStored().data.replace(
+        'RRULE:FREQ=WEEKLY;BYDAY=TU',
+        'RRULE:FREQ=WEEKLY;BYDAY=TU\r\nEXDATE;TZID=Europe/Berlin:20260623T120000'
+      ),
+    })
+    const result = await updateCalendarEvent(makeDeps(account(), cancelled, cap), {
+      args: { recurrenceId: '2026-06-23T10:00:00Z', title: 'Back on', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('refuses to edit a cancelled occurrence of a timed series', async () => {
+    const cap = captured()
+    const cancelled = recurringStored({
+      data: recurringStored().data.replace(
+        'RRULE:FREQ=WEEKLY;BYDAY=TU',
+        'RRULE:FREQ=WEEKLY;BYDAY=TU\r\nEXDATE:20260623T100000Z'
+      ),
+    })
+    const result = await updateCalendarEvent(makeDeps(account(), cancelled, cap), {
+      args: { recurrenceId: '2026-06-23T10:00:00Z', title: 'Back on', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(cap.updated).toHaveLength(0)
   })
 })

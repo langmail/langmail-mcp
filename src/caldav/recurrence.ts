@@ -8,7 +8,9 @@ import { TZDate } from '@date-fns/tz'
 import { rrulestr } from 'rrule'
 import { z } from 'zod'
 
-import { toWallClockIso } from './timezone.ts'
+import { parseWallClockInZone } from '@langmail/ical'
+
+import { dateOnlyToInstant, isDateOnly, toWallClockIso } from './timezone.ts'
 
 // RFC 5545 FREQ values we expose. Lowercase in the structured form for the
 // model's convenience; uppercased when emitted into the RRULE.
@@ -40,7 +42,10 @@ const structuredRecurrenceSchema = z
     count: z.number().int().min(1).max(1000).optional().describe('Total occurrences; not with `until`.'),
     frequency: z.enum(RECURRENCE_FREQUENCIES).describe('How often it repeats.'),
     interval: z.number().int().min(1).max(1000).optional().describe('Every N periods; defaults to 1.'),
-    until: z.iso.datetime({ offset: true }).optional().describe('Stops after this instant; not with `count`.'),
+    until: z
+      .union([z.iso.date(), z.iso.datetime({ offset: true })])
+      .optional()
+      .describe('Last day (YYYY-MM-DD) or instant of the series; not with `count`.'),
   })
   .refine((r) => !(r.until !== undefined && r.count !== undefined), {
     message: 'Provide at most one of `until` or `count`, not both.',
@@ -59,8 +64,9 @@ export type Recurrence = z.infer<typeof recurrenceSchema>
 export const recurrenceDescription =
   'Either a raw RFC 5545 RRULE ("FREQ=WEEKLY;BYDAY=TH", "FREQ=DAILY;COUNT=10") or ' +
   '{frequency, interval?, byDay?, until?|count?}. Use at most one of until/count; ' +
-  'a raw UNTIL must be a UTC date-time (UNTIL=20261231T000000Z). A raw rule is only ' +
-  'lightly validated, so a malformed one fails later at the server.'
+  'The object’s `until` is ISO (2026-12-31 or 2026-12-31T00:00:00Z); a raw UNTIL is compact ' +
+  '(20261231 or 20261231T000000Z). Either is converted to match the event (a date on an all-day series). ' +
+  'A raw rule is only lightly validated, so a malformed one fails later at the server.'
 
 // ISO `2026-12-31T00:00:00.000Z` → iCalendar `20261231T000000Z`: drop the
 // date/time separators, then the milliseconds.
@@ -97,9 +103,50 @@ export const toRRule = (recurrence: Recurrence): string => {
     parts.push(`COUNT=${recurrence.count}`)
   }
   if (recurrence.until !== undefined) {
-    parts.push(`UNTIL=${toIcalUtc(recurrence.until)}`)
+    // A date stays a date here; alignUntil re-types it to match the event.
+    parts.push(
+      `UNTIL=${DATE_ONLY_ISO_RE.test(recurrence.until) ? recurrence.until.replaceAll('-', '') : toIcalUtc(recurrence.until)}`
+    )
   }
   return parts.join(';')
+}
+
+const DATE_ONLY_ISO_RE = /^\d{4}-\d{2}-\d{2}$/u
+const UNTIL_RE = /(^|;)UNTIL=([^;]*)/iu
+const ICAL_DATE_RE = /^(\d{4})(\d{2})(\d{2})$/u
+const ICAL_UTC_DATE_TIME_RE = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/iu
+const ICAL_FLOATING_DATE_TIME_RE = /^(\d{8})T\d{6}$/u
+
+// The UNTIL value re-typed for the event it bounds, or undefined to keep it.
+const alignedUntil = (value: string, allDay: boolean, timeZone: string): string | undefined => {
+  const date = ICAL_DATE_RE.exec(value)
+  const utc = ICAL_UTC_DATE_TIME_RE.exec(value)
+  if (allDay) {
+    if (utc) {
+      const [, y, mo, d, h, mi, s] = utc
+      const instant = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`)
+      return toWallClockIso(instant, timeZone).slice(0, 10).replaceAll('-', '')
+    }
+    return ICAL_FLOATING_DATE_TIME_RE.exec(value)?.[1]
+  }
+  if (date) {
+    // "Until Dec 31" on a timed series includes that whole day.
+    const [, y, mo, d] = date
+    return toIcalUtc(parseWallClockInZone(`${y}-${mo}-${d}T23:59:59`, timeZone).toISOString())
+  }
+  return
+}
+
+// RFC 5545 §3.3.10: UNTIL must have the same value type as DTSTART — a DATE on
+// an all-day series, a UTC DATE-TIME on a timed (zoned or UTC) one. Rules
+// arrive in either form (a structured date, a raw rule, a rule preserved from
+// storage across a timed↔all-day switch), so every rule is aligned right
+// before it is written. A date-time becomes its calendar date in `timeZone`; a
+// date on a timed series becomes the end of that day in `timeZone`.
+export const alignUntil = (rrule: string, allDay: boolean, timeZone: string): string => {
+  const match = UNTIL_RE.exec(rrule)
+  const aligned = match?.[2] ? alignedUntil(match[2].trim(), allDay, timeZone) : undefined
+  return aligned === undefined ? rrule : rrule.replace(UNTIL_RE, `$1UNTIL=${aligned}`)
 }
 
 // BYDAY on a raw rule, and the parts of a rule that make a naive weekday check
@@ -149,4 +196,38 @@ export const isSeriesOccurrence = (
   const rule = rrulestr(`DTSTART:${start}\nRRULE:${rrule}`)
   const at = timeZone ? new Date(`${toWallClockIso(new Date(recurrenceId), timeZone)}Z`) : new Date(recurrenceId)
   return rule.between(at, at, true).length > 0
+}
+
+// The occurrence a caller's `recurrenceId` names, as an ISO instant, for the
+// series `master` heads. An all-day series' occurrences start at a date, so it
+// takes the date (`2026-06-23`), resolved to its UTC midnight — the instant the
+// parser and the splice give a DATE RECURRENCE-ID or EXDATE. A timed series
+// takes the occurrence's original start date-time. The wrong kind is refused
+// in both directions rather than coerced: a date-time's calendar day depends
+// on its offset, so truncating one could name the neighbouring occurrence.
+export const resolveRecurrenceId = (
+  recurrenceId: string,
+  master: { allDay?: true; recurrence?: string } | undefined
+): { error: string; ok: false } | { ok: true; value: string } => {
+  const dateOnly = isDateOnly(recurrenceId)
+  if (master?.allDay) {
+    return dateOnly
+      ? { ok: true, value: dateOnlyToInstant(recurrenceId).toISOString() }
+      : {
+          // Name the UTC day of the instant and say so: whether that or the
+          // leading digits is the day the caller meant depends on how they
+          // computed the value, so the hint must not pass a guess off as fact.
+          error:
+            'This series is all-day; pass recurrenceId as the occurrence’s date (YYYY-MM-DD). The instant you ' +
+            `passed falls on ${new Date(recurrenceId).toISOString().slice(0, 10)} in UTC.`,
+          ok: false,
+        }
+  }
+  if (dateOnly && master?.recurrence !== undefined) {
+    return {
+      error: `This series is not all-day; pass recurrenceId as the occurrence’s original start date-time (e.g. ${recurrenceId}T10:00:00Z).`,
+      ok: false,
+    }
+  }
+  return { ok: true, value: recurrenceId }
 }

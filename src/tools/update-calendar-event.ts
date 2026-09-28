@@ -28,6 +28,7 @@ import { type ParsedAttendee, type ParsedEvent, parseEvents } from '@langmail/ic
 import { hashEmail, logger } from '@langmail/logger'
 
 import { type AccountTimeZoneResolver, makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
+import { describeReminder, MAX_REMINDER_MINUTES } from '../caldav/alarm.ts'
 import {
   type CalDavConfig,
   discoverAccount,
@@ -37,16 +38,28 @@ import {
   type UpdateEventParams,
   updateEvent,
 } from '../caldav/client.ts'
-import { buildInvite, maxSequence, parseSequence } from '../caldav/ical.ts'
-import { spliceOccurrenceOverride } from '../caldav/occurrence.ts'
+import { buildInvite, type InviteAlarm, maxSequence, parseSequence } from '../caldav/ical.ts'
+import { spliceAlarms, spliceOccurrenceOverride } from '../caldav/occurrence.ts'
 import {
+  alignUntil,
   isSeriesOccurrence,
   recurrenceDescription,
   recurrenceSchema,
+  resolveRecurrenceId,
   startContradictsRule,
   toRRule,
 } from '../caldav/recurrence.ts'
-import { resolveInputDateTime, toWallClockIso, UTC_TIME_ZONE } from '../caldav/timezone.ts'
+import {
+  allDayEndError,
+  dateOnlyToInstant,
+  type EventTimesResolution,
+  instantToDateOnly,
+  isDateOnly,
+  resolveEventTimes,
+  resolveInputDateTime,
+  toWallClockIso,
+  UTC_TIME_ZONE,
+} from '../caldav/timezone.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import { type AttendeeWriteThrough } from './contact-write-through.ts'
@@ -58,6 +71,10 @@ import { errorResult, type ToolResult, textResult } from './result.ts'
 // "keep the stored rule". Listed first so it can't be read as a raw RRULE.
 const NO_RECURRENCE = 'none'
 const updateRecurrenceSchema = z.union([z.literal(NO_RECURRENCE), recurrenceSchema])
+
+// Same sentinel for reminders: omitting keeps the stored alarms, a number
+// replaces them all with one, `"none"` removes them.
+const NO_REMINDER = 'none'
 
 const shared = createCalendarEventInput.shape
 
@@ -77,7 +94,8 @@ export const updateCalendarEventInput = z.object({
   end: shared.end
     .optional()
     .describe(
-      'New end time, ISO 8601. Omit to keep the event’s duration when moving `start`, its stored end otherwise.'
+      'New end, ISO 8601, or an exclusive date for an all-day event. Omit to keep the event’s length when ' +
+        'moving `start`, its stored end otherwise.'
     ),
   location: shared.location.describe('New location; `""` clears it. Omit to keep the stored one.'),
   notify: z
@@ -90,12 +108,20 @@ export const updateCalendarEventInput = z.object({
       `New repeat rule for the whole series; "${NO_RECURRENCE}" makes it a one-off. ` +
         `Omit to keep the stored rule. ${recurrenceDescription}`
     ),
-  recurrenceId: z.iso
-    .datetime({ offset: true })
+  recurrenceId: z
+    .union([z.iso.date(), z.iso.datetime({ offset: true })])
     .optional()
     .describe(
       'To change one occurrence of a repeating series alone, its original start as an ISO 8601 instant ' +
-        '(e.g. 2026-06-16T10:00:00Z). Not combinable with `recurrence`, `addedAttendees` or `removedAttendees`.'
+        '(e.g. 2026-06-16T10:00:00Z), or its date for an all-day series (2026-06-16). Not combinable with ' +
+        '`recurrence`, `addedAttendees` or `removedAttendees`.'
+    ),
+  reminderMinutesBefore: z
+    .union([z.literal(NO_REMINDER), z.number().int().min(0).max(MAX_REMINDER_MINUTES)])
+    .optional()
+    .describe(
+      'Minutes before the start to remind the user (all-day events start at 00:00, so 900 = 09:00 the day ' +
+        `before); replaces any stored reminders. "${NO_REMINDER}" removes them. Omit to keep the stored ones.`
     ),
   removedAttendees: z
     .array(z.email())
@@ -103,7 +129,9 @@ export const updateCalendarEventInput = z.object({
     .max(50)
     .optional()
     .describe('Email addresses to uninvite (case-insensitive). Cannot be combined with `attendees`.'),
-  start: shared.start.optional().describe('New start time, ISO 8601. Omit to keep the stored start.'),
+  start: shared.start
+    .optional()
+    .describe('New start, ISO 8601, or a date (2026-10-03) for an all-day event. Omit to keep the stored start.'),
   // Not `shared.timeZone`: on update this zone governs the caller's own
   // start/end and the rebuilt event's rendering, and it defaults to the stored
   // event's own zone rather than the account's.
@@ -161,6 +189,8 @@ export interface UpdateCalendarEventContext {
 // stored value) rather than read off `args`, so this path and the whole-event
 // path agree on what "the edited event" is.
 interface OccurrenceUpdate {
+  alarms: InviteAlarm[]
+  allDay: boolean
   args: UpdateCalendarEventArgs
   attendees: string[]
   deps: UpdateCalendarEventDeps
@@ -188,6 +218,8 @@ interface OccurrenceUpdate {
 // the stored object alongside the untouched master before PUTting it back.
 const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
   const {
+    alarms,
+    allDay,
     args,
     attendees,
     deps,
@@ -224,13 +256,22 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
   } catch {
     return errorResult(
       `Could not evaluate this series' recurrence rule (${master.recurrence}) to validate ` +
-        `recurrenceId ${recurrenceId}.`
+        `recurrenceId ${args.recurrenceId ?? recurrenceId}. Nothing was changed.`
     )
   }
   if (!onOccurrence) {
     return errorResult(
-      `recurrenceId ${recurrenceId} does not match an occurrence of this series ` +
-        `(${master.recurrence}); it must equal an occurrence’s original start.`
+      `recurrenceId ${args.recurrenceId ?? recurrenceId} does not match an occurrence of this series ` +
+        `(${master.recurrence}); it must equal an occurrence’s original ${master.allDay ? 'date' : 'start'}. ` +
+        'Nothing was changed. Use list_calendar_events to see the series.'
+    )
+  }
+  // An EXDATE on the master cancels the instant; an override for it would be
+  // an orphan the series never shows, while this tool reported success.
+  if (isExcluded(master, recurrenceId)) {
+    return errorResult(
+      `The occurrence on ${args.recurrenceId ?? recurrenceId} was cancelled, so there is nothing to edit. ` +
+        'Nothing was changed.'
     )
   }
 
@@ -238,6 +279,8 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
   // any prior edit of the same instance.
   const sequence = maxSequence(existing.data) + 1
   const override = buildInvite({
+    alarms,
+    allDay,
     attendees,
     end,
     // The master's stored ORGANIZER wins over the discovered principal: an
@@ -246,6 +289,7 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
     // rejects with 412 SameOrganizerInAllComponents (see
     // docs/reference/stalwart/observed-behaviour.md).
     organizer: master.organizer ?? organizer,
+    recurrenceAllDay: master.allDay === true,
     recurrenceTimeZone: master.startTzid ?? UTC_TIME_ZONE,
     recurrenceId: new Date(recurrenceId),
     sequence,
@@ -282,10 +326,21 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
   })
 
   return textResult(
-    `Occurrence of "${title}" on ${recurrenceId} updated ` +
-      `(${deliverySummary(attendees, scheduleAgent, removedAttendees.length > 0)}). ` +
+    `Occurrence of "${title}" on ${args.recurrenceId ?? recurrenceId} updated ` +
+      `(${deliverySummary(attendees, scheduleAgent, removedAttendees.length > 0)}${reminderSummary(args, allDay)}). ` +
       'The rest of the series is unchanged.'
   )
+}
+
+// The reminder change an edit made, for the result line; empty when the
+// stored reminders were kept.
+const reminderSummary = (args: UpdateCalendarEventArgs, allDay: boolean): string => {
+  if (args.reminderMinutesBefore === undefined) {
+    return ''
+  }
+  return args.reminderMinutesBefore === NO_REMINDER
+    ? '; reminders removed'
+    : `; reminder ${describeReminder(args.reminderMinutesBefore, allDay)}`
 }
 
 // Audit line for the accepted PUT: the iMIP fan-out it triggers is otherwise
@@ -355,6 +410,12 @@ const deliverySummary = (attendees: string[], scheduleAgent?: 'NONE', removedAny
 // state, so editing an already-customized occurrence never reverts it to the
 // master's title/time.
 interface EditBase {
+  // The stored VALARMs as raw content lines, carried into the rebuilt VEVENT
+  // verbatim unless the caller replaces them (see resolveAlarms).
+  alarms: string[][]
+  // True when the stored DTSTART is a DATE: `start`/`end` are then date-only
+  // strings and `end` is exclusive.
+  allDay: boolean
   attendees: string[]
   description?: string
   // ISO wall-clock (or `…Z`) strings exactly as stored, not yet resolved against
@@ -379,6 +440,8 @@ interface EditBase {
 }
 
 const baseOf = (event: ParsedEvent | undefined): EditBase => ({
+  alarms: (event?.alarms ?? []).map((a) => a.lines),
+  allDay: event?.allDay === true,
   attendees: (event?.attendees ?? []).map((a) => a.email),
   hasExcludedDates: (event?.excludedDates?.length ?? 0) > 0,
   unparsedAttendeeCount: event?.unparsedAttendeeCount ?? 0,
@@ -394,6 +457,8 @@ const baseOf = (event: ParsedEvent | undefined): EditBase => ({
 // The event fields an edit resolves to, once the caller's values and the
 // preserved stored values have been reconciled.
 interface ResolvedFields {
+  alarms: InviteAlarm[]
+  allDay: boolean
   attendees: string[]
   description?: string
   end: Date
@@ -414,6 +479,7 @@ const MUTATING_FIELDS = [
   'end',
   'location',
   'recurrence',
+  'reminderMinutesBefore',
   'removedAttendees',
   'start',
   'title',
@@ -424,7 +490,7 @@ const MUTATING_FIELDS = [
 // Returns the error message, or undefined when the combination is coherent.
 const combinationError = (args: UpdateCalendarEventArgs, isDelta: boolean): string | undefined => {
   if (MUTATING_FIELDS.every((field) => args[field] === undefined)) {
-    return 'Nothing to update: pass at least one field to change — `start`/`end` to reschedule, `title`, `location`, `description`, `attendees` (or `addedAttendees`/`removedAttendees`), or `recurrence`.'
+    return 'Nothing to update: pass at least one field to change — `start`/`end` to reschedule, `title`, `location`, `description`, `attendees` (or `addedAttendees`/`removedAttendees`), `recurrence`, or `reminderMinutesBefore`.'
   }
   // `recurrence` re-rules the whole series; `recurrenceId` edits one occurrence.
   if (args.recurrenceId !== undefined && args.recurrence !== undefined) {
@@ -447,6 +513,8 @@ const combinationError = (args: UpdateCalendarEventArgs, isDelta: boolean): stri
 // stored with DURATION and no DTEND).
 const CLOCK_TIME_RE = /T\d{2}:\d{2}:\d{2}/u
 const hasClockTime = (iso: string | undefined): boolean => iso !== undefined && CLOCK_TIME_RE.test(iso)
+// A stored start/end an edit can carry over: a clock time, or an all-day date.
+const isReadableTime = (iso: string | undefined): boolean => hasClockTime(iso) || isDateOnly(iso)
 
 // A caller that re-specifies the event's whole shape — its time, title, attendee
 // list and repeat rule — has said what the event should become without relying
@@ -482,15 +550,15 @@ const mergeSafetyError = (stored: ParsedEvent[], base: EditBase, args: UpdateCal
   if (args.attendees === undefined && base.unparsedAttendeeCount > 0) {
     return 'This event has attendee(s) in an address format the connector can’t safely preserve. Pass the complete `attendees` list instead.'
   }
-  // A preserved start with no clock time (all-day, or DURATION-only) can't be
-  // rebuilt as a timed VEVENT.
-  if (args.start === undefined && !hasClockTime(base.start)) {
-    return 'This event has no explicit start time (e.g. an all-day event); pass `start` and `end` to edit it.'
+  // A preserved start has to be a clock time or an all-day date.
+  if (args.start === undefined && !isReadableTime(base.start)) {
+    return 'This event has no explicit start time; pass `start` and `end` to edit it.'
   }
   // A preserved end is the stored end, or — when `start` moves — the stored
-  // duration carried over; either way both stored instants have to be readable.
-  if (args.end === undefined && !(hasClockTime(base.start) && hasClockTime(base.end))) {
-    return 'This event has no explicit end time (e.g. an all-day event); pass `start` and `end` to edit it.'
+  // duration carried over; either way both stored values have to be readable.
+  // An event stored with DURATION and no DTEND has no end to read.
+  if (args.end === undefined && !(isReadableTime(base.start) && isReadableTime(base.end))) {
+    return 'This event has no explicit end time (e.g. one stored with a DURATION); pass `start` and `end` to edit it.'
   }
   return
 }
@@ -536,30 +604,19 @@ const resolveEditFields = (
   if (title === undefined) {
     return { error: 'This event has no readable title to keep; pass `title`.', ok: false }
   }
-  if (args.start === undefined && base.start === undefined) {
-    return { error: 'This event has no readable start to keep; pass `start` and `end`.', ok: false }
+  const times = resolveEditTimes(args, base, timeZone)
+  if (!times.ok) {
+    return times
   }
-  // A caller-supplied value is read with the caller's timeZone semantics; a
-  // preserved stored value is read as wall-clock in the zone it was *stored* in
-  // (base.timeZone), never in the caller's — an explicit `timeZone` on a
-  // title-only edit must not silently re-express the event elsewhere.
-  const start =
-    args.start === undefined
-      ? resolveStored(base.start ?? '', base, timeZone)
-      : resolveInputDateTime(args.start, timeZone, args.timeZone !== undefined)
-  const end = resolveEnd(args, base, timeZone, start)
-  if (end === undefined) {
-    return { error: 'This event has no readable end to keep; pass `start` and `end`.', ok: false }
-  }
-  if (end <= start) {
-    return { error: 'Event end must be after its start.', ok: false }
-  }
+  const { allDay, end, start } = times.value
 
   const location = args.location ?? base.location
   const description = args.description ?? base.description
   return {
     ok: true,
     value: {
+      alarms: resolveAlarms(args, base),
+      allDay,
       attendees: attendees.attendees,
       end,
       start,
@@ -571,6 +628,73 @@ const resolveEditFields = (
   }
 }
 
+// The alarms the edited VEVENT carries: a number replaces every stored alarm
+// with one DISPLAY reminder, `"none"` drops them all, and omitting it carries
+// the stored ones across verbatim.
+const resolveAlarms = (args: UpdateCalendarEventArgs, base: EditBase): InviteAlarm[] => {
+  if (args.reminderMinutesBefore === NO_REMINDER) {
+    return []
+  }
+  if (args.reminderMinutesBefore !== undefined) {
+    return [{ minutesBefore: args.reminderMinutesBefore }]
+  }
+  return base.alarms.map((lines) => ({ lines }))
+}
+
+// Whether the edited event is all-day: the value type of whichever time the
+// caller passed (start first), else the stored event's.
+const targetAllDay = (args: UpdateCalendarEventArgs, base: EditBase): boolean => {
+  const given = args.start ?? args.end
+  return given === undefined ? base.allDay : isDateOnly(given)
+}
+
+// Resolves the edited event's times. Passing both `start` and `end` states them
+// outright (and may switch between all-day and timed); passing one or neither
+// carries the rest over from storage, which only makes sense within the stored
+// kind — converting with one side would have to invent the other side's clock
+// time or length.
+const resolveEditTimes = (args: UpdateCalendarEventArgs, base: EditBase, timeZone: string): EventTimesResolution => {
+  const allDay = targetAllDay(args, base)
+  if (args.start !== undefined && args.end !== undefined) {
+    return resolveEventTimes(args.start, args.end, timeZone, args.timeZone !== undefined)
+  }
+  if (allDay !== base.allDay) {
+    return {
+      error:
+        'To switch an event between all-day and timed, pass both `start` and `end` — dates (YYYY-MM-DD, end ' +
+        'exclusive) for all-day, date-times for timed.',
+      ok: false,
+    }
+  }
+  if (args.start === undefined && base.start === undefined) {
+    return { error: 'This event has no readable start to keep; pass `start` and `end`.', ok: false }
+  }
+  // A caller-supplied value is read with the caller's timeZone semantics; a
+  // preserved stored value is read as wall-clock in the zone it was *stored* in
+  // (base.timeZone), never in the caller's — an explicit `timeZone` on a
+  // title-only edit must not silently re-express the event elsewhere.
+  const start =
+    args.start === undefined
+      ? resolveStored(base.start ?? '', base, timeZone)
+      : resolveCallerTime(args.start, args, timeZone)
+  const end = resolveEnd(args, base, timeZone, start)
+  if (end === undefined) {
+    return { error: 'This event has no readable end to keep; pass `start` and `end`.', ok: false }
+  }
+  if (end <= start) {
+    return {
+      error: allDay ? allDayEndError(instantToDateOnly(start)) : 'Event end must be after its start.',
+      ok: false,
+    }
+  }
+  return { ok: true, value: { allDay, end, start } }
+}
+
+// A caller's start/end: an all-day date as its UTC midnight, a date-time read
+// with the caller's timeZone semantics.
+const resolveCallerTime = (value: string, args: UpdateCalendarEventArgs, timeZone: string): Date =>
+  isDateOnly(value) ? dateOnlyToInstant(value) : resolveInputDateTime(value, timeZone, args.timeZone !== undefined)
+
 // The effective end. An explicit `end` wins. Omitting it while moving `start`
 // keeps the event's stored *duration* — "push the standup an hour later" is a
 // one-field call and must not silently stretch the meeting — and omitting it
@@ -579,11 +703,11 @@ const resolveEditFields = (
 // only the fallback for a floating stored time (no TZID, no `Z`), where the
 // caller's zone is the best guess we have.
 const resolveStored = (iso: string, base: EditBase, timeZone: string): Date =>
-  resolveInputDateTime(iso, base.timeZone ?? timeZone, false)
+  isDateOnly(iso) ? dateOnlyToInstant(iso) : resolveInputDateTime(iso, base.timeZone ?? timeZone, false)
 
 const resolveEnd = (args: UpdateCalendarEventArgs, base: EditBase, timeZone: string, start: Date): Date | undefined => {
   if (args.end !== undefined) {
-    return resolveInputDateTime(args.end, timeZone, args.timeZone !== undefined)
+    return resolveCallerTime(args.end, args, timeZone)
   }
   if (base.start === undefined || base.end === undefined) {
     return
@@ -599,14 +723,19 @@ const resolveEnd = (args: UpdateCalendarEventArgs, base: EditBase, timeZone: str
 // The whole-series RRULE for a whole-event edit: an explicit `recurrence`
 // re-rules the series, the `"none"` sentinel collapses it to a one-off, and
 // omitting it keeps the stored rule.
-const resolveRrule = (args: UpdateCalendarEventArgs, base: EditBase): string | undefined => {
+// Every rule is re-aligned to the edited event (alignUntil), so a preserved rule
+// follows the event across a switch between all-day and timed.
+const resolveRrule = (
+  args: UpdateCalendarEventArgs,
+  base: EditBase,
+  allDay: boolean,
+  timeZone: string
+): string | undefined => {
   if (args.recurrence === NO_RECURRENCE) {
     return
   }
-  if (args.recurrence !== undefined) {
-    return toRRule(args.recurrence)
-  }
-  return base.recurrence
+  const rrule = args.recurrence === undefined ? base.recurrence : toRRule(args.recurrence)
+  return rrule === undefined ? undefined : alignUntil(rrule, allDay, timeZone)
 }
 
 // Names for the effective attendees of the contact write-through, recovered
@@ -650,10 +779,23 @@ const occurrenceBase = (stored: ParsedEvent[], master: ParsedEvent | undefined, 
     return baseOf(existingOverride)
   }
   const base = baseOf(master)
+  if (base.allDay && isDateOnly(base.start) && isDateOnly(base.end)) {
+    // An all-day occurrence: the recurrenceId's date, for the master's length
+    // in days (both UTC midnights, so the arithmetic is exact).
+    const lengthMs = dateOnlyToInstant(base.end).getTime() - dateOnlyToInstant(base.start).getTime()
+    return {
+      ...base,
+      end: instantToDateOnly(new Date(targetMs + lengthMs)),
+      start: instantToDateOnly(new Date(targetMs)),
+    }
+  }
   if (base.start === undefined || base.end === undefined || !(hasClockTime(base.start) && hasClockTime(base.end))) {
-    // All-day or DURATION-only master: leave the times as stored so
-    // mergeSafetyError refuses with its actionable "pass start and end".
-    return base
+    // DURATION-only master: the occurrence has no slot we can derive, and the
+    // master's own DTSTART is the series' *first* day, not this occurrence's.
+    // Drop both times so mergeSafetyError refuses unless the caller passes
+    // `start` and `end`.
+    const { end: _end, start: _start, ...rest } = base
+    return rest
   }
   // The occurrence's own start/end, expressed exactly the way the master's are
   // — wall clock in the master's zone, or the `…Z` form when it has none — so
@@ -664,6 +806,128 @@ const occurrenceBase = (stored: ParsedEvent[], master: ParsedEvent | undefined, 
     resolveInputDateTime(base.end, zone, false).getTime() - resolveInputDateTime(base.start, zone, false).getTime()
   const zoned = (at: Date): string => `${toWallClockIso(at, zone)}${floating ? 'Z' : ''}`
   return { ...base, end: zoned(new Date(targetMs + durationMs)), start: zoned(new Date(targetMs)) }
+}
+
+// True when the master's EXDATEs cancel the instant `recurrenceId` names.
+// Compared by instant, so a DATE exclusion matches the UTC midnight an
+// all-day recurrenceId resolves to.
+const isExcluded = (master: ParsedEvent, recurrenceId: string): boolean => {
+  const targetMs = Date.parse(recurrenceId)
+  return (master.excludedDates ?? []).some((excluded) => Date.parse(excluded) === targetMs)
+}
+
+// An edit that changes nothing but the reminder. It takes its own path
+// (spliceAlarms) instead of the rebuild: a rebuild re-creates every ATTENDEE
+// as NEEDS-ACTION and bumps SEQUENCE, so setting one's own reminder would wipe
+// the guests' responses and re-invite them.
+const isReminderOnly = (args: UpdateCalendarEventArgs): boolean =>
+  args.reminderMinutesBefore !== undefined &&
+  MUTATING_FIELDS.every((field) => field === 'reminderMinutesBefore' || args[field] === undefined)
+
+// The reminder-only path for one occurrence. An existing override already
+// holds that occurrence's attendee state, so its alarms are spliced like the
+// whole event's. Without one, an override has to be created, which hands the
+// occurrence to Stalwart's scheduler as a fresh REQUEST with every response
+// reset — acceptable for a personal series (nobody to re-invite, so the
+// caller falls through to the normal occurrence path) but not for one with
+// attendees.
+const occurrenceReminderPath = (
+  stored: ParsedEvent[],
+  master: ParsedEvent | undefined,
+  recurrenceId: string
+): { override: ParsedEvent; path: 'splice' } | { path: 'rebuild' | 'refuse' } => {
+  const targetMs = Date.parse(recurrenceId)
+  const override = stored.find((e) => e.recurrenceId !== undefined && Date.parse(e.recurrenceId) === targetMs)
+  if (override) {
+    return { override, path: 'splice' }
+  }
+  return { path: (master?.attendees.length ?? 0) > 0 ? 'refuse' : 'rebuild' }
+}
+
+const updateReminderOnly = async (
+  deps: UpdateCalendarEventDeps,
+  existing: CalendarObject,
+  master: ParsedEvent | undefined,
+  args: UpdateCalendarEventArgs,
+  token: string,
+  scope: ReminderScope
+): Promise<ToolResult> => {
+  const minutes = args.reminderMinutesBefore === NO_REMINDER ? null : (args.reminderMinutesBefore ?? null)
+  const ical = spliceAlarms(existing.data, minutes, scope.kind === 'occurrence' ? scope.recurrenceId : undefined)
+  await deps.updateEvent({ ical, token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
+  return textResult(
+    `Event "${master?.title || args.uid}" updated (no notifications sent${reminderSummary(args, master?.allDay === true)}); ` +
+      REMINDER_SCOPE_NOTE[scope.kind]
+  )
+}
+
+// What a reminder-only edit touched. On a series with individually changed
+// occurrences the whole-event splice replaces their reminders too, so say so.
+type ReminderScope = { kind: 'event' } | { kind: 'series' } | { kind: 'occurrence'; recurrenceId: string }
+const REMINDER_SCOPE_NOTE = {
+  event: 'only the reminder changed.',
+  occurrence: 'only this occurrence’s reminder changed.',
+  series: 'only the reminder changed, on the series and every occurrence, including individually changed ones.',
+} as const
+
+interface ReminderOnlyEdit {
+  args: UpdateCalendarEventArgs
+  deps: UpdateCalendarEventDeps
+  existing: CalendarObject
+  recurrenceId: string | undefined
+  stored: ParsedEvent[]
+  storedMaster: ParsedEvent | undefined
+  token: string
+}
+
+// The result of a reminder-only edit, or undefined when the edit is not one
+// (or is one for a personal series' un-overridden occurrence, which the
+// normal occurrence path handles without anyone to re-invite).
+const reminderOnlyResult = (e: ReminderOnlyEdit): Promise<ToolResult> | ToolResult | undefined => {
+  if (!isReminderOnly(e.args)) {
+    return
+  }
+  if (e.recurrenceId === undefined) {
+    const kind = e.stored.length > 1 ? 'series' : 'event'
+    return updateReminderOnly(e.deps, e.existing, e.storedMaster, e.args, e.token, { kind })
+  }
+  const target = occurrenceReminderPath(e.stored, e.storedMaster, e.recurrenceId)
+  if (target.path === 'splice') {
+    // Report from the override being changed: its title and kind (a timed
+    // override of an all-day series) can differ from the master's. A foreign
+    // override may omit SUMMARY (the parser then yields ''), so fall back to
+    // the series title rather than report `Event ""`.
+    const described = { ...target.override, title: target.override.title || (e.storedMaster?.title ?? '') }
+    return updateReminderOnly(e.deps, e.existing, described, e.args, e.token, {
+      kind: 'occurrence',
+      recurrenceId: e.recurrenceId,
+    })
+  }
+  if (target.path === 'refuse') {
+    return errorResult(
+      'This occurrence has no individual changes yet, so setting its reminder alone would reset the attendees’ ' +
+        'responses to it. Set the reminder on the whole series instead (omit `recurrenceId`). Nothing was changed.'
+    )
+  }
+  return
+}
+
+// What the edit targets: the whole event (merging against the master), or —
+// with `recurrenceId` — one occurrence, named by its normalized instant and
+// merging against that occurrence's own stored state.
+const editScope = (
+  args: UpdateCalendarEventArgs,
+  stored: ParsedEvent[],
+  storedMaster: ParsedEvent | undefined
+): { base: EditBase; recurrenceId?: string } | { error: string } => {
+  if (args.recurrenceId === undefined) {
+    return { base: baseOf(storedMaster) }
+  }
+  const recurrenceId = resolveRecurrenceId(args.recurrenceId, storedMaster)
+  if (!recurrenceId.ok) {
+    return { error: recurrenceId.error }
+  }
+  return { base: occurrenceBase(stored, storedMaster, recurrenceId.value), recurrenceId: recurrenceId.value }
 }
 
 interface RebuildEvent {
@@ -680,6 +944,8 @@ interface RebuildEvent {
 // Serializes the whole-event edit as a single VEVENT.
 const rebuildEvent = ({ args, f, organizer, rrule, sequence, stored, timeZone }: RebuildEvent): string =>
   buildInvite({
+    alarms: f.alarms,
+    allDay: f.allDay,
     attendees: f.attendees,
     end: f.end,
     // Keep the stored ORGANIZER (see updateOccurrence): re-stamping the freshly
@@ -736,8 +1002,16 @@ export const updateCalendarEvent = async (
 
   const timeZone = args.timeZone ?? storedMaster?.startTzid ?? (await deps.resolveTimeZone(token)) ?? UTC_TIME_ZONE
 
-  const base =
-    args.recurrenceId === undefined ? baseOf(storedMaster) : occurrenceBase(stored, storedMaster, args.recurrenceId)
+  const scope = editScope(args, stored, storedMaster)
+  if ('error' in scope) {
+    return errorResult(`${scope.error} Nothing was changed.`)
+  }
+  const { base, recurrenceId } = scope
+
+  const reminderOnly = await reminderOnlyResult({ args, deps, existing, recurrenceId, stored, storedMaster, token })
+  if (reminderOnly) {
+    return reminderOnly
+  }
 
   const unsafe = mergeSafetyError(stored, base, args)
   if (unsafe) {
@@ -746,18 +1020,18 @@ export const updateCalendarEvent = async (
 
   const fields = resolveEditFields(args, isDelta, base, timeZone)
   if (!fields.ok) {
-    return errorResult(fields.error)
+    return errorResult(`${fields.error} Nothing was changed.`)
   }
   const f = fields.value
   const removed = removedAttendees(base.attendees, f.attendees)
 
-  if (args.recurrenceId !== undefined) {
+  if (recurrenceId !== undefined) {
     return updateOccurrence({
       args,
       deps,
       existing,
       organizer: account.organizer,
-      recurrenceId: args.recurrenceId,
+      recurrenceId,
       removedAttendees: removed,
       timeZone,
       token,
@@ -765,8 +1039,9 @@ export const updateCalendarEvent = async (
     })
   }
 
-  const rrule = resolveRrule(args, base)
-  const ruleConflict = movedStartConflict(args, rrule, f.start, timeZone)
+  const rrule = resolveRrule(args, base, f.allDay, timeZone)
+  // All-day dates are UTC midnights, so their weekday is read in UTC.
+  const ruleConflict = movedStartConflict(args, rrule, f.start, f.allDay ? UTC_TIME_ZONE : timeZone)
   if (ruleConflict) {
     return errorResult(ruleConflict)
   }
@@ -804,7 +1079,7 @@ export const updateCalendarEvent = async (
 
   return textResult(
     `${rrule ? 'Recurring event' : 'Event'} "${f.title}" updated ` +
-      `(${deliverySummary(f.attendees, f.scheduleAgent, removed.length > 0)}).`
+      `(${deliverySummary(f.attendees, f.scheduleAgent, removed.length > 0)}${reminderSummary(args, f.allDay)}).`
   )
 }
 
@@ -846,6 +1121,8 @@ export const registerUpdateCalendarEvent = (
         'change the time or title, set the location, or add and remove attendees. Pass the event `uid` ' +
         '(from list_calendar_events or create_calendar_event) plus only the fields to change — every ' +
         'field you omit keeps its stored value, so rescheduling needs nothing but `uid` and `start`. ' +
+        'All-day events stay all-day; pass `start`/`end` as dates or date-times to switch. Set or clear ' +
+        'a reminder with `reminderMinutesBefore`. ' +
         'Attendees are re-notified by iMIP unless you pass `notify: "none"`. To change one occurrence ' +
         'of a repeating series instead of the whole series, pass `recurrenceId`. To rename or recolor ' +
         'a calendar itself, use update_calendar. To put an event on a different calendar, use ' +
