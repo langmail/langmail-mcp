@@ -302,6 +302,17 @@ describe('deleteCalendarEvent — all-day series occurrence', () => {
     expect(result.content[0]?.text).toContain('on 2026-06-23 cancelled')
   })
 
+  test('a date off the all-day series is refused naming the date form', async () => {
+    const cap = captured()
+    const result = await deleteCalendarEvent(makeDeps(account(), allDaySeries(), cap), {
+      args: args({ recurrenceId: '2026-06-24' }),
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('original date')
+    expect(result.content[0]?.text).toContain('list_calendar_events')
+  })
+
   test('refuses a date-time recurrenceId on an all-day series', async () => {
     const cap = captured()
     const result = await deleteCalendarEvent(makeDeps(account(), allDaySeries(), cap), {

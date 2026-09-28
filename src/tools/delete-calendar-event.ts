@@ -128,7 +128,8 @@ const cancelOccurrence = async (c: OccurrenceCancellation): Promise<ToolResult> 
   if (!onOccurrence) {
     return errorResult(
       `recurrenceId ${c.recurrenceId} does not match an occurrence of this series ` +
-        `(${master.recurrence}); it must equal an occurrence’s original start.`
+        `(${master.recurrence}); it must equal an occurrence’s original ${master.allDay ? 'date' : 'start'}. ` +
+        'Nothing was cancelled. Use list_calendar_events to see the series.'
     )
   }
 

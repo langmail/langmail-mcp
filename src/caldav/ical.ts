@@ -262,7 +262,7 @@ const formatRecurrenceId = (instant: Date, timeZone: string): string => {
 
 // Reads the current SEQUENCE off a serialized VEVENT so an edit can bump
 // it. A VEVENT without a SEQUENCE line is implicitly 0 (RFC 5545 §3.8.7.4).
-const SEQUENCE_RE = /^SEQUENCE:(\d+)/mu
+const SEQUENCE_RE = /^SEQUENCE:(\d+)/imu
 
 export const parseSequence = (icalString: string): number => {
   const match = SEQUENCE_RE.exec(icalString)
@@ -274,7 +274,7 @@ export const parseSequence = (icalString: string): number => {
 // own SEQUENCE; a fresh (or re-edited) override bumps past this maximum so
 // attendees' clients always treat it as the newest revision of that instance.
 // No SEQUENCE lines → implicitly 0 (RFC 5545 §3.8.7.4).
-const SEQUENCE_ALL_RE = /^SEQUENCE:(\d+)/gmu
+const SEQUENCE_ALL_RE = /^SEQUENCE:(\d+)/gimu
 
 export const maxSequence = (icalString: string): number => {
   let max = 0

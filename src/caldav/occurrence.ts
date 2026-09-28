@@ -26,15 +26,15 @@ const LINE_RE = /\r\n|\r|\n/u
 // A RECURRENCE-ID content line, with optional parameters (e.g. `;VALUE=DATE`,
 // `;TZID=…`), capturing the value after the first colon. Datetime values are
 // short and never folded, so a single physical line is enough.
-const RECURRENCE_ID_RE = /^RECURRENCE-ID(?:;[^:]*)?:(.*)$/u
+const RECURRENCE_ID_RE = /^RECURRENCE-ID(?:;[^:]*)?:(.*)$/iu
 const TZID_RE = /(?:^|;)TZID=([^;:]+)/iu
 const METHOD_RE = /^METHOD:/iu
 const VTIMEZONE_TZID_RE = /^TZID:(.*)$/iu
 // An EXDATE content line, capturing the (possibly comma-separated) values after
 // the first colon. Like RECURRENCE-ID above, our own single-instant EXDATEs are
 // short and never folded, so one physical line is enough.
-const EXDATE_RE = /^EXDATE(?:;[^:]*)?:(.*)$/u
-const SEQUENCE_RE = /^SEQUENCE:/u
+const EXDATE_RE = /^EXDATE(?:;[^:]*)?:(.*)$/iu
+const SEQUENCE_RE = /^SEQUENCE:/iu
 const RRULE_RE = /^RRULE[:;]/iu
 
 // A top-level VCALENDAR component (VEVENT, VTIMEZONE, …) as its raw lines,

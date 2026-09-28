@@ -366,6 +366,27 @@ describe('spliceOccurrenceCancellation — TZID exclusions', () => {
   })
 })
 
+describe('spliceOccurrenceCancellation — lowercase property names', () => {
+  // Property names are case-insensitive (RFC 5545 §3.1). A producer that
+  // lowercases them must still get its override dropped and SEQUENCE bumped.
+  test('drops a lowercase override, bumps a lowercase SEQUENCE, and writes one SEQUENCE', () => {
+    const lower = (ics: string): string =>
+      ics.replace(
+        /^(RECURRENCE-ID|SEQUENCE|EXDATE)([;:])/gmu,
+        (_m, name: string, sep: string) => `${name.toLowerCase()}${sep}`
+      )
+    const master = masterObject({ sequence: 9 })
+    const override = overrideObject({ sequence: 10 })
+    const object = lower(spliceOccurrenceOverride(master, override, '2026-06-23T10:00:00Z'))
+    expect(object).toContain('recurrence-id:')
+    const out = spliceOccurrenceCancellation(object, '2026-06-23T10:00:00Z')
+    expect(parseEvents(out).filter((e) => e.recurrenceId !== undefined)).toHaveLength(0)
+    const masterEvent = out.slice(out.indexOf('BEGIN:VEVENT'))
+    expect(masterEvent.match(/^sequence:/gimu)).toHaveLength(1)
+    expect(masterEvent).toContain('SEQUENCE:11')
+  })
+})
+
 describe('spliceAlarms', () => {
   // RFC 5545 §3.1: component names are case-insensitive, and some producers
   // write them in lowercase. A miss here would PUT the object back unchanged
