@@ -2,12 +2,15 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import fs from 'node:fs'
 import path from 'node:path'
 
-// NOTE: this import has a side effect. logger.ts opens (and truncates) the dev
-// log file for the AMBIENT service name as it loads, so running this suite
-// rewrites `logs/${SERVICE_NAME || 'unknown'}.log`. That is why the in-process
-// block at the bottom only asserts the export contract and never the ambient
-// level: everything env-dependent is covered by subprocesses instead.
-import { logger } from './logger'
+// Type-only: erased at compile time, so naming the export here does NOT load
+// logger.ts. That matters because loading it opens (and truncates)
+// `logs/${SERVICE_NAME}.log` as an import-time side effect — with the ambient
+// SERVICE_NAME that is a developer's live service log (AGENTS.md: services log
+// to /logs/<SERVICE_NAME>.log in development). The runtime handle comes from
+// the dynamic import in beforeAll, once the env is pinned to a fixture name;
+// this is the same deferred-import idiom services/auth's integration suites
+// use for their pool.
+import { type logger as LoggerExport } from './logger'
 
 // logger.ts does all of its work at import time: it reads process.env, picks a
 // stream set, and touches the /logs directory as a side effect of being loaded.
@@ -25,20 +28,29 @@ const LOGGER_MODULE = path.resolve(import.meta.dir, 'logger.ts')
 const LOGS_DIR = path.resolve(import.meta.dir, '../../../logs')
 
 interface RunResult {
-  exitCode: number
   stderr: string
   stdout: string
 }
 
 interface RunOptions {
+  endpoint?: string
   logLevel?: string
   nodeEnv?: string
   serviceName?: string
   token?: string
-  tokenEndpoint?: string
 }
 
-// Emits one record per level so callers can assert on level filtering.
+// `process.exit(0)` is load-bearing, not tidiness. logger.ts builds its
+// destinations with `sync: true` so an immediate exit cannot drop buffered
+// lines (the rationale at logger.ts:19-26), and exiting here is what puts that
+// claim under test: flip the FILE destination to async and the three tests
+// that read logs/<service>.log go red, because sonic-boom's deferred write
+// never lands.
+//
+// The guard is partial, and worth knowing as such: flipping only the STDOUT
+// destination to async still passes, because fd 1 drains before exit under
+// Bun. So this suite pins the file half of that invariant, not the stdout
+// half. Keep the exit, or the file half loses its only guard too.
 const SCRIPT = `
 import { logger } from ${JSON.stringify(LOGGER_MODULE)}
 logger.info('probe:info')
@@ -58,7 +70,7 @@ const run = (options: RunOptions): RunResult => {
       SERVICE_NAME: options.serviceName ?? '',
       LOG_LEVEL: options.logLevel ?? '',
       BETTERSTACK_SOURCE_TOKEN: options.token ?? '',
-      BETTERSTACK_ENDPOINT: options.tokenEndpoint ?? '',
+      BETTERSTACK_ENDPOINT: options.endpoint ?? '',
     },
     stdout: 'pipe',
     stderr: 'pipe',
@@ -66,11 +78,12 @@ const run = (options: RunOptions): RunResult => {
   const stdout = result.stdout.toString()
   const stderr = result.stderr.toString()
   // A subprocess that dies at import writes nothing, which would otherwise let
-  // the emptiness-tolerant assertions below pass green. Fail loudly instead.
+  // the emptiness-tolerant assertions below pass green. Fail loudly instead, so
+  // no individual test has to re-assert the exit code.
   if (result.exitCode !== 0) {
     throw new Error(`logger subprocess exited ${result.exitCode}\nstdout:\n${stdout}\nstderr:\n${stderr}`)
   }
-  return { exitCode: result.exitCode, stderr, stdout }
+  return { stderr, stdout }
 }
 
 const parseRecords = (stdout: string): Record<string, unknown>[] =>
@@ -80,13 +93,17 @@ const parseRecords = (stdout: string): Record<string, unknown>[] =>
     .map((line) => JSON.parse(line) as Record<string, unknown>)
 
 // One service name per scenario so the files below don't clobber each other or
-// a developer's real service logs. They are fixed constants, so this assumes a
-// single test run at a time against a given checkout. /logs is gitignored
+// a developer's real service logs. They are fixed rather than pid-suffixed on
+// purpose: a fixed name is swept clean by the next run (see sweepFixtures),
+// whereas a pid-suffixed one would be orphaned forever by an interrupted run.
+// The cost is that two concurrent runs of THIS package against THIS checkout
+// would collide, which is not a thing that happens. /logs is gitignored
 // scratch space.
 const DEV_SERVICE = 'logger-test-dev'
 const TRUNCATE_SERVICE = 'logger-test-truncate'
 const LEVEL_SERVICE = 'logger-test-level'
 const PROD_SERVICE = 'logger-test-prod'
+const INPROCESS_SERVICE = 'logger-test-inprocess'
 
 // A plain FILE at the path logger.ts wants to use as a DIRECTORY. This is the
 // cheapest way to make its mkdirSync fail for real, which is the only way to
@@ -101,27 +118,58 @@ const logFileFor = (serviceName: string): string => path.join(LOGS_DIR, `${servi
 // (SIGINT, OOM, a CI step timeout), and a leftover logger-test-prod.log would
 // make the "does not touch /logs" assertion fail on the next run until someone
 // hand-deleted a gitignored file.
+//
+// `logs/unknown.log` is deliberately NOT swept: the empty-SERVICE_NAME case
+// below makes logger.ts write it, but that filename is chosen by logger.ts
+// rather than by this suite, and any number of other packages' test runs write
+// the same path. Deleting it would mean deleting a file this suite does not
+// own. Nothing here asserts on it, and /logs is gitignored.
 const sweepFixtures = (): void => {
-  for (const service of [DEV_SERVICE, TRUNCATE_SERVICE, LEVEL_SERVICE, PROD_SERVICE]) {
+  for (const service of [DEV_SERVICE, TRUNCATE_SERVICE, LEVEL_SERVICE, PROD_SERVICE, INPROCESS_SERVICE]) {
     fs.rmSync(logFileFor(service), { force: true })
   }
   fs.rmSync(BLOCKED_PARENT, { force: true, recursive: true })
 }
 
-beforeAll(() => {
+let logger: typeof LoggerExport
+const ambientEnv = { ...process.env }
+
+beforeAll(async () => {
   fs.mkdirSync(LOGS_DIR, { recursive: true })
   sweepFixtures()
   fs.writeFileSync(BLOCKED_PARENT, '', { flag: 'w' })
+
+  // Pin the env BEFORE logger.ts is first loaded. SERVICE_NAME keeps the
+  // import off a real service's log file; NODE_ENV keeps it on the dev branch
+  // (so a production-flavoured shell can't make it construct a BetterStack
+  // client); the empty token is a second guard against that, since a live
+  // client would target the real ingest endpoint; and the empty LOG_LEVEL
+  // makes the level assertion below deterministic under `LOG_LEVEL=debug`.
+  process.env.SERVICE_NAME = INPROCESS_SERVICE
+  process.env.NODE_ENV = 'test'
+  process.env.BETTERSTACK_SOURCE_TOKEN = ''
+  process.env.LOG_LEVEL = ''
+  ;({ logger } = await import('./logger'))
 })
 
-afterAll(sweepFixtures)
+afterAll(() => {
+  sweepFixtures()
+  // Leave the ambient env as found for any suite that runs after this one in
+  // the same process.
+  for (const key of ['SERVICE_NAME', 'NODE_ENV', 'BETTERSTACK_SOURCE_TOKEN', 'LOG_LEVEL']) {
+    const original = ambientEnv[key]
+    if (original === undefined) {
+      delete process.env[key]
+    } else {
+      process.env[key] = original
+    }
+  }
+})
 
 describe('logger', () => {
   test('writes newline-delimited JSON records to stdout', () => {
-    const result = run({ serviceName: DEV_SERVICE })
+    const records = parseRecords(run({ serviceName: DEV_SERVICE }).stdout)
 
-    expect(result.exitCode).toBe(0)
-    const records = parseRecords(result.stdout)
     expect(records).toHaveLength(2)
     expect(records[0]).toMatchObject({ level: 30, msg: 'probe:info' })
     expect(records[1]).toMatchObject({ level: 40, msg: 'probe:warn' })
@@ -190,30 +238,28 @@ describe('logger', () => {
     test('logs to stdout and does not touch /logs', () => {
       const result = run({ nodeEnv: 'production', serviceName: PROD_SERVICE })
 
-      expect(result.exitCode).toBe(0)
       expect(parseRecords(result.stdout)).toHaveLength(2)
       expect(fs.existsSync(logFileFor(PROD_SERVICE))).toBe(false)
     })
 
     // Scoped deliberately narrowly: this covers only that adding the BetterStack
     // stream to the multistream set leaves stdout delivery intact and the
-    // process exiting cleanly. It does NOT exercise a delivery attempt — the
-    // probe script calls process.exit(0), which tears the process down before
-    // the Logtail client dispatches anything and before its beforeExit flush
-    // runs (verified: a loopback sink receives zero connections). Testing the
-    // failure-swallowing path for real means letting the process drain, which
-    // costs ~7s of retry backoff. The endpoint is still pinned to a closed
-    // loopback port so that no future change to this test can reach a real
-    // network from CI.
+    // process exiting cleanly (run() throws on a non-zero exit). It does NOT
+    // exercise a delivery attempt — the probe script calls process.exit(0),
+    // which tears the process down before the Logtail client dispatches
+    // anything and before its beforeExit flush runs (verified: a loopback sink
+    // receives zero connections). Testing the failure-swallowing path for real
+    // means letting the process drain, which costs ~7s of retry backoff. The
+    // endpoint is still pinned to a closed loopback port so that no future
+    // change to this test can reach a real network from CI.
     test('adding the BetterStack stream leaves stdout logging intact', () => {
       const result = run({
+        endpoint: 'http://127.0.0.1:9',
         nodeEnv: 'production',
         serviceName: PROD_SERVICE,
         token: 'test-token-not-a-real-credential',
-        tokenEndpoint: 'http://127.0.0.1:9',
       })
 
-      expect(result.exitCode).toBe(0)
       expect(parseRecords(result.stdout)).toHaveLength(2)
     })
   })
@@ -223,7 +269,6 @@ describe('logger', () => {
   test('degrades to stdout-only with a stderr notice when /logs is unavailable', () => {
     const result = run({ serviceName: BLOCKED_NESTED_SERVICE })
 
-    expect(result.exitCode).toBe(0)
     expect(result.stderr).toContain('/logs unavailable, falling back to stdout-only')
     expect(parseRecords(result.stdout)).toHaveLength(2)
   })
@@ -231,7 +276,8 @@ describe('logger', () => {
   // The subprocess cases above are the only way to vary the environment, but
   // they run outside the coverage instrumentation. This block imports the
   // module directly so the export contract every service depends on is pinned
-  // in-process: one ready-to-use pino logger, not a factory.
+  // in-process: one ready-to-use pino logger, not a factory. beforeAll pins the
+  // env first, so these assertions hold whatever shell the suite runs in.
   describe('the exported instance', () => {
     test('is a configured pino logger', () => {
       expect(typeof logger.info).toBe('function')
@@ -241,17 +287,11 @@ describe('logger', () => {
     })
 
     test('carries the service name as a base binding on every record', () => {
-      expect(logger.bindings()).toHaveProperty('service')
+      expect(logger.bindings()).toMatchObject({ service: INPROCESS_SERVICE })
     })
 
-    // Deliberately not asserting 'info' here: this instance picks up the
-    // ambient LOG_LEVEL, so pinning the exact value would fail under
-    // `LOG_LEVEL=debug bun test`. The default, and the fallback for a bogus
-    // value, are pinned by the subprocess cases above, which control the env.
-    // What matters in-process is that pino never receives a level it would
-    // silently treat as "drop everything".
-    test('is always configured with a level pino recognizes', () => {
-      expect(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).toContain(logger.level)
+    test('defaults to the info level', () => {
+      expect(logger.level).toBe('info')
     })
   })
 })
