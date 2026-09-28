@@ -161,8 +161,14 @@ beforeAll(async () => {
   // one process, and `src/require-env.ts` and `src/index.ts` import ./logger
   // statically, so a future test file in this package that pulls in either
   // (a `require-env.test.ts`, say) and sorts before this one would break it.
-  // Nothing in the package does today. The same caching is why afterAll's
-  // sweep of the in-process log file is safe: no later suite holds the logger.
+  // Nothing in the package does today — which is also what makes afterAll's
+  // sweep of the in-process log file safe: nothing else here imports
+  // ./logger, so nobody logs after it. Note the caching cuts the OTHER way
+  // for that half. A later importer would get this same cached instance
+  // back, still holding a `sync: true` destination on the inode the sweep
+  // unlinked, so its file writes would succeed into nothing rather than
+  // reopen the path. Both halves fail together the moment something else
+  // in this package imports the logger.
   process.env.SERVICE_NAME = INPROCESS_SERVICE
   process.env.NODE_ENV = 'test'
   process.env.BETTERSTACK_SOURCE_TOKEN = ''
