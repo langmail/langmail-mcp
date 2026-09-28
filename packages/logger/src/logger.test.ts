@@ -36,7 +36,15 @@ interface RunOptions {
   endpoint?: string
   logLevel?: string
   nodeEnv?: string
-  serviceName?: string
+  // Required, deliberately. An omitted SERVICE_NAME resolves to `unknown`, and
+  // on the dev branch that opens logs/unknown.log with `flag: 'w'` — the live
+  // log of any local service running without a SERVICE_NAME, and the one name
+  // this suite cannot make unique. Leaving the field optional would put that
+  // trapdoor one forgetful `run({ logLevel: 'debug' })` away; requiring it
+  // makes the compiler enforce what the sweepFixtures comment promises. Pass a
+  // fixture name, or '' together with `nodeEnv: 'production'` to assert the
+  // fallback without touching /logs.
+  serviceName: string
   token?: string
 }
 
@@ -67,7 +75,7 @@ const run = (options: RunOptions): RunResult => {
     env: {
       ...process.env,
       NODE_ENV: options.nodeEnv ?? '',
-      SERVICE_NAME: options.serviceName ?? '',
+      SERVICE_NAME: options.serviceName,
       LOG_LEVEL: options.logLevel ?? '',
       BETTERSTACK_SOURCE_TOKEN: options.token ?? '',
       BETTERSTACK_ENDPOINT: options.endpoint ?? '',
@@ -145,6 +153,16 @@ beforeAll(async () => {
   // client); the empty token is a second guard against that, since a live
   // client would target the real ingest endpoint; and the empty LOG_LEVEL
   // makes the level assertion below deterministic under `LOG_LEVEL=debug`.
+  //
+  // This import must be the FIRST load of logger.ts in the bun process, or the
+  // pinning above is a no-op against an already-cached module — which would
+  // both fail the assertions below and silently restore the live-log
+  // truncation this deferral exists to prevent. `bun test` runs every file in
+  // one process, and `src/require-env.ts` and `src/index.ts` import ./logger
+  // statically, so a future test file in this package that pulls in either
+  // (a `require-env.test.ts`, say) and sorts before this one would break it.
+  // Nothing in the package does today. The same caching is why afterAll's
+  // sweep of the in-process log file is safe: no later suite holds the logger.
   process.env.SERVICE_NAME = INPROCESS_SERVICE
   process.env.NODE_ENV = 'test'
   process.env.BETTERSTACK_SOURCE_TOKEN = ''
@@ -194,6 +212,7 @@ describe('logger', () => {
   test('falls back to the service name "unknown" when SERVICE_NAME is empty', () => {
     const records = parseRecords(run({ nodeEnv: 'production', serviceName: '' }).stdout)
 
+    expect(records).toHaveLength(2)
     expect(records[0]).toMatchObject({ service: 'unknown' })
   })
 
