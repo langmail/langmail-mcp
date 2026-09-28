@@ -356,6 +356,16 @@ describe('spliceOccurrenceCancellation', () => {
   })
 })
 
+describe('spliceOccurrenceCancellation — TZID exclusions', () => {
+  test('treats an instant already excluded by a TZID-qualified EXDATE as a no-op re-cancel', () => {
+    const master = masterObject().replace(
+      'RRULE:FREQ=WEEKLY;BYDAY=TU',
+      'RRULE:FREQ=WEEKLY;BYDAY=TU\r\nEXDATE;TZID=Europe/Berlin:20260623T120000'
+    )
+    expect(spliceOccurrenceCancellation(master, '2026-06-23T10:00:00Z')).toBe(master)
+  })
+})
+
 describe('spliceAlarms', () => {
   // RFC 5545 §3.1: component names are case-insensitive, and some producers
   // write them in lowercase. A miss here would PUT the object back unchanged

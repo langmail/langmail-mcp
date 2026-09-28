@@ -345,6 +345,22 @@ describe('parseEvents — all-day events', () => {
   })
 })
 
+describe('parseEvents — excluded dates', () => {
+  const withExdate = (line: string): string =>
+    invite({ rrule: 'FREQ=WEEKLY' }).replace('END:VEVENT', `${line}\r\nEND:VEVENT`)
+
+  test('resolves a TZID-qualified EXDATE to a UTC instant', () => {
+    // 12:00 Berlin summer time is 10:00Z; left floating it would read as local time.
+    const [event] = parseEvents(withExdate('EXDATE;TZID=Europe/Berlin:20260623T120000,20260630T120000'))
+    expect(event?.excludedDates).toEqual(['2026-06-23T10:00:00.000Z', '2026-06-30T10:00:00.000Z'])
+  })
+
+  test('keeps UTC and DATE exclusions as stored', () => {
+    expect(parseEvents(withExdate('EXDATE:20260623T100000Z'))[0]?.excludedDates).toEqual(['2026-06-23T10:00:00Z'])
+    expect(parseEvents(withExdate('EXDATE;VALUE=DATE:20260623'))[0]?.excludedDates).toEqual(['2026-06-23'])
+  })
+})
+
 describe('parseEvents — alarms', () => {
   const withAlarms = invite().replace(
     'END:VEVENT',

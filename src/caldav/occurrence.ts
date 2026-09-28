@@ -216,8 +216,15 @@ const masterExcludes = (master: Component, targetMs: number): boolean => {
     if (!match) {
       continue
     }
+    // A TZID-qualified value is wall clock in that zone (same resolution as
+    // recurrenceIdMs); without it `Date.parse` would read it as local time.
+    const timeZone = TZID_RE.exec(line.slice(0, line.indexOf(':')))?.[1]?.replace(/^"|"$/gu, '')
     for (const value of (match[1] ?? '').split(',')) {
-      const ms = Date.parse(icalDateToIso(value.trim()))
+      const iso = icalDateToIso(value.trim())
+      const ms =
+        timeZone && iso.includes('T') && !iso.endsWith('Z')
+          ? parseWallClockInZone(iso, timeZone).getTime()
+          : Date.parse(iso)
       if (!Number.isNaN(ms) && ms === targetMs) {
         return true
       }

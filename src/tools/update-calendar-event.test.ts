@@ -1912,6 +1912,23 @@ describe('updateCalendarEvent — cancelled occurrences', () => {
     expect(cap.updated).toHaveLength(0)
   })
 
+  test('refuses to edit an occurrence cancelled by a TZID-qualified EXDATE', async () => {
+    const cap = captured()
+    // A foreign client's form: 12:00 Berlin (CEST) is the 10:00Z occurrence.
+    const cancelled = recurringStored({
+      data: recurringStored().data.replace(
+        'RRULE:FREQ=WEEKLY;BYDAY=TU',
+        'RRULE:FREQ=WEEKLY;BYDAY=TU\r\nEXDATE;TZID=Europe/Berlin:20260623T120000'
+      ),
+    })
+    const result = await updateCalendarEvent(makeDeps(account(), cancelled, cap), {
+      args: { recurrenceId: '2026-06-23T10:00:00Z', title: 'Back on', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(cap.updated).toHaveLength(0)
+  })
+
   test('refuses to edit a cancelled occurrence of a timed series', async () => {
     const cap = captured()
     const cancelled = recurringStored({

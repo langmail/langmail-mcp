@@ -359,13 +359,31 @@ const parseAttendee = (property: ParsedProperty): ParsedAttendee | undefined => 
 
 // Flattens the EXDATE lines of one VEVENT into ISO values. Each line may carry
 // a comma-separated list, and the property may repeat (RFC 5545 §3.8.5.1).
+//
+// A TZID-qualified date-time (`EXDATE;TZID=Europe/Berlin:20260623T120000`, the
+// form foreign clients write) is resolved to a UTC ISO instant, like
+// parseRecurrenceInstant does: left floating, `Date.parse` would read it as the
+// host's local time and it would never compare equal to an occurrence's
+// instant. UTC (`…Z`) and DATE values are surfaced as stored.
 const parseExcludedDates = (exdates: ParsedProperty[]): string[] =>
-  exdates.flatMap((property) =>
-    property.value
+  exdates.flatMap((property) => {
+    const timeZone = propertyTimeZone(property)
+    return property.value
       .split(',')
-      .map((value) => icalDateToIso(value.trim()))
+      .map((value) => resolveExcludedValue(icalDateToIso(value.trim()), timeZone))
       .filter(Boolean)
-  )
+  })
+
+const resolveExcludedValue = (iso: string, timeZone: string | undefined): string => {
+  if (!(timeZone && iso.includes('T')) || iso.endsWith('Z')) {
+    return iso
+  }
+  try {
+    return new Date(parseWallClockInZone(iso, timeZone).getTime()).toISOString()
+  } catch {
+    return iso
+  }
+}
 
 // A DATE (not DATE-TIME) property value: `;VALUE=DATE`, or a bare 8-digit value
 // from a producer that omits the (technically required) parameter.
