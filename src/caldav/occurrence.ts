@@ -206,10 +206,6 @@ export const spliceOccurrenceOverride = (masterIcal: string, overrideIcal: strin
 const isMaster = (component: Component): boolean =>
   component.name === 'VEVENT' && recurrenceIdMs(component) === null && component.lines.some((l) => RRULE_RE.test(l))
 
-// True when the master already carries an EXDATE for `targetMs`. Comparison is
-// by instant (same UTC invariant as recurrenceIdMs) so a re-cancel is detected
-// regardless of value formatting. EXDATE is multi-valued (RFC 5545 §3.8.5.1),
-// so each comma-separated instant on the line is checked.
 // A component's physical lines with RFC 5545 folds joined back into logical
 // lines, for reading. (Splices keep writing `lines` verbatim.)
 const unfoldLines = (lines: string[]): string[] =>
@@ -222,6 +218,10 @@ const unfoldLines = (lines: string[]): string[] =>
     return acc
   }, [])
 
+// True when the master already carries an EXDATE for `targetMs`. Comparison is
+// by instant (same UTC invariant as recurrenceIdMs) so a re-cancel is detected
+// regardless of value formatting. EXDATE is multi-valued (RFC 5545 §3.8.5.1),
+// so each comma-separated instant on the logical line is checked.
 const masterExcludes = (master: Component, targetMs: number): boolean => {
   for (const line of unfoldLines(master.lines)) {
     const match = EXDATE_RE.exec(line)
