@@ -215,7 +215,9 @@ export const resolveRecurrenceId = (
     return dateOnly
       ? { ok: true, value: dateOnlyToInstant(recurrenceId).toISOString() }
       : {
-          error: `This series is all-day; pass recurrenceId as the occurrence’s date (e.g. ${day}).`,
+          // The day the instant falls on in UTC — the one the caller named —
+          // not the leading digits, which an offset can put a day off.
+          error: `This series is all-day; pass recurrenceId as the occurrence’s date (e.g. ${new Date(recurrenceId).toISOString().slice(0, 10)}).`,
           ok: false,
         }
   }
