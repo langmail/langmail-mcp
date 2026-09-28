@@ -849,16 +849,25 @@ const updateReminderOnly = async (
   master: ParsedEvent | undefined,
   args: UpdateCalendarEventArgs,
   token: string,
-  recurrenceId?: string
+  scope: ReminderScope
 ): Promise<ToolResult> => {
   const minutes = args.reminderMinutesBefore === NO_REMINDER ? null : (args.reminderMinutesBefore ?? null)
-  const ical = spliceAlarms(existing.data, minutes, recurrenceId)
+  const ical = spliceAlarms(existing.data, minutes, scope.kind === 'occurrence' ? scope.recurrenceId : undefined)
   await deps.updateEvent({ ical, token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
   return textResult(
     `Event "${master?.title ?? args.uid}" updated (no notifications sent${reminderSummary(args, master?.allDay === true)}); ` +
-      'only the reminder changed.'
+      REMINDER_SCOPE_NOTE[scope.kind]
   )
 }
+
+// What a reminder-only edit touched. On a series with individually changed
+// occurrences the whole-event splice replaces their reminders too, so say so.
+type ReminderScope = { kind: 'event' } | { kind: 'series' } | { kind: 'occurrence'; recurrenceId: string }
+const REMINDER_SCOPE_NOTE = {
+  event: 'only the reminder changed.',
+  occurrence: 'only this occurrence’s reminder changed.',
+  series: 'only the reminder changed, on the series and every occurrence, including individually changed ones.',
+} as const
 
 interface ReminderOnlyEdit {
   args: UpdateCalendarEventArgs
@@ -878,11 +887,15 @@ const reminderOnlyResult = (e: ReminderOnlyEdit): Promise<ToolResult> | ToolResu
     return
   }
   if (e.recurrenceId === undefined) {
-    return updateReminderOnly(e.deps, e.existing, e.storedMaster, e.args, e.token)
+    const kind = e.stored.length > 1 ? 'series' : 'event'
+    return updateReminderOnly(e.deps, e.existing, e.storedMaster, e.args, e.token, { kind })
   }
   const path = occurrenceReminderPath(e.stored, e.storedMaster, e.recurrenceId)
   if (path === 'splice') {
-    return updateReminderOnly(e.deps, e.existing, e.storedMaster, e.args, e.token, e.recurrenceId)
+    return updateReminderOnly(e.deps, e.existing, e.storedMaster, e.args, e.token, {
+      kind: 'occurrence',
+      recurrenceId: e.recurrenceId,
+    })
   }
   if (path === 'refuse') {
     return errorResult(

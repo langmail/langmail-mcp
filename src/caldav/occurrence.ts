@@ -133,9 +133,9 @@ const ATTENDEE_LINE_RE = /^ATTENDEE[;:]/iu
 const veventHasAttendee = (lines: string[]): boolean => {
   let depth = 0
   for (const line of lines) {
-    if (line.startsWith('BEGIN:')) {
+    if (BEGIN_DELIMITER_RE.test(line)) {
       depth += 1
-    } else if (line.startsWith('END:')) {
+    } else if (END_DELIMITER_RE.test(line)) {
       depth -= 1
     } else if (depth === 1 && ATTENDEE_LINE_RE.test(line)) {
       return true
@@ -307,6 +307,8 @@ const SUMMARY_LINE_RE = /^SUMMARY(?:;[^:]*)?:(.*)$/iu
 
 // A VEVENT's lines with every top-level VALARM removed, and its SUMMARY value
 // (still TEXT-escaped, folds joined) for the replacement alarm's DESCRIPTION.
+// Both are TEXT, so the escaped value is copied as is — escaping it again
+// would double every backslash.
 const stripAlarms = (lines: string[]): { kept: string[]; summary: string } => {
   const kept: string[] = []
   let summary = ''

@@ -221,6 +221,11 @@ describe('listCalendarEvents — all-day events and reminders', () => {
     expect(await list([odd])).toContain('reminders: 90 seconds before start, 29 seconds before start')
   })
 
+  test('renders a mixed duration as minutes plus the leftover seconds', async () => {
+    const odd = { ...sync, data: sync.data.replace('TRIGGER:-PT30M', 'TRIGGER:-PT1H1M30S') }
+    expect(await list([odd])).toContain('61 minutes 30 seconds before start')
+  })
+
   test('an event without alarms has no reminder line', async () => {
     const txt = await list([event('plain', 'Plain', '2026-06-12T09:00:00Z', '2026-06-12T10:00:00Z')])
     expect(txt).not.toContain('reminder')

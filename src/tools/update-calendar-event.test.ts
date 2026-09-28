@@ -1462,6 +1462,26 @@ describe('updateCalendarEvent — alarms are preserved', () => {
     expect(valarmBlocks(cap.updated[0]?.ical ?? '')).toEqual([ALARM_DISPLAY.join('\r\n')])
   })
 
+  test('a lowercase VALARM’s ATTENDEE does not make a personal series a scheduling object', async () => {
+    const cap = captured()
+    const personal = buildInvite({
+      attendees: [],
+      end: new Date('2026-06-16T10:30:00Z'),
+      rrule: 'FREQ=WEEKLY;BYDAY=TU',
+      start: new Date('2026-06-16T10:00:00Z'),
+      timeZone: 'UTC',
+      title: 'Focus',
+      uid: UID,
+    })
+    const lowerEmail = ALARM_EMAIL.map((l) => (l.startsWith('BEGIN:') || l.startsWith('END:') ? l.toLowerCase() : l))
+    const stored = recurringStored({ data: withAlarms(personal, lowerEmail) })
+    await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { recurrenceId: '2026-06-23T10:00:00Z', title: 'Focus (moved)', uid: UID },
+      token: 'tok',
+    })
+    expect(cap.updated[0]?.ical).not.toContain('METHOD:')
+  })
+
   test('an EMAIL alarm’s ATTENDEE does not make a personal series a scheduling object', async () => {
     const cap = captured()
     const personal = buildInvite({
@@ -1808,6 +1828,8 @@ describe('updateCalendarEvent — reminder', () => {
     })
     // No customized-occurrence refusal: nothing is rebuilt, so nothing is flattened.
     expect(result.isError).toBeUndefined()
+    // …but every occurrence's own reminder was replaced, and the result says so.
+    expect(result.content[0]?.text).toContain('every occurrence')
     expect(valarmBlocks(cap.updated[0]?.ical ?? '')).toEqual([])
     expect((cap.updated[0]?.ical.match(/BEGIN:VEVENT/gu) ?? []).length).toBe(2)
   })
