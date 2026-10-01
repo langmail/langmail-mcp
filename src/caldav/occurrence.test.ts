@@ -366,6 +366,48 @@ describe('spliceOccurrenceCancellation — TZID exclusions', () => {
   })
 })
 
+describe('spliceOccurrenceCancellation — zoned master', () => {
+  // Tuesdays 12:00 Europe/Berlin from 2026-03-24 (CET, 11:00Z). The RRULE
+  // expands on the wall clock, so after the DST switch on 2026-03-29 each
+  // occurrence is 12:00 CEST = 10:00Z. RFC 5545 §3.8.5.1: the EXDATE must take
+  // DTSTART's form to name one of those occurrences.
+  const berlinMaster = (): string =>
+    masterObject({
+      end: new Date('2026-03-24T11:30:00Z'),
+      start: new Date('2026-03-24T11:00:00Z'),
+      timeZone: 'Europe/Berlin',
+    })
+  const AFTER_DST = '2026-03-31T10:00:00Z'
+
+  test('writes the EXDATE as Berlin wall clock, not UTC', () => {
+    const merged = unfold(spliceOccurrenceCancellation(berlinMaster(), AFTER_DST))
+    expect(merged).toContain('DTSTART;TZID=Europe/Berlin:20260324T120000')
+    expect(merged).toContain('EXDATE;TZID=Europe/Berlin:20260331T120000')
+    expect(merged).not.toContain('EXDATE:20260331T100000Z')
+  })
+
+  test('the zoned EXDATE resolves to the cancelled instant', () => {
+    const [master] = parseEvents(spliceOccurrenceCancellation(berlinMaster(), AFTER_DST))
+    expect(master?.excludedDates?.map((d) => Date.parse(d))).toEqual([Date.parse(AFTER_DST)])
+  })
+
+  test('a second cancel of the same occurrence is a no-op', () => {
+    const once = spliceOccurrenceCancellation(berlinMaster(), AFTER_DST)
+    expect(spliceOccurrenceCancellation(once, AFTER_DST)).toBe(once)
+  })
+
+  // Outlook names its zones by Windows ID, defined only by the object's own
+  // VTIMEZONE. Without a wall clock to compute, the UTC instant is the best
+  // valid EXDATE we can write.
+  test('falls back to a UTC EXDATE for a zone it cannot resolve', () => {
+    const windows = berlinMaster().replaceAll(';TZID=Europe/Berlin:', ';TZID=W. Europe Standard Time:')
+    const once = spliceOccurrenceCancellation(windows, AFTER_DST)
+    expect(unfold(once)).toContain('EXDATE:20260331T100000Z')
+    expect(once).not.toContain('NaN')
+    expect(spliceOccurrenceCancellation(once, AFTER_DST)).toBe(once)
+  })
+})
+
 describe('spliceOccurrenceCancellation — folded EXDATE', () => {
   test('sees an instant on a folded continuation of a long EXDATE line', () => {
     const exdate = 'EXDATE:20260616T100000Z,20260630T100000Z,20260707T100000Z,\r\n 20260623T100000Z'
