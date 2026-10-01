@@ -18,7 +18,7 @@ const TODO_VALUE = 'todo'
 // `todo` is agent/user bookkeeping the taxonomy doesn't model, glossed here.
 const KEYWORD_GLOSSES: Record<string, string> = {
   ...Object.fromEntries(EMAIL_TYPE_VALUES.map((type) => [type, EMAIL_TYPES[type].search])),
-  [TODO_VALUE]: 'Messages the user (or an agent) flagged as an action item / to-do.',
+  [TODO_VALUE]: 'Messages the user (or an agent) flagged as an action item / to-do; set or clear it with mark_emails.',
 }
 
 // Ordered enum values: the taxonomy in its canonical order, then `todo`. The

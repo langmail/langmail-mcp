@@ -1,21 +1,42 @@
-// mark_emails tool — set the read state of messages. One targeted keyword
-// patch ($seen add or drop) over the whole batch, so nothing else about a
-// message — its folders, its tags, its flag — moves. Reading a message with
+// mark_emails tool — set and clear the user-facing flags on messages: read,
+// to-do, starred. One targeted keyword patch over the whole batch, so nothing
+// else about a message — its folders, its type, any flag left out — moves.
+// One field per flag, holding the state the flag should end up in, so "add
+// and remove the same flag" cannot be expressed. Reading a message with
 // get_email never changes its read state; the agent decides, through this.
+// System flags ($answered, $draft) and classification types are deliberately
+// not fields: an agent must not fake what happened to a message.
 
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
 import { ACCOUNT_WRITE } from './annotations.ts'
 import { dedupedIds, type FileEmailsDeps, formatBatchResult, idsShape } from './file-emails-common.ts'
-import { type ToolResult } from './result.ts'
+import { keywordToJmapKeyword } from './keywords.ts'
+import { errorResult, type ToolResult } from './result.ts'
 
-// RFC 8621 §4.1.1: the system keyword for "this message has been read".
+// RFC 8621 §4.1.1 system keywords: "has been read" and "flagged for urgent or
+// special attention" — the keyword Gmail's STARRED and the mail-rule flag
+// action already map to.
 const SEEN_KEYWORD = '$seen'
+const FLAGGED_KEYWORD = '$flagged'
+// The same `$label:todo` keyword search_emails filters on with keywords: ["todo"].
+const TODO_KEYWORD = keywordToJmapKeyword('todo')
 
 const markEmailsShape = {
   ...idsShape,
-  as: z.enum(['read', 'unread']).describe('"read" marks the messages as read; "unread" marks them unread again.'),
+  read: z
+    .boolean()
+    .optional()
+    .describe('true marks the messages read, false marks them unread. Leave out to keep read state.'),
+  starred: z.boolean().optional().describe('true stars the messages, false removes the star. Leave out to keep it.'),
+  todo: z
+    .boolean()
+    .optional()
+    .describe(
+      'true flags the messages as a to-do for the user, false clears the to-do (e.g. once it is done). ' +
+        'Leave out to keep it.'
+    ),
 }
 
 export const markEmailsInput = z.object({ ...markEmailsShape, ids: dedupedIds })
@@ -30,10 +51,35 @@ export interface MarkEmailsContext {
   token: string
 }
 
+interface FlagSpec {
+  keyword: string
+  off: string
+  on: string
+}
+
+// Field order here is the order the result line names the flags in.
+const FLAGS = {
+  read: { keyword: SEEN_KEYWORD, off: 'unread', on: 'read' },
+  todo: { keyword: TODO_KEYWORD, off: 'not to-do', on: 'to-do' },
+  starred: { keyword: FLAGGED_KEYWORD, off: 'unstarred', on: 'starred' },
+} as const satisfies Record<'read' | 'starred' | 'todo', FlagSpec>
+
 export const markEmails = async (deps: MarkEmailsDeps, ctx: MarkEmailsContext): Promise<ToolResult> => {
-  const read = ctx.args.as === 'read'
-  const result = await deps.updateEmails(ctx.token, ctx.args.ids, { keywords: { [SEEN_KEYWORD]: read } })
-  return formatBatchResult('Marked', result, ` as ${ctx.args.as}`)
+  const keywords: Record<string, boolean> = {}
+  const labels: string[] = []
+  for (const [field, spec] of Object.entries(FLAGS)) {
+    const value = ctx.args[field as keyof typeof FLAGS]
+    if (value === undefined) {
+      continue
+    }
+    keywords[spec.keyword] = value
+    labels.push(value ? spec.on : spec.off)
+  }
+  if (labels.length === 0) {
+    return errorResult('No flag given, so nothing was changed. Pass at least one of read, todo or starred.')
+  }
+  const result = await deps.updateEmails(ctx.token, ctx.args.ids, { keywords })
+  return formatBatchResult('Marked', result, ` as ${labels.join(', ')}`)
 }
 
 // --- MCP registration ----------------------------------------------------
@@ -44,15 +90,18 @@ export const registerMarkEmails = (server: McpServer, deps: FileEmailsDeps, getT
     {
       annotations: ACCOUNT_WRITE,
       description:
-        'Mark one or more messages as read or unread. Reading a message with get_email, get_thread or ' +
-        'search_emails never changes its read state, so call this when the user wants what you read ' +
-        'marked read, or says "keep this unread" / "mark it unread". Takes message ids from ' +
-        'search_emails or get_thread; folders, tags and flags are untouched, and re-running it on the ' +
-        'same ids is harmless. To get a message out of the inbox use archive_emails or move_emails ' +
-        'instead; to mark something as spam, use move_emails with Junk. ' +
-        'Reports how many messages were marked and lists any id the server refused.',
+        'Set or clear the flags on one or more messages: read / unread, to-do, and starred. ' +
+        'Reading a message with get_email, get_thread or search_emails never changes its read state, so ' +
+        'call this when the user wants what you read marked read or says "keep this unread"; set todo when ' +
+        'a message needs action from the user ("flag this for me", "add it to my to-dos"), clear it when ' +
+        'the to-do is done ("mark it done"), and set starred for "star this". Several flags go in one call, ' +
+        'e.g. read: true, todo: false to finish a to-do; a flag you leave out is untouched. ' +
+        'Takes message ids from search_emails or get_thread; folders are untouched, and re-running it on ' +
+        'the same ids is harmless. To get a message out of the inbox use archive_emails or move_emails ' +
+        'instead (finishing a to-do is usually this, then archive_emails); to mark something as spam, use ' +
+        'move_emails with Junk. Reports how many messages were marked and lists any id the server refused.',
       inputSchema: markEmailsShape,
-      title: 'Mark emails read or unread',
+      title: 'Mark emails read, to-do or starred',
     },
     (args) => markEmails(deps, { args: markEmailsInput.parse(args), token: getToken() })
   )

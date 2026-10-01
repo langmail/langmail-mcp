@@ -295,13 +295,33 @@ live('filing tools against live Stalwart', () => {
     })
     expect(await isSeen(id)).toBe(false)
     // Unread on a message that never had $seen, then each direction twice.
-    for (const as of ['unread', 'read', 'read', 'unread', 'unread'] as const) {
-      const result = await markEmails(deps, { args: { as, ids: [id] }, token: TOKEN })
-      expect(result.content[0]?.text).toBe(`Marked 1 message(s) as ${as}.`)
-      expect(await isSeen(id)).toBe(as === 'read')
+    for (const read of [false, true, true, false, false]) {
+      const result = await markEmails(deps, { args: { ids: [id], read }, token: TOKEN })
+      expect(result.content[0]?.text).toBe(`Marked 1 message(s) as ${read ? 'read' : 'unread'}.`)
+      expect(await isSeen(id)).toBe(read)
     }
     const [rec] = await emailGet({ accountId, apiUrl, authorization, ids: [id] })
     expect(rec?.keywords?.$flagged).toBe(true)
+    expect(await mailboxesOf(id)).toEqual([inboxId])
+  })
+
+  test('mark_emails sets and clears to-do and star together, leaving read state alone', async () => {
+    const id = await importEmail({
+      body: 'Please send the documents.',
+      from: 'Tax Office <advisor@example.com>',
+      keywords: { $seen: true },
+      receivedAt: new Date(run),
+      subject: 'Documents for the annual return',
+    })
+    const keywordsOf = async (): Promise<Record<string, boolean>> => {
+      const [rec] = await emailGet({ accountId, apiUrl, authorization, ids: [id] })
+      return rec?.keywords ?? {}
+    }
+    await markEmails(deps, { args: { ids: [id], starred: true, todo: true }, token: TOKEN })
+    expect(await keywordsOf()).toEqual({ $flagged: true, '$label:todo': true, $seen: true })
+    const result = await markEmails(deps, { args: { ids: [id], todo: false }, token: TOKEN })
+    expect(result.content[0]?.text).toBe('Marked 1 message(s) as not to-do.')
+    expect(await keywordsOf()).toEqual({ $flagged: true, $seen: true })
     expect(await mailboxesOf(id)).toEqual([inboxId])
   })
 })

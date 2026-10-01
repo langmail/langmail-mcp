@@ -195,14 +195,20 @@ Returns:
 
 ### mark_emails
 
-Marks one or more messages as read or unread by setting or clearing the `$seen`
-keyword. Folders, tags and flags are untouched. Reading a message with `get_email`
-or `get_thread` never changes its read state on its own.
+Sets or clears the user-facing flags on one or more messages in one keyword
+patch: read (`$seen`), to-do (`$label:todo`, the keyword `search_emails` filters
+on) and starred (`$flagged`). A flag left out is untouched, as are folders.
+System flags and classification types are not settable. Reading a message with
+`get_email` or `get_thread` never changes its read state on its own.
 
 Parameters:
 
 - `ids`: array of string — 1–50 message ids
-- `as`: `"read"` | `"unread"`
+- `read`: boolean (optional) — `true` marks read, `false` unread
+- `todo`: boolean (optional) — `true` flags as a to-do, `false` clears it
+- `starred`: boolean (optional) — `true` stars, `false` unstars
+
+At least one flag is required.
 
 Returns:
 
