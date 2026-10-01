@@ -68,8 +68,8 @@ export const registerMoveEmails = (server: McpServer, deps: FileEmailsDeps, getT
         'and end up only in the destination. Use this when the user names a destination ("put this ' +
         'in Projects", "move it back to the inbox"). Takes message ids from search_emails or ' +
         'get_thread. The mailbox is resolved the same way as the search_emails mailbox filter and is ' +
-        'never created; an unknown name returns the folders that exist. Read state is untouched; use ' +
-        'mark_emails to change it. Re-running it on the same ' +
+        'never created; an unknown name returns the folders that exist. Read state and flags (to-do, ' +
+        'starred) are untouched; use mark_emails to change them. Re-running it on the same ' +
         'ids is harmless. To archive use archive_emails; to delete use trash_emails — this tool ' +
         'refuses Trash. Reports how many messages moved and lists any id the server refused.',
       inputSchema: moveEmailsShape,

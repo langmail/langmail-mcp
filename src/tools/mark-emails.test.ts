@@ -49,7 +49,9 @@ describe('markEmails', () => {
     const deps = fakeDeps()
     const result = await markEmails(deps, { args: { ids: ['m1'] }, token: 'tok' })
     expect(result.isError).toBe(true)
-    expect(result.content[0]?.text).toContain('nothing was changed')
+    expect(result.content[0]?.text).toBe(
+      'No flag given, so nothing was changed. Pass at least one of read, todo or starred.'
+    )
     expect(deps.patches).toHaveLength(0)
   })
 
