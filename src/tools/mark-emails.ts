@@ -77,9 +77,8 @@ export const markEmails = async (deps: MarkEmailsDeps, ctx: MarkEmailsContext): 
   }
   if (labels.length === 0) {
     const fields = Object.keys(FLAGS)
-    return errorResult(
-      `No flag given, so nothing was changed. Pass at least one of ${fields.slice(0, -1).join(', ')} or ${fields.at(-1)}.`
-    )
+    const choices = `${fields.slice(0, -1).join(', ')} or ${fields.at(-1)}`
+    return errorResult(`No flag given, so nothing was changed. Pass at least one of ${choices}.`)
   }
   const result = await deps.updateEmails(ctx.token, ctx.args.ids, { keywords })
   return formatBatchResult('Marked', result, ` as ${labels.join(', ')}`)

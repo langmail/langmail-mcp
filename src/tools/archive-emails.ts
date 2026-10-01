@@ -42,7 +42,8 @@ export const registerArchiveEmails = (server: McpServer, deps: FileEmailsDeps, g
       description:
         'Archive one or more messages: remove them from the Inbox and file them in the Archive ' +
         'mailbox. Use this when the user says archive, clear, or "get this out of my inbox". ' +
-        'Read state and flags (to-do, starred) are untouched (use mark_emails for those), and re-running it on the same ids is harmless. Takes message ids ' +
+        'Read state and flags (to-do, starred) are untouched (use mark_emails for those), and ' +
+        're-running it on the same ids is harmless. Takes message ids ' +
         "from search_emails or get_thread; pass all of a thread's ids to archive the conversation. " +
         'To file into a specific folder use move_emails; to delete use trash_emails. Reports how ' +
         'many messages were archived and lists any id the server refused.',

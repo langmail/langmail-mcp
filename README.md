@@ -151,8 +151,8 @@ Returns:
 ### archive_emails
 
 Removes one or more messages from the Inbox and files them in the Archive
-mailbox. Read state and flags (to-do, starred) are untouched. Fails, without creating anything, if the
-account has no Archive mailbox.
+mailbox. Read state and flags (to-do, starred) are untouched. Fails, without
+creating anything, if the account has no Archive mailbox.
 
 Parameters:
 
