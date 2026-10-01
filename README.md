@@ -193,6 +193,21 @@ Returns:
 
 - How many messages were trashed, and any id the server refused with its reason
 
+### mark_emails
+
+Marks one or more messages as read or unread by setting or clearing the `$seen`
+keyword. Folders and labels are untouched. Reading a message with `get_email`
+or `get_thread` never changes its read state on its own.
+
+Parameters:
+
+- `ids`: array of string — 1–50 message ids
+- `as`: `"read"` | `"unread"`
+
+Returns:
+
+- How many messages were marked, and any id the server refused with its reason
+
 ### search_contacts
 
 Resolves a person's name, partial name, email address, or organization to

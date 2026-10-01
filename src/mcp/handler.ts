@@ -54,6 +54,7 @@ import { makeLiveDeps as makeListCalendarsDeps, registerListCalendars } from '..
 import { registerListMailRules } from '../tools/list-mail-rules.ts'
 import { registerListUpcomingBirthdays } from '../tools/list-upcoming-birthdays.ts'
 import { type MailRuleToolDeps } from '../tools/mail-rule-common.ts'
+import { registerMarkEmails } from '../tools/mark-emails.ts'
 import {
   makeLiveDeps as makeMoveCalendarEventsDeps,
   registerMoveCalendarEvents,
@@ -159,6 +160,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     registerArchiveEmails(server, fileEmailsDeps, () => ctx.token)
     registerMoveEmails(server, fileEmailsDeps, () => ctx.token)
     registerTrashEmails(server, fileEmailsDeps, () => ctx.token)
+    registerMarkEmails(server, fileEmailsDeps, () => ctx.token)
     registerDownloadAttachment(server, downloadAttachmentDeps, () => ctx.token)
     registerPreviewMailRule(server, mailRuleDeps, () => ctx.token)
     registerCreateMailRule(server, mailRuleDeps, () => ctx.token)

@@ -1,8 +1,10 @@
-// E2E for archive_emails / move_emails / trash_emails against a REAL Stalwart.
+// E2E for archive_emails / move_emails / trash_emails / mark_emails against a
+// REAL Stalwart.
 // The unit tests prove each tool builds the right patch against fake deps;
 // this proves the patch does what we claim on the wire: archive leaves Inbox
 // and lands in Archive, move replaces the folder set, trash lands in Trash,
-// and a stale id is reported rather than thrown.
+// mark flips $seen without moving the message, and a stale id is reported
+// rather than thrown.
 //
 // The MCP tools wrap their OAuth token as `Bearer …`, but a dev-Stalwart
 // throwaway account authenticates with a Basic app password — the deps pin
@@ -29,6 +31,7 @@ import {
 import { archiveEmails } from './archive-emails.ts'
 import { type FileEmailsDeps } from './file-emails-common.ts'
 import { lookupMailbox } from './mailbox-lookup.ts'
+import { markEmails } from './mark-emails.ts'
 import { moveEmails } from './move-emails.ts'
 import { trashEmails } from './trash-emails.ts'
 
@@ -143,6 +146,11 @@ live('filing tools against live Stalwart', () => {
   const mailboxesOf = async (id: string): Promise<string[]> => {
     const [rec] = await emailGet({ accountId, apiUrl, authorization, ids: [id] })
     return Object.keys(rec?.mailboxIds ?? {}).sort()
+  }
+
+  const isSeen = async (id: string): Promise<boolean> => {
+    const [rec] = await emailGet({ accountId, apiUrl, authorization, ids: [id] })
+    return rec?.keywords?.$seen === true
   }
 
   beforeAll(async () => {
@@ -275,5 +283,25 @@ live('filing tools against live Stalwart', () => {
     // RFC 8620 §5.3: an unknown id in `update` is refused as `notFound`.
     expect(result.content[0]?.text).toContain('zz-does-not-exist (notFound)')
     expect(await mailboxesOf(id)).toEqual([trashId])
+  })
+
+  test('mark_emails flips $seen both ways, idempotently, without moving the message', async () => {
+    const id = await importEmail({
+      body: 'Read me later.',
+      from: 'Ada Example <ada@example.com>',
+      keywords: {},
+      receivedAt: new Date(run),
+      subject: 'Weekly notes',
+    })
+    expect(await isSeen(id)).toBe(false)
+    for (const _ of [1, 2]) {
+      const read = await markEmails(deps, { args: { as: 'read', ids: [id] }, token: TOKEN })
+      expect(read.content[0]?.text).toBe('Marked 1 message(s) as read.')
+      expect(await isSeen(id)).toBe(true)
+    }
+    const unread = await markEmails(deps, { args: { as: 'unread', ids: [id] }, token: TOKEN })
+    expect(unread.content[0]?.text).toBe('Marked 1 message(s) as unread.')
+    expect(await isSeen(id)).toBe(false)
+    expect(await mailboxesOf(id)).toEqual([inboxId])
   })
 })

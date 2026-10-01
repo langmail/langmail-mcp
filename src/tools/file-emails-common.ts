@@ -1,7 +1,8 @@
 // Shared seam for the three filing tools (archive_emails, move_emails,
-// trash_emails). They differ only in how the destination is chosen; the
-// JMAP write is always one uniform Email/set over a batch of ids, and the
-// per-id outcome is reported the same way. Kept out of the rules engine
+// trash_emails) and mark_emails. The filing tools differ only in how the
+// destination is chosen; mark_emails patches the $seen keyword instead of a
+// mailbox. The JMAP write is always one uniform Email/set over a batch of
+// ids, and the per-id outcome is reported the same way. Kept out of the rules engine
 // on purpose: a rule *creates* missing places, a model-driven tool must not.
 
 import { z } from 'zod'
