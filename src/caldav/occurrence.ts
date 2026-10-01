@@ -16,6 +16,7 @@ import { icalDateToIso, parseWallClockInZone } from '@langmail/ical'
 
 import { foldLine, maxSequence } from './ical.ts'
 import { toIcalUtc } from './recurrence.ts'
+import { toWallClockIso, toZonedDate } from './timezone.ts'
 
 const CRLF = '\r\n'
 // Line break between content lines (CRLF, bare CR, or LF). Output is always
@@ -35,6 +36,7 @@ const VTIMEZONE_TZID_RE = /^TZID:(.*)$/iu
 // foreign series with many cancelled days folds its EXDATE list.
 const EXDATE_RE = /^EXDATE(?:;[^:]*)?:(.*)$/iu
 const SEQUENCE_RE = /^SEQUENCE:/iu
+const DTSTART_RE = /^DTSTART(;[^:]*)?:/iu
 const RRULE_RE = /^RRULE[:;]/iu
 
 // A top-level VCALENDAR component (VEVENT, VTIMEZONE, …) as its raw lines,
@@ -245,6 +247,35 @@ const masterExcludes = (master: Component, targetMs: number): boolean => {
   return false
 }
 
+// The TZID of the master's DTSTART, or undefined for a UTC (or DATE) start.
+// The VEVENT's own DTSTART precedes any VALARM (RFC 5545 §3.6.1), so the first
+// match is the right one.
+const startTimeZone = (master: Component): string | undefined => {
+  const params = unfoldLines(master.lines)
+    .map((line) => DTSTART_RE.exec(line))
+    .find((match) => match !== null)?.[1]
+  return params ? TZID_RE.exec(params)?.[1]?.replace(/^"|"$/gu, '') : undefined
+}
+
+// The EXDATE naming `recurrenceId` in the master DTSTART's own form (RFC 5545
+// §3.8.5.1): a DATE for an all-day series, zone wall clock for a TZID start
+// (the RRULE expands on that wall clock, so a UTC value may match no
+// occurrence), else UTC. A TZID we can't resolve (an Outlook Windows zone ID,
+// defined only by the object's VTIMEZONE) also falls back to UTC: still a
+// valid EXDATE, where a wall clock would come out as NaN.
+const exdateLine = (master: Component, recurrenceId: string, allDay: boolean): string => {
+  if (allDay) {
+    return `EXDATE;VALUE=DATE:${toIcalUtc(recurrenceId).slice(0, 8)}`
+  }
+  const instant = new Date(recurrenceId)
+  const timeZone = startTimeZone(master)
+  if (!timeZone || Number.isNaN(toZonedDate(instant, timeZone).getTime())) {
+    return `EXDATE:${toIcalUtc(recurrenceId)}`
+  }
+  const wallClock = toWallClockIso(instant, timeZone).replaceAll(/[-:]/gu, '')
+  return `EXDATE;TZID=${timeZone}:${wallClock}`
+}
+
 // Rewrites the master's lines to exclude one instant: replace its SEQUENCE line
 // with the bumped value (or add one when the master carried none) and splice the
 // EXDATE in just before END:VEVENT. Every other line is preserved verbatim.
@@ -301,9 +332,7 @@ export const spliceOccurrenceCancellation = (masterIcal: string, recurrenceId: s
   }
 
   const sequence = maxSequence(masterIcal) + 1
-  const exdate = allDay
-    ? `EXDATE;VALUE=DATE:${toIcalUtc(recurrenceId).slice(0, 8)}`
-    : `EXDATE:${toIcalUtc(recurrenceId)}`
+  const exdate = exdateLine(master, recurrenceId, allDay)
   const components = calendar.components
     // Drop any prior override for the cancelled instant.
     .filter((c) => !(c.name === 'VEVENT' && recurrenceIdMs(c) === targetMs))
