@@ -289,19 +289,19 @@ live('filing tools against live Stalwart', () => {
     const id = await importEmail({
       body: 'Read me later.',
       from: 'Ada Example <ada@example.com>',
-      keywords: {},
+      keywords: { $flagged: true },
       receivedAt: new Date(run),
       subject: 'Weekly notes',
     })
     expect(await isSeen(id)).toBe(false)
-    for (const _ of [1, 2]) {
-      const read = await markEmails(deps, { args: { as: 'read', ids: [id] }, token: TOKEN })
-      expect(read.content[0]?.text).toBe('Marked 1 message(s) as read.')
-      expect(await isSeen(id)).toBe(true)
+    // Unread on a message that never had $seen, then each direction twice.
+    for (const as of ['unread', 'read', 'read', 'unread', 'unread'] as const) {
+      const result = await markEmails(deps, { args: { as, ids: [id] }, token: TOKEN })
+      expect(result.content[0]?.text).toBe(`Marked 1 message(s) as ${as}.`)
+      expect(await isSeen(id)).toBe(as === 'read')
     }
-    const unread = await markEmails(deps, { args: { as: 'unread', ids: [id] }, token: TOKEN })
-    expect(unread.content[0]?.text).toBe('Marked 1 message(s) as unread.')
-    expect(await isSeen(id)).toBe(false)
+    const [rec] = await emailGet({ accountId, apiUrl, authorization, ids: [id] })
+    expect(rec?.keywords?.$flagged).toBe(true)
     expect(await mailboxesOf(id)).toEqual([inboxId])
   })
 })

@@ -57,7 +57,7 @@ export interface FileEmailsDeps {
   resolveMailbox: (token: string, name: string) => Promise<MailboxLookup>
   // Inbox/Archive/Trash by RFC 8621 role from one mailbox listing.
   resolvePlaces: (token: string) => Promise<PlaceIds>
-  // Targeted add/drop of named mailboxes (archive: +Archive −Inbox).
+  // Targeted add/drop of named mailboxes or keywords (archive: +Archive −Inbox; mark: ±$seen).
   updateEmails: (token: string, ids: string[], changes: EmailSetChanges) => Promise<EmailSetManyResult>
 }
 

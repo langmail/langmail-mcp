@@ -196,7 +196,7 @@ Returns:
 ### mark_emails
 
 Marks one or more messages as read or unread by setting or clearing the `$seen`
-keyword. Folders and labels are untouched. Reading a message with `get_email`
+keyword. Folders, tags and flags are untouched. Reading a message with `get_email`
 or `get_thread` never changes its read state on its own.
 
 Parameters:
