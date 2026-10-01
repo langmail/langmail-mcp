@@ -22,12 +22,15 @@ export const markEmailsInput = z.object({ ...markEmailsShape, ids: dedupedIds })
 
 export type MarkEmailsArgs = z.infer<typeof markEmailsInput>
 
+// Only the keyword patch: mark_emails never resolves or replaces mailboxes.
+export type MarkEmailsDeps = Pick<FileEmailsDeps, 'updateEmails'>
+
 export interface MarkEmailsContext {
   args: MarkEmailsArgs
   token: string
 }
 
-export const markEmails = async (deps: FileEmailsDeps, ctx: MarkEmailsContext): Promise<ToolResult> => {
+export const markEmails = async (deps: MarkEmailsDeps, ctx: MarkEmailsContext): Promise<ToolResult> => {
   const read = ctx.args.as === 'read'
   const result = await deps.updateEmails(ctx.token, ctx.args.ids, { keywords: { [SEEN_KEYWORD]: read } })
   return formatBatchResult('Marked', result, ` as ${ctx.args.as}`)
