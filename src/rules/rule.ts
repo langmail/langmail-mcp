@@ -77,10 +77,11 @@ export const normalizeConditions = (c: MailRuleConditions): MailRuleConditions =
 
 // --- actions -------------------------------------------------------------------
 
-// Mirror of Bulwark's tag-id normalization (see email-sync's
-// `sanitize_keyword`): lower → non-[a-z0-9_-] to '-' → collapse runs → trim.
-// Keeping the algorithms in lockstep is what makes a rule's tag and a
-// user-defined webmail tag with the same name collide into one chip.
+// Mirror of the JMAP client label convention's tag-id normalization
+// (originated in Bulwark; see email-sync's `sanitize_keyword`): lower →
+// non-[a-z0-9_-] to '-' → collapse runs → trim. Keeping the algorithms in
+// lockstep is what makes a rule's tag and a projected Gmail label with the
+// same name collide into one chip.
 export const tagToKeywordSuffix = (name: string): string | null => {
   const slug = name
     .toLowerCase()

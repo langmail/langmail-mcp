@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { LABEL_KEYWORD_PREFIX, toLabelKeyword } from './keywords.ts'
 
 describe('keywords', () => {
-  test('LABEL_KEYWORD_PREFIX matches the Bulwark convention', () => {
+  test('LABEL_KEYWORD_PREFIX matches the JMAP client label convention', () => {
     expect(LABEL_KEYWORD_PREFIX).toBe('$label:')
   })
 
