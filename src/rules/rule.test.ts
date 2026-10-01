@@ -44,7 +44,7 @@ describe('normalizeConditions', () => {
 })
 
 describe('tagToKeywordSuffix', () => {
-  test('mirrors the Bulwark tag-id normalization', () => {
+  test('mirrors the JMAP client label tag-id normalization', () => {
     expect(tagToKeywordSuffix('GitHub')).toBe('github')
     expect(tagToKeywordSuffix('Acme Corp')).toBe('acme-corp')
     expect(tagToKeywordSuffix('--Weird__Tag!!')).toBe('weird__tag')

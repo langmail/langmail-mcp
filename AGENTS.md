@@ -62,7 +62,7 @@ mount `StreamableHTTPServerTransport` and register tools. Conventions:
   once the email-agent became the second consumer (ADR 0004, Phase 1).
   Add new JMAP methods there, not in this service.
 - Auth principal comes from `GET /oauth2/userinfo` against **Better Auth**
-  (the OpenID Provider — same IdP as app + webmail) with the client's bearer;
+  (the OpenID Provider — same IdP as the web app) with the client's bearer;
   the principal is the `email` claim (the user's `username@langmail.me` mailbox
   address), cached as `(token, principal)` until token `exp`. The validated
   bearer is then forwarded to **Stalwart** for JMAP/CalDAV. See

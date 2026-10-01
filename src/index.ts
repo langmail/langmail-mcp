@@ -30,7 +30,7 @@ const HOST = process.env.MCP_HOST ?? '127.0.0.1'
 const PUBLIC_URL = (process.env.MCP_PUBLIC_URL ?? `http://${HOST}:${PORT}`).replace(TRAILING_SLASHES_RE, '')
 const STALWART_URL = (process.env.STALWART_PUBLIC_URL ?? 'https://mail.langmail.me').replace(TRAILING_SLASHES_RE, '')
 
-// Better Auth is the OpenID Provider for the MCP server (as for app + webmail):
+// Better Auth is the OpenID Provider for the MCP server (as for the web app):
 // clients authenticate against it, and we validate every bearer at its userinfo.
 // The issuer mirrors services/auth's `${baseURL}/api/auth` derivation.
 const AUTH_URL = (process.env.AUTH_PUBLIC_URL ?? 'https://auth.langmail.me').replace(TRAILING_SLASHES_RE, '')

@@ -228,8 +228,9 @@ export interface IdentityResolution {
 // On Stalwart that name is the account's `description`, falling back to its
 // `name` — and Langmail's provisioning (services/auth `createAccount`) sets no
 // description, so today it resolves to the mailbox local part rather than a
-// human name. That's a provisioning gap, not one to paper over here: webmail
-// sends under the same Identity, so whatever it says, both surfaces agree.
+// human name. That's a provisioning gap, not one to paper over here: the
+// Identity is the account's one record of its sender name, so the fix belongs
+// where the account is created, not in each tool that sends.
 const identityAddress = (identity: IdentityRecord, requestedName?: string): EmailAddress => {
   const name = identity.name?.trim() || requestedName
   return name ? { email: identity.email, name } : { email: identity.email }
