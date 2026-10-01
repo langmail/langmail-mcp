@@ -62,7 +62,7 @@ const FLAGS = {
   read: { keyword: SEEN_KEYWORD, off: 'unread', on: 'read' },
   todo: { keyword: TODO_KEYWORD, off: 'not to-do', on: 'to-do' },
   starred: { keyword: FLAGGED_KEYWORD, off: 'unstarred', on: 'starred' },
-} as const satisfies Record<'read' | 'starred' | 'todo', FlagSpec>
+} as const satisfies Record<Exclude<keyof MarkEmailsArgs, 'ids'>, FlagSpec>
 
 export const markEmails = async (deps: MarkEmailsDeps, ctx: MarkEmailsContext): Promise<ToolResult> => {
   const keywords: Record<string, boolean> = {}
@@ -76,7 +76,7 @@ export const markEmails = async (deps: MarkEmailsDeps, ctx: MarkEmailsContext): 
     labels.push(value ? spec.on : spec.off)
   }
   if (labels.length === 0) {
-    return errorResult('No flag given, so nothing was changed. Pass at least one of read, todo or starred.')
+    return errorResult(`No flag given, so nothing was changed. Pass at least one of ${Object.keys(FLAGS).join(', ')}.`)
   }
   const result = await deps.updateEmails(ctx.token, ctx.args.ids, { keywords })
   return formatBatchResult('Marked', result, ` as ${labels.join(', ')}`)
@@ -94,12 +94,12 @@ export const registerMarkEmails = (server: McpServer, deps: FileEmailsDeps, getT
         'Reading a message with get_email, get_thread or search_emails never changes its read state, so ' +
         'call this when the user wants what you read marked read or says "keep this unread"; set todo when ' +
         'a message needs action from the user ("flag this for me", "add it to my to-dos"), clear it when ' +
-        'the to-do is done ("mark it done"), and set starred for "star this". Several flags go in one call, ' +
-        'e.g. read: true, todo: false to finish a to-do; a flag you leave out is untouched. ' +
-        'Takes message ids from search_emails or get_thread; folders are untouched, and re-running it on ' +
-        'the same ids is harmless. To get a message out of the inbox use archive_emails or move_emails ' +
-        'instead (finishing a to-do is usually this, then archive_emails); to mark something as spam, use ' +
-        'move_emails with Junk. Reports how many messages were marked and lists any id the server refused.',
+        'the to-do is done ("mark it done"), and set starred for "star this". Several flags go in one call; ' +
+        'a flag you leave out is untouched. To finish a to-do, call this tool with todo: false (plus ' +
+        'read: true if it is still unread), then archive_emails. Takes message ids from search_emails or ' +
+        'get_thread; folders are untouched, and re-running it on the same ids is harmless. To get a ' +
+        'message out of the inbox use archive_emails or move_emails instead; to mark something as spam, ' +
+        'use move_emails with Junk. Reports how many messages were marked and lists any id the server refused.',
       inputSchema: markEmailsShape,
       title: 'Mark emails read, to-do or starred',
     },
