@@ -333,6 +333,50 @@ describe('createLogtailStream context handling', () => {
     expect(ctx.recipientHashes).toEqual(['4be15ac83ae8', '49a3135ca77a'])
   })
 
+  // The three tests below are all consequences of one thing: `forward` derives
+  // `meta.dt`, then copies every non-reserved record key into that same object.
+  // `dt` and `message_field` are not in RESERVED_KEYS, so a record carrying
+  // either collides with the field this stream uses for its own purposes.
+
+  // The sharpest of the pinned quirks, and the only one reachable from ordinary
+  // pino use with no malformed input: a caller doing `logger.info({ dt }, 'x')`
+  // silently replaces the timestamp derived from `time` with its own raw value,
+  // even when that value is a string the client cannot read as a time.
+  test('lets a dt on the record override the dt derived from time', async () => {
+    await emit({ level: 30, time: 1, msg: 'own-dt', dt: 'not-a-date' })
+
+    expect(logCalls).toHaveLength(1)
+    expect(logCalls[0]?.context.dt).toBe('not-a-date')
+  })
+
+  // `meta.message_field` is assigned after the copy loop, so which value wins
+  // depends on whether the record had both `msg` and `message`.
+  test('keeps a record message_field when msg is absent but loses it when both are present', async () => {
+    await emit({ level: 30, time: 1, message: 'm', message_field: 'mine' })
+
+    expect(logCalls[0]?.context.message_field).toBe('mine')
+
+    logCalls.length = 0
+    await emit({ level: 30, time: 1, msg: 'a', message: 'b', message_field: 'mine' })
+
+    expect(logCalls[0]?.context.message_field).toBe('b')
+  })
+
+  // `JSON.parse` makes `__proto__` an own property, so `Object.keys` yields it,
+  // but `meta[key] = value` goes through Object.prototype's setter instead of
+  // creating an own property — so the field never reaches the context. The
+  // containment is what matters here: the assignment can repoint this one
+  // object's prototype, and `Object.prototype` itself is left alone.
+  test('drops a __proto__ field without polluting Object.prototype', async () => {
+    await emit({ level: 30, time: 1, msg: 'proto', __proto__: { polluted: true } })
+
+    expect(logCalls).toHaveLength(1)
+    expect(Object.keys(logCalls[0]?.context ?? {})).toEqual(['dt'])
+    expect(Object.hasOwn(logCalls[0]?.context ?? {}, '__proto__')).toBe(false)
+    expect(Object.hasOwn({}, 'polluted')).toBe(false)
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
   test('keeps a null field rather than dropping it', async () => {
     await emit({ level: 30, time: 1, msg: 'nulls', threadId: null })
 
