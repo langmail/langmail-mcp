@@ -323,6 +323,17 @@ describe('createLogtailStream message handling', () => {
     expect(logCalls[0]?.message).toBe(42 as unknown as string)
   })
 
+  // The `message` fallback is read with `??` too, so a falsy-but-present
+  // `message` passes through unconverted rather than collapsing to `''`. Same
+  // property the non-string `msg` test above pins, on the other operand;
+  // `logger.info({ message: 0 })` is the call that reaches it.
+  test('passes a falsy message through as the message rather than collapsing it', async () => {
+    await emit({ level: 30, time: 1, message: 0 })
+
+    expect(logCalls).toHaveLength(1)
+    expect(logCalls[0]?.message).toBe(0 as unknown as string)
+  })
+
   test('keeps message_field off the context when only message is present', async () => {
     await emit({ level: 30, time: 1, message: 'solo' })
 
