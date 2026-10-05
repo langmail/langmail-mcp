@@ -28,6 +28,28 @@ let flushCount = 0
 let rejectLogs = false
 let rejectFlush = false
 
+let rejectionsHandled = 0
+
+// `forward` attaches its handler by calling `.catch(...)` directly on whatever
+// the client returned, so shadowing `catch` on the rejected promise makes
+// handler attachment observable. That is what lets the tests below assert the
+// guarantee themselves instead of leaning entirely on Bun's runner failing a
+// test that leaks an unhandled rejection: this counter is synchronous and
+// independent of both the runner's behaviour and how long `settleRejections`
+// waits.
+type VoidPromiseCatch = Promise<void>['catch']
+
+const trackedRejection = (message: string): Promise<void> => {
+  const promise: Promise<void> = Promise.reject(new Error(message))
+  const attach: VoidPromiseCatch = promise.catch.bind(promise)
+  const counting: VoidPromiseCatch = (onRejected) => {
+    rejectionsHandled += 1
+    return attach(onRejected)
+  }
+  promise.catch = counting
+  return promise
+}
+
 // Runtime stand-in for @logtail/node's Logtail; the production code constructs
 // it with (token, options), which a no-arg JS class accepts and ignores.
 class FakeLogtail {
@@ -37,12 +59,12 @@ class FakeLogtail {
 
   log(message: string, level: string, context: Record<string, unknown>): Promise<void> {
     logCalls.push({ context, level, message })
-    return rejectLogs ? Promise.reject(new Error('logtail unavailable')) : Promise.resolve()
+    return rejectLogs ? trackedRejection('logtail unavailable') : Promise.resolve()
   }
 
   flush(): Promise<void> {
     flushCount += 1
-    return rejectFlush ? Promise.reject(new Error('flush failed')) : Promise.resolve()
+    return rejectFlush ? trackedRejection('flush failed') : Promise.resolve()
   }
 }
 
@@ -110,6 +132,7 @@ const resetState = (): void => {
   flushCount = 0
   rejectLogs = false
   rejectFlush = false
+  rejectionsHandled = 0
 }
 
 beforeEach(resetState)
@@ -380,6 +403,7 @@ describe('createLogtailStream failure handling', () => {
     await settleRejections()
 
     expect(logCalls).toHaveLength(1)
+    expect(rejectionsHandled).toBe(1)
   })
 
   test('keeps forwarding records after a rejected log promise', async () => {
@@ -390,6 +414,7 @@ describe('createLogtailStream failure handling', () => {
     await settleRejections()
 
     expect(logCalls.map((c) => c.message)).toEqual(['rejected', 'accepted'])
+    expect(rejectionsHandled).toBe(1)
   })
 
   test('flushes the client when the event loop drains', () => {
@@ -415,6 +440,7 @@ describe('createLogtailStream failure handling', () => {
       await settleRejections()
 
       expect(flushCount).toBe(1)
+      expect(rejectionsHandled).toBe(1)
     } finally {
       removeExitListeners(added)
     }
