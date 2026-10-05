@@ -323,12 +323,14 @@ describe('createLogtailStream message handling', () => {
     expect(logCalls[0]?.message).toBe(42 as unknown as string)
   })
 
-  // `message_field` is guarded with `!== undefined`, not a nullish check, so a
-  // null `message` alongside a `msg` still reaches the context as null rather
-  // than being dropped. `logger.info({ message: null }, 'a')` produces this
-  // record — a nullable field in a user object is ordinary, which is what
-  // separates it from a null `msg`: pino takes `msg` from the message argument,
-  // so a caller cannot put `null` there.
+  // Both operands of the `message_field` guard are `!== undefined`, not nullish
+  // checks, and pino reaches both: its merge-object loop drops only `undefined`,
+  // so a `null` on either key is serialized. Measured —
+  // `logger.info({ msg: undefined, message: 'y' })` omits `msg` entirely, while
+  // `logger.info({ msg: null, message: 'x' })` writes `msg: null`.
+  //
+  // A null `message` alongside a `msg` reaches the context as null rather than
+  // being dropped. `logger.info({ message: null }, 'a')` produces this record.
   test('keeps a null message as message_field rather than dropping it', async () => {
     await emit({ level: 30, time: 1, msg: 'a', message: null })
 
@@ -336,6 +338,20 @@ describe('createLogtailStream message handling', () => {
     expect(logCalls[0]?.message).toBe('a')
     expect(Object.hasOwn(logCalls[0]?.context ?? {}, 'message_field')).toBe(true)
     expect(logCalls[0]?.context.message_field).toBeNull()
+  })
+
+  // The `msg` side of that guard, reached by the no-message form: there is no
+  // message argument to override the object's key, so `msg: null` survives into
+  // the record. `msg` then resolves through the nullish fallback to `message`,
+  // and because both keys are present the same value is copied to
+  // `message_field` as well — `'x'` ships twice. Captured as current behaviour,
+  // not endorsed; the fix would be a nullish guard on the `msg` operand.
+  test('publishes the message twice when msg is null and message is set', async () => {
+    await emit({ level: 30, time: 1, msg: null, message: 'x' })
+
+    expect(logCalls).toHaveLength(1)
+    expect(logCalls[0]?.message).toBe('x')
+    expect(logCalls[0]?.context.message_field).toBe('x')
   })
 
   // The `message` fallback is read with `??` too, so a falsy-but-present
