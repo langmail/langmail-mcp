@@ -362,19 +362,40 @@ describe('createLogtailStream context handling', () => {
     expect(logCalls[0]?.context.message_field).toBe('b')
   })
 
-  // `JSON.parse` makes `__proto__` an own property, so `Object.keys` yields it,
-  // but `meta[key] = value` goes through Object.prototype's setter instead of
-  // creating an own property — so the field never reaches the context. The
-  // containment is what matters here: the assignment can repoint this one
-  // object's prototype, and `Object.prototype` itself is left alone.
-  test('drops a __proto__ field without polluting Object.prototype', async () => {
-    await emit({ level: 30, time: 1, msg: 'proto', __proto__: { polluted: true } })
+  // Both `__proto__` tests use a raw line rather than `emit`, and that is
+  // load-bearing: `__proto__:` in an *object literal* sets the literal's own
+  // prototype instead of creating a property (ES2015 B.3.1), so
+  // `JSON.stringify` would drop the key and the stream would never see it.
+  // Only `JSON.parse` of a real line makes `__proto__` an own property that
+  // `Object.keys` yields and the copy loop then assigns.
+
+  // With an object value the assignment reaches `Object.prototype`'s setter, so
+  // the value is not discarded — it becomes *this* context object's prototype,
+  // readable through the chain while absent from `Object.keys`. The containment
+  // is the guarantee worth pinning: `Object.prototype` itself is untouched.
+  test('keeps a __proto__ object off the context without polluting Object.prototype', async () => {
+    await writeRaw('{"level":30,"time":1,"msg":"proto","__proto__":{"polluted":true}}\n')
 
     expect(logCalls).toHaveLength(1)
-    expect(Object.keys(logCalls[0]?.context ?? {})).toEqual(['dt'])
-    expect(Object.hasOwn(logCalls[0]?.context ?? {}, '__proto__')).toBe(false)
+    const ctx = logCalls[0]?.context ?? {}
+    expect(Object.keys(ctx)).toEqual(['dt'])
+    expect(Object.hasOwn(ctx, '__proto__')).toBe(false)
+    expect(Object.hasOwn(ctx, 'polluted')).toBe(false)
+    expect(ctx.polluted).toBe(true)
     expect(Object.hasOwn({}, 'polluted')).toBe(false)
     expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
+  // A primitive value takes a third path: the setter returns without doing
+  // anything, so the field is dropped outright and no prototype changes.
+  test('drops a primitive __proto__ field outright', async () => {
+    await writeRaw('{"level":30,"time":1,"msg":"proto","__proto__":"x"}\n')
+
+    expect(logCalls).toHaveLength(1)
+    const ctx = logCalls[0]?.context ?? {}
+    expect(Object.keys(ctx)).toEqual(['dt'])
+    expect(ctx.polluted).toBeUndefined()
+    expect(Object.getPrototypeOf(ctx)).toBe(Object.prototype)
   })
 
   test('keeps a null field rather than dropping it', async () => {
