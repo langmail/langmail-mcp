@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { type Writable } from 'node:stream'
 
 // Capture every logtail.log(...) call so we can assert the pino → Logtail
 // mapping matches what @logtail/pino's transport produced.
@@ -9,16 +10,40 @@ interface LogCall {
 }
 const logCalls: LogCall[] = []
 
+// createLogtailStream's only observable use of its arguments is the client it
+// constructs, so the constructor arguments are part of the contract: an absent
+// endpoint must stay absent rather than become `endpoint: undefined`, which the
+// @logtail/node client would read as a configured (empty) endpoint.
+interface ConstructorCall {
+  options: Record<string, unknown>
+  token: string
+}
+const constructorCalls: ConstructorCall[] = []
+
+let flushCount = 0
+
+// The @logtail/node client retries and burst-protects internally, so
+// logtail-stream.ts deliberately swallows rejected log/flush promises. These
+// flags are how the suite reaches that path — the real client only rejects
+// against a network.
+let rejectLogs = false
+let rejectFlush = false
+
 // Runtime stand-in for @logtail/node's Logtail; the production code constructs
 // it with (token, options), which a no-arg JS class accepts and ignores.
 class FakeLogtail {
+  constructor(token: string, options: Record<string, unknown> = {}) {
+    constructorCalls.push({ options, token })
+  }
+
   log(message: string, level: string, context: Record<string, unknown>): Promise<void> {
-    logCalls.push({ message, level, context })
-    return Promise.resolve()
+    logCalls.push({ context, level, message })
+    return rejectLogs ? Promise.reject(new Error('logtail unavailable')) : Promise.resolve()
   }
 
   flush(): Promise<void> {
-    return Promise.resolve()
+    flushCount += 1
+    return rejectFlush ? Promise.reject(new Error('flush failed')) : Promise.resolve()
   }
 }
 
@@ -30,18 +55,77 @@ const { createLogtailStream } = await import('./logtail-stream')
 const stream = createLogtailStream('test-token', 'https://example.test')
 
 // Resolve once pino's serialized line has been fully handled by the stream.
-const emit = (record: Record<string, unknown>): Promise<void> =>
+const emitTo = (target: Writable, record: Record<string, unknown>): Promise<void> =>
   new Promise((resolve) => {
-    stream.write(`${JSON.stringify(record)}\n`, () => resolve())
+    target.write(`${JSON.stringify(record)}\n`, () => resolve())
   })
 
-beforeEach(() => {
-  logCalls.length = 0
-})
+const emit = (record: Record<string, unknown>): Promise<void> => emitTo(stream, record)
 
-afterEach(() => {
+// Bypasses JSON.stringify so a test can hand the stream bytes pino would never
+// produce (malformed lines, blank lines, a record split across two writes).
+const writeRaw = (target: Writable, chunk: Buffer | string): Promise<void> =>
+  new Promise((resolve) => {
+    target.write(chunk, () => resolve())
+  })
+
+type ExitListener = () => void
+
+const beforeExitListeners = (): ExitListener[] => process.listeners('beforeExit') as ExitListener[]
+
+// createLogtailStream registers one process-level `beforeExit` listener per
+// call, so a test that builds its own stream has to take that listener back off
+// again — otherwise the suite leaks one per test and Node starts warning at
+// eleven. Returns the listeners this call added, so a test can both invoke them
+// (that is the flush-on-drain path) and remove them afterwards.
+const createStreamWithExitListeners = (
+  token: string,
+  endpoint?: string
+): { added: ExitListener[]; stream: Writable } => {
+  const before = new Set(beforeExitListeners())
+  const created = createLogtailStream(token, endpoint)
+  const added = beforeExitListeners().filter((listener) => !before.has(listener))
+  return { added, stream: created }
+}
+
+const removeExitListeners = (listeners: ExitListener[]): void => {
+  for (const listener of listeners) {
+    process.removeListener('beforeExit', listener)
+  }
+}
+
+// The guarantee around a rejected client promise is a negative one: nothing
+// reaches process-level `unhandledRejection`, because that would take down the
+// emitting service. Asserting it means watching for the event that must not
+// fire, not asserting on a return value.
+const unhandledRejectionsDuring = async (run: () => Promise<void>): Promise<unknown[]> => {
+  const seen: unknown[] = []
+  const onRejection = (reason: unknown): void => {
+    seen.push(reason)
+  }
+  process.on('unhandledRejection', onRejection)
+  try {
+    await run()
+    // Node reports an unhandled rejection only after the microtask queue has
+    // drained, so give the loop a macrotask turn before concluding silence.
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  } finally {
+    process.removeListener('unhandledRejection', onRejection)
+  }
+  return seen
+}
+
+const resetState = (): void => {
   logCalls.length = 0
-})
+  constructorCalls.length = 0
+  flushCount = 0
+  rejectLogs = false
+  rejectFlush = false
+}
+
+beforeEach(resetState)
+
+afterEach(resetState)
 
 describe('createLogtailStream', () => {
   test('maps pino numeric levels to Logtail levels at each boundary', async () => {
@@ -95,10 +179,304 @@ describe('createLogtailStream', () => {
   })
 
   test('ignores malformed lines without throwing', async () => {
-    await new Promise<void>((resolve) => {
-      stream.write('not json\n', () => resolve())
-    })
+    await writeRaw(stream, 'not json\n')
 
     expect(logCalls).toHaveLength(0)
+  })
+})
+
+describe('createLogtailStream level mapping between boundaries', () => {
+  test('rounds each pino level band up to its Logtail level', async () => {
+    await emit({ level: 1, time: 1, msg: 'a' })
+    await emit({ level: 15, time: 1, msg: 'a' })
+    await emit({ level: 25, time: 1, msg: 'a' })
+    await emit({ level: 35, time: 1, msg: 'a' })
+    await emit({ level: 45, time: 1, msg: 'a' })
+    await emit({ level: 55, time: 1, msg: 'a' })
+
+    expect(logCalls.map((c) => c.level)).toEqual(['trace', 'debug', 'info', 'warn', 'error', 'fatal'])
+  })
+
+  test('maps a level below pino trace to trace and one above fatal to fatal', async () => {
+    await emit({ level: -1, time: 1, msg: 'a' })
+    await emit({ level: 1000, time: 1, msg: 'a' })
+
+    expect(logCalls.map((c) => c.level)).toEqual(['trace', 'fatal'])
+  })
+
+  // Documents a quirk rather than an intention: every comparison in
+  // toLogtailLevel is false against `undefined`, so a record pino never writes
+  // (it always sets `level`) would land in BetterStack as a fatal.
+  test('reports a record with no level as fatal', async () => {
+    await emit({ time: 1, msg: 'levelless' })
+
+    expect(logCalls[0]?.level).toBe('fatal')
+  })
+})
+
+describe('createLogtailStream dt handling', () => {
+  test('omits dt when the record has no time', async () => {
+    await emit({ level: 30, msg: 'no-time' })
+
+    expect(logCalls[0]?.context.dt).toBeUndefined()
+    expect(Object.hasOwn(logCalls[0]?.context ?? {}, 'dt')).toBe(false)
+  })
+
+  test('omits dt when time cannot be parsed as a date', async () => {
+    await emit({ level: 30, time: 'not-a-date', msg: 'bad-time' })
+
+    expect(logCalls[0]?.context.dt).toBeUndefined()
+  })
+
+  // The in-process stream is deliberately more permissive than @logtail/pino,
+  // which only handled string times and so dropped dt for pino's numeric
+  // default. Both shapes must now produce a dt.
+  test('sets dt from an ISO string time', async () => {
+    await emit({ level: 30, time: '2026-06-09T12:00:00.000Z', msg: 'string-time' })
+
+    const dt = logCalls[0]?.context.dt as Date
+    expect(dt).toBeInstanceOf(Date)
+    expect(dt.toISOString()).toBe('2026-06-09T12:00:00.000Z')
+  })
+
+  // A null time is not undefined, so it passes the guard and `new Date(null)`
+  // yields a valid date at the unix epoch. Captured as current behaviour.
+  test('maps a null time to the unix epoch', async () => {
+    await emit({ level: 30, time: null, msg: 'null-time' })
+
+    const dt = logCalls[0]?.context.dt as Date
+    expect(dt.toISOString()).toBe('1970-01-01T00:00:00.000Z')
+  })
+})
+
+describe('createLogtailStream message handling', () => {
+  test('sends an empty message when neither msg nor message is present', async () => {
+    await emit({ level: 30, time: 1, service: 'api' })
+
+    expect(logCalls[0]?.message).toBe('')
+    expect(logCalls[0]?.context.service).toBe('api')
+  })
+
+  // `msg` is cast to string rather than converted, so a non-string msg reaches
+  // the client with its original runtime type. Captured as current behaviour.
+  test('passes a non-string msg through without converting it', async () => {
+    await emit({ level: 30, time: 1, msg: 42 })
+
+    expect(logCalls[0]?.message).toBe(42 as unknown as string)
+  })
+
+  test('keeps message_field off the context when only message is present', async () => {
+    await emit({ level: 30, time: 1, message: 'solo' })
+
+    expect(Object.hasOwn(logCalls[0]?.context ?? {}, 'message_field')).toBe(false)
+  })
+})
+
+describe('createLogtailStream context handling', () => {
+  test('preserves nested objects and arrays', async () => {
+    await emit({
+      level: 30,
+      time: 1,
+      msg: 'nested',
+      err: { message: 'boom', type: 'Error' },
+      recipients: ['ada@example.com', 'grace@example.org'],
+    })
+
+    const ctx = logCalls[0]?.context ?? {}
+    expect(ctx.err).toEqual({ message: 'boom', type: 'Error' })
+    expect(ctx.recipients).toEqual(['ada@example.com', 'grace@example.org'])
+  })
+
+  test('keeps a null field rather than dropping it', async () => {
+    await emit({ level: 30, time: 1, msg: 'nulls', threadId: null })
+
+    expect(Object.hasOwn(logCalls[0]?.context ?? {}, 'threadId')).toBe(true)
+    expect(logCalls[0]?.context.threadId).toBeNull()
+  })
+})
+
+describe('createLogtailStream chunk handling', () => {
+  test('forwards every record in a multi-line chunk', async () => {
+    const lines = [
+      JSON.stringify({ level: 30, time: 1, msg: 'first' }),
+      JSON.stringify({ level: 40, time: 1, msg: 'second' }),
+      JSON.stringify({ level: 50, time: 1, msg: 'third' }),
+    ]
+    await writeRaw(stream, `${lines.join('\n')}\n`)
+
+    expect(logCalls.map((c) => c.message)).toEqual(['first', 'second', 'third'])
+  })
+
+  test('accepts a Buffer chunk', async () => {
+    await writeRaw(stream, Buffer.from(`${JSON.stringify({ level: 30, time: 1, msg: 'from-buffer' })}\n`, 'utf8'))
+
+    expect(logCalls.map((c) => c.message)).toEqual(['from-buffer'])
+  })
+
+  test('forwards a line with no trailing newline', async () => {
+    await writeRaw(stream, JSON.stringify({ level: 30, time: 1, msg: 'unterminated' }))
+
+    expect(logCalls.map((c) => c.message)).toEqual(['unterminated'])
+  })
+
+  test('skips blank lines', async () => {
+    await writeRaw(stream, `\n\n${JSON.stringify({ level: 30, time: 1, msg: 'after-blanks' })}\n\n`)
+
+    expect(logCalls.map((c) => c.message)).toEqual(['after-blanks'])
+  })
+
+  test('forwards the valid lines surrounding a malformed one', async () => {
+    const chunk = [
+      JSON.stringify({ level: 30, time: 1, msg: 'before' }),
+      '{"level":30,"msg":',
+      JSON.stringify({ level: 30, time: 1, msg: 'after' }),
+    ].join('\n')
+    await writeRaw(stream, `${chunk}\n`)
+
+    expect(logCalls.map((c) => c.message)).toEqual(['before', 'after'])
+  })
+
+  // A limitation, captured so a future reassembly fix has something to flip:
+  // the stream parses each write in isolation, so a record delivered in two
+  // chunks is dropped entirely rather than being buffered and re-joined. Safe
+  // in practice only because pino.multistream writes one whole line per call.
+  test('drops a record split across two writes', async () => {
+    await writeRaw(stream, '{"level":30,"time":1,"msg":"split"')
+    await writeRaw(stream, '}\n')
+
+    expect(logCalls).toHaveLength(0)
+  })
+})
+
+describe('createLogtailStream failure handling', () => {
+  test('swallows a rejected log promise without an unhandled rejection', async () => {
+    const seen = await unhandledRejectionsDuring(async () => {
+      rejectLogs = true
+      await emit({ level: 30, time: 1, msg: 'will-reject' })
+    })
+
+    expect(logCalls).toHaveLength(1)
+    expect(seen).toEqual([])
+  })
+
+  test('keeps forwarding records after a rejected log promise', async () => {
+    const seen = await unhandledRejectionsDuring(async () => {
+      rejectLogs = true
+      await emit({ level: 30, time: 1, msg: 'rejected' })
+      rejectLogs = false
+      await emit({ level: 30, time: 1, msg: 'accepted' })
+    })
+
+    expect(logCalls.map((c) => c.message)).toEqual(['rejected', 'accepted'])
+    expect(seen).toEqual([])
+  })
+
+  test('flushes the client when the event loop drains', () => {
+    const { added } = createStreamWithExitListeners('flush-token')
+    try {
+      expect(added).toHaveLength(1)
+      for (const listener of added) {
+        listener()
+      }
+      expect(flushCount).toBe(1)
+    } finally {
+      removeExitListeners(added)
+    }
+  })
+
+  test('swallows a rejected flush promise without an unhandled rejection', async () => {
+    const { added } = createStreamWithExitListeners('flush-token')
+    try {
+      const seen = await unhandledRejectionsDuring(async () => {
+        rejectFlush = true
+        for (const listener of added) {
+          listener()
+        }
+        await Promise.resolve()
+      })
+
+      expect(flushCount).toBe(1)
+      expect(seen).toEqual([])
+    } finally {
+      removeExitListeners(added)
+    }
+  })
+
+  // Each stream owns its own client, so each registers its own drain flush
+  // rather than sharing one: two streams in a process flush twice, once per
+  // client. This is also why every stream here is torn down — the listeners
+  // accumulate per call.
+  test('registers one independent drain flush per stream', () => {
+    const first = createStreamWithExitListeners('flush-token-a')
+    const second = createStreamWithExitListeners('flush-token-b')
+    try {
+      expect(first.added).toHaveLength(1)
+      expect(second.added).toHaveLength(1)
+      expect(first.added[0]).not.toBe(second.added[0])
+
+      for (const listener of [...first.added, ...second.added]) {
+        listener()
+      }
+
+      expect(flushCount).toBe(2)
+    } finally {
+      removeExitListeners([...first.added, ...second.added])
+    }
+  })
+
+  // No SIGINT/SIGTERM handler is registered on purpose: adding a signal
+  // listener suppresses Node's default termination and would hang services
+  // that have no shutdown handler of their own.
+  test('registers no signal handlers', () => {
+    const sigintBefore = process.listenerCount('SIGINT')
+    const sigtermBefore = process.listenerCount('SIGTERM')
+    const { added } = createStreamWithExitListeners('signal-token')
+    try {
+      expect(process.listenerCount('SIGINT')).toBe(sigintBefore)
+      expect(process.listenerCount('SIGTERM')).toBe(sigtermBefore)
+    } finally {
+      removeExitListeners(added)
+    }
+  })
+})
+
+describe('createLogtailStream client construction', () => {
+  test('passes the source token through to the Logtail client', () => {
+    const { added } = createStreamWithExitListeners('source-token-123')
+    try {
+      expect(constructorCalls).toHaveLength(1)
+      expect(constructorCalls[0]?.token).toBe('source-token-123')
+    } finally {
+      removeExitListeners(added)
+    }
+  })
+
+  test('leaves endpoint unset when none is given', () => {
+    const { added } = createStreamWithExitListeners('source-token-123')
+    try {
+      expect(Object.hasOwn(constructorCalls[0]?.options ?? {}, 'endpoint')).toBe(false)
+    } finally {
+      removeExitListeners(added)
+    }
+  })
+
+  test('forwards a provided endpoint as a client option', () => {
+    const { added } = createStreamWithExitListeners('source-token-123', 'https://in.example.test')
+    try {
+      expect(constructorCalls[0]?.options.endpoint).toBe('https://in.example.test')
+    } finally {
+      removeExitListeners(added)
+    }
+  })
+
+  // An empty endpoint is falsy, so it is treated as "not configured" rather
+  // than overriding the client default with an unusable URL.
+  test('treats an empty endpoint as no endpoint', () => {
+    const { added } = createStreamWithExitListeners('source-token-123', '')
+    try {
+      expect(Object.hasOwn(constructorCalls[0]?.options ?? {}, 'endpoint')).toBe(false)
+    } finally {
+      removeExitListeners(added)
+    }
   })
 })

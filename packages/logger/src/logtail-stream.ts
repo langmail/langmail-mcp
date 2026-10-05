@@ -1,6 +1,6 @@
 import { Writable } from 'node:stream'
 import { Logtail } from '@logtail/node'
-import { type Context, type ILogLevel, type ILogtailNodeOptions, LogLevel } from '@logtail/types'
+import { type Context, type ILogtailNodeOptions, LogLevel } from '@logtail/types'
 
 // Keys pino puts on every record that should not be forwarded as Logtail
 // context. Mirrors the exclusion list in `@logtail/pino`'s transport.
@@ -47,7 +47,7 @@ const forward = (logtail: Logtail, record: Record<string, unknown>): void => {
   // original @logtail/pino guard (which only handled string times and so
   // dropped dt for the numeric default), set dt whenever the time parses.
   if (record.time !== undefined) {
-    const dt = new Date(record.time as number)
+    const dt = new Date(record.time as number | string)
     if (!Number.isNaN(dt.valueOf())) {
       meta.dt = dt
     }
@@ -66,7 +66,7 @@ const forward = (logtail: Logtail, record: Record<string, unknown>): void => {
     meta.message_field = record.message
   }
 
-  const level: ILogLevel = toLogtailLevel(record.level as number)
+  const level = toLogtailLevel(record.level as number)
   logtail.log(msg, level, meta).catch(ignoreRejection)
 }
 
