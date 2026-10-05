@@ -109,14 +109,22 @@ const removeExitListeners = (listeners: ExitListener[]): void => {
   }
 }
 
-// The guarantee around a rejected client promise is a negative one: the
-// rejection must not escape `forward`, because an unhandled rejection would
-// take down the emitting service. Bun's test runner is the detector — it fails
-// any test that leaks one, rather than delivering it to a
-// `process.on('unhandledRejection')` listener, which is why these tests carry
-// no explicit "nothing fired" assertion: there is nothing a listener here could
-// observe. Confirmed by mutation — dropping the `.catch(ignoreRejection)` in
-// logtail-stream.ts reds exactly the two log-rejection tests below.
+// The guarantee around a rejected client promise: it must not escape `forward`,
+// because an unhandled rejection would take down the emitting service. Two
+// mechanisms hold it, and both are deliberate. `trackedRejection` above counts
+// handler attachment, which is what the tests assert directly; Bun's runner
+// then catches a rejection that escapes by any other route, since it fails any
+// test that leaks one rather than delivering it to a
+// `process.on('unhandledRejection')` listener — a listener here would observe
+// nothing, which is why there is no "nothing fired" assertion.
+//
+// Confirmed by mutation at both `.catch(ignoreRejection)` sites in
+// logtail-stream.ts: dropping the one on the `log` call reds the two
+// log-rejection tests below, and dropping the one on the drain `flush` reds
+// `swallows a rejected flush promise`. Attaching the handler by another route
+// instead (`.then(undefined, ignoreRejection)`) leaks nothing, so the runner
+// stays quiet and the attachment count is the only thing that reds — which is
+// what shows that assertion is load-bearing rather than along for the ride.
 //
 // An escaped rejection only surfaces once the microtask queue has drained, so
 // every test that provokes one yields a macrotask turn before finishing;
