@@ -325,9 +325,15 @@ describe('createLogtailStream message handling', () => {
 
   // Both operands of the `message_field` guard are `!== undefined`, not nullish
   // checks, and pino reaches both: its merge-object loop drops only `undefined`,
-  // so a `null` on either key is serialized. Measured —
+  // so a `null` on either key is serialized. Measured against pino 10.3.1 —
   // `logger.info({ msg: undefined, message: 'y' })` omits `msg` entirely, while
   // `logger.info({ msg: null, message: 'x' })` writes `msg: null`.
+  //
+  // That is an upstream behaviour, stated here as of a version rather than for
+  // all time: these two fixtures are hand-written NDJSON, so nothing in this file
+  // would notice if a later pino started dropping nullish merge values and made
+  // the records unproducible. The tests would still be correct about `forward`;
+  // only the note on where the records come from would go stale.
   //
   // A null `message` alongside a `msg` reaches the context as null rather than
   // being dropped. `logger.info({ message: null }, 'a')` produces this record.
