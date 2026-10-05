@@ -333,7 +333,7 @@ describe('createLogtailStream context handling', () => {
     expect(ctx.recipientHashes).toEqual(['4be15ac83ae8', '49a3135ca77a'])
   })
 
-  // The three tests below are all consequences of one thing: `forward` derives
+  // The tests below are all consequences of one thing: `forward` derives
   // `meta.dt`, then copies every non-reserved record key into that same object.
   // `dt` and `message_field` are not in RESERVED_KEYS, so a record carrying
   // either collides with the field this stream uses for its own purposes.
