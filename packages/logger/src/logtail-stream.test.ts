@@ -213,6 +213,12 @@ describe('createLogtailStream', () => {
     await writeRaw('not json\n')
 
     expect(logCalls).toHaveLength(0)
+
+    // The length-0 assertion alone is satisfied by a stream that never forwards
+    // anything, so show the pipeline survived the malformed line rather than
+    // having been broken all along.
+    await emit({ level: 30, time: 1, msg: 'after-malformed' })
+    expect(logCalls.map((c) => c.message)).toEqual(['after-malformed'])
   })
 })
 
@@ -406,6 +412,9 @@ describe('createLogtailStream chunk handling', () => {
     await writeRaw('null\n')
 
     expect(logCalls).toHaveLength(0)
+
+    await emit({ level: 30, time: 1, msg: 'after-null' })
+    expect(logCalls.map((c) => c.message)).toEqual(['after-null'])
   })
 
   // A limitation, captured so a future reassembly fix has something to flip:
@@ -417,6 +426,9 @@ describe('createLogtailStream chunk handling', () => {
     await writeRaw('}\n')
 
     expect(logCalls).toHaveLength(0)
+
+    await emit({ level: 30, time: 1, msg: 'after-split' })
+    expect(logCalls.map((c) => c.message)).toEqual(['after-split'])
   })
 })
 
@@ -500,6 +512,9 @@ describe('createLogtailStream failure handling', () => {
     const sigtermBefore = process.listenerCount('SIGTERM')
     const added = createStreamWithExitListeners('signal-token')
     try {
+      // Pins that a stream was actually built: both counter assertions below
+      // also hold against a createLogtailStream that registered nothing at all.
+      expect(added).toHaveLength(1)
       expect(process.listenerCount('SIGINT')).toBe(sigintBefore)
       expect(process.listenerCount('SIGTERM')).toBe(sigtermBefore)
     } finally {
