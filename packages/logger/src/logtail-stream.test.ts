@@ -302,6 +302,19 @@ describe('createLogtailStream message handling', () => {
     expect(logCalls[0]?.context.service).toBe('api')
   })
 
+  // `msg` is read with `??`, not `||`, so an explicitly empty message stays empty
+  // instead of falling through to `message`. The reaching call is ordinary —
+  // `logger.info({ message: 'y' }, '')` serializes to `{"msg":"","message":"y"}`
+  // — and under `||` the same value would be published as both the message and
+  // `message_field`, with the empty-message behaviour lost.
+  test('keeps an empty msg as the message rather than falling through to message', async () => {
+    await emit({ level: 30, time: 1, msg: '', message: 'fallback' })
+
+    expect(logCalls).toHaveLength(1)
+    expect(logCalls[0]?.message).toBe('')
+    expect(logCalls[0]?.context.message_field).toBe('fallback')
+  })
+
   // `msg` is cast to string rather than converted, so a non-string msg reaches
   // the client with its original runtime type. Captured as current behaviour.
   test('passes a non-string msg through without converting it', async () => {
