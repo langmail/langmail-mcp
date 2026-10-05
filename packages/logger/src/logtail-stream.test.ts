@@ -584,6 +584,37 @@ describe('createLogtailStream failure handling', () => {
     }
   })
 
+  // Registered with `once`, not `on`. Node re-emits `beforeExit` when a listener
+  // schedules more work, and `flush()` is a network round-trip, so an `on`
+  // registration could flush repeatedly on one drain. Nothing the other drain
+  // tests observe tells the two apart: `listeners()` returns the original
+  // function either way — which is what makes `removeExitListeners` work — and
+  // calling a listener by hand does not consume a `once`. Bun also exposes no
+  // `.listener`-bearing wrapper on `rawListeners`, so the registration cannot be
+  // inspected directly. Emitting the event is what consumes it, so this drains
+  // twice and pins the second drain as silent.
+  //
+  // The emit fires every `beforeExit` listener in the process, the suite's
+  // module-level stream included, so the first count is a floor rather than an
+  // exact figure; what the mutation changes is whether the second drain adds to
+  // it.
+  test('registers the drain flush with once, so a second drain does not flush again', () => {
+    const added = createStreamWithExitListeners('once-token')
+    try {
+      expect(added).toHaveLength(1)
+
+      process.emit('beforeExit', 0)
+      const afterFirstDrain = flushCount
+      expect(afterFirstDrain).toBeGreaterThanOrEqual(1)
+      expect(beforeExitListeners()).not.toContain(added[0])
+
+      process.emit('beforeExit', 0)
+      expect(flushCount).toBe(afterFirstDrain)
+    } finally {
+      removeExitListeners(added)
+    }
+  })
+
   // No SIGINT/SIGTERM handler is registered on purpose: adding a signal
   // listener suppresses Node's default termination and would hang services
   // that have no shutdown handler of their own.
