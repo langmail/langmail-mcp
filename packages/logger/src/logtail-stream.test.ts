@@ -323,6 +323,21 @@ describe('createLogtailStream message handling', () => {
     expect(logCalls[0]?.message).toBe(42 as unknown as string)
   })
 
+  // `message_field` is guarded with `!== undefined`, not a nullish check, so a
+  // null `message` alongside a `msg` still reaches the context as null rather
+  // than being dropped. `logger.info({ message: null }, 'a')` produces this
+  // record — a nullable field in a user object is ordinary, which is what
+  // separates it from a null `msg`: pino takes `msg` from the message argument,
+  // so a caller cannot put `null` there.
+  test('keeps a null message as message_field rather than dropping it', async () => {
+    await emit({ level: 30, time: 1, msg: 'a', message: null })
+
+    expect(logCalls).toHaveLength(1)
+    expect(logCalls[0]?.message).toBe('a')
+    expect(Object.hasOwn(logCalls[0]?.context ?? {}, 'message_field')).toBe(true)
+    expect(logCalls[0]?.context.message_field).toBeNull()
+  })
+
   // The `message` fallback is read with `??` too, so a falsy-but-present
   // `message` passes through unconverted rather than collapsing to `''`. Same
   // property the non-string `msg` test above pins, on the other operand;
