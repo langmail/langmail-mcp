@@ -389,7 +389,18 @@ describe('createLogtailStream context handling', () => {
   // A primitive value takes a third path: the setter returns without doing
   // anything, so the field is dropped outright and no prototype changes.
   test('drops a primitive __proto__ field outright', async () => {
-    await writeRaw('{"level":30,"time":1,"msg":"proto","__proto__":"x"}\n')
+    const line = '{"level":30,"time":1,"msg":"proto","__proto__":"x"}'
+
+    // Pins the fixture rather than only the output, which is the one guard
+    // available here. The object-value test above is self-guarding —
+    // `ctx.polluted` is `true` only if the key arrived — but a no-op setter and
+    // an absent key produce identical contexts, so every assertion below also
+    // holds for a line carrying no `__proto__` at all. Without this line the
+    // object-literal mistake that broke the first version of these tests would
+    // pass unnoticed here.
+    expect(Object.hasOwn(JSON.parse(line) as Record<string, unknown>, '__proto__')).toBe(true)
+
+    await writeRaw(`${line}\n`)
 
     expect(logCalls).toHaveLength(1)
     const ctx = logCalls[0]?.context ?? {}
