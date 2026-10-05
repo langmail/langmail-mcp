@@ -196,7 +196,11 @@ describe('createLogtailStream', () => {
   })
 
   test('forwards extra fields as context but strips reserved keys', async () => {
-    await emit({ level: 30, time: 1, msg: 'm', v: 1, service: 'api', userId: 'u-1', count: 3 })
+    // `message` is in the fixture so the `ctx.message` assertion below is
+    // load-bearing. Without the key it holds whether or not `message` is
+    // stripped, and it was the one entry in RESERVED_KEYS that could be deleted
+    // with the whole suite staying green.
+    await emit({ level: 30, time: 1, msg: 'm', message: 'x', v: 1, service: 'api', userId: 'u-1', count: 3 })
 
     const ctx = logCalls[0]?.context ?? {}
     expect(ctx.service).toBe('api')
