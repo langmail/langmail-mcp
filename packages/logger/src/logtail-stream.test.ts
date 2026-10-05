@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { type Writable } from 'node:stream'
 
 // Capture every logtail.log(...) call so we can assert the pino → Logtail
 // mapping matches what @logtail/pino's transport produced.
@@ -55,18 +54,16 @@ const { createLogtailStream } = await import('./logtail-stream')
 const stream = createLogtailStream('test-token', 'https://example.test')
 
 // Resolve once pino's serialized line has been fully handled by the stream.
-const emitTo = (target: Writable, record: Record<string, unknown>): Promise<void> =>
+const emit = (record: Record<string, unknown>): Promise<void> =>
   new Promise((resolve) => {
-    target.write(`${JSON.stringify(record)}\n`, () => resolve())
+    stream.write(`${JSON.stringify(record)}\n`, () => resolve())
   })
-
-const emit = (record: Record<string, unknown>): Promise<void> => emitTo(stream, record)
 
 // Bypasses JSON.stringify so a test can hand the stream bytes pino would never
 // produce (malformed lines, blank lines, a record split across two writes).
-const writeRaw = (target: Writable, chunk: Buffer | string): Promise<void> =>
+const writeRaw = (chunk: Buffer | string): Promise<void> =>
   new Promise((resolve) => {
-    target.write(chunk, () => resolve())
+    stream.write(chunk, () => resolve())
   })
 
 type ExitListener = () => void
@@ -78,14 +75,10 @@ const beforeExitListeners = (): ExitListener[] => process.listeners('beforeExit'
 // again — otherwise the suite leaks one per test and Node starts warning at
 // eleven. Returns the listeners this call added, so a test can both invoke them
 // (that is the flush-on-drain path) and remove them afterwards.
-const createStreamWithExitListeners = (
-  token: string,
-  endpoint?: string
-): { added: ExitListener[]; stream: Writable } => {
+const createStreamWithExitListeners = (token: string, endpoint?: string): ExitListener[] => {
   const before = new Set(beforeExitListeners())
-  const created = createLogtailStream(token, endpoint)
-  const added = beforeExitListeners().filter((listener) => !before.has(listener))
-  return { added, stream: created }
+  createLogtailStream(token, endpoint)
+  return beforeExitListeners().filter((listener) => !before.has(listener))
 }
 
 const removeExitListeners = (listeners: ExitListener[]): void => {
@@ -175,7 +168,7 @@ describe('createLogtailStream', () => {
   })
 
   test('ignores malformed lines without throwing', async () => {
-    await writeRaw(stream, 'not json\n')
+    await writeRaw('not json\n')
 
     expect(logCalls).toHaveLength(0)
   })
@@ -302,25 +295,25 @@ describe('createLogtailStream chunk handling', () => {
       JSON.stringify({ level: 40, time: 1, msg: 'second' }),
       JSON.stringify({ level: 50, time: 1, msg: 'third' }),
     ]
-    await writeRaw(stream, `${lines.join('\n')}\n`)
+    await writeRaw(`${lines.join('\n')}\n`)
 
     expect(logCalls.map((c) => c.message)).toEqual(['first', 'second', 'third'])
   })
 
   test('accepts a Buffer chunk', async () => {
-    await writeRaw(stream, Buffer.from(`${JSON.stringify({ level: 30, time: 1, msg: 'from-buffer' })}\n`, 'utf8'))
+    await writeRaw(Buffer.from(`${JSON.stringify({ level: 30, time: 1, msg: 'from-buffer' })}\n`, 'utf8'))
 
     expect(logCalls.map((c) => c.message)).toEqual(['from-buffer'])
   })
 
   test('forwards a line with no trailing newline', async () => {
-    await writeRaw(stream, JSON.stringify({ level: 30, time: 1, msg: 'unterminated' }))
+    await writeRaw(JSON.stringify({ level: 30, time: 1, msg: 'unterminated' }))
 
     expect(logCalls.map((c) => c.message)).toEqual(['unterminated'])
   })
 
   test('skips blank lines', async () => {
-    await writeRaw(stream, `\n\n${JSON.stringify({ level: 30, time: 1, msg: 'after-blanks' })}\n\n`)
+    await writeRaw(`\n\n${JSON.stringify({ level: 30, time: 1, msg: 'after-blanks' })}\n\n`)
 
     expect(logCalls.map((c) => c.message)).toEqual(['after-blanks'])
   })
@@ -331,9 +324,41 @@ describe('createLogtailStream chunk handling', () => {
       '{"level":30,"msg":',
       JSON.stringify({ level: 30, time: 1, msg: 'after' }),
     ].join('\n')
-    await writeRaw(stream, `${chunk}\n`)
+    await writeRaw(`${chunk}\n`)
 
     expect(logCalls.map((c) => c.message)).toEqual(['before', 'after'])
+  })
+
+  // `forward` assumes JSON.parse returned an object. A scalar line does not
+  // throw, so it slips past the `catch` that discards malformed lines, and with
+  // no `level` it falls through toLogtailLevel's default — so a stray `42` is
+  // published to BetterStack as an empty *fatal* rather than being skipped. This
+  // is where the levelless-record fall-through stops being harmless.
+  test('turns a non-object JSON line into an empty fatal', async () => {
+    await writeRaw('42\n')
+
+    expect(logCalls).toHaveLength(1)
+    expect(logCalls[0]?.level).toBe('fatal')
+    expect(logCalls[0]?.message).toBe('')
+    expect(logCalls[0]?.context).toEqual({})
+  })
+
+  // Worse for a quoted string than for a number: `Object.keys('str')` is the
+  // index list, so the characters are spread across the context as 0/1/2.
+  test('spreads a JSON string line across the context by character index', async () => {
+    await writeRaw('"str"\n')
+
+    expect(logCalls).toHaveLength(1)
+    expect(logCalls[0]?.level).toBe('fatal')
+    expect(logCalls[0]?.context).toEqual({ 0: 's', 1: 't', 2: 'r' })
+  })
+
+  // `null` is the one scalar that is skipped, and only by accident: reading
+  // `.time` off it throws, and `write`'s catch discards the line.
+  test('drops a JSON null line', async () => {
+    await writeRaw('null\n')
+
+    expect(logCalls).toHaveLength(0)
   })
 
   // A limitation, captured so a future reassembly fix has something to flip:
@@ -341,8 +366,8 @@ describe('createLogtailStream chunk handling', () => {
   // chunks is dropped entirely rather than being buffered and re-joined. Safe
   // in practice only because pino.multistream writes one whole line per call.
   test('drops a record split across two writes', async () => {
-    await writeRaw(stream, '{"level":30,"time":1,"msg":"split"')
-    await writeRaw(stream, '}\n')
+    await writeRaw('{"level":30,"time":1,"msg":"split"')
+    await writeRaw('}\n')
 
     expect(logCalls).toHaveLength(0)
   })
@@ -368,7 +393,7 @@ describe('createLogtailStream failure handling', () => {
   })
 
   test('flushes the client when the event loop drains', () => {
-    const { added } = createStreamWithExitListeners('flush-token')
+    const added = createStreamWithExitListeners('flush-token')
     try {
       expect(added).toHaveLength(1)
       for (const listener of added) {
@@ -381,7 +406,7 @@ describe('createLogtailStream failure handling', () => {
   })
 
   test('swallows a rejected flush promise', async () => {
-    const { added } = createStreamWithExitListeners('flush-token')
+    const added = createStreamWithExitListeners('flush-token')
     try {
       rejectFlush = true
       for (const listener of added) {
@@ -403,17 +428,17 @@ describe('createLogtailStream failure handling', () => {
     const first = createStreamWithExitListeners('flush-token-a')
     const second = createStreamWithExitListeners('flush-token-b')
     try {
-      expect(first.added).toHaveLength(1)
-      expect(second.added).toHaveLength(1)
-      expect(first.added[0]).not.toBe(second.added[0])
+      expect(first).toHaveLength(1)
+      expect(second).toHaveLength(1)
+      expect(first[0]).not.toBe(second[0])
 
-      for (const listener of [...first.added, ...second.added]) {
+      for (const listener of [...first, ...second]) {
         listener()
       }
 
       expect(flushCount).toBe(2)
     } finally {
-      removeExitListeners([...first.added, ...second.added])
+      removeExitListeners([...first, ...second])
     }
   })
 
@@ -423,7 +448,7 @@ describe('createLogtailStream failure handling', () => {
   test('registers no signal handlers', () => {
     const sigintBefore = process.listenerCount('SIGINT')
     const sigtermBefore = process.listenerCount('SIGTERM')
-    const { added } = createStreamWithExitListeners('signal-token')
+    const added = createStreamWithExitListeners('signal-token')
     try {
       expect(process.listenerCount('SIGINT')).toBe(sigintBefore)
       expect(process.listenerCount('SIGTERM')).toBe(sigtermBefore)
@@ -435,7 +460,7 @@ describe('createLogtailStream failure handling', () => {
 
 describe('createLogtailStream client construction', () => {
   test('passes the source token through to the Logtail client', () => {
-    const { added } = createStreamWithExitListeners('source-token-123')
+    const added = createStreamWithExitListeners('source-token-123')
     try {
       expect(constructorCalls).toHaveLength(1)
       expect(constructorCalls[0]?.token).toBe('source-token-123')
@@ -445,7 +470,7 @@ describe('createLogtailStream client construction', () => {
   })
 
   test('leaves endpoint unset when none is given', () => {
-    const { added } = createStreamWithExitListeners('source-token-123')
+    const added = createStreamWithExitListeners('source-token-123')
     try {
       expect(Object.hasOwn(constructorCalls[0]?.options ?? {}, 'endpoint')).toBe(false)
     } finally {
@@ -454,7 +479,7 @@ describe('createLogtailStream client construction', () => {
   })
 
   test('forwards a provided endpoint as a client option', () => {
-    const { added } = createStreamWithExitListeners('source-token-123', 'https://in.example.test')
+    const added = createStreamWithExitListeners('source-token-123', 'https://in.example.test')
     try {
       expect(constructorCalls[0]?.options.endpoint).toBe('https://in.example.test')
     } finally {
@@ -465,7 +490,7 @@ describe('createLogtailStream client construction', () => {
   // An empty endpoint is falsy, so it is treated as "not configured" rather
   // than overriding the client default with an unusable URL.
   test('treats an empty endpoint as no endpoint', () => {
-    const { added } = createStreamWithExitListeners('source-token-123', '')
+    const added = createStreamWithExitListeners('source-token-123', '')
     try {
       expect(Object.hasOwn(constructorCalls[0]?.options ?? {}, 'endpoint')).toBe(false)
     } finally {
