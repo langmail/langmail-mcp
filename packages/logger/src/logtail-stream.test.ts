@@ -30,23 +30,34 @@ let rejectFlush = false
 
 let rejectionsHandled = 0
 
-// `forward` attaches its handler by calling `.catch(...)` directly on whatever
-// the client returned, so shadowing `catch` on the rejected promise makes
-// handler attachment observable. That is what lets the tests below assert the
-// guarantee themselves instead of leaning entirely on Bun's runner failing a
-// test that leaks an unhandled rejection: this counter is synchronous and
-// independent of both the runner's behaviour and how long `settleRejections`
-// waits.
-type VoidPromiseCatch = Promise<void>['catch']
+// Counts rejection handlers attached to the promise the client returned, which
+// is what lets the tests below assert the guarantee themselves instead of
+// leaning entirely on Bun's runner failing a test that leaks an unhandled
+// rejection. The counter is synchronous, so it is independent of both the
+// runner's behaviour and how long `settleRejections` waits.
+//
+// `then` is the shadowed method rather than `catch`, deliberately. `forward`
+// uses `.catch(...)`, but the language specifies that as
+// `Invoke(promise, 'then', «undefined, onRejected»)` — an observable lookup on
+// the instance, not an internal slot — so shadowing `then` sees a handler
+// attached either way, and the assertion pins the guarantee (a rejection
+// handler was attached) rather than the method `forward` happens to reach for.
+// Shadowing `catch` would red a correct refactor to `.then(undefined, handler)`.
+// Verified under Bun: `.catch(h)` and `.then(undefined, h)` both count 1,
+// `.then(onFulfilled)` alone counts 0, and dropping the handler counts 0.
+type VoidPromiseThen = Promise<void>['then']
 
 const trackedRejection = (message: string): Promise<void> => {
   const promise: Promise<void> = Promise.reject(new Error(message))
-  const attach: VoidPromiseCatch = promise.catch.bind(promise)
-  const counting: VoidPromiseCatch = (onRejected) => {
-    rejectionsHandled += 1
-    return attach(onRejected)
+  const attach: VoidPromiseThen = promise.then.bind(promise)
+  const counting: VoidPromiseThen = (onFulfilled, onRejected) => {
+    // Gated so a plain `.then(onFulfilled)` cannot inflate the count.
+    if (typeof onRejected === 'function') {
+      rejectionsHandled += 1
+    }
+    return attach(onFulfilled, onRejected)
   }
-  promise.catch = counting
+  promise.then = counting
   return promise
 }
 
@@ -121,10 +132,10 @@ const removeExitListeners = (listeners: ExitListener[]): void => {
 // Confirmed by mutation at both `.catch(ignoreRejection)` sites in
 // logtail-stream.ts: dropping the one on the `log` call reds the two
 // log-rejection tests below, and dropping the one on the drain `flush` reds
-// `swallows a rejected flush promise`. Attaching the handler by another route
-// instead (`.then(undefined, ignoreRejection)`) leaks nothing, so the runner
-// stays quiet and the attachment count is the only thing that reds — which is
-// what shows that assertion is load-bearing rather than along for the ride.
+// `swallows a rejected flush promise`. Rewriting either as
+// `.then(undefined, ignoreRejection)` keeps them green, which is the boundary
+// these tests are meant to draw — dropping the handler fails, changing how it
+// is attached does not.
 //
 // An escaped rejection only surfaces once the microtask queue has drained, so
 // every test that provokes one yields a macrotask turn before finishing;
