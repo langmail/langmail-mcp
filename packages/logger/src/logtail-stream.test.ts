@@ -94,26 +94,22 @@ const removeExitListeners = (listeners: ExitListener[]): void => {
   }
 }
 
-// The guarantee around a rejected client promise is a negative one: nothing
-// reaches process-level `unhandledRejection`, because that would take down the
-// emitting service. Asserting it means watching for the event that must not
-// fire, not asserting on a return value.
-const unhandledRejectionsDuring = async (run: () => Promise<void>): Promise<unknown[]> => {
-  const seen: unknown[] = []
-  const onRejection = (reason: unknown): void => {
-    seen.push(reason)
-  }
-  process.on('unhandledRejection', onRejection)
-  try {
-    await run()
-    // Node reports an unhandled rejection only after the microtask queue has
-    // drained, so give the loop a macrotask turn before concluding silence.
-    await new Promise((resolve) => setTimeout(resolve, 10))
-  } finally {
-    process.removeListener('unhandledRejection', onRejection)
-  }
-  return seen
-}
+// The guarantee around a rejected client promise is a negative one: the
+// rejection must not escape `forward`, because an unhandled rejection would
+// take down the emitting service. Bun's test runner is the detector — it fails
+// any test that leaks one, rather than delivering it to a
+// `process.on('unhandledRejection')` listener, which is why these tests carry
+// no explicit "nothing fired" assertion: there is nothing a listener here could
+// observe. Confirmed by mutation — dropping the `.catch(ignoreRejection)` in
+// logtail-stream.ts reds exactly the two log-rejection tests below.
+//
+// An escaped rejection only surfaces once the microtask queue has drained, so
+// every test that provokes one yields a macrotask turn before finishing;
+// without that the test could end before the runner could notice.
+const settleRejections = (): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, 10)
+  })
 
 const resetState = (): void => {
   logCalls.length = 0
@@ -279,12 +275,16 @@ describe('createLogtailStream context handling', () => {
       time: 1,
       msg: 'nested',
       err: { message: 'boom', type: 'Error' },
-      recipients: ['ada@example.com', 'grace@example.org'],
+      // Hashes, not addresses: REVIEW.md keeps email addresses out of log
+      // lines, and this package exports `hashEmail` so callers can log these
+      // instead. A fixture inside the BetterStack forwarder should model the
+      // shape callers are meant to send.
+      recipientHashes: ['4be15ac83ae8', '49a3135ca77a'],
     })
 
     const ctx = logCalls[0]?.context ?? {}
     expect(ctx.err).toEqual({ message: 'boom', type: 'Error' })
-    expect(ctx.recipients).toEqual(['ada@example.com', 'grace@example.org'])
+    expect(ctx.recipientHashes).toEqual(['4be15ac83ae8', '49a3135ca77a'])
   })
 
   test('keeps a null field rather than dropping it', async () => {
@@ -349,26 +349,22 @@ describe('createLogtailStream chunk handling', () => {
 })
 
 describe('createLogtailStream failure handling', () => {
-  test('swallows a rejected log promise without an unhandled rejection', async () => {
-    const seen = await unhandledRejectionsDuring(async () => {
-      rejectLogs = true
-      await emit({ level: 30, time: 1, msg: 'will-reject' })
-    })
+  test('swallows a rejected log promise', async () => {
+    rejectLogs = true
+    await emit({ level: 30, time: 1, msg: 'will-reject' })
+    await settleRejections()
 
     expect(logCalls).toHaveLength(1)
-    expect(seen).toEqual([])
   })
 
   test('keeps forwarding records after a rejected log promise', async () => {
-    const seen = await unhandledRejectionsDuring(async () => {
-      rejectLogs = true
-      await emit({ level: 30, time: 1, msg: 'rejected' })
-      rejectLogs = false
-      await emit({ level: 30, time: 1, msg: 'accepted' })
-    })
+    rejectLogs = true
+    await emit({ level: 30, time: 1, msg: 'rejected' })
+    rejectLogs = false
+    await emit({ level: 30, time: 1, msg: 'accepted' })
+    await settleRejections()
 
     expect(logCalls.map((c) => c.message)).toEqual(['rejected', 'accepted'])
-    expect(seen).toEqual([])
   })
 
   test('flushes the client when the event loop drains', () => {
@@ -384,19 +380,16 @@ describe('createLogtailStream failure handling', () => {
     }
   })
 
-  test('swallows a rejected flush promise without an unhandled rejection', async () => {
+  test('swallows a rejected flush promise', async () => {
     const { added } = createStreamWithExitListeners('flush-token')
     try {
-      const seen = await unhandledRejectionsDuring(async () => {
-        rejectFlush = true
-        for (const listener of added) {
-          listener()
-        }
-        await Promise.resolve()
-      })
+      rejectFlush = true
+      for (const listener of added) {
+        listener()
+      }
+      await settleRejections()
 
       expect(flushCount).toBe(1)
-      expect(seen).toEqual([])
     } finally {
       removeExitListeners(added)
     }
