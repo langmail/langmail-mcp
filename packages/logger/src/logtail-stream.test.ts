@@ -249,13 +249,17 @@ describe('createLogtailStream dt handling', () => {
   test('omits dt when the record has no time', async () => {
     await emit({ level: 30, msg: 'no-time' })
 
+    // The length assertion is load-bearing: every assertion below is satisfied
+    // by absence, so without it a stream that forwarded nothing would pass.
+    expect(logCalls).toHaveLength(1)
     expect(logCalls[0]?.context.dt).toBeUndefined()
-    expect(Object.hasOwn(logCalls[0]?.context ?? {}, 'dt')).toBe(false)
+    expect(logCalls[0]?.context).not.toHaveProperty('dt')
   })
 
   test('omits dt when time cannot be parsed as a date', async () => {
     await emit({ level: 30, time: 'not-a-date', msg: 'bad-time' })
 
+    expect(logCalls).toHaveLength(1)
     expect(logCalls[0]?.context.dt).toBeUndefined()
   })
 
@@ -299,7 +303,8 @@ describe('createLogtailStream message handling', () => {
   test('keeps message_field off the context when only message is present', async () => {
     await emit({ level: 30, time: 1, message: 'solo' })
 
-    expect(Object.hasOwn(logCalls[0]?.context ?? {}, 'message_field')).toBe(false)
+    expect(logCalls).toHaveLength(1)
+    expect(logCalls[0]?.context).not.toHaveProperty('message_field')
   })
 })
 
@@ -517,7 +522,7 @@ describe('createLogtailStream client construction', () => {
   test('leaves endpoint unset when none is given', () => {
     const added = createStreamWithExitListeners('source-token-123')
     try {
-      expect(Object.hasOwn(constructorCalls[0]?.options ?? {}, 'endpoint')).toBe(false)
+      expect(constructorCalls[0]?.options).toEqual({})
     } finally {
       removeExitListeners(added)
     }
@@ -537,7 +542,7 @@ describe('createLogtailStream client construction', () => {
   test('treats an empty endpoint as no endpoint', () => {
     const added = createStreamWithExitListeners('source-token-123', '')
     try {
-      expect(Object.hasOwn(constructorCalls[0]?.options ?? {}, 'endpoint')).toBe(false)
+      expect(constructorCalls[0]?.options).toEqual({})
     } finally {
       removeExitListeners(added)
     }
