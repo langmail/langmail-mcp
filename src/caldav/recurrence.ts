@@ -10,7 +10,7 @@ import { z } from 'zod'
 
 import { parseWallClockInZone } from '@langmail/ical'
 
-import { dateOnlyToInstant, isDateOnly, toWallClockIso } from './timezone.ts'
+import { dateOnlyToInstant, isDateOnly, isValidTimeZone, toWallClockIso } from './timezone.ts'
 
 // RFC 5545 FREQ values we expose. Lowercase in the structured form for the
 // model's convenience; uppercased when emitted into the RRULE.
@@ -177,6 +177,54 @@ export const startContradictsRule = (rrule: string, start: Date, timeZone: strin
   return weekday !== undefined && days.length > 0 && !days.includes(weekday)
 }
 
+// A zoned series is expanded on its floating wall clock (see isSeriesOccurrence),
+// but RFC 5545 §3.3.10 writes its UNTIL in UTC. Comparing that UTC value against
+// wall clock read as UTC would drop the last occurrence east of UTC, and
+// re-expressing it as wall clock is ambiguous in a DST fall-back hour. So a UTC
+// UNTIL is split off the rule and checked against the true instant instead.
+// A producer that writes local digits with a `Z` is read as the instant it
+// claims to be (west of UTC it loses its last occurrence); restoring a
+// wall-clock reading would bring back the fall-back mis-ordering.
+const splitUtcUntil = (rrule: string): { rule: string; until?: Date } => {
+  const match = UNTIL_RE.exec(rrule)
+  const utc = ICAL_UTC_DATE_TIME_RE.exec(match?.[2]?.trim() ?? '')
+  if (!utc) {
+    return { rule: rrule }
+  }
+  const [, y, mo, d, h, mi, s] = utc
+  const until = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`)
+  // A digit-shaped but impossible value (month 13, hour 25) stays in the rule
+  // for rrule to reject, rather than being stripped into an unbounded series.
+  if (Number.isNaN(until.getTime()) || toIcalUtc(until.toISOString()) !== `${y}${mo}${d}T${h}${mi}${s}Z`) {
+    return { rule: rrule }
+  }
+  const rule = rrule.replace(UNTIL_RE, '').replace(LEADING_SEPARATOR_RE, '')
+  return { rule, until }
+}
+
+const LEADING_SEPARATOR_RE = /^;/u
+const NONZERO_FRACTION_RE = /\.\d*[1-9]/u
+
+// The zone a series' RRULE expands in, for isSeriesOccurrence: the master's
+// DTSTART TZID (the parser drops one written beside an all-day DATE). A TZID
+// that isn't an IANA zone, such as a vendor zone name defined only by the object's
+// VTIMEZONE, can't be expanded at all. It is refused by name, echoing the
+// caller's `recurrenceId`, rather than surfacing as an opaque rule error — and
+// never matched as if its wall clock were UTC.
+export const seriesTimeZone = (
+  master: { startTzid?: string },
+  recurrenceId: string
+): { error: string; ok: false } | { ok: true; value: string | undefined } => {
+  const zone = master.startTzid
+  if (zone && !isValidTimeZone(zone)) {
+    return {
+      error: `This series' time zone (${zone}) is not a recognized IANA zone, so recurrenceId ${recurrenceId} cannot be matched to an occurrence.`,
+      ok: false,
+    }
+  }
+  return { ok: true, value: zone }
+}
+
 // True when `recurrenceId` (an ISO 8601 instant) is the original start of an
 // occurrence the series generates — i.e. expanding `rrule` from `masterStart`
 // lands exactly on it. update_calendar_event uses this to reject an occurrence
@@ -184,18 +232,37 @@ export const startContradictsRule = (rrule: string, start: Date, timeZone: strin
 // requires a RECURRENCE-ID to name a real instance of the master's RRULE.
 //
 // Membership is tested with a single-instant `between(t, t, inclusive)` rather
-// than expanding the whole (possibly unbounded) series. Our events are UTC, so
-// both bounds are normalized to a UTC DTSTART before handing off to `rrule`.
+// than expanding the whole (possibly unbounded) series. A UTC series is matched
+// on instants. A zoned series (`timeZone`, the master's DTSTART TZID) is
+// expanded on its floating wall clock and `recurrenceId` is reduced to wall
+// clock in that zone, so DST shifts the UTC instant but not the match. Both DST
+// edges stay imperfect: an occurrence inside the spring-forward gap has no
+// instant that reduces to its wall clock and cannot be named, and one inside the
+// fall-back hour is matched by both instants of that repeated wall clock (the
+// EXDATE or RECURRENCE-ID written for it is equally ambiguous).
 export const isSeriesOccurrence = (
   masterStart: string,
   rrule: string,
   recurrenceId: string,
   timeZone?: string
 ): boolean => {
-  const start = timeZone ? toIcalFloating(masterStart) : toIcalUtc(masterStart)
-  const rule = rrulestr(`DTSTART:${start}\nRRULE:${rrule}`)
-  const at = timeZone ? new Date(`${toWallClockIso(new Date(recurrenceId), timeZone)}Z`) : new Date(recurrenceId)
-  return rule.between(at, at, true).length > 0
+  if (!timeZone) {
+    const at = new Date(recurrenceId)
+    return rrulestr(`DTSTART:${toIcalUtc(masterStart)}\nRRULE:${rrule}`).between(at, at, true).length > 0
+  }
+  // The wall-clock reduction below keeps whole seconds only, so a sub-second
+  // instant would otherwise match the occurrence it merely falls near. Read the
+  // fraction from the text: a Date keeps milliseconds only.
+  if (NONZERO_FRACTION_RE.test(recurrenceId)) {
+    return false
+  }
+  const instant = new Date(recurrenceId)
+  const { rule, until } = splitUtcUntil(rrule)
+  if (until && instant.getTime() > until.getTime()) {
+    return false
+  }
+  const at = new Date(`${toWallClockIso(instant, timeZone)}Z`)
+  return rrulestr(`DTSTART:${toIcalFloating(masterStart)}\nRRULE:${rule}`).between(at, at, true).length > 0
 }
 
 // The occurrence a caller's `recurrenceId` names, as an ISO instant, for the

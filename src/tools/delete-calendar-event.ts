@@ -42,7 +42,7 @@ import {
   updateEvent,
 } from '../caldav/client.ts'
 import { spliceOccurrenceCancellation } from '../caldav/occurrence.ts'
-import { isSeriesOccurrence, resolveRecurrenceId } from '../caldav/recurrence.ts'
+import { isSeriesOccurrence, resolveRecurrenceId, seriesTimeZone } from '../caldav/recurrence.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import { eventUidSchema } from './create-calendar-event.ts'
@@ -113,12 +113,17 @@ const cancelOccurrence = async (c: OccurrenceCancellation): Promise<ToolResult> 
   }
   const recurrenceId = resolved.value
 
+  const zone = seriesTimeZone(master, c.recurrenceId)
+  if (!zone.ok) {
+    return errorResult(`${zone.error} Nothing was cancelled.`)
+  }
+
   // A raw master RRULE is only lightly validated on create, so `rrule` may
   // reject one Stalwart happily stored. Treat an unparseable rule as a clean
   // rejection rather than an opaque crash — mirrors update_calendar_event.
   let onOccurrence: boolean
   try {
-    onOccurrence = isSeriesOccurrence(master.start, master.recurrence, recurrenceId)
+    onOccurrence = isSeriesOccurrence(master.start, master.recurrence, recurrenceId, zone.value)
   } catch {
     return errorResult(
       `Could not evaluate this series' recurrence rule (${master.recurrence}) to validate ` +

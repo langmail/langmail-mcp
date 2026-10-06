@@ -140,6 +140,51 @@ describe('isSeriesOccurrence', () => {
         isSeriesOccurrence('2026-06-16T10:00:00 Europe/Berlin', weekly, '2026-06-16T08:00:00Z', 'Europe/Berlin')
       ).toBe(true)
     })
+
+    test('keeps the last occurrence of a series bounded by a UTC UNTIL', () => {
+      // UNTIL is the last occurrence's true instant (08:15 Berlin, CEST), as
+      // RFC 5545 requires it in UTC for a zoned DTSTART.
+      const bounded = 'FREQ=WEEKLY;UNTIL=20261021T061500Z'
+      expect(isSeriesOccurrence('2026-10-07T08:15:00', bounded, '2026-10-21T06:15:00Z', 'Europe/Berlin')).toBe(true)
+      expect(isSeriesOccurrence('2026-10-07T08:15:00', bounded, '2026-10-28T07:15:00Z', 'Europe/Berlin')).toBe(false)
+    })
+
+    test('splits off a UTC UNTIL written before FREQ', () => {
+      // RFC 5545 fixes no part order; stripping a leading UNTIL must not leave
+      // a stray `;` that rrule rejects.
+      const leading = 'UNTIL=20261021T061500Z;FREQ=WEEKLY'
+      expect(isSeriesOccurrence('2026-10-07T08:15:00', leading, '2026-10-21T06:15:00Z', 'Europe/Berlin')).toBe(true)
+    })
+
+    test('keeps an impossible UTC UNTIL bounding the series', () => {
+      // Month 13: stripping it would turn the series unbounded and accept an
+      // occurrence years past any reading of the bound.
+      const impossible = 'FREQ=WEEKLY;UNTIL=20261399T250000Z'
+      expect(isSeriesOccurrence('2026-10-07T08:15:00', impossible, '2030-10-23T06:15:00Z', 'Europe/Berlin')).toBe(false)
+    })
+
+    test('rejects a sub-millisecond instant near an occurrence', () => {
+      // A Date keeps milliseconds only, so the fraction is read from the text.
+      expect(isSeriesOccurrence('2026-06-16T10:00:00', weekly, '2026-06-16T08:00:00.0005Z', 'Europe/Berlin')).toBe(
+        false
+      )
+      expect(isSeriesOccurrence('2026-06-16T10:00:00', weekly, '2026-06-16T08:00:00.000Z', 'Europe/Berlin')).toBe(true)
+    })
+
+    test('rejects a sub-second instant near an occurrence', () => {
+      // 08:00:00.500Z is not the 10:00 Berlin start, though its wall clock
+      // truncates to it.
+      expect(isSeriesOccurrence('2026-06-16T10:00:00', weekly, '2026-06-16T08:00:00.500Z', 'Europe/Berlin')).toBe(false)
+    })
+
+    test('orders a UTC UNTIL inside the DST fall-back hour by instant', () => {
+      // 2026-11-01 01:30 New York is first EDT (05:30Z), then EST (06:30Z).
+      // UNTIL 06:00Z falls between them, so only the first 01:30 is in range —
+      // as wall clock it would read 01:00 and drop that day altogether.
+      const bounded = 'FREQ=DAILY;UNTIL=20261101T060000Z'
+      expect(isSeriesOccurrence('2026-10-31T01:30:00', bounded, '2026-11-01T05:30:00Z', 'America/New_York')).toBe(true)
+      expect(isSeriesOccurrence('2026-10-31T01:30:00', bounded, '2026-11-01T06:30:00Z', 'America/New_York')).toBe(false)
+    })
   })
 })
 
