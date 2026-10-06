@@ -239,11 +239,17 @@ export const isSeriesOccurrence = (
     const at = new Date(recurrenceId)
     return rrulestr(`DTSTART:${toIcalUtc(masterStart)}\nRRULE:${rrule}`).between(at, at, true).length > 0
   }
-  const { rule, until } = splitUtcUntil(rrule)
-  if (until && new Date(recurrenceId).getTime() > until.getTime()) {
+  // The wall-clock reduction below keeps whole seconds only, so a sub-second
+  // instant would otherwise match the occurrence it merely falls near.
+  const instant = new Date(recurrenceId)
+  if (instant.getUTCMilliseconds() !== 0) {
     return false
   }
-  const at = new Date(`${toWallClockIso(new Date(recurrenceId), timeZone)}Z`)
+  const { rule, until } = splitUtcUntil(rrule)
+  if (until && instant.getTime() > until.getTime()) {
+    return false
+  }
+  const at = new Date(`${toWallClockIso(instant, timeZone)}Z`)
   return rrulestr(`DTSTART:${toIcalFloating(masterStart)}\nRRULE:${rule}`).between(at, at, true).length > 0
 }
 

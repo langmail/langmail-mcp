@@ -273,15 +273,15 @@ describe('deleteCalendarEvent — single occurrence (recurrenceId)', () => {
   })
 })
 
-// A master written by Apple Calendar: an uppercase UUID, a DTSTART in
+// A master written by another calendar client: an uppercase UUID, a DTSTART in
 // Europe/Berlin wall clock backed by its own VTIMEZONE, weekly on Wednesdays at
 // 08:15 — so occurrences start at 06:15Z in summer (CEST) and 07:15Z in winter
 // (CET). `tzid` swaps in a zone name so the unresolvable case can reuse it.
-const appleZonedStored = (tzid = 'Europe/Berlin'): CalendarObject => ({
+const foreignZonedStored = (tzid = 'Europe/Berlin'): CalendarObject => ({
   data: [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Apple Inc.//macOS 15.0//EN',
+    'PRODID:-//Example Corp//Example Calendar 1.0//EN',
     'CALSCALE:GREGORIAN',
     'BEGIN:VTIMEZONE',
     `TZID:${tzid}`,
@@ -314,12 +314,12 @@ const appleZonedStored = (tzid = 'Europe/Berlin'): CalendarObject => ({
     'END:VCALENDAR',
     '',
   ].join('\r\n'),
-  etag: '"apple"',
+  etag: '"foreign"',
   url: `${CAL}0F3A9C1E-7B2D-4E5F-8A6B-1C2D3E4F5A6B.ics`,
 })
 
 describe('deleteCalendarEvent — zoned series written by another client', () => {
-  const cancel = async (recurrenceId: string, stored = appleZonedStored()) => {
+  const cancel = async (recurrenceId: string, stored = foreignZonedStored()) => {
     const cap = captured()
     const result = await deleteCalendarEvent(makeDeps(account(), stored, cap), {
       args: args({ recurrenceId, uid: '0F3A9C1E-7B2D-4E5F-8A6B-1C2D3E4F5A6B' }),
@@ -354,7 +354,7 @@ describe('deleteCalendarEvent — zoned series written by another client', () =>
   test('fails loudly when the series’ zone cannot be resolved', async () => {
     // A Windows zone ID, defined only by the object's VTIMEZONE: matching it as
     // UTC would cancel the wrong instant, so nothing is written.
-    const { cap, result } = await cancel('2026-11-18T07:15:00Z', appleZonedStored('W. Europe Standard Time'))
+    const { cap, result } = await cancel('2026-11-18T07:15:00Z', foreignZonedStored('W. Europe Standard Time'))
     expect(result.isError).toBe(true)
     expect(result.content[0]?.text).toContain('W. Europe Standard Time')
     expect(result.content[0]?.text).toContain('Nothing was cancelled')

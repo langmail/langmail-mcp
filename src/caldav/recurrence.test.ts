@@ -149,6 +149,12 @@ describe('isSeriesOccurrence', () => {
       expect(isSeriesOccurrence('2026-10-07T08:15:00', bounded, '2026-10-28T07:15:00Z', 'Europe/Berlin')).toBe(false)
     })
 
+    test('rejects a sub-second instant near an occurrence', () => {
+      // 08:00:00.500Z is not the 10:00 Berlin start, though its wall clock
+      // truncates to it.
+      expect(isSeriesOccurrence('2026-06-16T10:00:00', weekly, '2026-06-16T08:00:00.500Z', 'Europe/Berlin')).toBe(false)
+    })
+
     test('orders a UTC UNTIL inside the DST fall-back hour by instant', () => {
       // 2026-11-01 01:30 New York is first EDT (05:30Z), then EST (06:30Z).
       // UNTIL 06:00Z falls between them, so only the first 01:30 is in range —
