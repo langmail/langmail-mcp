@@ -325,7 +325,8 @@ describe('createLogtailStream message handling', () => {
 
   // Both operands of the `message_field` guard are `!== undefined`, not nullish
   // checks, and pino reaches both: its merge-object loop drops only `undefined`,
-  // so a `null` on either key is serialized. Measured against pino 10.3.1 —
+  // so a `null` on either key is serialized. Measured against pino 10.3.1, the
+  // version `bun.lock` pins (`package.json` declares the range `^10.3.1`) —
   // `logger.info({ msg: undefined, message: 'y' })` omits `msg` entirely, while
   // `logger.info({ msg: null, message: 'x' })` writes `msg: null`.
   //
