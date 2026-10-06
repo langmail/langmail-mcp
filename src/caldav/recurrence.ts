@@ -10,7 +10,7 @@ import { z } from 'zod'
 
 import { parseWallClockInZone } from '@langmail/ical'
 
-import { dateOnlyToInstant, isDateOnly, toWallClockIso } from './timezone.ts'
+import { dateOnlyToInstant, isDateOnly, isValidTimeZone, toWallClockIso } from './timezone.ts'
 
 // RFC 5545 FREQ values we expose. Lowercase in the structured form for the
 // model's convenience; uppercased when emitted into the RRULE.
@@ -190,6 +190,26 @@ const floatUntil = (rrule: string, timeZone: string): string => {
   const [, y, mo, d, h, mi, s] = utc
   const wallClock = toWallClockIso(new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`), timeZone)
   return rrule.replace(UNTIL_RE, `$1UNTIL=${toIcalFloating(wallClock)}`)
+}
+
+// The zone a series' RRULE expands in, for isSeriesOccurrence: the master's
+// DTSTART TZID on a timed series, none on an all-day one (a TZID some producers
+// write beside a DATE has no wall clock to govern). A TZID that isn't an IANA
+// zone (a Windows ID defined only by the object's VTIMEZONE) can't be expanded
+// at all, so it is refused by name rather than surfacing as an opaque rule error
+// — and never matched as if its wall clock were UTC.
+export const seriesTimeZone = (master: {
+  allDay?: true
+  startTzid?: string
+}): { error: string; ok: false } | { ok: true; value: string | undefined } => {
+  const zone = master.allDay ? undefined : master.startTzid
+  if (zone && !isValidTimeZone(zone)) {
+    return {
+      error: `This series' time zone (${zone}) is not a recognized IANA zone, so recurrenceId cannot be matched to an occurrence.`,
+      ok: false,
+    }
+  }
+  return { ok: true, value: zone }
 }
 
 // True when `recurrenceId` (an ISO 8601 instant) is the original start of an

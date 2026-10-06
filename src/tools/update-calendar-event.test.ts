@@ -913,6 +913,42 @@ describe('updateCalendarEvent — single occurrence (recurrenceId)', () => {
     expect(result.isError).toBeUndefined()
   })
 
+  test('fails loudly when the series’ zone cannot be resolved', async () => {
+    // A Windows zone ID, defined only by the object's VTIMEZONE: it cannot be
+    // expanded, so no override is written for an unvalidated instant.
+    const windowsZoned = storedEvent({
+      data: [
+        'BEGIN:VCALENDAR',
+        'BEGIN:VEVENT',
+        `UID:${UID}`,
+        'SUMMARY:Weekly Sync',
+        'DTSTART;TZID=W. Europe Standard Time:20260616T100000',
+        'DTEND;TZID=W. Europe Standard Time:20260616T103000',
+        'RRULE:FREQ=WEEKLY;BYDAY=TU',
+        'ORGANIZER;CN="host@langmail.me":mailto:host@langmail.me',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n'),
+    })
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), windowsZoned, cap), {
+      // An explicit start/end gets past the preserved-start guard, so the
+      // occurrence match itself is what must refuse.
+      args: {
+        end: '2026-06-23T09:00:00Z',
+        recurrenceId: '2026-06-23T08:00:00Z',
+        start: '2026-06-23T08:30:00Z',
+        title: 'Q3 planning',
+        uid: UID,
+      },
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('W. Europe Standard Time')
+    expect(result.content[0]?.text).toContain('Nothing was changed')
+    expect(cap.updated).toHaveLength(0)
+  })
+
   test('rejects a recurrenceId that is not an occurrence of the series', async () => {
     const cap = captured()
     // 2026-06-24 is a Wednesday — not on the Tuesday rule.
@@ -1705,6 +1741,20 @@ describe('updateCalendarEvent — all-day events', () => {
       'DTEND:20260623T120000Z',
       'RECURRENCE-ID;VALUE=DATE:20260623',
     ])
+  })
+
+  test('ignores a TZID written beside an all-day DTSTART', async () => {
+    // Off-spec, but some producers write it: the date must still match as a date.
+    const zonedAllDay = allDayStored()
+    zonedAllDay.data = zonedAllDay.data.replace('DTSTART;VALUE=DATE:', 'DTSTART;TZID=Europe/Berlin;VALUE=DATE:')
+    expect(zonedAllDay.data).toContain('DTSTART;TZID=Europe/Berlin;VALUE=DATE:20260616')
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), zonedAllDay, cap), {
+      args: { recurrenceId: '2026-06-23', title: 'Offsite', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(cap.updated).toHaveLength(1)
   })
 
   test('refuses a date-time recurrenceId on an all-day series instead of truncating it', async () => {

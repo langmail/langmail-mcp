@@ -42,8 +42,7 @@ import {
   updateEvent,
 } from '../caldav/client.ts'
 import { spliceOccurrenceCancellation } from '../caldav/occurrence.ts'
-import { isSeriesOccurrence, resolveRecurrenceId } from '../caldav/recurrence.ts'
-import { isValidTimeZone } from '../caldav/timezone.ts'
+import { isSeriesOccurrence, resolveRecurrenceId, seriesTimeZone } from '../caldav/recurrence.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import { eventUidSchema } from './create-calendar-event.ts'
@@ -114,17 +113,9 @@ const cancelOccurrence = async (c: OccurrenceCancellation): Promise<ToolResult> 
   }
   const recurrenceId = resolved.value
 
-  // A timed series' RRULE expands on the master's wall clock in its DTSTART
-  // zone. An all-day series has no zone to honour, even when its producer wrote
-  // a TZID next to the DATE. A zone we can't resolve (a Windows ID defined only
-  // by the object's VTIMEZONE) cannot be matched at all: name it, rather than
-  // the opaque rule-evaluation error below.
-  const seriesZone = master.allDay ? undefined : master.startTzid
-  if (seriesZone && !isValidTimeZone(seriesZone)) {
-    return errorResult(
-      `This series' time zone (${seriesZone}) is not a recognized IANA zone, so recurrenceId ` +
-        `${c.recurrenceId} cannot be matched to an occurrence. Nothing was cancelled.`
-    )
+  const zone = seriesTimeZone(master)
+  if (!zone.ok) {
+    return errorResult(`${zone.error} Nothing was cancelled.`)
   }
 
   // A raw master RRULE is only lightly validated on create, so `rrule` may
@@ -132,7 +123,7 @@ const cancelOccurrence = async (c: OccurrenceCancellation): Promise<ToolResult> 
   // rejection rather than an opaque crash — mirrors update_calendar_event.
   let onOccurrence: boolean
   try {
-    onOccurrence = isSeriesOccurrence(master.start, master.recurrence, recurrenceId, seriesZone)
+    onOccurrence = isSeriesOccurrence(master.start, master.recurrence, recurrenceId, zone.value)
   } catch {
     return errorResult(
       `Could not evaluate this series' recurrence rule (${master.recurrence}) to validate ` +

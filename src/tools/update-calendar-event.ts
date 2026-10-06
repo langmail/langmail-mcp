@@ -46,6 +46,7 @@ import {
   recurrenceDescription,
   recurrenceSchema,
   resolveRecurrenceId,
+  seriesTimeZone,
   startContradictsRule,
   toRRule,
 } from '../caldav/recurrence.ts'
@@ -244,6 +245,11 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
     return errorResult(`Event ${args.uid} is not a recurring series; omit recurrenceId to edit it.`)
   }
 
+  const zone = seriesTimeZone(master)
+  if (!zone.ok) {
+    return errorResult(`${zone.error} Nothing was changed.`)
+  }
+
   // The master RRULE is only lightly validated on create (raw rules pass
   // through to CalDAV), so `rrule` may reject one Stalwart happily stored — a
   // trailing `;`, an unknown BYDAY code, an exotic FREQ. Treat an unparseable
@@ -252,12 +258,7 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
   // unvalidated override risks the very orphan this guard exists to prevent.
   let onOccurrence: boolean
   try {
-    onOccurrence = isSeriesOccurrence(
-      master.start,
-      master.recurrence,
-      recurrenceId,
-      master.allDay ? undefined : master.startTzid
-    )
+    onOccurrence = isSeriesOccurrence(master.start, master.recurrence, recurrenceId, zone.value)
   } catch {
     return errorResult(
       `Could not evaluate this series' recurrence rule (${master.recurrence}) to validate ` +
