@@ -113,7 +113,7 @@ const cancelOccurrence = async (c: OccurrenceCancellation): Promise<ToolResult> 
   }
   const recurrenceId = resolved.value
 
-  const zone = seriesTimeZone(master)
+  const zone = seriesTimeZone(master, c.recurrenceId)
   if (!zone.ok) {
     return errorResult(`${zone.error} Nothing was cancelled.`)
   }

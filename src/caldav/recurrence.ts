@@ -200,17 +200,18 @@ const LEADING_SEPARATOR_RE = /^;/u
 
 // The zone a series' RRULE expands in, for isSeriesOccurrence: the master's
 // DTSTART TZID (the parser drops one written beside an all-day DATE). A TZID
-// that isn't an IANA
-// zone (a Windows ID defined only by the object's VTIMEZONE) can't be expanded
-// at all, so it is refused by name rather than surfacing as an opaque rule error
-// — and never matched as if its wall clock were UTC.
-export const seriesTimeZone = (master: {
-  startTzid?: string
-}): { error: string; ok: false } | { ok: true; value: string | undefined } => {
+// that isn't an IANA zone, such as a Windows ID defined only by the object's
+// VTIMEZONE, can't be expanded at all. It is refused by name, echoing the
+// caller's `recurrenceId`, rather than surfacing as an opaque rule error — and
+// never matched as if its wall clock were UTC.
+export const seriesTimeZone = (
+  master: { startTzid?: string },
+  recurrenceId: string
+): { error: string; ok: false } | { ok: true; value: string | undefined } => {
   const zone = master.startTzid
   if (zone && !isValidTimeZone(zone)) {
     return {
-      error: `This series' time zone (${zone}) is not a recognized IANA zone, so recurrenceId cannot be matched to an occurrence.`,
+      error: `This series' time zone (${zone}) is not a recognized IANA zone, so recurrenceId ${recurrenceId} cannot be matched to an occurrence.`,
       ok: false,
     }
   }

@@ -245,7 +245,7 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
     return errorResult(`Event ${args.uid} is not a recurring series; omit recurrenceId to edit it.`)
   }
 
-  const zone = seriesTimeZone(master)
+  const zone = seriesTimeZone(master, args.recurrenceId ?? recurrenceId)
   if (!zone.ok) {
     return errorResult(`${zone.error} Nothing was changed.`)
   }

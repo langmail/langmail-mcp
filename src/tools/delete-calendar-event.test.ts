@@ -357,6 +357,7 @@ describe('deleteCalendarEvent — zoned series written by another client', () =>
     const { cap, result } = await cancel('2026-11-18T07:15:00Z', foreignZonedStored('W. Europe Standard Time'))
     expect(result.isError).toBe(true)
     expect(result.content[0]?.text).toContain('W. Europe Standard Time')
+    expect(result.content[0]?.text).toContain('2026-11-18T07:15:00Z')
     expect(result.content[0]?.text).toContain('Nothing was cancelled')
     expect(cap.updated).toHaveLength(0)
     expect(cap.deleted).toHaveLength(0)
