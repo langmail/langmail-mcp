@@ -148,6 +148,15 @@ describe('isSeriesOccurrence', () => {
       expect(isSeriesOccurrence('2026-10-07T08:15:00', bounded, '2026-10-21T06:15:00Z', 'Europe/Berlin')).toBe(true)
       expect(isSeriesOccurrence('2026-10-07T08:15:00', bounded, '2026-10-28T07:15:00Z', 'Europe/Berlin')).toBe(false)
     })
+
+    test('orders a UTC UNTIL inside the DST fall-back hour by instant', () => {
+      // 2026-11-01 01:30 New York is first EDT (05:30Z), then EST (06:30Z).
+      // UNTIL 06:00Z falls between them, so only the first 01:30 is in range —
+      // as wall clock it would read 01:00 and drop that day altogether.
+      const bounded = 'FREQ=DAILY;UNTIL=20261101T060000Z'
+      expect(isSeriesOccurrence('2026-10-31T01:30:00', bounded, '2026-11-01T05:30:00Z', 'America/New_York')).toBe(true)
+      expect(isSeriesOccurrence('2026-10-31T01:30:00', bounded, '2026-11-01T06:30:00Z', 'America/New_York')).toBe(false)
+    })
   })
 })
 

@@ -260,9 +260,9 @@ const startTimeZone = (master: Component): string | undefined => {
 // The EXDATE naming `recurrenceId` in the master DTSTART's own form (RFC 5545
 // §3.8.5.1): a DATE for an all-day series, zone wall clock for a TZID start
 // (the RRULE expands on that wall clock, so a UTC value may match no
-// occurrence), else UTC. A TZID we can't resolve (an Outlook Windows zone ID,
-// defined only by the object's VTIMEZONE) also falls back to UTC: still a
-// valid EXDATE, where a wall clock would come out as NaN.
+// occurrence), else UTC. delete_calendar_event refuses a series whose TZID
+// isn't an IANA zone before it gets here (see seriesTimeZone); the UTC fallback
+// for such a TZID only keeps this pure function from emitting a NaN wall clock.
 const exdateLine = (master: Component, recurrenceId: string, allDay: boolean): string => {
   if (allDay) {
     return `EXDATE;VALUE=DATE:${toIcalUtc(recurrenceId).slice(0, 8)}`

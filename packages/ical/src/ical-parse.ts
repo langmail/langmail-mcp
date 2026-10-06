@@ -75,7 +75,9 @@ export interface ParsedEvent {
   // IANA zone named by the DTSTART `;TZID=` param, when present. This is the
   // event's own zone: update_calendar_event keeps it so an edit doesn't silently
   // re-express the event elsewhere, and list rendering surfaces it. Absent for
-  // the historical UTC (`…Z`) form and for foreign floating times. `start`/`end`
+  // the historical UTC (`…Z`) form, for foreign floating times, and for an
+  // all-day DATE (some producers write a TZID beside it, but a date has no wall
+  // clock for a zone to govern). `start`/`end`
   // stay pure ISO wall-clock strings — the zone lives here, not appended to them.
   startTzid?: string
   title: string
@@ -400,7 +402,6 @@ const optionalFields = (block: ParsedBlock, attendees: ParsedAttendee[]): Partia
   const description = block.props.get('DESCRIPTION')?.value
   const location = block.props.get('LOCATION')?.value
   const organizer = parseOrganizerEmail(block.props.get('ORGANIZER'))
-  const startTzid = propertyTimeZone(block.props.get('DTSTART'))
   // Trim so a server that emits a trailing space (`RRULE:FREQ=WEEKLY `) doesn't
   // leak it into the listed `repeats:` value.
   const recurrence = block.props.get('RRULE')?.value.trim()
@@ -408,6 +409,9 @@ const optionalFields = (block: ParsedBlock, attendees: ParsedAttendee[]): Partia
   const excludedDates = parseExcludedDates(block.exdates)
   const unparsedAttendeeCount = block.attendees.length - attendees.length
   const allDay = isDateValue(block.props.get('DTSTART'))
+  // A TZID beside a DATE is off-spec and meaningless; surfacing it would let
+  // consumers re-express a date-only series in that zone.
+  const startTzid = allDay ? undefined : propertyTimeZone(block.props.get('DTSTART'))
   return {
     ...(block.alarms.length > 0 ? { alarms: block.alarms.map(parseAlarm) } : {}),
     ...(allDay ? { allDay: true as const } : {}),

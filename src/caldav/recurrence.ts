@@ -178,31 +178,33 @@ export const startContradictsRule = (rrule: string, start: Date, timeZone: strin
 }
 
 // A zoned series is expanded on its floating wall clock (see isSeriesOccurrence),
-// but RFC 5545 §3.3.10 writes its UNTIL in UTC. Re-express that UNTIL as wall
-// clock in the same zone, or `rrule` compares it against wall clock read as UTC
-// and, east of UTC, drops the last occurrence.
-const floatUntil = (rrule: string, timeZone: string): string => {
+// but RFC 5545 §3.3.10 writes its UNTIL in UTC. Comparing that UTC value against
+// wall clock read as UTC would drop the last occurrence east of UTC, and
+// re-expressing it as wall clock is ambiguous in a DST fall-back hour. So a UTC
+// UNTIL is split off the rule and checked against the true instant instead.
+const splitUtcUntil = (rrule: string): { rule: string; until?: Date } => {
   const match = UNTIL_RE.exec(rrule)
   const utc = ICAL_UTC_DATE_TIME_RE.exec(match?.[2]?.trim() ?? '')
   if (!utc) {
-    return rrule
+    return { rule: rrule }
   }
   const [, y, mo, d, h, mi, s] = utc
-  const wallClock = toWallClockIso(new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`), timeZone)
-  return rrule.replace(UNTIL_RE, `$1UNTIL=${toIcalFloating(wallClock)}`)
+  const rule = rrule.replace(UNTIL_RE, '').replace(LEADING_SEPARATOR_RE, '')
+  return { rule, until: new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`) }
 }
 
+const LEADING_SEPARATOR_RE = /^;/u
+
 // The zone a series' RRULE expands in, for isSeriesOccurrence: the master's
-// DTSTART TZID on a timed series, none on an all-day one (a TZID some producers
-// write beside a DATE has no wall clock to govern). A TZID that isn't an IANA
+// DTSTART TZID (the parser drops one written beside an all-day DATE). A TZID
+// that isn't an IANA
 // zone (a Windows ID defined only by the object's VTIMEZONE) can't be expanded
 // at all, so it is refused by name rather than surfacing as an opaque rule error
 // — and never matched as if its wall clock were UTC.
 export const seriesTimeZone = (master: {
-  allDay?: true
   startTzid?: string
 }): { error: string; ok: false } | { ok: true; value: string | undefined } => {
-  const zone = master.allDay ? undefined : master.startTzid
+  const zone = master.startTzid
   if (zone && !isValidTimeZone(zone)) {
     return {
       error: `This series' time zone (${zone}) is not a recognized IANA zone, so recurrenceId cannot be matched to an occurrence.`,
@@ -219,18 +221,30 @@ export const seriesTimeZone = (master: {
 // requires a RECURRENCE-ID to name a real instance of the master's RRULE.
 //
 // Membership is tested with a single-instant `between(t, t, inclusive)` rather
-// than expanding the whole (possibly unbounded) series. Our events are UTC, so
-// both bounds are normalized to a UTC DTSTART before handing off to `rrule`.
+// than expanding the whole (possibly unbounded) series. A UTC series is matched
+// on instants. A zoned series (`timeZone`, the master's DTSTART TZID) is
+// expanded on its floating wall clock and `recurrenceId` is reduced to wall
+// clock in that zone, so DST shifts the UTC instant but not the match. Both DST
+// edges stay imperfect: an occurrence inside the spring-forward gap has no
+// instant that reduces to its wall clock and cannot be named, and one inside the
+// fall-back hour is matched by both instants of that repeated wall clock (the
+// EXDATE or RECURRENCE-ID written for it is equally ambiguous).
 export const isSeriesOccurrence = (
   masterStart: string,
   rrule: string,
   recurrenceId: string,
   timeZone?: string
 ): boolean => {
-  const start = timeZone ? toIcalFloating(masterStart) : toIcalUtc(masterStart)
-  const rule = rrulestr(`DTSTART:${start}\nRRULE:${timeZone ? floatUntil(rrule, timeZone) : rrule}`)
-  const at = timeZone ? new Date(`${toWallClockIso(new Date(recurrenceId), timeZone)}Z`) : new Date(recurrenceId)
-  return rule.between(at, at, true).length > 0
+  if (!timeZone) {
+    const at = new Date(recurrenceId)
+    return rrulestr(`DTSTART:${toIcalUtc(masterStart)}\nRRULE:${rrule}`).between(at, at, true).length > 0
+  }
+  const { rule, until } = splitUtcUntil(rrule)
+  if (until && new Date(recurrenceId).getTime() > until.getTime()) {
+    return false
+  }
+  const at = new Date(`${toWallClockIso(new Date(recurrenceId), timeZone)}Z`)
+  return rrulestr(`DTSTART:${toIcalFloating(masterStart)}\nRRULE:${rule}`).between(at, at, true).length > 0
 }
 
 // The occurrence a caller's `recurrenceId` names, as an ISO instant, for the

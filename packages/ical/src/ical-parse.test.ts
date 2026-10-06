@@ -94,6 +94,18 @@ describe('parseEvents', () => {
     expect(ev?.title).toBe('Lunch, then a very long title that theserver folded')
   })
 
+  test('surfaces the DTSTART TZID of a timed event', () => {
+    const ics = 'BEGIN:VEVENT\r\nUID:zoned@langmail.me\r\nDTSTART;TZID=Europe/Berlin:20260612T100000\r\nEND:VEVENT'
+    expect(parseEvents(ics)[0]?.startTzid).toBe('Europe/Berlin')
+  })
+
+  test('drops a TZID written beside an all-day DATE', () => {
+    const ics = 'BEGIN:VEVENT\r\nUID:allday@langmail.me\r\nDTSTART;TZID=Europe/Berlin;VALUE=DATE:20260612\r\nEND:VEVENT'
+    const [event] = parseEvents(ics)
+    expect(event?.allDay).toBe(true)
+    expect(event?.startTzid).toBeUndefined()
+  })
+
   test('keeps a date-only value as a calendar date', () => {
     const ics = 'BEGIN:VEVENT\r\nUID:allday@langmail.me\r\nDTSTART:20260612\r\nEND:VEVENT'
     expect(parseEvents(ics)[0]?.start).toBe('2026-06-12')
