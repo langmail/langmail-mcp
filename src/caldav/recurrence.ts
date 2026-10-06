@@ -177,6 +177,21 @@ export const startContradictsRule = (rrule: string, start: Date, timeZone: strin
   return weekday !== undefined && days.length > 0 && !days.includes(weekday)
 }
 
+// A zoned series is expanded on its floating wall clock (see isSeriesOccurrence),
+// but RFC 5545 §3.3.10 writes its UNTIL in UTC. Re-express that UNTIL as wall
+// clock in the same zone, or `rrule` compares it against wall clock read as UTC
+// and, east of UTC, drops the last occurrence.
+const floatUntil = (rrule: string, timeZone: string): string => {
+  const match = UNTIL_RE.exec(rrule)
+  const utc = ICAL_UTC_DATE_TIME_RE.exec(match?.[2]?.trim() ?? '')
+  if (!utc) {
+    return rrule
+  }
+  const [, y, mo, d, h, mi, s] = utc
+  const wallClock = toWallClockIso(new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`), timeZone)
+  return rrule.replace(UNTIL_RE, `$1UNTIL=${toIcalFloating(wallClock)}`)
+}
+
 // True when `recurrenceId` (an ISO 8601 instant) is the original start of an
 // occurrence the series generates — i.e. expanding `rrule` from `masterStart`
 // lands exactly on it. update_calendar_event uses this to reject an occurrence
@@ -193,7 +208,7 @@ export const isSeriesOccurrence = (
   timeZone?: string
 ): boolean => {
   const start = timeZone ? toIcalFloating(masterStart) : toIcalUtc(masterStart)
-  const rule = rrulestr(`DTSTART:${start}\nRRULE:${rrule}`)
+  const rule = rrulestr(`DTSTART:${start}\nRRULE:${timeZone ? floatUntil(rrule, timeZone) : rrule}`)
   const at = timeZone ? new Date(`${toWallClockIso(new Date(recurrenceId), timeZone)}Z`) : new Date(recurrenceId)
   return rule.between(at, at, true).length > 0
 }

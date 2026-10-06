@@ -273,6 +273,96 @@ describe('deleteCalendarEvent — single occurrence (recurrenceId)', () => {
   })
 })
 
+// A master written by Apple Calendar: an uppercase UUID, a DTSTART in
+// Europe/Berlin wall clock backed by its own VTIMEZONE, weekly on Wednesdays at
+// 08:15 — so occurrences start at 06:15Z in summer (CEST) and 07:15Z in winter
+// (CET). `tzid` swaps in a zone name so the unresolvable case can reuse it.
+const appleZonedStored = (tzid = 'Europe/Berlin'): CalendarObject => ({
+  data: [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Apple Inc.//macOS 15.0//EN',
+    'CALSCALE:GREGORIAN',
+    'BEGIN:VTIMEZONE',
+    `TZID:${tzid}`,
+    'BEGIN:DAYLIGHT',
+    'TZOFFSETFROM:+0100',
+    'RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU',
+    'DTSTART:19810329T020000',
+    'TZNAME:CEST',
+    'TZOFFSETTO:+0200',
+    'END:DAYLIGHT',
+    'BEGIN:STANDARD',
+    'TZOFFSETFROM:+0200',
+    'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU',
+    'DTSTART:19961027T030000',
+    'TZNAME:CET',
+    'TZOFFSETTO:+0100',
+    'END:STANDARD',
+    'END:VTIMEZONE',
+    'BEGIN:VEVENT',
+    'CREATED:20241120T091200Z',
+    'UID:0F3A9C1E-7B2D-4E5F-8A6B-1C2D3E4F5A6B',
+    `DTEND;TZID=${tzid}:20241127T093000`,
+    'RRULE:FREQ=WEEKLY;BYDAY=WE',
+    'TRANSP:OPAQUE',
+    'SUMMARY:Yoga',
+    `DTSTART;TZID=${tzid}:20241127T081500`,
+    'DTSTAMP:20241120T091200Z',
+    'SEQUENCE:0',
+    'END:VEVENT',
+    'END:VCALENDAR',
+    '',
+  ].join('\r\n'),
+  etag: '"apple"',
+  url: `${CAL}0F3A9C1E-7B2D-4E5F-8A6B-1C2D3E4F5A6B.ics`,
+})
+
+describe('deleteCalendarEvent — zoned series written by another client', () => {
+  const cancel = async (recurrenceId: string, stored = appleZonedStored()) => {
+    const cap = captured()
+    const result = await deleteCalendarEvent(makeDeps(account(), stored, cap), {
+      args: args({ recurrenceId, uid: '0F3A9C1E-7B2D-4E5F-8A6B-1C2D3E4F5A6B' }),
+      token: 'tok',
+    })
+    return { cap, ical: (cap.updated[0]?.ical ?? '').replace(/\r\n /gu, ''), result }
+  }
+
+  test.each([
+    // 08:15 Berlin in CEST, as a UTC instant.
+    ['2026-10-21T06:15:00Z', 'EXDATE;TZID=Europe/Berlin:20261021T081500'],
+    // 08:15 Berlin in CET, as a UTC instant.
+    ['2026-11-18T07:15:00Z', 'EXDATE;TZID=Europe/Berlin:20261118T081500'],
+    // The same CET instant written with its offset.
+    ['2026-11-18T08:15:00+01:00', 'EXDATE;TZID=Europe/Berlin:20261118T081500'],
+  ])('accepts the occurrence’s true instant %s and excludes its wall clock', async (recurrenceId, exdate) => {
+    const { cap, ical, result } = await cancel(recurrenceId)
+    expect(result.isError).toBeUndefined()
+    expect(cap.updated).toHaveLength(1)
+    expect(ical).toContain(exdate)
+  })
+
+  test('rejects the wall clock labelled as UTC, which is not an occurrence', async () => {
+    // 08:15Z is 09:15 Berlin in CET: no occurrence starts then.
+    const { cap, result } = await cancel('2026-11-18T08:15:00Z')
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('does not match an occurrence')
+    expect(cap.updated).toHaveLength(0)
+    expect(cap.deleted).toHaveLength(0)
+  })
+
+  test('fails loudly when the series’ zone cannot be resolved', async () => {
+    // A Windows zone ID, defined only by the object's VTIMEZONE: matching it as
+    // UTC would cancel the wrong instant, so nothing is written.
+    const { cap, result } = await cancel('2026-11-18T07:15:00Z', appleZonedStored('W. Europe Standard Time'))
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('W. Europe Standard Time')
+    expect(result.content[0]?.text).toContain('Nothing was cancelled')
+    expect(cap.updated).toHaveLength(0)
+    expect(cap.deleted).toHaveLength(0)
+  })
+})
+
 describe('deleteCalendarEvent — all-day series occurrence', () => {
   const allDaySeries = (): CalendarObject =>
     storedEvent({
@@ -300,6 +390,20 @@ describe('deleteCalendarEvent — all-day series occurrence', () => {
     expect(result.isError).toBeUndefined()
     expect(cap.updated[0]?.ical).toContain('EXDATE;VALUE=DATE:20260623')
     expect(result.content[0]?.text).toContain('on 2026-06-23 cancelled')
+  })
+
+  test('ignores a TZID written beside an all-day DTSTART', async () => {
+    // Off-spec, but some producers write it: the date must still match as a date.
+    const zonedAllDay = allDaySeries()
+    zonedAllDay.data = zonedAllDay.data.replace('DTSTART;VALUE=DATE:', 'DTSTART;TZID=Europe/Berlin;VALUE=DATE:')
+    expect(zonedAllDay.data).toContain('DTSTART;TZID=Europe/Berlin;VALUE=DATE:20260616')
+    const cap = captured()
+    const result = await deleteCalendarEvent(makeDeps(account(), zonedAllDay, cap), {
+      args: args({ recurrenceId: '2026-06-23' }),
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(cap.updated[0]?.ical).toContain('EXDATE;VALUE=DATE:20260623')
   })
 
   test('a date off the all-day series is refused naming the date form', async () => {

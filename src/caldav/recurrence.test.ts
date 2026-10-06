@@ -140,6 +140,14 @@ describe('isSeriesOccurrence', () => {
         isSeriesOccurrence('2026-06-16T10:00:00 Europe/Berlin', weekly, '2026-06-16T08:00:00Z', 'Europe/Berlin')
       ).toBe(true)
     })
+
+    test('keeps the last occurrence of a series bounded by a UTC UNTIL', () => {
+      // UNTIL is the last occurrence's true instant (08:15 Berlin, CEST), as
+      // RFC 5545 requires it in UTC for a zoned DTSTART.
+      const bounded = 'FREQ=WEEKLY;UNTIL=20261021T061500Z'
+      expect(isSeriesOccurrence('2026-10-07T08:15:00', bounded, '2026-10-21T06:15:00Z', 'Europe/Berlin')).toBe(true)
+      expect(isSeriesOccurrence('2026-10-07T08:15:00', bounded, '2026-10-28T07:15:00Z', 'Europe/Berlin')).toBe(false)
+    })
   })
 })
 

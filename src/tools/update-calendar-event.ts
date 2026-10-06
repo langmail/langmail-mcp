@@ -252,7 +252,12 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
   // unvalidated override risks the very orphan this guard exists to prevent.
   let onOccurrence: boolean
   try {
-    onOccurrence = isSeriesOccurrence(master.start, master.recurrence, recurrenceId, master.startTzid)
+    onOccurrence = isSeriesOccurrence(
+      master.start,
+      master.recurrence,
+      recurrenceId,
+      master.allDay ? undefined : master.startTzid
+    )
   } catch {
     return errorResult(
       `Could not evaluate this series' recurrence rule (${master.recurrence}) to validate ` +
