@@ -182,6 +182,9 @@ export const startContradictsRule = (rrule: string, start: Date, timeZone: strin
 // wall clock read as UTC would drop the last occurrence east of UTC, and
 // re-expressing it as wall clock is ambiguous in a DST fall-back hour. So a UTC
 // UNTIL is split off the rule and checked against the true instant instead.
+// A producer that writes local digits with a `Z` is read as the instant it
+// claims to be (west of UTC it loses its last occurrence); restoring a
+// wall-clock reading would bring back the fall-back mis-ordering.
 const splitUtcUntil = (rrule: string): { rule: string; until?: Date } => {
   const match = UNTIL_RE.exec(rrule)
   const utc = ICAL_UTC_DATE_TIME_RE.exec(match?.[2]?.trim() ?? '')

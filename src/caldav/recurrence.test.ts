@@ -149,6 +149,13 @@ describe('isSeriesOccurrence', () => {
       expect(isSeriesOccurrence('2026-10-07T08:15:00', bounded, '2026-10-28T07:15:00Z', 'Europe/Berlin')).toBe(false)
     })
 
+    test('splits off a UTC UNTIL written before FREQ', () => {
+      // RFC 5545 fixes no part order; stripping a leading UNTIL must not leave
+      // a stray `;` that rrule rejects.
+      const leading = 'UNTIL=20261021T061500Z;FREQ=WEEKLY'
+      expect(isSeriesOccurrence('2026-10-07T08:15:00', leading, '2026-10-21T06:15:00Z', 'Europe/Berlin')).toBe(true)
+    })
+
     test('rejects a sub-second instant near an occurrence', () => {
       // 08:00:00.500Z is not the 10:00 Berlin start, though its wall clock
       // truncates to it.
