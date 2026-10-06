@@ -156,6 +156,21 @@ describe('isSeriesOccurrence', () => {
       expect(isSeriesOccurrence('2026-10-07T08:15:00', leading, '2026-10-21T06:15:00Z', 'Europe/Berlin')).toBe(true)
     })
 
+    test('keeps an impossible UTC UNTIL bounding the series', () => {
+      // Month 13: stripping it would turn the series unbounded and accept an
+      // occurrence years past any reading of the bound.
+      const impossible = 'FREQ=WEEKLY;UNTIL=20261399T250000Z'
+      expect(isSeriesOccurrence('2026-10-07T08:15:00', impossible, '2030-10-23T06:15:00Z', 'Europe/Berlin')).toBe(false)
+    })
+
+    test('rejects a sub-millisecond instant near an occurrence', () => {
+      // A Date keeps milliseconds only, so the fraction is read from the text.
+      expect(isSeriesOccurrence('2026-06-16T10:00:00', weekly, '2026-06-16T08:00:00.0005Z', 'Europe/Berlin')).toBe(
+        false
+      )
+      expect(isSeriesOccurrence('2026-06-16T10:00:00', weekly, '2026-06-16T08:00:00.000Z', 'Europe/Berlin')).toBe(true)
+    })
+
     test('rejects a sub-second instant near an occurrence', () => {
       // 08:00:00.500Z is not the 10:00 Berlin start, though its wall clock
       // truncates to it.

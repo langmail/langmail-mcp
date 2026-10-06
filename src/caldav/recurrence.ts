@@ -192,15 +192,22 @@ const splitUtcUntil = (rrule: string): { rule: string; until?: Date } => {
     return { rule: rrule }
   }
   const [, y, mo, d, h, mi, s] = utc
+  const until = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`)
+  // A digit-shaped but impossible value (month 13, hour 25) stays in the rule
+  // for rrule to reject, rather than being stripped into an unbounded series.
+  if (Number.isNaN(until.getTime()) || toIcalUtc(until.toISOString()) !== `${y}${mo}${d}T${h}${mi}${s}Z`) {
+    return { rule: rrule }
+  }
   const rule = rrule.replace(UNTIL_RE, '').replace(LEADING_SEPARATOR_RE, '')
-  return { rule, until: new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`) }
+  return { rule, until }
 }
 
 const LEADING_SEPARATOR_RE = /^;/u
+const NONZERO_FRACTION_RE = /\.\d*[1-9]/u
 
 // The zone a series' RRULE expands in, for isSeriesOccurrence: the master's
 // DTSTART TZID (the parser drops one written beside an all-day DATE). A TZID
-// that isn't an IANA zone, such as a Windows ID defined only by the object's
+// that isn't an IANA zone, such as a vendor zone name defined only by the object's
 // VTIMEZONE, can't be expanded at all. It is refused by name, echoing the
 // caller's `recurrenceId`, rather than surfacing as an opaque rule error — and
 // never matched as if its wall clock were UTC.
@@ -244,11 +251,12 @@ export const isSeriesOccurrence = (
     return rrulestr(`DTSTART:${toIcalUtc(masterStart)}\nRRULE:${rrule}`).between(at, at, true).length > 0
   }
   // The wall-clock reduction below keeps whole seconds only, so a sub-second
-  // instant would otherwise match the occurrence it merely falls near.
-  const instant = new Date(recurrenceId)
-  if (instant.getUTCMilliseconds() !== 0) {
+  // instant would otherwise match the occurrence it merely falls near. Read the
+  // fraction from the text: a Date keeps milliseconds only.
+  if (NONZERO_FRACTION_RE.test(recurrenceId)) {
     return false
   }
+  const instant = new Date(recurrenceId)
   const { rule, until } = splitUtcUntil(rrule)
   if (until && instant.getTime() > until.getTime()) {
     return false

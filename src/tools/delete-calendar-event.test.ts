@@ -352,11 +352,11 @@ describe('deleteCalendarEvent — zoned series written by another client', () =>
   })
 
   test('fails loudly when the series’ zone cannot be resolved', async () => {
-    // A Windows zone ID, defined only by the object's VTIMEZONE: matching it as
+    // A non-IANA zone name, defined only by the object's VTIMEZONE: matching it as
     // UTC would cancel the wrong instant, so nothing is written.
-    const { cap, result } = await cancel('2026-11-18T07:15:00Z', foreignZonedStored('W. Europe Standard Time'))
+    const { cap, result } = await cancel('2026-11-18T07:15:00Z', foreignZonedStored('Example Standard Time'))
     expect(result.isError).toBe(true)
-    expect(result.content[0]?.text).toContain('W. Europe Standard Time')
+    expect(result.content[0]?.text).toContain('Example Standard Time')
     expect(result.content[0]?.text).toContain('2026-11-18T07:15:00Z')
     expect(result.content[0]?.text).toContain('Nothing was cancelled')
     expect(cap.updated).toHaveLength(0)

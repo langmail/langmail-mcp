@@ -914,7 +914,7 @@ describe('updateCalendarEvent — single occurrence (recurrenceId)', () => {
   })
 
   test('fails loudly when the series’ zone cannot be resolved', async () => {
-    // A Windows zone ID, defined only by the object's VTIMEZONE: it cannot be
+    // A non-IANA zone name, defined only by the object's VTIMEZONE: it cannot be
     // expanded, so no override is written for an unvalidated instant.
     const windowsZoned = storedEvent({
       data: [
@@ -922,8 +922,8 @@ describe('updateCalendarEvent — single occurrence (recurrenceId)', () => {
         'BEGIN:VEVENT',
         `UID:${UID}`,
         'SUMMARY:Weekly Sync',
-        'DTSTART;TZID=W. Europe Standard Time:20260616T100000',
-        'DTEND;TZID=W. Europe Standard Time:20260616T103000',
+        'DTSTART;TZID=Example Standard Time:20260616T100000',
+        'DTEND;TZID=Example Standard Time:20260616T103000',
         'RRULE:FREQ=WEEKLY;BYDAY=TU',
         'ORGANIZER;CN="host@langmail.me":mailto:host@langmail.me',
         'END:VEVENT',
@@ -944,7 +944,7 @@ describe('updateCalendarEvent — single occurrence (recurrenceId)', () => {
       token: 'tok',
     })
     expect(result.isError).toBe(true)
-    expect(result.content[0]?.text).toContain('W. Europe Standard Time')
+    expect(result.content[0]?.text).toContain('Example Standard Time')
     expect(result.content[0]?.text).toContain('Nothing was changed')
     expect(cap.updated).toHaveLength(0)
   })
