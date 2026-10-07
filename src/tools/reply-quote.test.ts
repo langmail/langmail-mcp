@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 
+import { MAX_DRAFT_BODY_VALUE_BYTES } from './draft-common.ts'
 import { receivedMessage } from './draft-test-fixtures.ts'
-import { attributionLine, MAX_QUOTE_CHARS, quotesByDefault, withQuotedOriginal } from './reply-quote.ts'
+import { attributionLine, MAX_QUOTE_CHARS, quoteWithheldFrom, withQuotedOriginal } from './reply-quote.ts'
 
 const RECEIVED_AT = '2026-10-05T12:00:00Z'
 
@@ -96,6 +97,35 @@ describe('withQuotedOriginal', () => {
     expect(html).toContain('href="mailto:nadia@example.org"')
   })
 
+  test('strips inline styles that lift quoted content over the reply or hide it', () => {
+    const original = receivedMessage({
+      bodyValues: {
+        '2': {
+          value:
+            '<div style="position:fixed;inset:0;z-index:9999;background:#fff">cover</div>' +
+            '<p style="display: none">hidden</p><p style="color:blue;display:block">kept</p>',
+        },
+      },
+      htmlBody: [{ partId: '2', type: 'text/html' }],
+    })
+    const { html } = withQuotedOriginal({ html: '<p>ok</p>' }, original)
+    expect(html).toContain('<div style="background:#fff">cover</div>')
+    expect(html).toContain('<p>hidden</p>')
+    expect(html).toContain('<p style="color:blue;display:block">kept</p>')
+  })
+
+  test('keeps a maximal non-ASCII reply plus its quote inside the read-back budget', () => {
+    const original = receivedMessage({
+      bodyValues: { '1': { value: '数字\n'.repeat(40_000) } },
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    const own = '返信'.repeat(30_000)
+    const text = withQuotedOriginal({ text: own }, original).text ?? ''
+    expect(text).toStartWith(own)
+    expect(text).toContain('[… quoted message shortened]')
+    expect(text.length * 4).toBeLessThanOrEqual(MAX_DRAFT_BODY_VALUE_BYTES)
+  })
+
   test('marks a quote cut short, whether by the read budget or the quote cap', () => {
     const truncated = receivedMessage({
       bodyValues: { '1': { isTruncated: true, value: 'start of a long message' } },
@@ -128,11 +158,12 @@ describe('withQuotedOriginal', () => {
   })
 })
 
-describe('quotesByDefault', () => {
-  test('quotes for the original roster, not for someone the original never reached', () => {
+describe('quoteWithheldFrom', () => {
+  test('names a recipient the original never reached, but never the user themselves', () => {
     const original = receivedMessage()
-    expect(quotesByDefault(original, {})).toBe(true)
-    expect(quotesByDefault(original, { to: [{ email: 'Tomas@example.com' }] })).toBe(true)
-    expect(quotesByDefault(original, { to: [{ email: 'outsider@example.net' }] })).toBe(false)
+    expect(quoteWithheldFrom(original, {}, [])).toBeNull()
+    expect(quoteWithheldFrom(original, { to: [{ email: 'Tomas@example.com' }] }, [])).toBeNull()
+    expect(quoteWithheldFrom(original, { bcc: [{ email: 'alias@langmail.me' }] }, ['alias@langmail.me'])).toBeNull()
+    expect(quoteWithheldFrom(original, { to: [{ email: 'outsider@example.net' }] }, [])).toBe('outsider@example.net')
   })
 })

@@ -19,7 +19,7 @@ import sanitizeHtml from 'sanitize-html'
 import { type EmailComposeRecord } from '@langmail/jmap'
 
 import { DATA_IMAGE_RE } from '../email-render/sanitize.ts'
-import { bodyTruncated, draftFromRecord, type ParsedRecipients } from './draft-common.ts'
+import { bodyTruncated, draftFromRecord, MAX_DRAFT_BODY_VALUE_BYTES, type ParsedRecipients } from './draft-common.ts'
 
 export interface ReplyBody {
   html?: string
@@ -104,6 +104,24 @@ const BODY_CONTENT_RE = /<body[^>]*>([\s\S]*)<\/body>/iu
 const HEAD_RE = /<head[^>]*>[\s\S]*?<\/head>/iu
 const PRESENTATION_ATTRIBUTES = ['align', 'valign', 'bgcolor', 'width', 'height', 'border', 'dir', 'style']
 
+// Inline styles stay — email layout leans on them — minus the declarations
+// that take quoted content out of the blockquote's flow or hide it: a
+// `position:fixed` box can cover the user's own text above the quote, and
+// `display:none` ships text the user never sees under their name.
+const UNQUOTABLE_STYLE_RE =
+  /^(?:position|inset|top|right|bottom|left|z-index|transform|visibility|opacity|clip|clip-path)$/u
+const HIDDEN_DISPLAY_RE = /^display\s*:\s*none\b/iu
+
+const quotableStyle = (style: string): string =>
+  style
+    .split(';')
+    .map((declaration) => declaration.trim())
+    .filter((declaration) => {
+      const property = declaration.split(':')[0]?.trim().toLowerCase() ?? ''
+      return declaration !== '' && !UNQUOTABLE_STYLE_RE.test(property) && !HIDDEN_DISPLAY_RE.test(declaration)
+    })
+    .join(';')
+
 const quotableImageSrc = (src: string | undefined): boolean =>
   Boolean(src) && (!src?.toLowerCase().startsWith('data:') || DATA_IMAGE_RE.test(src))
 
@@ -127,6 +145,16 @@ const quotableHtml = (html: string): string => {
     // email-render/sanitize.ts).
     exclusiveFilter: (frame) => frame.tag === 'img' && !quotableImageSrc(frame.attribs.src),
     nonTextTags: ['script', 'style', 'textarea', 'noscript', 'title', 'head'],
+    transformTags: {
+      '*': (tagName, attribs) => {
+        if (attribs.style === undefined) {
+          return { attribs, tagName }
+        }
+        const { style, ...rest } = attribs
+        const kept = quotableStyle(style)
+        return { attribs: kept === '' ? rest : { ...rest, style: kept }, tagName }
+      },
+    },
   }).trim()
 }
 
@@ -139,59 +167,137 @@ const quoteText = (text: string): string =>
     .map((line) => (line === '' || line.startsWith('>') ? `>${line}` : `> ${line}`))
     .join('\n')
 
-// How much of the original a quote carries, per body part. Bounded so a reply
-// to a long newsletter stays a reply — and stays within the budget update_draft
-// reads a draft back at (MAX_DRAFT_BODY_VALUE_BYTES), past which it refuses to
-// edit the draft at all.
+// How much of the original a quote carries, per body part — so a reply to a
+// long newsletter stays a reply.
 export const MAX_QUOTE_CHARS = 50_000
+// The longest body part that is guaranteed to read back whole: update_draft
+// reads at MAX_DRAFT_BODY_VALUE_BYTES octets, a character costs at most four,
+// so 100_000 characters always fit. A staged reply's part — the caller's text
+// plus the quote — is kept inside this, or update_draft would find it
+// truncated and refuse to edit the draft at all.
+const MAX_REPLY_PART_CHARS = MAX_DRAFT_BODY_VALUE_BYTES / 4
+// Room for the attribution, the shortened note, and the markup around them.
+const QUOTE_FRAME_CHARS = 1000
 const SHORTENED_NOTE = '[… quoted message shortened]'
 
-const bounded = (value: string, truncated: boolean): { shortened: boolean; value: string } =>
-  value.length > MAX_QUOTE_CHARS
-    ? { shortened: true, value: value.slice(0, MAX_QUOTE_CHARS) }
-    : { shortened: truncated, value }
+// Render as much of `value` as fits in `budget` characters once rendered.
+// Rendering grows the text unevenly (`> ` prefixes, HTML escaping), so the cut
+// is found by shrinking until the output fits rather than computed up front.
+const fitted = (
+  value: string,
+  render: (value: string) => string,
+  budget: number
+): { rendered: string; shortened: boolean } => {
+  let limit = Math.min(value.length, MAX_QUOTE_CHARS)
+  for (;;) {
+    const rendered = render(value.slice(0, limit))
+    if (rendered.length <= budget || limit === 0) {
+      return { rendered, shortened: limit < value.length }
+    }
+    limit = Math.max(0, Math.floor((limit * budget) / rendered.length) - 1)
+  }
+}
 
 // Whether a reply quotes the original when the caller did not say. It does,
 // unless explicit recipients name someone the original was never addressed
 // to: quoting then forwards the whole message to a new person, which is a
-// decision the user makes (`quoteOriginal: true`), not a default.
-export const quotesByDefault = (original: EmailComposeRecord, recipients: ParsedRecipients): boolean => {
+// decision the user makes (`quoteOriginal: true`), not a default. The user's
+// own addresses are never outsiders — a self-bcc is not a forward.
+export const quoteWithheldFrom = (
+  original: EmailComposeRecord,
+  recipients: ParsedRecipients,
+  selfAddresses: string[]
+): string | null => {
   const roster = new Set(
-    [...(original.from ?? []), ...(original.replyTo ?? []), ...(original.to ?? []), ...(original.cc ?? [])].map(
-      (address) => address.email.toLowerCase()
-    )
+    [...(original.from ?? []), ...(original.replyTo ?? []), ...(original.to ?? []), ...(original.cc ?? [])]
+      .map((address) => address.email)
+      .concat(selfAddresses)
+      .map((email) => email.toLowerCase())
   )
   const named = [...(recipients.to ?? []), ...(recipients.cc ?? []), ...(recipients.bcc ?? [])]
-  return named.every((address) => roster.has(address.email.toLowerCase()))
+  return named.find((address) => !roster.has(address.email.toLowerCase()))?.email ?? null
 }
 
+// The line a result carries when the default withheld the quote, so the agent
+// learns it at the moment it matters rather than only from the description.
+const quoteWithheldNote = (outsider: string): string =>
+  `The original was not quoted: ${outsider} was not on it, and quoting would forward it to them. ` +
+  'Pass `quoteOriginal: true` if the user wants it included.'
+
+interface QuoteSource {
+  attribution: string
+  html: string | undefined
+  text: string | undefined
+  truncated: boolean
+}
+
+const quoteTextPart = (own: string, q: QuoteSource): string => {
+  const trimmed = own.replace(TRAILING_SPACE_RE, '')
+  const budget = MAX_REPLY_PART_CHARS - trimmed.length - QUOTE_FRAME_CHARS
+  if (budget <= 0) {
+    return own
+  }
+  const quoted = fitted(q.text ?? htmlToText(q.html ?? ''), quoteText, budget)
+  const note = quoted.shortened || q.truncated ? `\n>\n> ${SHORTENED_NOTE}` : ''
+  return `${trimmed}\n\n${quoteText(q.attribution)}\n>\n${quoted.rendered}${note}\n`
+}
+
+const quoteHtmlPart = (own: string, q: QuoteSource): string => {
+  const budget = MAX_REPLY_PART_CHARS - own.length - QUOTE_FRAME_CHARS
+  if (budget <= 0) {
+    return own
+  }
+  const quoted = q.html === undefined ? fitted(q.text ?? '', textAsHtml, budget) : fitted(q.html, quotableHtml, budget)
+  const note = quoted.shortened || q.truncated ? `<p>${escapeHtml(SHORTENED_NOTE)}</p>` : ''
+  return (
+    `${own}\n<br>\n<div>${escapeHtml(q.attribution)}</div>\n` +
+    `<blockquote type="cite" style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex">${quoted.rendered}${note}</blockquote>\n`
+  )
+}
+
+const nonBlank = (value: string | undefined): string | undefined =>
+  value !== undefined && value.trim() !== '' ? value : undefined
+
 // The reply body with the original quoted below it. Returns the body unchanged
-// when the original has nothing to quote (no body part came back).
+// when the original has nothing to quote (no body part came back). A read cut
+// off at the body budget is quoted as far as it goes, and says so.
 export const withQuotedOriginal = (body: ReplyBody, original: EmailComposeRecord): ReplyBody => {
-  const { html: originalHtml, text: originalText } = draftFromRecord(original)
-  const hasText = originalText !== undefined && originalText.trim() !== ''
-  const hasHtml = originalHtml !== undefined && originalHtml.trim() !== ''
-  if (!(hasText || hasHtml)) {
+  const parts = draftFromRecord(original)
+  const source: QuoteSource = {
+    attribution: attributionLine(original),
+    html: nonBlank(parts.html),
+    text: nonBlank(parts.text),
+    truncated: bodyTruncated(original),
+  }
+  if (source.text === undefined && source.html === undefined) {
     return body
   }
-  // A read cut off at the body budget is quoted as far as it goes, and says so.
-  const truncated = bodyTruncated(original)
-  const attribution = attributionLine(original)
-  const out: ReplyBody = {}
-  if (body.text !== undefined) {
-    const quoted = bounded(hasText ? (originalText ?? '') : htmlToText(originalHtml ?? ''), truncated)
-    const note = quoted.shortened ? `\n>\n> ${SHORTENED_NOTE}` : ''
-    out.text =
-      `${body.text.replace(TRAILING_SPACE_RE, '')}\n\n${quoteText(attribution)}\n>\n` +
-      `${quoteText(quoted.value)}${note}\n`
+  return {
+    ...(body.text === undefined ? {} : { text: quoteTextPart(body.text, source) }),
+    ...(body.html === undefined ? {} : { html: quoteHtmlPart(body.html, source) }),
   }
-  if (body.html !== undefined) {
-    const quoted = bounded(hasHtml ? (originalHtml ?? '') : (originalText ?? ''), truncated)
-    const inner = hasHtml ? quotableHtml(quoted.value) : textAsHtml(quoted.value)
-    const note = quoted.shortened ? `<p>${escapeHtml(SHORTENED_NOTE)}</p>` : ''
-    out.html =
-      `${body.html}\n<br>\n<div>${escapeHtml(attribution)}</div>\n` +
-      `<blockquote type="cite" style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex">${inner}${note}</blockquote>\n`
+}
+
+// The quoting decision both reply paths make: the caller's `quoteOriginal`
+// when given, the recipient rule otherwise. Returns the body to stage and,
+// when the default withheld the quote, the note the result should carry.
+export const quoteReply = (
+  body: ReplyBody,
+  p: {
+    original: EmailComposeRecord
+    quoteOriginal: boolean | undefined
+    recipients: ParsedRecipients
+    selfAddresses: string[]
   }
-  return out
+): { body: ReplyBody; note: string | null } => {
+  if (p.quoteOriginal === false) {
+    return { body, note: null }
+  }
+  if (p.quoteOriginal === undefined) {
+    const outsider = quoteWithheldFrom(p.original, p.recipients, p.selfAddresses)
+    if (outsider) {
+      return { body, note: quoteWithheldNote(outsider) }
+    }
+  }
+  return { body: withQuotedOriginal(body, p.original), note: null }
 }

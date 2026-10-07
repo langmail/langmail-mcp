@@ -39,7 +39,7 @@ import {
   replyThreading,
   resolveIdentity,
 } from './draft-common.ts'
-import { quotesByDefault, type ReplyBody, withQuotedOriginal } from './reply-quote.ts'
+import { quoteReply, type ReplyBody } from './reply-quote.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 import { formatSent, sendDraftSubject, submitDraft, wasRefused } from './send-draft.ts'
 
@@ -134,7 +134,7 @@ const buildReply = (
   original: EmailComposeRecord,
   identity: ResolvedIdentity,
   recipients: ParsedRecipients
-): { error: string } | { reply: EmailDraft } => {
+): { error: string } | { quoteNote?: string; reply: EmailDraft } => {
   const derived = replyRecipients(original, identity.selfAddresses, args.replyAll === true)
   const to = recipients.to ?? derived.to
   if (to.length === 0) {
@@ -147,7 +147,14 @@ const buildReply = (
     ...(args.text === undefined ? {} : { text: args.text }),
     ...(args.html === undefined ? {} : { html: args.html }),
   }
+  const quoted = quoteReply(body, {
+    original,
+    quoteOriginal: args.quoteOriginal,
+    recipients,
+    selfAddresses: identity.selfAddresses,
+  })
   return {
+    ...(quoted.note ? { quoteNote: quoted.note } : {}),
     reply: {
       from: [identity.address],
       to,
@@ -156,7 +163,7 @@ const buildReply = (
       inReplyTo: threading.inReplyTo,
       references: threading.references,
       subject: args.subject ?? replySubject(original.subject),
-      ...((args.quoteOriginal ?? quotesByDefault(original, recipients)) ? withQuotedOriginal(body, original) : body),
+      ...quoted.body,
     },
   }
 }
@@ -230,7 +237,8 @@ const replyHeld = async (
     apiUrl: '',
     authorization,
     id: args.messageId,
-    // The body is read only when it is going to be quoted.
+    // The body is read whenever the reply may quote it; whether it does also
+    // depends on the recipients, which this read is what resolves.
     maxBodyValueBytes: args.quoteOriginal === false ? 1 : MAX_DRAFT_BODY_VALUE_BYTES,
   })
   if (!original) {
@@ -246,7 +254,7 @@ const replyHeld = async (
   if ('error' in built) {
     return errorResult(built.error)
   }
-  const { reply } = built
+  const { quoteNote, reply } = built
 
   const staged = await deps.draftCreate({
     accountId,
@@ -295,12 +303,13 @@ const replyHeld = async (
     )
   }
 
-  const summary = formatSent('Reply sent.', {
+  const sent = formatSent('Reply sent.', {
     draft: reply,
     messageId: staged.id,
     outcome,
     threadId: staged.threadId ?? original.threadId ?? null,
   })
+  const summary = quoteNote ? `${sent}\n${quoteNote}` : sent
   if (args.idempotencyKey) {
     replays.record(TOOL_NAME, principal, args.idempotencyKey, summary)
   }

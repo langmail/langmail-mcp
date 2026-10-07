@@ -98,6 +98,25 @@ describe('createDraft', () => {
     expect(creates[1]?.draft.text).toContain('> Can you send the numbers?')
   })
 
+  test('says when the quote was withheld, and still quotes for a self-bcc', async () => {
+    const original = receivedMessage({
+      bodyValues: { '1': { value: 'Can you send the numbers?' } },
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    const creates: DraftCreateParams[] = []
+    const withheld = await run(
+      { inReplyTo: 'e1', text: 'Looping you in.', to: ['outsider@example.net'] },
+      { creates, records: { e1: original } }
+    )
+    expect(withheld.text).toContain('The original was not quoted: outsider@example.net')
+    const selfCopy = await run(
+      { bcc: [TEST_PRINCIPAL], inReplyTo: 'e1', text: 'Here they are.' },
+      { creates, records: { e1: original } }
+    )
+    expect(selfCopy.text).not.toContain('not quoted')
+    expect(creates[1]?.draft.text).toContain('> Can you send the numbers?')
+  })
+
   test('threads a reply from the message being answered', async () => {
     const creates: DraftCreateParams[] = []
     const { text } = await run({ inReplyTo: 'e1', text: 'Thanks!' }, { creates, records: { e1: receivedMessage() } })

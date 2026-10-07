@@ -31,7 +31,7 @@ import {
   replyThreading,
   resolveIdentity,
 } from './draft-common.ts'
-import { quotesByDefault, withQuotedOriginal } from './reply-quote.ts'
+import { quoteReply } from './reply-quote.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 // The replay cache is keyed per tool — see drafts/idempotency.ts.
@@ -125,7 +125,7 @@ const composeDraft = async (
   deps: DraftToolDeps,
   ctx: CreateDraftContext,
   p: { accountId: string; authorization: string; identity: ResolvedIdentity }
-): Promise<{ error: ToolResult } | { draft: EmailDraft }> => {
+): Promise<{ error: ToolResult } | { draft: EmailDraft; quoteNote?: string }> => {
   const { args } = ctx
   const recipients = parseRecipients({
     ...(args.to ? { to: args.to } : {}),
@@ -153,7 +153,8 @@ const composeDraft = async (
     apiUrl: '',
     authorization: p.authorization,
     id: args.inReplyTo,
-    // The body is read only when it is going to be quoted.
+    // The body is read whenever the reply may quote it; whether it does also
+    // depends on the recipients, which this read is what resolves.
     maxBodyValueBytes: args.quoteOriginal === false ? 1 : MAX_DRAFT_BODY_VALUE_BYTES,
   })
   if (!original) {
@@ -176,12 +177,17 @@ const composeDraft = async (
     }
   }
   const threading = replyThreading(original)
-  const quote = args.quoteOriginal ?? quotesByDefault(original, recipients)
-  const body = quote ? withQuotedOriginal(base, original) : {}
+  const quoted = quoteReply(base, {
+    original,
+    quoteOriginal: args.quoteOriginal,
+    recipients,
+    selfAddresses: p.identity.selfAddresses,
+  })
   return {
+    ...(quoted.note ? { quoteNote: quoted.note } : {}),
     draft: {
       ...base,
-      ...body,
+      ...quoted.body,
       to,
       cc: recipients.cc ?? derived.cc,
       inReplyTo: threading.inReplyTo,
@@ -275,7 +281,8 @@ export const createDraft = async (
 
   const summary =
     'Draft staged in Drafts. Nothing has been sent — send it with send_draft, or leave it for the user ' +
-    `to review and send in Langmail.\ndraftId: ${created.id}\n${formatDraft(draft, { threadId: created.threadId })}`
+    `to review and send in Langmail.\ndraftId: ${created.id}\n${formatDraft(draft, { threadId: created.threadId })}` +
+    (composed.quoteNote ? `\n${composed.quoteNote}` : '')
   if (args.idempotencyKey) {
     replays.record(TOOL_NAME, principal, args.idempotencyKey, summary)
   }
