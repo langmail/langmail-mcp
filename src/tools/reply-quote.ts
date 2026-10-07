@@ -190,7 +190,8 @@ export const MAX_QUOTE_CHARS = 50_000
 // plus the quote — is kept inside this, or update_draft would find it
 // truncated and refuse to edit the draft at all.
 const MAX_REPLY_PART_CHARS = MAX_DRAFT_BODY_VALUE_BYTES / 4
-// Room for the attribution, the shortened note, and the markup around them.
+// Room for the shortened note and the markup around the quote; the attribution
+// is measured, since it carries the sender's display name.
 const QUOTE_FRAME_CHARS = 1000
 const SHORTENED_NOTE = '[… quoted message shortened]'
 
@@ -247,17 +248,19 @@ interface QuoteSource {
 
 const quoteTextPart = (own: string, q: QuoteSource): string => {
   const trimmed = own.replace(TRAILING_SPACE_RE, '')
-  const budget = MAX_REPLY_PART_CHARS - trimmed.length - QUOTE_FRAME_CHARS
+  const attribution = quoteText(q.attribution)
+  const budget = MAX_REPLY_PART_CHARS - trimmed.length - attribution.length - QUOTE_FRAME_CHARS
   if (budget <= 0) {
     return own
   }
   const quoted = fitted(q.text ?? htmlToText(q.html ?? ''), quoteText, budget)
   const note = quoted.shortened || q.truncated ? `\n>\n> ${SHORTENED_NOTE}` : ''
-  return `${trimmed}\n\n${quoteText(q.attribution)}\n>\n${quoted.rendered}${note}\n`
+  return `${trimmed}\n\n${attribution}\n>\n${quoted.rendered}${note}\n`
 }
 
 const quoteHtmlPart = (own: string, q: QuoteSource): string => {
-  const budget = MAX_REPLY_PART_CHARS - own.length - QUOTE_FRAME_CHARS
+  const attribution = escapeHtml(q.attribution)
+  const budget = MAX_REPLY_PART_CHARS - own.length - attribution.length - QUOTE_FRAME_CHARS
   if (budget <= 0) {
     return own
   }
@@ -265,7 +268,7 @@ const quoteHtmlPart = (own: string, q: QuoteSource): string => {
     q.html === undefined ? fitted(q.text ?? '', textAsHtml, budget) : fitted(htmlBodyOf(q.html), quotableHtml, budget)
   const note = quoted.shortened || q.truncated ? `<p>${escapeHtml(SHORTENED_NOTE)}</p>` : ''
   return (
-    `${own}\n<br>\n<div>${escapeHtml(q.attribution)}</div>\n` +
+    `${own}\n<br>\n<div>${attribution}</div>\n` +
     `<blockquote type="cite" style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex">${quoted.rendered}${note}</blockquote>\n`
   )
 }

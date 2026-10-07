@@ -154,6 +154,16 @@ describe('withQuotedOriginal', () => {
     expect(withQuotedOriginal({ html: '<p>ok</p>' }, original).html).toContain('<p>visible</p>')
   })
 
+  test('counts a long sender name against the budget', () => {
+    const original = receivedMessage({
+      bodyValues: { '1': { value: 'x\n'.repeat(40_000) } },
+      from: [{ email: 'nadia@example.org', name: 'N'.repeat(60_000) }],
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    const text = withQuotedOriginal({ text: 'y'.repeat(30_000) }, original).text ?? ''
+    expect(text.length * 4).toBeLessThanOrEqual(MAX_DRAFT_BODY_VALUE_BYTES)
+  })
+
   test('marks a quote cut short, whether by the read budget or the quote cap', () => {
     const truncated = receivedMessage({
       bodyValues: { '1': { isTruncated: true, value: 'start of a long message' } },
