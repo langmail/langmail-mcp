@@ -74,7 +74,11 @@ const BLANK_RUN_RE = /\n{3,}/gu
 // optional; `<br>` with any attributes.
 // The containers' mandatory closings break too, so text after a table or list
 // does not join its last line.
-const BLOCK_BREAK_RE = /<br\b[^>]*>|<(?:p|li|tr)(?:\s[^>]*)?>|<\/(?:div|table|thead|tbody|ul|ol|h[1-6]|blockquote)>/giu
+// `<div>` breaks on its opening, so the first line of an Apple Mail or Gmail
+// body does not join the next; its closing breaks only when no block follows,
+// so sibling divs are not double-spaced. `<dt>`/`<dd>` like `<li>`.
+const BLOCK_BREAK_RE =
+  /<br\b[^>]*>|<(?:p|li|tr|div|dt|dd)(?:\s[^>]*)?>|<\/div>(?!\s*<(?:p|li|tr|div|table|ul|ol|dl)\b)|<\/(?:table|thead|tbody|ul|ol|dl|h[1-6]|blockquote)>/giu
 // Table cells are separated by a space, so a row reads `Qty Price`, not `QtyPrice`.
 // Openings too: `</td>` is optional in HTML, and plenty of mail omits it.
 const CELL_BREAK_RE = /<\/?t[dh](?:\s[^>]*)?>/giu
@@ -120,9 +124,10 @@ const PRESENTATION_ATTRIBUTES = ['align', 'valign', 'bgcolor', 'width', 'height'
 // Inline styles are an allowlist too: the presentational properties email
 // layout leans on, with values that cannot lift quoted content out of the
 // blockquote or shrink it to nothing. Everything else — `position`, any
-// `transform`/`translate`, negative margins, `text-indent`, `display`,
-// `visibility`, and any property spelled with a CSS escape — is dropped by
-// sanitize-html's style filter, which keeps only what is named here. This is
+// `transform`/`translate`, negative or large margins, `text-indent`,
+// `visibility`, `display:none`, and any property spelled with a CSS escape —
+// is dropped by sanitize-html's style filter, which keeps only what is named
+// here. Keywords and units are matched case-insensitively, as CSS reads them. This is
 // layout integrity of the user's own outbound mail, not a security boundary: a
 // sender can still colour text white, but cannot paint over the reply above.
 // No function that fetches — `url(`, `image-set(` / `-webkit-image-set(` (which
@@ -133,21 +138,24 @@ const SAFE_VALUE = /^(?!.*(?:url|src|image-set|expression)\s*\()[#\w\s.,%'"()/+-
 // Margins and padding: non-negative and small. Large vertical padding on an
 // inline element paints outside its line box without moving it, so an
 // unbounded value is the overlay again; 99px or 9em is more than layout needs.
-const SMALL_LENGTH = String.raw`(?:0|auto|(?:\d{1,2}(?:\.\d+)?|\.\d+)(?:px|pt|ex|%)|(?:\d(?:\.\d+)?|\.\d+)(?:em|rem))`
-const SMALL_BOX = new RegExp(String.raw`^${SMALL_LENGTH}(?:\s+${SMALL_LENGTH}){0,3}$`, 'u')
-const POSITIVE_NUMBER = /^(?:0*[1-9]\d*(?:\.\d+)?|0*\.\d*[1-9]\d*)$/u
+// The large units (`in`, `cm`, `mm` — what Word's MsoNormal boilerplate uses)
+// get the single-digit bound `em` has.
+const SMALL_LENGTH = String.raw`(?:0|auto|(?:\d{1,2}(?:\.\d+)?|\.\d+)(?:px|pt|ex|mm|%)|(?:\d(?:\.\d+)?|\.\d+)(?:em|rem|in|cm))`
+const SMALL_BOX = new RegExp(String.raw`^${SMALL_LENGTH}(?:\s+${SMALL_LENGTH}){0,3}$`, 'iu')
+const POSITIVE = String.raw`(?:0*[1-9]\d*(?:\.\d+)?|0*\.\d*[1-9]\d*)`
+const POSITIVE_NUMBER = new RegExp(`^${POSITIVE}$`, 'u')
 // Sizes need a unit: unitless lengths are invalid CSS outside line-height.
-const POSITIVE_LENGTH = new RegExp(`^(?:auto|${POSITIVE_NUMBER.source.slice(1, -1)}(?:px|pt|em|rem|ex|%))$`, 'u')
-const DISPLAY = /^(?:block|inline|inline-block|table|table-row|table-cell|list-item)$/u
+const POSITIVE_LENGTH = new RegExp(`^(?:auto|${POSITIVE}(?:px|pt|em|rem|ex|in|cm|mm|%))$`, 'iu')
+const DISPLAY = /^(?:block|inline|inline-block|table|table-row|table-cell|list-item)$/iu
 // Keywords only: a length raises or lowers an inline box by that much, which
 // is the overlay again by another route.
-const VERTICAL_ALIGN = /^(?:baseline|sub|super|top|text-top|middle|bottom|text-bottom)$/u
+const VERTICAL_ALIGN = /^(?:baseline|sub|super|top|text-top|middle|bottom|text-bottom)$/iu
 const QUOTABLE_STYLES: Record<string, RegExp[]> = Object.fromEntries([
   ['vertical-align', [VERTICAL_ALIGN]],
   // Keywords that keep the element on the page; `none` is not one of them.
   ['display', [DISPLAY]],
   // A zero line box lets glyphs paint over whatever sits above it.
-  ['line-height', [/^normal$/u, POSITIVE_LENGTH, POSITIVE_NUMBER]],
+  ['line-height', [/^normal$/iu, POSITIVE_LENGTH, POSITIVE_NUMBER]],
   ...[
     'background',
     'background-color',

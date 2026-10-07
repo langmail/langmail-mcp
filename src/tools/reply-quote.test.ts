@@ -258,6 +258,29 @@ describe('withQuotedOriginal', () => {
     expect(text).toContain('> Label\n> Footer\n> a\n> tail\n')
   })
 
+  test('divs and description lists break where a mail client shows a new line', () => {
+    const lines = (html: string) => withQuotedOriginal({ text: 'ok' }, htmlOriginal(html)).text ?? ''
+    expect(lines('Hi<div>A</div><div>B</div>')).toContain('> Hi\n> A\n> B\n')
+    expect(lines('<div dir="ltr">Hi<div>A</div></div>')).toContain('> Hi\n> A\n')
+    expect(lines('<div>A</div>tail')).toContain('> A\n> tail\n')
+    expect(lines('<dl><dt>Plan</dt><dd>Pro</dd><dt>Seats</dt><dd>5</dd></dl>')).toContain(
+      '> Plan\n> Pro\n> Seats\n> 5\n'
+    )
+  })
+
+  test('matches style keywords and units in any case, Word units included', () => {
+    const { html } = withQuotedOriginal(
+      { html: '<p>ok</p>' },
+      htmlOriginal(
+        '<p style="display:BLOCK;vertical-align:TOP;padding:10PX">a</p>' +
+          '<p class=MsoNormal style=\'margin:0in 0in 10.0pt 0in\'>b</p><p style="margin:-5in">c</p>'
+      )
+    )
+    expect(html).toContain('<p style="display:BLOCK;vertical-align:TOP;padding:10PX">a</p>')
+    expect(html).toContain('<p style="margin:0in 0in 10.0pt 0in">b</p>')
+    expect(html).toContain('<p>c</p>')
+  })
+
   test('a quote of its own output keeps the cite marker and the indent', () => {
     const first = withQuotedOriginal({ html: '<p>first</p>' }, htmlOriginal('<p>original</p>')).html ?? ''
     const second = withQuotedOriginal({ html: '<p>second</p>' }, htmlOriginal(first)).html ?? ''

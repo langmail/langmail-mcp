@@ -19,13 +19,20 @@ import { sendDraft, sendDraftInput } from './send-draft.ts'
 
 const store = () => createIdempotencyStore<string>()
 
+// A failed submission logs its own error line (see reply-to-message.ts); muted
+// here so a test that takes that path does not write it into the suite output.
 const run = async (args: Record<string, unknown>, opts: DraftDepsOptions = {}) => {
-  const result = await replyToMessage(draftDeps(opts), store(), createSendGuard(), {
-    args: replyToMessageInput.parse(args),
-    principal: TEST_PRINCIPAL,
-    token: 'tok',
-  })
-  return { result, text: result.content[0]?.text ?? '' }
+  const error = spyOn(logger, 'error').mockImplementation(() => undefined)
+  try {
+    const result = await replyToMessage(draftDeps(opts), store(), createSendGuard(), {
+      args: replyToMessageInput.parse(args),
+      principal: TEST_PRINCIPAL,
+      token: 'tok',
+    })
+    return { result, text: result.content[0]?.text ?? '' }
+  } finally {
+    error.mockRestore()
+  }
 }
 
 describe('replyArgsError', () => {
@@ -94,6 +101,7 @@ describe('replyToMessage', () => {
       { records: { e1: original }, submitError: new Error('socket hang up') }
     )
     expect(result.isError).toBe(true)
+    expect(text).toContain('may already have gone out')
     expect(text).toContain('The original was not quoted: outsider@example.net')
   })
 
