@@ -85,6 +85,19 @@ describe('createDraft', () => {
     expect(creates[1]?.draft.text).toBe('Here they are.')
   })
 
+  test('does not quote the original to a recipient it was never addressed to, unless asked', async () => {
+    const original = receivedMessage({
+      bodyValues: { '1': { value: 'Can you send the numbers?' } },
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    const creates: DraftCreateParams[] = []
+    const args = { inReplyTo: 'e1', text: 'Looping you in.', to: ['outsider@example.net'] }
+    await run(args, { creates, records: { e1: original } })
+    await run({ ...args, quoteOriginal: true }, { creates, records: { e1: original } })
+    expect(creates[0]?.draft.text).toBe('Looping you in.')
+    expect(creates[1]?.draft.text).toContain('> Can you send the numbers?')
+  })
+
   test('threads a reply from the message being answered', async () => {
     const creates: DraftCreateParams[] = []
     const { text } = await run({ inReplyTo: 'e1', text: 'Thanks!' }, { creates, records: { e1: receivedMessage() } })

@@ -63,7 +63,11 @@ export const updateDraftInput = z.object({
   bcc: addressListSchema('Bcc'),
   cc: addressListSchema('Cc'),
   draftId: z.string().min(1).describe('The draft to edit, as returned by create_draft or a previous update_draft.'),
-  html: z.string().max(MAX_BODY_CHARS).optional().describe('Replace the HTML body. Omit to keep it.'),
+  html: z
+    .string()
+    .max(MAX_BODY_CHARS)
+    .optional()
+    .describe('Replace the HTML body — all of it, including the quoted original a reply carries. Omit to keep it.'),
   subject: z.string().max(500).optional().describe('Replace the subject. Omit to keep it.'),
   text: z
     .string()

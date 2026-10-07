@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import { receivedMessage } from './draft-test-fixtures.ts'
-import { attributionLine, withQuotedOriginal } from './reply-quote.ts'
+import { attributionLine, MAX_QUOTE_CHARS, quotesByDefault, withQuotedOriginal } from './reply-quote.ts'
 
 const RECEIVED_AT = '2026-10-05T12:00:00Z'
 
@@ -61,6 +61,38 @@ describe('withQuotedOriginal', () => {
     expect(html).not.toContain('<head>')
   })
 
+  test('drops a style sheet anywhere in the original, so it cannot restyle the reply above it', () => {
+    const original = receivedMessage({
+      bodyValues: {
+        '2': {
+          value:
+            '<html><head><title>T</title><style>*{color:red}</style></head><style>p{display:none}</style><p style="color:blue">hi</p></html>',
+        },
+      },
+      htmlBody: [{ partId: '2', type: 'text/html' }],
+    })
+    const { html } = withQuotedOriginal({ html: '<p>ok</p>' }, original)
+    expect(html).not.toContain('<style')
+    expect(html).not.toContain('display:none')
+    expect(html).not.toContain('<title')
+    expect(html).toContain('<p style="color:blue">hi</p>')
+  })
+
+  test('marks a quote cut short, whether by the read budget or the quote cap', () => {
+    const truncated = receivedMessage({
+      bodyValues: { '1': { isTruncated: true, value: 'start of a long message' } },
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    expect(withQuotedOriginal({ text: 'ok' }, truncated).text).toEndWith('> [… quoted message shortened]\n')
+    const long = receivedMessage({
+      bodyValues: { '1': { value: 'x'.repeat(MAX_QUOTE_CHARS + 10) } },
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    const text = withQuotedOriginal({ text: 'ok' }, long).text ?? ''
+    expect(text).toContain('[… quoted message shortened]')
+    expect(text.length).toBeLessThan(MAX_QUOTE_CHARS + 200)
+  })
+
   test('flattens an html-only original into the text quote', () => {
     expect(withQuotedOriginal({ text: 'Here they are.' }, htmlOnly).text).toContain('>\n> Numbers & charts\n> Thanks\n')
   })
@@ -75,5 +107,14 @@ describe('withQuotedOriginal', () => {
 
   test('leaves the body alone when the original has nothing to quote', () => {
     expect(withQuotedOriginal({ text: 'Thanks!' }, receivedMessage())).toEqual({ text: 'Thanks!' })
+  })
+})
+
+describe('quotesByDefault', () => {
+  test('quotes for the original roster, not for someone the original never reached', () => {
+    const original = receivedMessage()
+    expect(quotesByDefault(original, {})).toBe(true)
+    expect(quotesByDefault(original, { to: [{ email: 'Tomas@example.com' }] })).toBe(true)
+    expect(quotesByDefault(original, { to: [{ email: 'outsider@example.net' }] })).toBe(false)
   })
 })

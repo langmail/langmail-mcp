@@ -39,7 +39,7 @@ import {
   replyThreading,
   resolveIdentity,
 } from './draft-common.ts'
-import { withQuotedOriginal } from './reply-quote.ts'
+import { quotesByDefault, type ReplyBody, withQuotedOriginal } from './reply-quote.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 import { formatSent, sendDraftSubject, submitDraft, wasRefused } from './send-draft.ts'
 
@@ -88,7 +88,9 @@ export const replyToMessageInput = z.object({
     .optional()
     .describe(
       'Quote the original below the new text, under an "On …, <sender> wrote:" line, the way a mail ' +
-        'client does. Defaults to true; pass false for a bare reply.'
+        'client does. Defaults to true — unless `to`/`cc`/`bcc` name someone the original was not addressed ' +
+        'to, where quoting would forward it to them, so pass true only if the user wants that. Pass false ' +
+        'for a bare reply.'
     ),
   replyAll: z
     .boolean()
@@ -141,7 +143,7 @@ const buildReply = (
     }
   }
   const threading = replyThreading(original)
-  const body: { html?: string; text?: string } = {
+  const body: ReplyBody = {
     ...(args.text === undefined ? {} : { text: args.text }),
     ...(args.html === undefined ? {} : { html: args.html }),
   }
@@ -154,7 +156,7 @@ const buildReply = (
       inReplyTo: threading.inReplyTo,
       references: threading.references,
       subject: args.subject ?? replySubject(original.subject),
-      ...(args.quoteOriginal === false ? body : withQuotedOriginal(body, original)),
+      ...((args.quoteOriginal ?? quotesByDefault(original, recipients)) ? withQuotedOriginal(body, original) : body),
     },
   }
 }

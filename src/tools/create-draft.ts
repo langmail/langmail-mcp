@@ -31,7 +31,7 @@ import {
   replyThreading,
   resolveIdentity,
 } from './draft-common.ts'
-import { withQuotedOriginal } from './reply-quote.ts'
+import { quotesByDefault, withQuotedOriginal } from './reply-quote.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 // The replay cache is keyed per tool — see drafts/idempotency.ts.
@@ -92,7 +92,9 @@ export const createDraftInput = z.object({
     .optional()
     .describe(
       'With `inReplyTo`: quote the original below the new text, under an "On …, <sender> wrote:" line, ' +
-        'the way a mail client does. Defaults to true; pass false for a bare reply. Ignored without `inReplyTo`.'
+        'the way a mail client does. Defaults to true — unless `to`/`cc`/`bcc` name someone the original ' +
+        'was not addressed to, where quoting would forward it to them, so pass true only if the user wants ' +
+        'that. Pass false for a bare reply. Ignored without `inReplyTo`.'
     ),
   replyAll: z
     .boolean()
@@ -174,7 +176,8 @@ const composeDraft = async (
     }
   }
   const threading = replyThreading(original)
-  const body = args.quoteOriginal === false ? {} : withQuotedOriginal(base, original)
+  const quote = args.quoteOriginal ?? quotesByDefault(original, recipients)
+  const body = quote ? withQuotedOriginal(base, original) : {}
   return {
     draft: {
       ...base,
