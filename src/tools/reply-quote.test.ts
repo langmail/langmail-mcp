@@ -78,6 +78,24 @@ describe('withQuotedOriginal', () => {
     expect(html).toContain('<p style="color:blue">hi</p>')
   })
 
+  test('keeps raster data images and web links only', () => {
+    const original = receivedMessage({
+      bodyValues: {
+        '2': {
+          value:
+            '<img src="data:image/svg+xml;base64,PHN2Zz4="><img src="data:image/png;base64,iVBO">' +
+            '<a href="ftp://example.org/f">f</a><a href="mailto:nadia@example.org">m</a>',
+        },
+      },
+      htmlBody: [{ partId: '2', type: 'text/html' }],
+    })
+    const { html } = withQuotedOriginal({ html: '<p>ok</p>' }, original)
+    expect(html).not.toContain('svg+xml')
+    expect(html).toContain('data:image/png;base64,iVBO')
+    expect(html).not.toContain('ftp:')
+    expect(html).toContain('href="mailto:nadia@example.org"')
+  })
+
   test('marks a quote cut short, whether by the read budget or the quote cap', () => {
     const truncated = receivedMessage({
       bodyValues: { '1': { isTruncated: true, value: 'start of a long message' } },

@@ -18,6 +18,7 @@ import sanitizeHtml from 'sanitize-html'
 
 import { type EmailComposeRecord } from '@langmail/jmap'
 
+import { DATA_IMAGE_RE } from '../email-render/sanitize.ts'
 import { bodyTruncated, draftFromRecord, type ParsedRecipients } from './draft-common.ts'
 
 export interface ReplyBody {
@@ -103,6 +104,9 @@ const BODY_CONTENT_RE = /<body[^>]*>([\s\S]*)<\/body>/iu
 const HEAD_RE = /<head[^>]*>[\s\S]*?<\/head>/iu
 const PRESENTATION_ATTRIBUTES = ['align', 'valign', 'bgcolor', 'width', 'height', 'border', 'dir', 'style']
 
+const quotableImageSrc = (src: string | undefined): boolean =>
+  Boolean(src) && (!src?.toLowerCase().startsWith('data:') || DATA_IMAGE_RE.test(src))
+
 const quotableHtml = (html: string): string => {
   const body = BODY_CONTENT_RE.exec(html)?.[1] ?? html.replace(HEAD_RE, '')
   return sanitizeHtml(body, {
@@ -113,12 +117,15 @@ const quotableHtml = (html: string): string => {
       td: ['colspan', 'rowspan', ...PRESENTATION_ATTRIBUTES],
       th: ['colspan', 'rowspan', ...PRESENTATION_ATTRIBUTES],
     },
+    allowedSchemes: ['http', 'https', 'mailto', 'tel'],
     allowedSchemesByTag: { img: ['http', 'https', 'data'] },
     allowedTags: [...sanitizeHtml.defaults.allowedTags, 'img', 'font', 'center', 'span'],
     // An inline image of the original is not carried over as an attachment, so
     // its `cid:` src is refused by the scheme list above — and an <img> with
-    // nothing left to show is dropped rather than rendered as a broken box.
-    exclusiveFilter: (frame) => frame.tag === 'img' && !frame.attribs.src,
+    // nothing left to show is dropped rather than rendered as a broken box. A
+    // `data:` image must be a raster one: SVG can carry markup (see
+    // email-render/sanitize.ts).
+    exclusiveFilter: (frame) => frame.tag === 'img' && !quotableImageSrc(frame.attribs.src),
     nonTextTags: ['script', 'style', 'textarea', 'noscript', 'title', 'head'],
   }).trim()
 }

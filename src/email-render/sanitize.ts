@@ -26,7 +26,7 @@ const DROP_TAG = 'x-dropped-img'
 
 // Raster subtypes only: data:image/svg+xml is the one image shape that can
 // carry markup/script, and nothing legitimate in email needs it inline.
-const DATA_IMAGE_RE = /^data:image\/(?:png|jpeg|jpg|gif|webp|avif)[;,]/i
+export const DATA_IMAGE_RE = /^data:image\/(?:png|jpeg|jpg|gif|webp|avif)[;,]/i
 const REMOTE_RE = /^https?:\/\//i
 
 const resolveImgSrc = (src: string | undefined, resolvers: EmailHtmlResolvers): string | null => {
