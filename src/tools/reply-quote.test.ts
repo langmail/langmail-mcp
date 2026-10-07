@@ -237,6 +237,27 @@ describe('withQuotedOriginal', () => {
     expect(html).not.toContain('t.gif')
   })
 
+  test('refuses every fetching background function, and keeps plain ones', () => {
+    const { html } = withQuotedOriginal(
+      { html: '<p>ok</p>' },
+      htmlOriginal(
+        '<p style="background:image-set(&quot;//example.org/p.png&quot; 1x)">a</p>' +
+          '<p style="background:-webkit-image-set(&quot;//example.org/p.png&quot; 1x)">b</p>' +
+          '<p style="background:linear-gradient(red, blue)">c</p>'
+      )
+    )
+    expect(html).not.toContain('example.org/p.png')
+    expect(html).toContain('<p style="background:linear-gradient(red, blue)">c</p>')
+  })
+
+  test('text after a table or list starts its own line', () => {
+    const { text } = withQuotedOriginal(
+      { text: 'ok' },
+      htmlOriginal('<table><tr><td>Label</td></tr></table>Footer<ul><li>a</li></ul>tail')
+    )
+    expect(text).toContain('> Label\n> Footer\n> a\n> tail\n')
+  })
+
   test('a quote of its own output keeps the cite marker and the indent', () => {
     const first = withQuotedOriginal({ html: '<p>first</p>' }, htmlOriginal('<p>original</p>')).html ?? ''
     const second = withQuotedOriginal({ html: '<p>second</p>' }, htmlOriginal(first)).html ?? ''

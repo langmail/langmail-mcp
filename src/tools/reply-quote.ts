@@ -72,7 +72,9 @@ const LINE_BREAKS_RE = /\r?\n/gu
 const BLANK_RUN_RE = /\n{3,}/gu
 // `<p>`, `<li>` and `<tr>` break on their opening, since their closing tags are
 // optional; `<br>` with any attributes.
-const BLOCK_BREAK_RE = /<br\b[^>]*>|<(?:p|li|tr)(?:\s[^>]*)?>|<\/(?:div|h[1-6]|blockquote)>/giu
+// The containers' mandatory closings break too, so text after a table or list
+// does not join its last line.
+const BLOCK_BREAK_RE = /<br\b[^>]*>|<(?:p|li|tr)(?:\s[^>]*)?>|<\/(?:div|table|thead|tbody|ul|ol|h[1-6]|blockquote)>/giu
 // Table cells are separated by a space, so a row reads `Qty Price`, not `QtyPrice`.
 // Openings too: `</td>` is optional in HTML, and plenty of mail omits it.
 const CELL_BREAK_RE = /<\/?t[dh](?:\s[^>]*)?>/giu
@@ -123,9 +125,11 @@ const PRESENTATION_ATTRIBUTES = ['align', 'valign', 'bgcolor', 'width', 'height'
 // sanitize-html's style filter, which keeps only what is named here. This is
 // layout integrity of the user's own outbound mail, not a security boundary: a
 // sender can still colour text white, but cannot paint over the reply above.
-// No `url(` (a remote fetch the image rules would not see) and no IE
-// `expression(`.
-const SAFE_VALUE = /^(?!.*(?:url|expression)\s*\()[#\w\s.,%'"()/+-]*$/iu
+// No function that fetches — `url(`, `image-set(` / `-webkit-image-set(` (which
+// take a bare, scheme-relative string), `src(` — so quoted styles cannot make
+// the recipient's client load anything the image rules would not see. No IE
+// `expression(` either.
+const SAFE_VALUE = /^(?!.*(?:url|src|image-set|expression)\s*\()[#\w\s.,%'"()/+-]*$/iu
 // Margins and padding: non-negative and small. Large vertical padding on an
 // inline element paints outside its line box without moving it, so an
 // unbounded value is the overlay again; 99px or 9em is more than layout needs.
