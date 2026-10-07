@@ -69,7 +69,8 @@ const LINE_BREAKS_RE = /\r?\n/gu
 const BLANK_RUN_RE = /\n{3,}/gu
 const BLOCK_BREAK_RE = /<br\s*\/?>|<\/(?:p|div|li|tr|h[1-6]|blockquote)>/giu
 // Table cells are separated by a space, so a row reads `Qty Price`, not `QtyPrice`.
-const CELL_BREAK_RE = /<\/t[dh]>/giu
+// Openings too: `</td>` is optional in HTML, and plenty of mail omits it.
+const CELL_BREAK_RE = /<\/?t[dh](?:\s[^>]*)?>/giu
 const ENTITY_RE = /&(?:amp|lt|gt|quot|#39|nbsp);/gu
 const ENTITIES: Record<string, string> = {
   '&#39;': "'",
@@ -106,23 +107,60 @@ const BODY_CONTENT_RE = /<body[^>]*>([\s\S]*)<\/body>/iu
 const HEAD_RE = /<head[^>]*>[\s\S]*?<\/head>/iu
 const PRESENTATION_ATTRIBUTES = ['align', 'valign', 'bgcolor', 'width', 'height', 'border', 'dir', 'style']
 
-// Inline styles stay — email layout leans on them — minus the declarations
-// that take quoted content out of the blockquote's flow or hide it: a
-// `position:fixed` box can cover the user's own text above the quote, and
-// `display:none` ships text the user never sees under their name.
-const UNQUOTABLE_STYLE_RE =
-  /^(?:position|inset|top|right|bottom|left|z-index|transform|visibility|opacity|clip|clip-path)$/u
-const HIDDEN_DISPLAY_RE = /^display\s*:\s*none\b/iu
-
-const quotableStyle = (style: string): string =>
-  style
-    .split(';')
-    .map((declaration) => declaration.trim())
-    .filter((declaration) => {
-      const property = declaration.split(':')[0]?.trim().toLowerCase() ?? ''
-      return declaration !== '' && !UNQUOTABLE_STYLE_RE.test(property) && !HIDDEN_DISPLAY_RE.test(declaration)
-    })
-    .join(';')
+// Inline styles are an allowlist too: the presentational properties email
+// layout leans on, with values that cannot lift quoted content out of the
+// blockquote or shrink it to nothing. Everything else — `position`, any
+// `transform`/`translate`, negative margins, `text-indent`, `display`,
+// `visibility`, and any property spelled with a CSS escape — is dropped by
+// sanitize-html's style filter, which keeps only what is named here. This is
+// layout integrity of the user's own outbound mail, not a security boundary: a
+// sender can still colour text white, but cannot paint over the reply above.
+const SAFE_VALUE = /^[#\w\s.,%'"()/+-]*$/u
+const LENGTH = String.raw`(?:\d+(?:\.\d+)?(?:px|pt|em|rem|ex|%)?|auto)`
+const NON_NEGATIVE_BOX = new RegExp(String.raw`^${LENGTH}(?:\s+${LENGTH}){0,3}$`, 'u')
+const POSITIVE_LENGTH = /^(?:auto|(?:0*[1-9]\d*(?:\.\d+)?|0*\.\d*[1-9]\d*)(?:px|pt|em|rem|ex|%)?)$/u
+const QUOTABLE_STYLES: Record<string, RegExp[]> = Object.fromEntries([
+  ...[
+    'background-color',
+    'border',
+    'border-bottom',
+    'border-collapse',
+    'border-color',
+    'border-left',
+    'border-radius',
+    'border-right',
+    'border-spacing',
+    'border-style',
+    'border-top',
+    'border-width',
+    'color',
+    'font-family',
+    'font-style',
+    'font-weight',
+    'line-height',
+    'list-style-type',
+    'text-align',
+    'text-decoration',
+    'vertical-align',
+    'white-space',
+  ].map((property) => [property, [SAFE_VALUE]]),
+  ...[
+    'margin',
+    'margin-bottom',
+    'margin-left',
+    'margin-right',
+    'margin-top',
+    'padding',
+    'padding-bottom',
+    'padding-left',
+    'padding-right',
+    'padding-top',
+  ].map((property) => [property, [NON_NEGATIVE_BOX]]),
+  ...['font-size', 'height', 'max-width', 'min-height', 'min-width', 'width'].map((property) => [
+    property,
+    [POSITIVE_LENGTH],
+  ]),
+])
 
 // Compared after the same normalization sanitize-html's scheme filter applies —
 // it drops control characters and spaces before reading the scheme — so a
@@ -152,6 +190,7 @@ const quotableHtml = (body: string): string =>
     },
     allowedSchemes: ['http', 'https', 'mailto', 'tel'],
     allowedSchemesByTag: { img: ['http', 'https', 'data'] },
+    allowedStyles: { '*': QUOTABLE_STYLES },
     allowedTags: [...sanitizeHtml.defaults.allowedTags, 'img', 'font', 'center', 'span'],
     // An inline image of the original is not carried over as an attachment, so
     // its `cid:` src is refused by the scheme list above — and an <img> with
@@ -160,16 +199,6 @@ const quotableHtml = (body: string): string =>
     // email-render/sanitize.ts).
     exclusiveFilter: (frame) => frame.tag === 'img' && !quotableImageSrc(frame.attribs.src),
     nonTextTags: ['script', 'style', 'textarea', 'noscript', 'title', 'head'],
-    transformTags: {
-      '*': (tagName, attribs) => {
-        if (attribs.style === undefined) {
-          return { attribs, tagName }
-        }
-        const { style, ...rest } = attribs
-        const kept = quotableStyle(style)
-        return { attribs: kept === '' ? rest : { ...rest, style: kept }, tagName }
-      },
-    },
   }).trim()
 
 const textAsHtml = (text: string): string => escapeHtml(text).replace(LINE_BREAKS_RE, '<br>')
@@ -250,6 +279,7 @@ const quoteTextPart = (own: string, q: QuoteSource): string => {
   const trimmed = own.replace(TRAILING_SPACE_RE, '')
   const attribution = quoteText(q.attribution)
   const budget = MAX_REPLY_PART_CHARS - trimmed.length - attribution.length - QUOTE_FRAME_CHARS
+  // A reply that already fills the part budget goes out unquoted, as written.
   if (budget <= 0) {
     return own
   }

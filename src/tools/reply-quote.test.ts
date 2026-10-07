@@ -109,9 +109,27 @@ describe('withQuotedOriginal', () => {
       htmlBody: [{ partId: '2', type: 'text/html' }],
     })
     const { html } = withQuotedOriginal({ html: '<p>ok</p>' }, original)
-    expect(html).toContain('<div style="background:#fff">cover</div>')
+    expect(html).toContain('<div>cover</div>')
     expect(html).toContain('<p>hidden</p>')
-    expect(html).toContain('<p style="color:blue;display:block">kept</p>')
+    expect(html).toContain('<p style="color:blue">kept</p>')
+  })
+
+  test('keeps presentational styles and drops anything that moves or shrinks quoted content', () => {
+    const original = receivedMessage({
+      bodyValues: {
+        '2': {
+          value:
+            '<p style="margin-top:-500px;padding:4px 8px">a</p><p style="-webkit-transform:translateY(-500px);translate:0 -500px">b</p>' +
+            '<p style="text-indent:-9999px;font-size:0">c</p><p style="\\70 osition:fixed;margin:0 auto;font-size:14px">d</p>',
+        },
+      },
+      htmlBody: [{ partId: '2', type: 'text/html' }],
+    })
+    const { html } = withQuotedOriginal({ html: '<p>ok</p>' }, original)
+    expect(html).toContain('<p style="padding:4px 8px">a</p>')
+    expect(html).toContain('<p>b</p>')
+    expect(html).toContain('<p>c</p>')
+    expect(html).toContain('<p style="margin:0 auto;font-size:14px">d</p>')
   })
 
   test('keeps a maximal non-ASCII reply plus its quote inside the read-back budget', () => {
@@ -137,7 +155,7 @@ describe('withQuotedOriginal', () => {
   test('keeps table cells apart in the text quote', () => {
     const original = receivedMessage({
       bodyValues: {
-        '2': { value: '<table><tr><td>Qty</td><td>Price</td></tr><tr><td>2</td><td>10</td></tr></table>' },
+        '2': { value: '<table><tr><td>Qty</td><td>Price</td></tr><tr><td class="n">2<td>10</tr></table>' },
       },
       htmlBody: [{ partId: '2', type: 'text/html' }],
     })
