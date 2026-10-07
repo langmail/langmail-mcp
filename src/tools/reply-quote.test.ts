@@ -288,6 +288,31 @@ describe('withQuotedOriginal', () => {
     expect(performance.now() - started).toBeLessThan(2000)
   })
 
+  test('bounds every unit of a margin near the same size', () => {
+    const { html } = withQuotedOriginal(
+      { html: '<p>ok</p>' },
+      htmlOriginal(
+        '<p style="padding-top:9in">a</p><p style="padding-top:99ex">b</p><p style="padding-top:50%">c</p>' +
+          '<p style="margin-left:.5in">d</p><p style="margin:2in 9mm 9% 99pt">e</p>'
+      )
+    )
+    expect(html).toContain('<p>a</p>')
+    expect(html).toContain('<p>b</p>')
+    expect(html).toContain('<p>c</p>')
+    expect(html).toContain('<p style="margin-left:.5in">d</p>')
+    expect(html).toContain('<p style="margin:2in 9mm 9% 99pt">e</p>')
+  })
+
+  test('trims a long whitespace run in linear time', () => {
+    const started = performance.now()
+    const original = receivedMessage({
+      bodyValues: { '1': { value: `x${' '.repeat(40_000)}y` } },
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    withQuotedOriginal({ text: `a${' '.repeat(40_000)}b` }, original)
+    expect(performance.now() - started).toBeLessThan(1000)
+  })
+
   test('a quote of its own output keeps the cite marker and the indent', () => {
     const first = withQuotedOriginal({ html: '<p>first</p>' }, htmlOriginal('<p>original</p>')).html ?? ''
     const second = withQuotedOriginal({ html: '<p>second</p>' }, htmlOriginal(first)).html ?? ''

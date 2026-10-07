@@ -63,7 +63,6 @@ export const attributionLine = (original: EmailComposeRecord): string => {
   return when ? `On ${when}, ${who} wrote:` : `${who} wrote:`
 }
 
-const TRAILING_SPACE_RE = /\s+$/u
 const LINE_BREAK_RE = /\r?\n/u
 const LINE_BREAKS_RE = /\r?\n/gu
 
@@ -77,7 +76,9 @@ const BLANK_RUN_RE = /\n{3,}/gu
 // These run on the raw, sender-controlled body before anything is cut to size,
 // so an attribute run is bounded and stops at the next `<`: unbounded, a body
 // of unterminated tags (`<p <p <p …`) backtracks quadratically and stalls the
-// server for minutes.
+// server for minutes. The cost is that a tag with a literal `<` in an
+// attribute, or more than 1000 characters of them, yields no break — a joined
+// line in the text alternative, never wrong markup.
 // `<div>` breaks on its opening, so the first line of an Apple Mail or Gmail
 // body does not join the next; its closing breaks only when no block follows,
 // so sibling divs are not double-spaced. `<dt>`/`<dd>` like `<li>`.
@@ -131,9 +132,10 @@ const PRESENTATION_ATTRIBUTES = ['align', 'valign', 'bgcolor', 'width', 'height'
 // `transform`/`translate`, negative or large margins, `text-indent`,
 // `visibility`, `display:none`, and any property spelled with a CSS escape —
 // is dropped by sanitize-html's style filter, which keeps only what is named
-// here. Keywords and units are matched case-insensitively, as CSS reads them. This is
-// layout integrity of the user's own outbound mail, not a security boundary: a
-// sender can still colour text white, but cannot paint over the reply above.
+// here, with keywords and units matched case-insensitively, as CSS reads them.
+// This is layout integrity of the user's own outbound mail, not a security
+// boundary: a sender can still colour text white, but cannot paint over the
+// reply above.
 // No function that fetches — `url(`, `image-set(` / `-webkit-image-set(` (which
 // take a bare, scheme-relative string), `src(` — so quoted styles cannot make
 // the recipient's client load anything the image rules would not see. No IE
@@ -141,10 +143,10 @@ const PRESENTATION_ATTRIBUTES = ['align', 'valign', 'bgcolor', 'width', 'height'
 const SAFE_VALUE = /^(?!.*(?:url|src|image-set|expression)\s*\()[#\w\s.,%'"()/+-]*$/iu
 // Margins and padding: non-negative and small. Large vertical padding on an
 // inline element paints outside its line box without moving it, so an
-// unbounded value is the overlay again; 99px or 9em is more than layout needs.
-// The large units (`in`, `cm`, `mm` — what Word's MsoNormal boilerplate uses)
-// get the single-digit bound `em` has.
-const SMALL_LENGTH = String.raw`(?:0|auto|(?:\d{1,2}(?:\.\d+)?|\.\d+)(?:px|pt|ex|mm|%)|(?:\d(?:\.\d+)?|\.\d+)(?:em|rem|in|cm))`
+// unbounded value is the overlay again. Each unit is bounded by its size, so
+// every ceiling lands near 100–200px: 99px/pt, 9em/rem, 9ex/mm, 9% (of the
+// width), and 2in/cm — enough for Word's MsoNormal `0in` and `.5in` indents.
+const SMALL_LENGTH = String.raw`(?:0|auto|(?:\d{1,2}(?:\.\d+)?|\.\d+)(?:px|pt)|(?:\d(?:\.\d+)?|\.\d+)(?:em|rem|ex|mm|%)|(?:[01](?:\.\d+)?|2(?:\.0+)?|\.\d+)(?:in|cm))`
 const SMALL_BOX = new RegExp(String.raw`^${SMALL_LENGTH}(?:\s+${SMALL_LENGTH}){0,3}$`, 'iu')
 const POSITIVE = String.raw`(?:0*[1-9]\d*(?:\.\d+)?|0*\.\d*[1-9]\d*)`
 const POSITIVE_NUMBER = new RegExp(`^${POSITIVE}$`, 'u')
@@ -263,7 +265,7 @@ const textAsHtml = (text: string): string => escapeHtml(text).replace(LINE_BREAK
 
 const quoteText = (text: string): string =>
   text
-    .replace(TRAILING_SPACE_RE, '')
+    .trimEnd()
     .split(LINE_BREAK_RE)
     .map((line) => (line === '' || line.startsWith('>') ? `>${line}` : `> ${line}`))
     .join('\n')
@@ -350,7 +352,7 @@ const partTruncated = (record: EmailComposeRecord, parts: EmailComposeRecord['te
   )
 
 const quoteTextPart = (own: string, q: QuoteSource): string => {
-  const trimmed = own.replace(TRAILING_SPACE_RE, '')
+  const trimmed = own.trimEnd()
   const attribution = quoteText(q.attribution)
   const budget = MAX_REPLY_PART_CHARS - trimmed.length - attribution.length - QUOTE_FRAME_CHARS
   // A reply that already fills the part budget goes out unquoted, as written.
