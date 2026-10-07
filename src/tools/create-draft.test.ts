@@ -69,6 +69,54 @@ describe('createDraft', () => {
     expect(text).toContain('cannot send as someone@example.org')
   })
 
+  test('quotes the original below a reply by default, and not when quoteOriginal is false', async () => {
+    const original = receivedMessage({
+      bodyValues: { '1': { value: 'Can you send the numbers?' } },
+      receivedAt: '2026-10-05T12:00:00Z',
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    const creates: DraftCreateParams[] = []
+    await run({ inReplyTo: 'e1', text: 'Here they are.' }, { creates, records: { e1: original } })
+    await run({ inReplyTo: 'e1', quoteOriginal: false, text: 'Here they are.' }, { creates, records: { e1: original } })
+    expect(creates[0]?.draft.text).toBe(
+      'Here they are.\n\n> On Mon, 5 Oct 2026 at 12:00 UTC, Nadia Bram <nadia@example.org> wrote:\n>\n' +
+        '> Can you send the numbers?\n'
+    )
+    expect(creates[1]?.draft.text).toBe('Here they are.')
+  })
+
+  test('does not quote the original to a recipient it was never addressed to, unless asked', async () => {
+    const original = receivedMessage({
+      bodyValues: { '1': { value: 'Can you send the numbers?' } },
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    const creates: DraftCreateParams[] = []
+    const args = { inReplyTo: 'e1', text: 'Looping you in.', to: ['outsider@example.net'] }
+    await run(args, { creates, records: { e1: original } })
+    await run({ ...args, quoteOriginal: true }, { creates, records: { e1: original } })
+    expect(creates[0]?.draft.text).toBe('Looping you in.')
+    expect(creates[1]?.draft.text).toContain('> Can you send the numbers?')
+  })
+
+  test('says when the quote was withheld, and still quotes for a self-bcc', async () => {
+    const original = receivedMessage({
+      bodyValues: { '1': { value: 'Can you send the numbers?' } },
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    const creates: DraftCreateParams[] = []
+    const withheld = await run(
+      { inReplyTo: 'e1', text: 'Looping you in.', to: ['outsider@example.net'] },
+      { creates, records: { e1: original } }
+    )
+    expect(withheld.text).toContain('The original was not quoted: outsider@example.net')
+    const selfCopy = await run(
+      { bcc: [TEST_PRINCIPAL], inReplyTo: 'e1', text: 'Here they are.' },
+      { creates, records: { e1: original } }
+    )
+    expect(selfCopy.text).not.toContain('not quoted')
+    expect(creates[1]?.draft.text).toContain('> Can you send the numbers?')
+  })
+
   test('threads a reply from the message being answered', async () => {
     const creates: DraftCreateParams[] = []
     const { text } = await run({ inReplyTo: 'e1', text: 'Thanks!' }, { creates, records: { e1: receivedMessage() } })

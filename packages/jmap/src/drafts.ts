@@ -65,6 +65,8 @@ const COMPOSE_PROPERTIES = [
   'inReplyTo',
   'references',
   'receivedAt',
+  // The Date header — what a reply's "On …, X wrote:" line cites.
+  'sentAt',
   'textBody',
   'htmlBody',
   'bodyValues',
@@ -296,6 +298,12 @@ export const draftCreate = async (p: DraftCreateParams): Promise<DraftCreateResu
 
 export interface EmailComposeGetParams extends JmapCall {
   accountId: string
+  // Which body values to fetch. `all` (the default) is every text/* part, text
+  // attachments included — what a draft rewrite needs. `body` is only the parts
+  // of textBody/htmlBody (RFC 8621 fetchTextBodyValues/fetchHTMLBodyValues):
+  // all that quoting a message into a reply reads, without pulling a large
+  // .csv attachment over the wire at the same budget.
+  bodyValues?: 'all' | 'body'
   id: string
   maxBodyValueBytes: number
 }
@@ -314,7 +322,9 @@ export const emailComposeGet = async (p: EmailComposeGetParams): Promise<EmailCo
           bodyProperties: [...COMPOSE_BODY_PROPERTIES],
           // Both parts, not just text: an html-only draft would otherwise read
           // back with an empty body.
-          fetchAllBodyValues: true,
+          ...(p.bodyValues === 'body'
+            ? { fetchHTMLBodyValues: true, fetchTextBodyValues: true }
+            : { fetchAllBodyValues: true }),
           ids: [p.id],
           maxBodyValueBytes: p.maxBodyValueBytes,
           properties: [...COMPOSE_PROPERTIES],

@@ -99,6 +99,8 @@ export interface EmailComposeRecord extends EmailDetailRecord {
   inReplyTo?: string[] | null
   references?: string[] | null
   replyTo?: EmailAddress[] | null
+  // RFC 8621 `sentAt`: the Date header, as the sender stamped it.
+  sentAt?: string | null
 }
 
 // RFC 8621 §6 Identity — one address the account is allowed to send as.

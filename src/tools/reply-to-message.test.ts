@@ -19,13 +19,20 @@ import { sendDraft, sendDraftInput } from './send-draft.ts'
 
 const store = () => createIdempotencyStore<string>()
 
+// A failed submission logs its own error line (see reply-to-message.ts); muted
+// here so a test that takes that path does not write it into the suite output.
 const run = async (args: Record<string, unknown>, opts: DraftDepsOptions = {}) => {
-  const result = await replyToMessage(draftDeps(opts), store(), createSendGuard(), {
-    args: replyToMessageInput.parse(args),
-    principal: TEST_PRINCIPAL,
-    token: 'tok',
-  })
-  return { result, text: result.content[0]?.text ?? '' }
+  const error = spyOn(logger, 'error').mockImplementation(() => undefined)
+  try {
+    const result = await replyToMessage(draftDeps(opts), store(), createSendGuard(), {
+      args: replyToMessageInput.parse(args),
+      principal: TEST_PRINCIPAL,
+      token: 'tok',
+    })
+    return { result, text: result.content[0]?.text ?? '' }
+  } finally {
+    error.mockRestore()
+  }
 }
 
 describe('replyArgsError', () => {
@@ -68,6 +75,34 @@ describe('replyToMessage', () => {
     expect(submissions[0]?.emailId).toBe('dNew1')
     expect(text).toContain('Reply sent.')
     expect(text).toContain('messageId: dNew1')
+  })
+
+  test('quotes the original below the reply unless quoteOriginal is false', async () => {
+    const original = receivedMessage({
+      bodyValues: { '1': { value: 'Can you send the numbers?' } },
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    const creates: DraftCreateParams[] = []
+    await run({ messageId: 'e1', text: 'Here they are.' }, { creates, records: { e1: original } })
+    await run({ messageId: 'e1', quoteOriginal: false, text: 'Here they are.' }, { creates, records: { e1: original } })
+    expect(creates[0]?.draft.text).toBe(
+      'Here they are.\n\n> Nadia Bram <nadia@example.org> wrote:\n>\n> Can you send the numbers?\n'
+    )
+    expect(creates[1]?.draft.text).toBe('Here they are.')
+  })
+
+  test('a failed send still says the quote was withheld', async () => {
+    const original = receivedMessage({
+      bodyValues: { '1': { value: 'Can you send the numbers?' } },
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    const { result, text } = await run(
+      { messageId: 'e1', text: 'Looping you in.', to: ['outsider@example.net'] },
+      { records: { e1: original }, submitError: new Error('socket hang up') }
+    )
+    expect(result.isError).toBe(true)
+    expect(text).toContain('may already have gone out')
+    expect(text).toContain('The original was not quoted: outsider@example.net')
   })
 
   test('reply-all includes the original roster minus the user', async () => {
