@@ -69,6 +69,22 @@ describe('createDraft', () => {
     expect(text).toContain('cannot send as someone@example.org')
   })
 
+  test('quotes the original below a reply by default, and not when quoteOriginal is false', async () => {
+    const original = receivedMessage({
+      bodyValues: { '1': { value: 'Can you send the numbers?' } },
+      receivedAt: '2026-10-05T12:00:00Z',
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    const creates: DraftCreateParams[] = []
+    await run({ inReplyTo: 'e1', text: 'Here they are.' }, { creates, records: { e1: original } })
+    await run({ inReplyTo: 'e1', quoteOriginal: false, text: 'Here they are.' }, { creates, records: { e1: original } })
+    expect(creates[0]?.draft.text).toBe(
+      'Here they are.\n\n> On Mon, 5 Oct 2026 at 12:00 UTC, Nadia Bram <nadia@example.org> wrote:\n>\n' +
+        '> Can you send the numbers?\n'
+    )
+    expect(creates[1]?.draft.text).toBe('Here they are.')
+  })
+
   test('threads a reply from the message being answered', async () => {
     const creates: DraftCreateParams[] = []
     const { text } = await run({ inReplyTo: 'e1', text: 'Thanks!' }, { creates, records: { e1: receivedMessage() } })

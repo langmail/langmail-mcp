@@ -65,7 +65,14 @@ export const updateDraftInput = z.object({
   draftId: z.string().min(1).describe('The draft to edit, as returned by create_draft or a previous update_draft.'),
   html: z.string().max(MAX_BODY_CHARS).optional().describe('Replace the HTML body. Omit to keep it.'),
   subject: z.string().max(500).optional().describe('Replace the subject. Omit to keep it.'),
-  text: z.string().max(MAX_BODY_CHARS).optional().describe('Replace the plain-text body. Omit to keep it.'),
+  text: z
+    .string()
+    .max(MAX_BODY_CHARS)
+    .optional()
+    .describe(
+      'Replace the plain-text body — all of it, including the quoted original a reply carries. To reword ' +
+        'a reply and keep the quote, stage a fresh one with create_draft and `inReplyTo`. Omit to keep it.'
+    ),
   to: addressListSchema('To'),
 })
 

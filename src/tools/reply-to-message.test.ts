@@ -70,6 +70,20 @@ describe('replyToMessage', () => {
     expect(text).toContain('messageId: dNew1')
   })
 
+  test('quotes the original below the reply unless quoteOriginal is false', async () => {
+    const original = receivedMessage({
+      bodyValues: { '1': { value: 'Can you send the numbers?' } },
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    const creates: DraftCreateParams[] = []
+    await run({ messageId: 'e1', text: 'Here they are.' }, { creates, records: { e1: original } })
+    await run({ messageId: 'e1', quoteOriginal: false, text: 'Here they are.' }, { creates, records: { e1: original } })
+    expect(creates[0]?.draft.text).toBe(
+      'Here they are.\n\n> Nadia Bram <nadia@example.org> wrote:\n>\n> Can you send the numbers?\n'
+    )
+    expect(creates[1]?.draft.text).toBe('Here they are.')
+  })
+
   test('reply-all includes the original roster minus the user', async () => {
     const creates: DraftCreateParams[] = []
     await run({ messageId: 'e1', replyAll: true, text: 'Thanks!' }, { creates, records: { e1: receivedMessage() } })

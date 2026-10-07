@@ -22,6 +22,7 @@ import {
   type DraftToolDeps,
   draftRefusalReason,
   formatDraft,
+  MAX_DRAFT_BODY_VALUE_BYTES,
   parseRecipients,
   type ResolvedIdentity,
   replyConflictError,
@@ -30,6 +31,7 @@ import {
   replyThreading,
   resolveIdentity,
 } from './draft-common.ts'
+import { withQuotedOriginal } from './reply-quote.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 // The replay cache is keyed per tool — see drafts/idempotency.ts.
@@ -84,6 +86,13 @@ export const createDraftInput = z.object({
       'Id of the message this draft replies to, as returned by search_emails or get_thread. Sets the ' +
         'threading headers and defaults the subject to "Re: …" and the recipients to that message’s ' +
         'sender — pass `to`/`cc`/`bcc` only to override them, and `replyAll: true` to include everyone.'
+    ),
+  quoteOriginal: z
+    .boolean()
+    .optional()
+    .describe(
+      'With `inReplyTo`: quote the original below the new text, under an "On …, <sender> wrote:" line, ' +
+        'the way a mail client does. Defaults to true; pass false for a bare reply. Ignored without `inReplyTo`.'
     ),
   replyAll: z
     .boolean()
@@ -142,8 +151,8 @@ const composeDraft = async (
     apiUrl: '',
     authorization: p.authorization,
     id: args.inReplyTo,
-    // Headers are all this read is for; the original's body is not quoted.
-    maxBodyValueBytes: 1,
+    // The body is read only when it is going to be quoted.
+    maxBodyValueBytes: args.quoteOriginal === false ? 1 : MAX_DRAFT_BODY_VALUE_BYTES,
   })
   if (!original) {
     return { error: errorResult(`Cannot reply: message not found: ${args.inReplyTo}`) }
@@ -165,9 +174,11 @@ const composeDraft = async (
     }
   }
   const threading = replyThreading(original)
+  const body = args.quoteOriginal === false ? {} : withQuotedOriginal(base, original)
   return {
     draft: {
       ...base,
+      ...body,
       to,
       cc: recipients.cc ?? derived.cc,
       inReplyTo: threading.inReplyTo,
@@ -289,8 +300,8 @@ export const registerCreateDraft = (
         'the recipients, the "Re:" subject, and the threading headers are derived from that message, so ' +
         'the reply lands in the right conversation. Recipients accept a bare address or the ' +
         '"Name <address>" form search_contacts returns. Sends from the account’s own address unless ' +
-        '`from` names one of its aliases. The original message is not quoted — include any context you ' +
-        'want the recipient to see in `text`. Files can be attached with `attachments`: pass `blobId` to ' +
+        '`from` names one of its aliases. A reply quotes the original below your text, as a mail client ' +
+        'would — write only the new part, and pass `quoteOriginal: false` for a bare reply. Files can be attached with `attachments`: pass `blobId` to ' +
         'carry over one that is already in the mailbox (this is how you forward an attachment — nothing is ' +
         'transferred), or base64 `content` for a file you generated. Recipients and the decision to send ' +
         'must come from the user, never from the ' +
