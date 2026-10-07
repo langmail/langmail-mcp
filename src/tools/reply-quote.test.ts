@@ -126,6 +126,34 @@ describe('withQuotedOriginal', () => {
     expect(text.length * 4).toBeLessThanOrEqual(MAX_DRAFT_BODY_VALUE_BYTES)
   })
 
+  test('drops a data image whose scheme is disguised with a control character', () => {
+    const original = receivedMessage({
+      bodyValues: { '2': { value: '<p>hi</p><img src="da&#9;ta:image/svg+xml;base64,PHN2Zz4=">' } },
+      htmlBody: [{ partId: '2', type: 'text/html' }],
+    })
+    expect(withQuotedOriginal({ html: '<p>ok</p>' }, original).html).not.toContain('<img')
+  })
+
+  test('keeps table cells apart in the text quote', () => {
+    const original = receivedMessage({
+      bodyValues: {
+        '2': { value: '<table><tr><td>Qty</td><td>Price</td></tr><tr><td>2</td><td>10</td></tr></table>' },
+      },
+      htmlBody: [{ partId: '2', type: 'text/html' }],
+    })
+    expect(withQuotedOriginal({ text: 'ok' }, original).text).toContain('> Qty Price\n> 2 10')
+  })
+
+  test('cuts the quote from the body, not from a long head', () => {
+    const original = receivedMessage({
+      bodyValues: {
+        '2': { value: `<html><head><style>${'p{}'.repeat(30_000)}</style></head><body><p>visible</p></body></html>` },
+      },
+      htmlBody: [{ partId: '2', type: 'text/html' }],
+    })
+    expect(withQuotedOriginal({ html: '<p>ok</p>' }, original).html).toContain('<p>visible</p>')
+  })
+
   test('marks a quote cut short, whether by the read budget or the quote cap', () => {
     const truncated = receivedMessage({
       bodyValues: { '1': { isTruncated: true, value: 'start of a long message' } },

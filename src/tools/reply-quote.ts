@@ -68,6 +68,8 @@ const LINE_BREAKS_RE = /\r?\n/gu
 // flattened HTML body keeps its paragraphs instead of running together.
 const BLANK_RUN_RE = /\n{3,}/gu
 const BLOCK_BREAK_RE = /<br\s*\/?>|<\/(?:p|div|li|tr|h[1-6]|blockquote)>/giu
+// Table cells are separated by a space, so a row reads `Qty Price`, not `QtyPrice`.
+const CELL_BREAK_RE = /<\/t[dh]>/giu
 const ENTITY_RE = /&(?:amp|lt|gt|quot|#39|nbsp);/gu
 const ENTITIES: Record<string, string> = {
   '&#39;': "'",
@@ -81,7 +83,7 @@ const ENTITIES: Record<string, string> = {
 const LINE_SPACE_RE = /[ \t]+/gu
 
 const htmlToText = (html: string): string =>
-  sanitizeHtml(html.replace(BLOCK_BREAK_RE, '\n'), {
+  sanitizeHtml(html.replace(BLOCK_BREAK_RE, '\n').replace(CELL_BREAK_RE, ' '), {
     allowedAttributes: {},
     allowedTags: [],
     nonTextTags: ['script', 'style', 'textarea', 'noscript', 'title', 'head'],
@@ -122,12 +124,25 @@ const quotableStyle = (style: string): string =>
     })
     .join(';')
 
-const quotableImageSrc = (src: string | undefined): boolean =>
-  Boolean(src) && (!src?.toLowerCase().startsWith('data:') || DATA_IMAGE_RE.test(src))
+// Compared after the same normalization sanitize-html's scheme filter applies —
+// it drops control characters and spaces before reading the scheme — so a
+// `da<tab>ta:` src cannot pass as "not a data URI" here and as `data:` there.
+const SCHEME_NOISE_RE = /[\u0000-\u0020]+/gu
 
-const quotableHtml = (html: string): string => {
-  const body = BODY_CONTENT_RE.exec(html)?.[1] ?? html.replace(HEAD_RE, '')
-  return sanitizeHtml(body, {
+const quotableImageSrc = (src: string | undefined): boolean => {
+  if (!src) {
+    return false
+  }
+  const normalized = src.replace(SCHEME_NOISE_RE, '')
+  return !normalized.toLowerCase().startsWith('data:') || DATA_IMAGE_RE.test(normalized)
+}
+
+// The part of an HTML document that is quoted. Taken before the quote is cut
+// to size, so a newsletter's long <head> cannot use up the whole budget.
+const htmlBodyOf = (html: string): string => BODY_CONTENT_RE.exec(html)?.[1] ?? html.replace(HEAD_RE, '')
+
+const quotableHtml = (body: string): string =>
+  sanitizeHtml(body, {
     allowedAttributes: {
       '*': PRESENTATION_ATTRIBUTES,
       a: ['href', 'title'],
@@ -156,7 +171,6 @@ const quotableHtml = (html: string): string => {
       },
     },
   }).trim()
-}
 
 const textAsHtml = (text: string): string => escapeHtml(text).replace(LINE_BREAKS_RE, '<br>')
 
@@ -247,7 +261,8 @@ const quoteHtmlPart = (own: string, q: QuoteSource): string => {
   if (budget <= 0) {
     return own
   }
-  const quoted = q.html === undefined ? fitted(q.text ?? '', textAsHtml, budget) : fitted(q.html, quotableHtml, budget)
+  const quoted =
+    q.html === undefined ? fitted(q.text ?? '', textAsHtml, budget) : fitted(htmlBodyOf(q.html), quotableHtml, budget)
   const note = quoted.shortened || q.truncated ? `<p>${escapeHtml(SHORTENED_NOTE)}</p>` : ''
   return (
     `${own}\n<br>\n<div>${escapeHtml(q.attribution)}</div>\n` +
