@@ -119,7 +119,14 @@ const SAFE_VALUE = /^[#\w\s.,%'"()/+-]*$/u
 const LENGTH = String.raw`(?:\d+(?:\.\d+)?(?:px|pt|em|rem|ex|%)?|auto)`
 const NON_NEGATIVE_BOX = new RegExp(String.raw`^${LENGTH}(?:\s+${LENGTH}){0,3}$`, 'u')
 const POSITIVE_LENGTH = /^(?:auto|(?:0*[1-9]\d*(?:\.\d+)?|0*\.\d*[1-9]\d*)(?:px|pt|em|rem|ex|%)?)$/u
+// Keywords only: a length raises or lowers an inline box by that much, which
+// is the overlay again by another route.
+const VERTICAL_ALIGN = /^(?:baseline|sub|super|top|text-top|middle|bottom|text-bottom)$/u
+const POSITIVE_NUMBER = /^(?:0*[1-9]\d*(?:\.\d+)?|0*\.\d*[1-9]\d*)$/u
 const QUOTABLE_STYLES: Record<string, RegExp[]> = Object.fromEntries([
+  ['vertical-align', [VERTICAL_ALIGN]],
+  // A zero line box lets glyphs paint over whatever sits above it.
+  ['line-height', [/^normal$/u, POSITIVE_LENGTH, POSITIVE_NUMBER]],
   ...[
     'background-color',
     'border',
@@ -137,11 +144,9 @@ const QUOTABLE_STYLES: Record<string, RegExp[]> = Object.fromEntries([
     'font-family',
     'font-style',
     'font-weight',
-    'line-height',
     'list-style-type',
     'text-align',
     'text-decoration',
-    'vertical-align',
     'white-space',
   ].map((property) => [property, [SAFE_VALUE]]),
   ...[

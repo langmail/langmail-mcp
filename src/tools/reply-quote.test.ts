@@ -132,6 +132,24 @@ describe('withQuotedOriginal', () => {
     expect(html).toContain('<p style="margin:0 auto;font-size:14px">d</p>')
   })
 
+  test('keeps vertical-align keywords and positive line heights only', () => {
+    const original = receivedMessage({
+      bodyValues: {
+        '2': {
+          value:
+            '<span style="vertical-align:600px">a</span><span style="vertical-align:top">b</span>' +
+            '<p style="line-height:0">c</p><p style="line-height:1.4">d</p>',
+        },
+      },
+      htmlBody: [{ partId: '2', type: 'text/html' }],
+    })
+    const { html } = withQuotedOriginal({ html: '<p>ok</p>' }, original)
+    expect(html).toContain('<span>a</span>')
+    expect(html).toContain('<span style="vertical-align:top">b</span>')
+    expect(html).toContain('<p>c</p>')
+    expect(html).toContain('<p style="line-height:1.4">d</p>')
+  })
+
   test('keeps a maximal non-ASCII reply plus its quote inside the read-back budget', () => {
     const original = receivedMessage({
       bodyValues: { '1': { value: '数字\n'.repeat(40_000) } },
@@ -179,6 +197,7 @@ describe('withQuotedOriginal', () => {
       textBody: [{ partId: '1', type: 'text/plain' }],
     })
     const text = withQuotedOriginal({ text: 'y'.repeat(30_000) }, original).text ?? ''
+    expect(text).toContain('nadia@example.org')
     expect(text.length * 4).toBeLessThanOrEqual(MAX_DRAFT_BODY_VALUE_BYTES)
   })
 
