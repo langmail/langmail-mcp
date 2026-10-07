@@ -281,6 +281,13 @@ describe('withQuotedOriginal', () => {
     expect(html).toContain('<p>c</p>')
   })
 
+  test('flattens a body of unterminated tags in linear time', () => {
+    const started = performance.now()
+    withQuotedOriginal({ text: 'ok' }, htmlOriginal('<p '.repeat(133_000)))
+    withQuotedOriginal({ text: 'ok' }, htmlOriginal('<td '.repeat(100_000)))
+    expect(performance.now() - started).toBeLessThan(2000)
+  })
+
   test('a quote of its own output keeps the cite marker and the indent', () => {
     const first = withQuotedOriginal({ html: '<p>first</p>' }, htmlOriginal('<p>original</p>')).html ?? ''
     const second = withQuotedOriginal({ html: '<p>second</p>' }, htmlOriginal(first)).html ?? ''

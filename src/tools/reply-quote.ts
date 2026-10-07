@@ -74,14 +74,18 @@ const BLANK_RUN_RE = /\n{3,}/gu
 // optional; `<br>` with any attributes.
 // The containers' mandatory closings break too, so text after a table or list
 // does not join its last line.
+// These run on the raw, sender-controlled body before anything is cut to size,
+// so an attribute run is bounded and stops at the next `<`: unbounded, a body
+// of unterminated tags (`<p <p <p …`) backtracks quadratically and stalls the
+// server for minutes.
 // `<div>` breaks on its opening, so the first line of an Apple Mail or Gmail
 // body does not join the next; its closing breaks only when no block follows,
 // so sibling divs are not double-spaced. `<dt>`/`<dd>` like `<li>`.
 const BLOCK_BREAK_RE =
-  /<br\b[^>]*>|<(?:p|li|tr|div|dt|dd)(?:\s[^>]*)?>|<\/div>(?!\s*<(?:p|li|tr|div|table|ul|ol|dl)\b)|<\/(?:table|thead|tbody|ul|ol|dl|h[1-6]|blockquote)>/giu
+  /<br\b[^<>]{0,1000}>|<(?:p|li|tr|div|dt|dd)(?:\s[^<>]{0,1000})?>|<\/div>(?!\s*<(?:p|li|tr|div|table|ul|ol|dl)\b)|<\/(?:table|thead|tbody|ul|ol|dl|h[1-6]|blockquote)>/giu
 // Table cells are separated by a space, so a row reads `Qty Price`, not `QtyPrice`.
 // Openings too: `</td>` is optional in HTML, and plenty of mail omits it.
-const CELL_BREAK_RE = /<\/?t[dh](?:\s[^>]*)?>/giu
+const CELL_BREAK_RE = /<\/?t[dh](?:\s[^<>]{0,1000})?>/giu
 const ENTITY_RE = /&(?:amp|lt|gt|quot|#39|nbsp);/gu
 const ENTITIES: Record<string, string> = {
   '&#39;': "'",
