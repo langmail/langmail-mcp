@@ -84,6 +84,19 @@ describe('replyToMessage', () => {
     expect(creates[1]?.draft.text).toBe('Here they are.')
   })
 
+  test('a failed send still says the quote was withheld', async () => {
+    const original = receivedMessage({
+      bodyValues: { '1': { value: 'Can you send the numbers?' } },
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    const { result, text } = await run(
+      { messageId: 'e1', text: 'Looping you in.', to: ['outsider@example.net'] },
+      { records: { e1: original }, submitError: new Error('socket hang up') }
+    )
+    expect(result.isError).toBe(true)
+    expect(text).toContain('The original was not quoted: outsider@example.net')
+  })
+
   test('reply-all includes the original roster minus the user', async () => {
     const creates: DraftCreateParams[] = []
     await run({ messageId: 'e1', replyAll: true, text: 'Thanks!' }, { creates, records: { e1: receivedMessage() } })

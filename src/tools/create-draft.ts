@@ -155,6 +155,7 @@ const composeDraft = async (
     id: args.inReplyTo,
     // The body is read whenever the reply may quote it; whether it does also
     // depends on the recipients, which this read is what resolves.
+    bodyValues: 'body',
     maxBodyValueBytes: args.quoteOriginal === false ? 1 : MAX_DRAFT_BODY_VALUE_BYTES,
   })
   if (!original) {

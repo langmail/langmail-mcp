@@ -239,6 +239,7 @@ const replyHeld = async (
     id: args.messageId,
     // The body is read whenever the reply may quote it; whether it does also
     // depends on the recipients, which this read is what resolves.
+    bodyValues: 'body',
     maxBodyValueBytes: args.quoteOriginal === false ? 1 : MAX_DRAFT_BODY_VALUE_BYTES,
   })
   if (!original) {
@@ -255,6 +256,9 @@ const replyHeld = async (
     return errorResult(built.error)
   }
   const { quoteNote, reply } = built
+  // Every outcome past this point names a staged reply, so each says whether it
+  // carries the quote — a draft left to send by hand included.
+  const withNote = (message: string): string => (quoteNote ? `${message}\n${quoteNote}` : message)
 
   const staged = await deps.draftCreate({
     accountId,
@@ -270,7 +274,9 @@ const replyHeld = async (
   const draftSubject = sendDraftSubject(staged.id)
   const clash = hold.cover(draftSubject)
   if (clash) {
-    return errorResult(`${reservationRefusal(draftSubject, clash)} The reply is staged as draft ${staged.id}.`)
+    return errorResult(
+      withNote(`${reservationRefusal(draftSubject, clash)} The reply is staged as draft ${staged.id}.`)
+    )
   }
   let outcome: string
   try {
@@ -294,12 +300,14 @@ const replyHeld = async (
     // it safe to send: a lost answer may hide a delivery.
     const detail = error instanceof Error ? error.message : 'unknown error'
     return errorResult(
-      wasRefused(error)
-        ? `The reply was composed but the server refused to send it (${detail}). Nothing was sent. It is ` +
-            `staged as draft ${staged.id} — send it with send_draft once the cause is resolved, or delete it.`
-        : `The reply was staged as draft ${staged.id} and handed to the server, but the answer was lost ` +
-            `(${detail}), so it may already have gone out. Do NOT send it again yet: read it back with ` +
-            "get_email, or check the user's Sent folder, before deciding."
+      withNote(
+        wasRefused(error)
+          ? `The reply was composed but the server refused to send it (${detail}). Nothing was sent. It is ` +
+              `staged as draft ${staged.id} — send it with send_draft once the cause is resolved, or delete it.`
+          : `The reply was staged as draft ${staged.id} and handed to the server, but the answer was lost ` +
+              `(${detail}), so it may already have gone out. Do NOT send it again yet: read it back with ` +
+              "get_email, or check the user's Sent folder, before deciding."
+      )
     )
   }
 
@@ -309,7 +317,7 @@ const replyHeld = async (
     outcome,
     threadId: staged.threadId ?? original.threadId ?? null,
   })
-  const summary = quoteNote ? `${sent}\n${quoteNote}` : sent
+  const summary = withNote(sent)
   if (args.idempotencyKey) {
     replays.record(TOOL_NAME, principal, args.idempotencyKey, summary)
   }

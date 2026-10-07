@@ -25,7 +25,16 @@ const htmlOnly = receivedMessage({
   textBody: [{ partId: '2', type: 'text/html' }],
 })
 
+const htmlOriginal = (html: string) =>
+  receivedMessage({ bodyValues: { '2': { value: html } }, htmlBody: [{ partId: '2', type: 'text/html' }] })
+
 describe('attributionLine', () => {
+  test('cites the Date header over the time the message arrived', () => {
+    expect(attributionLine({ ...textOnly, receivedAt: '2026-10-06T09:00:00Z', sentAt: RECEIVED_AT })).toContain(
+      'On Mon, 5 Oct 2026 at 12:00 UTC'
+    )
+  })
+
   test('names the sender and the UTC time the original arrived', () => {
     expect(attributionLine(textOnly)).toBe('On Mon, 5 Oct 2026 at 12:00 UTC, Nadia Bram <nadia@example.org> wrote:')
   })
@@ -109,9 +118,9 @@ describe('withQuotedOriginal', () => {
       htmlBody: [{ partId: '2', type: 'text/html' }],
     })
     const { html } = withQuotedOriginal({ html: '<p>ok</p>' }, original)
-    expect(html).toContain('<div>cover</div>')
+    expect(html).toContain('<div style="background:#fff">cover</div>')
     expect(html).toContain('<p>hidden</p>')
-    expect(html).toContain('<p style="color:blue">kept</p>')
+    expect(html).toContain('<p style="color:blue;display:block">kept</p>')
   })
 
   test('keeps presentational styles and drops anything that moves or shrinks quoted content', () => {
@@ -201,6 +210,68 @@ describe('withQuotedOriginal', () => {
     expect(text.length * 4).toBeLessThanOrEqual(MAX_DRAFT_BODY_VALUE_BYTES)
   })
 
+  test('keeps only absolute web links and images, and lowercases style properties', () => {
+    const original = htmlOriginal(
+      '<img src="/pixel"><img src="logo.png"><img src="//example.org/x.png"><img src="https://example.org/ok.png">' +
+        '<a href="/account/action">rel</a><a href="https://example.org/">abs</a><p style="COLOR:red">c</p>'
+    )
+    const { html } = withQuotedOriginal({ html: '<p>ok</p>' }, original)
+    expect(html).not.toContain('/pixel')
+    expect(html).not.toContain('logo.png')
+    expect(html).not.toContain('//example.org/x.png')
+    expect(html).toContain('<img src="https://example.org/ok.png" />')
+    expect(html).toContain('<a>rel</a>')
+    expect(html).toContain('<a href="https://example.org/">abs</a>')
+    expect(html).toContain('<p style="color:red">c</p>')
+  })
+
+  test('bounds margins and padding, requires units on sizes, and refuses url() backgrounds', () => {
+    const original = htmlOriginal(
+      '<span style="padding-top:100000px;background-color:white">a</span><p style="font-size:14">b</p>' +
+        '<p style="font-size:14px;padding:8px 2em">c</p><td style="background:url(https://example.org/t.gif)">d</td>'
+    )
+    const { html } = withQuotedOriginal({ html: '<p>ok</p>' }, original)
+    expect(html).toContain('<span style="background-color:white">a</span>')
+    expect(html).toContain('<p>b</p>')
+    expect(html).toContain('<p style="font-size:14px;padding:8px 2em">c</p>')
+    expect(html).not.toContain('t.gif')
+  })
+
+  test('a quote of its own output keeps the cite marker and the indent', () => {
+    const first = withQuotedOriginal({ html: '<p>first</p>' }, htmlOriginal('<p>original</p>')).html ?? ''
+    const second = withQuotedOriginal({ html: '<p>second</p>' }, htmlOriginal(first)).html ?? ''
+    expect(second.match(/<blockquote type="cite" style="margin:0 0 0 0.8ex/gu)).toHaveLength(2)
+  })
+
+  test('spends the budget on content, not on markup the sanitizer drops', () => {
+    const original = htmlOriginal(`<body><style>${'p{}'.repeat(30_000)}</style><p>visible</p></body>`)
+    expect(withQuotedOriginal({ html: '<p>ok</p>' }, original).html).toContain('<p>visible</p>')
+  })
+
+  test('a <body> inside a script does not decide where the message starts', () => {
+    const original = htmlOriginal(
+      "<html><head><script>const x='<body>'; HIDDEN</script></head><body><p>visible</p></body></html>"
+    )
+    const { html } = withQuotedOriginal({ html: '<p>ok</p>' }, original)
+    expect(html).not.toContain('HIDDEN')
+    expect(html).toContain('<p>visible</p>')
+  })
+
+  test('breaks lines on attributed <br> and unclosed paragraphs in the text quote', () => {
+    const { text } = withQuotedOriginal({ text: 'ok' }, htmlOriginal('A<br class="x">B<p>one<p>two'))
+    expect(text).toContain('> A\n> B\n> one\n> two\n')
+  })
+
+  test('marks only the part that was actually cut short', () => {
+    const original = receivedMessage({
+      bodyValues: { '1': { value: 'complete text' }, '2': { isTruncated: true, value: '<p>long html' } },
+      htmlBody: [{ partId: '2', type: 'text/html' }],
+      textBody: [{ partId: '1', type: 'text/plain' }],
+    })
+    expect(withQuotedOriginal({ text: 'ok' }, original).text).not.toContain('shortened')
+    expect(withQuotedOriginal({ html: '<p>ok</p>' }, original).html).toContain('shortened')
+  })
+
   test('marks a quote cut short, whether by the read budget or the quote cap', () => {
     const truncated = receivedMessage({
       bodyValues: { '1': { isTruncated: true, value: 'start of a long message' } },
@@ -240,5 +311,7 @@ describe('quoteWithheldFrom', () => {
     expect(quoteWithheldFrom(original, { to: [{ email: 'Tomas@example.com' }] }, [])).toBeNull()
     expect(quoteWithheldFrom(original, { bcc: [{ email: 'alias@langmail.me' }] }, ['alias@langmail.me'])).toBeNull()
     expect(quoteWithheldFrom(original, { to: [{ email: 'outsider@example.net' }] }, [])).toBe('outsider@example.net')
+    const sent = receivedMessage({ bcc: [{ email: 'quiet@example.net' }] })
+    expect(quoteWithheldFrom(sent, { to: [{ email: 'quiet@example.net' }] }, [])).toBeNull()
   })
 })

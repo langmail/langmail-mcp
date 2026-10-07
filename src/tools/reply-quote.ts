@@ -19,7 +19,7 @@ import sanitizeHtml from 'sanitize-html'
 import { type EmailComposeRecord } from '@langmail/jmap'
 
 import { DATA_IMAGE_RE } from '../email-render/sanitize.ts'
-import { bodyTruncated, draftFromRecord, MAX_DRAFT_BODY_VALUE_BYTES, type ParsedRecipients } from './draft-common.ts'
+import { draftFromRecord, MAX_DRAFT_BODY_VALUE_BYTES, type ParsedRecipients } from './draft-common.ts'
 
 export interface ReplyBody {
   html?: string
@@ -56,7 +56,10 @@ export const attributionLine = (original: EmailComposeRecord): string => {
   const sender = original.from?.[0]
   const named = sender?.name ? `${sender.name} <${sender.email}>` : sender?.email
   const who = named ?? 'The sender'
-  const when = original.receivedAt ? formatAttributionDate(original.receivedAt) : null
+  // The Date header the sender stamped, not when it reached this mailbox —
+  // delayed or imported mail can be hours or years apart.
+  const stamp = original.sentAt ?? original.receivedAt
+  const when = stamp ? formatAttributionDate(stamp) : null
   return when ? `On ${when}, ${who} wrote:` : `${who} wrote:`
 }
 
@@ -67,7 +70,9 @@ const LINE_BREAKS_RE = /\r?\n/gu
 // Block-level boundaries become line breaks before the tags are dropped, so a
 // flattened HTML body keeps its paragraphs instead of running together.
 const BLANK_RUN_RE = /\n{3,}/gu
-const BLOCK_BREAK_RE = /<br\s*\/?>|<\/(?:p|div|li|tr|h[1-6]|blockquote)>/giu
+// `<p>`, `<li>` and `<tr>` break on their opening, since their closing tags are
+// optional; `<br>` with any attributes.
+const BLOCK_BREAK_RE = /<br\b[^>]*>|<(?:p|li|tr)(?:\s[^>]*)?>|<\/(?:div|h[1-6]|blockquote)>/giu
 // Table cells are separated by a space, so a row reads `Qty Price`, not `QtyPrice`.
 // Openings too: `</td>` is optional in HTML, and plenty of mail omits it.
 const CELL_BREAK_RE = /<\/?t[dh](?:\s[^>]*)?>/giu
@@ -82,12 +87,16 @@ const ENTITIES: Record<string, string> = {
 }
 
 const LINE_SPACE_RE = /[ \t]+/gu
+// Elements whose content is never message text. `noscript` is deliberately not
+// here: it is the discard path GHSA-x3q4-9hxx-gx8m broke, and as an ordinary
+// disallowed tag its content is sanitized like any other text.
+const NON_TEXT_TAGS = ['script', 'style', 'textarea', 'title', 'head']
 
 const htmlToText = (html: string): string =>
   sanitizeHtml(html.replace(BLOCK_BREAK_RE, '\n').replace(CELL_BREAK_RE, ' '), {
     allowedAttributes: {},
     allowedTags: [],
-    nonTextTags: ['script', 'style', 'textarea', 'noscript', 'title', 'head'],
+    nonTextTags: NON_TEXT_TAGS,
   })
     .replace(ENTITY_RE, (entity) => ENTITIES[entity] ?? entity)
     .split(LINE_BREAK_RE)
@@ -101,10 +110,9 @@ const htmlToText = (html: string): string =>
 // not a denylist: presentational markup and inline styles survive, while
 // anything active — scripts, forms, frames — and any <style> sheet, which is not
 // scoped to the blockquote and could restyle or hide the user's own text above
-// it, is dropped. Only the <body> content is kept; a nested <html>/<head> is not
-// valid inside a blockquote.
-const BODY_CONTENT_RE = /<body[^>]*>([\s\S]*)<\/body>/iu
-const HEAD_RE = /<head[^>]*>[\s\S]*?<\/head>/iu
+// it, is dropped. <html>/<body> are unwrapped and <head> discarded by the
+// parser, never located by pattern: a `<body>` inside a script or comment must
+// not decide where the message starts.
 const PRESENTATION_ATTRIBUTES = ['align', 'valign', 'bgcolor', 'width', 'height', 'border', 'dir', 'style']
 
 // Inline styles are an allowlist too: the presentational properties email
@@ -115,19 +123,29 @@ const PRESENTATION_ATTRIBUTES = ['align', 'valign', 'bgcolor', 'width', 'height'
 // sanitize-html's style filter, which keeps only what is named here. This is
 // layout integrity of the user's own outbound mail, not a security boundary: a
 // sender can still colour text white, but cannot paint over the reply above.
-const SAFE_VALUE = /^[#\w\s.,%'"()/+-]*$/u
-const LENGTH = String.raw`(?:\d+(?:\.\d+)?(?:px|pt|em|rem|ex|%)?|auto)`
-const NON_NEGATIVE_BOX = new RegExp(String.raw`^${LENGTH}(?:\s+${LENGTH}){0,3}$`, 'u')
-const POSITIVE_LENGTH = /^(?:auto|(?:0*[1-9]\d*(?:\.\d+)?|0*\.\d*[1-9]\d*)(?:px|pt|em|rem|ex|%)?)$/u
+// No `url(` (a remote fetch the image rules would not see) and no IE
+// `expression(`.
+const SAFE_VALUE = /^(?!.*(?:url|expression)\s*\()[#\w\s.,%'"()/+-]*$/iu
+// Margins and padding: non-negative and small. Large vertical padding on an
+// inline element paints outside its line box without moving it, so an
+// unbounded value is the overlay again; 99px or 9em is more than layout needs.
+const SMALL_LENGTH = String.raw`(?:0|auto|(?:\d{1,2}(?:\.\d+)?|\.\d+)(?:px|pt|ex|%)|(?:\d(?:\.\d+)?|\.\d+)(?:em|rem))`
+const SMALL_BOX = new RegExp(String.raw`^${SMALL_LENGTH}(?:\s+${SMALL_LENGTH}){0,3}$`, 'u')
+const POSITIVE_NUMBER = /^(?:0*[1-9]\d*(?:\.\d+)?|0*\.\d*[1-9]\d*)$/u
+// Sizes need a unit: unitless lengths are invalid CSS outside line-height.
+const POSITIVE_LENGTH = new RegExp(`^(?:auto|${POSITIVE_NUMBER.source.slice(1, -1)}(?:px|pt|em|rem|ex|%))$`, 'u')
+const DISPLAY = /^(?:block|inline|inline-block|table|table-row|table-cell|list-item)$/u
 // Keywords only: a length raises or lowers an inline box by that much, which
 // is the overlay again by another route.
 const VERTICAL_ALIGN = /^(?:baseline|sub|super|top|text-top|middle|bottom|text-bottom)$/u
-const POSITIVE_NUMBER = /^(?:0*[1-9]\d*(?:\.\d+)?|0*\.\d*[1-9]\d*)$/u
 const QUOTABLE_STYLES: Record<string, RegExp[]> = Object.fromEntries([
   ['vertical-align', [VERTICAL_ALIGN]],
+  // Keywords that keep the element on the page; `none` is not one of them.
+  ['display', [DISPLAY]],
   // A zero line box lets glyphs paint over whatever sits above it.
   ['line-height', [/^normal$/u, POSITIVE_LENGTH, POSITIVE_NUMBER]],
   ...[
+    'background',
     'background-color',
     'border',
     'border-bottom',
@@ -160,7 +178,7 @@ const QUOTABLE_STYLES: Record<string, RegExp[]> = Object.fromEntries([
     'padding-left',
     'padding-right',
     'padding-top',
-  ].map((property) => [property, [NON_NEGATIVE_BOX]]),
+  ].map((property) => [property, [SMALL_BOX]]),
   ...['font-size', 'height', 'max-width', 'min-height', 'min-width', 'width'].map((property) => [
     property,
     [POSITIVE_LENGTH],
@@ -172,23 +190,41 @@ const QUOTABLE_STYLES: Record<string, RegExp[]> = Object.fromEntries([
 // `da<tab>ta:` src cannot pass as "not a data URI" here and as `data:` there.
 const SCHEME_NOISE_RE = /[\u0000-\u0020]+/gu
 
+const WEB_SCHEME_RE = /^https?:/iu
+const LINK_SCHEME_RE = /^(?:https?|mailto|tel):/iu
+
+// sanitize-html lets a URL with no scheme through (`/pixel`, `logo.png`,
+// `//host/x`); in a reply those resolve against the recipient's webmail. Only
+// absolute web URLs and raster data images are quoted.
 const quotableImageSrc = (src: string | undefined): boolean => {
-  if (!src) {
-    return false
-  }
-  const normalized = src.replace(SCHEME_NOISE_RE, '')
-  return !normalized.toLowerCase().startsWith('data:') || DATA_IMAGE_RE.test(normalized)
+  const normalized = src?.replace(SCHEME_NOISE_RE, '') ?? ''
+  return WEB_SCHEME_RE.test(normalized) || DATA_IMAGE_RE.test(normalized)
 }
 
-// The part of an HTML document that is quoted. Taken before the quote is cut
-// to size, so a newsletter's long <head> cannot use up the whole budget.
-const htmlBodyOf = (html: string): string => BODY_CONTENT_RE.exec(html)?.[1] ?? html.replace(HEAD_RE, '')
+const quotableHref = (href: string): boolean => LINK_SCHEME_RE.test(href.replace(SCHEME_NOISE_RE, ''))
+
+// sanitize-html matches style properties case-sensitively, so `COLOR:red` from a
+// Word export would be dropped; property names are lowercased first.
+const STYLE_PROPERTY_RE = /(^|;)\s*([-\w]+)\s*:/gu
+const lowercaseStyleProperties = (style: string): string =>
+  style.replace(STYLE_PROPERTY_RE, (_, sep: string, property: string) => `${sep}${property.toLowerCase()}:`)
+
+const quotableAttributes = (attribs: sanitizeHtml.Attributes): sanitizeHtml.Attributes => {
+  const { href, style, ...rest } = attribs
+  return {
+    ...rest,
+    ...(href !== undefined && quotableHref(href) ? { href } : {}),
+    ...(style === undefined ? {} : { style: lowercaseStyleProperties(style) }),
+  }
+}
 
 const quotableHtml = (body: string): string =>
   sanitizeHtml(body, {
     allowedAttributes: {
       '*': PRESENTATION_ATTRIBUTES,
       a: ['href', 'title'],
+      // So a quote of a quote keeps the marker clients collapse history on.
+      blockquote: ['type'],
       img: ['src', 'alt', 'title', 'width', 'height'],
       td: ['colspan', 'rowspan', ...PRESENTATION_ATTRIBUTES],
       th: ['colspan', 'rowspan', ...PRESENTATION_ATTRIBUTES],
@@ -203,7 +239,8 @@ const quotableHtml = (body: string): string =>
     // `data:` image must be a raster one: SVG can carry markup (see
     // email-render/sanitize.ts).
     exclusiveFilter: (frame) => frame.tag === 'img' && !quotableImageSrc(frame.attribs.src),
-    nonTextTags: ['script', 'style', 'textarea', 'noscript', 'title', 'head'],
+    nonTextTags: NON_TEXT_TAGS,
+    transformTags: { '*': (tagName, attribs) => ({ attribs: quotableAttributes(attribs), tagName }) },
   }).trim()
 
 const textAsHtml = (text: string): string => escapeHtml(text).replace(LINE_BREAKS_RE, '<br>')
@@ -258,7 +295,14 @@ export const quoteWithheldFrom = (
   selfAddresses: string[]
 ): string | null => {
   const roster = new Set(
-    [...(original.from ?? []), ...(original.replyTo ?? []), ...(original.to ?? []), ...(original.cc ?? [])]
+    [
+      ...(original.from ?? []),
+      ...(original.replyTo ?? []),
+      ...(original.to ?? []),
+      ...(original.cc ?? []),
+      // Present on the user's own sent mail: those people already have it.
+      ...(original.bcc ?? []),
+    ]
       .map((address) => address.email)
       .concat(selfAddresses)
       .map((email) => email.toLowerCase())
@@ -276,9 +320,18 @@ const quoteWithheldNote = (outsider: string): string =>
 interface QuoteSource {
   attribution: string
   html: string | undefined
+  htmlTruncated: boolean
   text: string | undefined
-  truncated: boolean
+  textTruncated: boolean
 }
+
+// Whether the body value of one media type came back cut off at the read
+// budget — per part, so a complete text part is not marked shortened because
+// its HTML alternative was long.
+const partTruncated = (record: EmailComposeRecord, parts: EmailComposeRecord['textBody'], mediaType: string): boolean =>
+  (parts ?? []).some(
+    (part) => part.type === mediaType && part.partId && record.bodyValues?.[part.partId]?.isTruncated === true
+  )
 
 const quoteTextPart = (own: string, q: QuoteSource): string => {
   const trimmed = own.replace(TRAILING_SPACE_RE, '')
@@ -289,7 +342,8 @@ const quoteTextPart = (own: string, q: QuoteSource): string => {
     return own
   }
   const quoted = fitted(q.text ?? htmlToText(q.html ?? ''), quoteText, budget)
-  const note = quoted.shortened || q.truncated ? `\n>\n> ${SHORTENED_NOTE}` : ''
+  const truncated = q.text === undefined ? q.htmlTruncated : q.textTruncated
+  const note = quoted.shortened || truncated ? `\n>\n> ${SHORTENED_NOTE}` : ''
   return `${trimmed}\n\n${attribution}\n>\n${quoted.rendered}${note}\n`
 }
 
@@ -299,12 +353,16 @@ const quoteHtmlPart = (own: string, q: QuoteSource): string => {
   if (budget <= 0) {
     return own
   }
+  // Sanitized before it is cut, so markup the sanitizer discards (a long <head>,
+  // an embedded style sheet) cannot spend the budget; re-sanitizing each cut
+  // closes whatever tags the cut left open.
   const quoted =
-    q.html === undefined ? fitted(q.text ?? '', textAsHtml, budget) : fitted(htmlBodyOf(q.html), quotableHtml, budget)
-  const note = quoted.shortened || q.truncated ? `<p>${escapeHtml(SHORTENED_NOTE)}</p>` : ''
+    q.html === undefined ? fitted(q.text ?? '', textAsHtml, budget) : fitted(quotableHtml(q.html), quotableHtml, budget)
+  const truncated = q.html === undefined ? q.textTruncated : q.htmlTruncated
+  const note = quoted.shortened || truncated ? `<p>${escapeHtml(SHORTENED_NOTE)}</p>` : ''
   return (
     `${own}\n<br>\n<div>${attribution}</div>\n` +
-    `<blockquote type="cite" style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex">${quoted.rendered}${note}</blockquote>\n`
+    `<blockquote type="cite" style="margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex">${quoted.rendered}${note}</blockquote>\n`
   )
 }
 
@@ -319,8 +377,9 @@ export const withQuotedOriginal = (body: ReplyBody, original: EmailComposeRecord
   const source: QuoteSource = {
     attribution: attributionLine(original),
     html: nonBlank(parts.html),
+    htmlTruncated: partTruncated(original, original.htmlBody, 'text/html'),
     text: nonBlank(parts.text),
-    truncated: bodyTruncated(original),
+    textTruncated: partTruncated(original, original.textBody, 'text/plain'),
   }
   if (source.text === undefined && source.html === undefined) {
     return body
