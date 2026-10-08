@@ -331,7 +331,7 @@ export const quoteWithheldFrom = (
 
 // The line a result carries when the default withheld the quote, so the agent
 // learns it at the moment it matters rather than only from the description.
-const quoteWithheldNote = (outsider: string): string =>
+export const quoteWithheldNote = (outsider: string): string =>
   `The original was not quoted: ${outsider} was not on it, and quoting would forward it to them. ` +
   'Pass `quoteOriginal: true` if the user wants it included.'
 
@@ -406,6 +406,15 @@ export const withQuotedOriginal = (body: ReplyBody, original: EmailComposeRecord
     ...(body.text === undefined ? {} : { text: quoteTextPart(body.text, source) }),
     ...(body.html === undefined ? {} : { html: quoteHtmlPart(body.html, source) }),
   }
+}
+
+// Whether a body already quotes `original` — by its attribution line, which is
+// how update_draft tells a reply that carries the quote from a bare one, and a
+// caller who passed the whole body (quote included) from one who passed only
+// the new part.
+export const carriesQuoteOf = (body: ReplyBody, original: EmailComposeRecord): boolean => {
+  const attribution = attributionLine(original)
+  return Boolean(body.text?.includes(attribution) || body.html?.includes(escapeHtml(attribution)))
 }
 
 // The quoting decision both reply paths make: the caller's `quoteOriginal`

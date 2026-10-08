@@ -13,6 +13,12 @@
 // when the client retries a call whose response it never saw. Both are checked
 // inside a reservation taken before either is read (see drafts/send-guard.ts);
 // the protocol is model-checked in `spec/SendProtocol.tla`.
+//
+// A draft answers to two ids — its draftId and its current message id — and
+// the reservation is taken on the one the caller passed, before anything is
+// read. The other is covered once the draft is loaded, so two calls through
+// different ids exclude each other rather than replay: when both are in flight
+// at once, both may refuse, and neither sends.
 
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
@@ -30,8 +36,9 @@ import {
   draftFromRecord,
   formatDraft,
   isDraft,
-  MAX_DRAFT_BODY_VALUE_BYTES,
+  loadDraft,
   resolveIdentity,
+  stableDraftId,
   unreferencableAttachments,
 } from './draft-common.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
@@ -47,7 +54,10 @@ export const sendDraftInput = z.object({
   draftId: z
     .string()
     .min(1)
-    .describe('The draft to send, as returned by the most recent create_draft or update_draft call.'),
+    .describe(
+      'The draft id, as returned by create_draft or update_draft — edits do not change it — or a message id ' +
+        'from search_emails with `mailbox: "Drafts"`, which an edit replaces with the draftId it returns.'
+    ),
   idempotencyKey: z
     .string()
     .min(1)
@@ -179,18 +189,11 @@ const loadSendableDraft = async (
   deps: DraftToolDeps,
   p: { accountId: string; authorization: string; draftId: string }
 ): Promise<{ error: ToolResult } | { record: EmailComposeRecord }> => {
-  const record = await deps.emailComposeGet({
-    accountId: p.accountId,
-    apiUrl: '',
-    authorization: p.authorization,
-    id: p.draftId,
-    maxBodyValueBytes: MAX_DRAFT_BODY_VALUE_BYTES,
-  })
+  const record = await loadDraft(deps, p)
   if (!record) {
     return {
       error: errorResult(
-        `Draft not found: ${p.draftId}. Nothing was sent. If it was edited, use the draftId that ` +
-          'update_draft returned — editing a draft changes its id.'
+        `Draft not found: ${p.draftId}. Nothing was sent. Find it with search_emails using mailbox "Drafts".`
       ),
     }
   }
@@ -198,7 +201,7 @@ const loadSendableDraft = async (
     return {
       error: errorResult(
         `${p.draftId} is no longer a draft — it has already been sent. Nothing was sent again. ` +
-          'Read it back with get_email.'
+          `Read it back with get_email, passing id ${record.id}.`
       ),
     }
   }
@@ -211,7 +214,7 @@ const loadSendableDraft = async (
     return {
       error: errorResult(
         `Draft ${p.draftId} has no recipients, so it cannot be sent. Nothing was sent. Add them with ` +
-          'update_draft, then send the draftId it returns.'
+          'update_draft, then send it again.'
       ),
     }
   }
@@ -265,6 +268,21 @@ const sendHeld = async (
   }
   const { record } = loaded
 
+  // The reservation was taken on the id the caller passed, but a draft answers
+  // to two: its draftId and its current message id (what search_emails shows).
+  // A retry through the other one must meet the same reservation, or it would
+  // deliver a second copy.
+  for (const alias of new Set([record.id, stableDraftId(record)])) {
+    if (alias === null || alias === args.draftId) {
+      continue
+    }
+    const aliasSubject = sendDraftSubject(alias)
+    const clash = hold.cover(aliasSubject)
+    if (clash) {
+      return errorResult(reservationRefusal(aliasSubject, clash))
+    }
+  }
+
   const mailboxes = await deps.resolveComposeMailboxes(authorization)
   if (!mailboxes.drafts) {
     return errorResult('This account has no Drafts folder, so the draft cannot be sent.')
@@ -292,7 +310,9 @@ const sendHeld = async (
   try {
     outcome = await submitDraft(deps, {
       authorization,
-      draftId: args.draftId,
+      // The current revision's JMAP id, which an edit changes — not the
+      // stable draftId the caller holds.
+      draftId: record.id,
       draftsMailboxId: mailboxes.drafts,
       hold,
       identityId: identity.identityId,
@@ -309,13 +329,13 @@ const sendHeld = async (
       wasRefused(error)
         ? `The server refused to send ${args.draftId} (${detail}). Nothing was sent; it is still a draft.`
         : `${args.draftId} was handed to the server, but the answer was lost (${detail}), so it may already ` +
-            "have gone out. Do NOT send it again yet: read it back with get_email, or check the user's Sent " +
-            'folder, before deciding.'
+            `have gone out. Do NOT send it again yet: read it back with get_email, passing id ${record.id}, ` +
+            "or check the user's Sent folder, before deciding."
     )
   }
   const summary = formatSent('Sent.', {
     draft: draftFromRecord(record),
-    messageId: args.draftId,
+    messageId: record.id,
     outcome,
     threadId: record.threadId ?? null,
     unreferencable: unreferencableAttachments(record),
@@ -345,8 +365,8 @@ export const registerSendDraft = (
         'recipients and the body with the user before calling it unless they have already asked for the ' +
         'message to be sent. Sends any draft in the user’s Drafts folder, not only ones you staged — find ' +
         'an existing one with search_emails using `mailbox: "Drafts"`, and read it back with get_draft ' +
-        'before sending something you did not write. Use the draftId from the most recent create_draft or ' +
-        'update_draft; editing a draft changes its id. Returns the sent message’s id, which get_email can ' +
+        'before sending something you did not write. Use the draftId create_draft returned; editing a draft ' +
+        'with update_draft keeps it. Returns the sent message’s id, which get_email can ' +
         'read back. A draft that has already been sent is refused rather than sent twice.',
       inputSchema: sendDraftInput.shape,
       title: 'Send draft',

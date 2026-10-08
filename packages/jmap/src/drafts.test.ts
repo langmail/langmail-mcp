@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test'
 
-import { draftCreate, emailComposeGet, sentEmailPatch } from './drafts.ts'
+import { draftCreate, draftIdResolve, emailComposeGet, sentEmailPatch, threadMessageFind } from './drafts.ts'
 import { JmapError } from './session.ts'
 
 const API = 'https://mail.example.com/jmap/'
@@ -296,6 +296,56 @@ describe('draftCreate', () => {
     expect(result.replacedDestroyed).toBe(false)
   })
 
+  test('takes the draft id off a superseded draft the destroy left behind', async () => {
+    const calls: Record<string, unknown>[] = []
+    const f = mock((_url: string, init?: RequestInit) => {
+      const params = JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1]
+      calls.push(params)
+      if (params.create) {
+        return Promise.resolve(jmapResponse([['Email/set', { created: { draft: { id: 'd1' } } }, '0']]))
+      }
+      return Promise.resolve(
+        jmapResponse([['Email/set', params.destroy ? { destroyed: [] } : { updated: { d0: null } }, '0']])
+      )
+    })
+    const result = await withFetch(f, () =>
+      draftCreate({
+        ...call,
+        draft: { from: [{ email: 'me@example.com' }], text: 'edited' },
+        keywords: ['$label:invoices', '$draftid:tok1'],
+        mailboxId: 'mbDrafts',
+        replaces: 'd0',
+      })
+    )
+    expect(result.replacedDestroyed).toBe(false)
+    // Only the draft id goes: the token must name the replacement alone, while
+    // the stale copy keeps its labels and stays a draft the user can delete.
+    expect(calls[2]).toEqual({ accountId: 'acct', update: { d0: { 'keywords/$draftid:tok1': false } } })
+  })
+
+  test('does not touch a superseded draft that was destroyed', async () => {
+    const calls: Record<string, unknown>[] = []
+    const f = mock((_url: string, init?: RequestInit) => {
+      const params = JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1]
+      calls.push(params)
+      return Promise.resolve(
+        params.create
+          ? jmapResponse([['Email/set', { created: { draft: { id: 'd1' } } }, '0']])
+          : jmapResponse([['Email/set', { destroyed: ['d0'] }, '0']])
+      )
+    })
+    await withFetch(f, () =>
+      draftCreate({
+        ...call,
+        draft: { from: [{ email: 'me@example.com' }], text: 'edited' },
+        keywords: ['$draftid:tok1'],
+        mailboxId: 'mbDrafts',
+        replaces: 'd0',
+      })
+    )
+    expect(calls).toHaveLength(2)
+  })
+
   test('throws with the JMAP error type when the create is refused', async () => {
     const f = mock(() =>
       Promise.resolve(jmapResponse([['Email/set', { notCreated: { draft: { type: 'invalidProperties' } } }, '0']]))
@@ -367,5 +417,67 @@ describe('sentEmailPatch', () => {
     const patch = sentEmailPatch('a/b', 'c~d')
     expect(patch['mailboxIds/a~1b']).toBeNull()
     expect(patch['mailboxIds/c~0d']).toBe(true)
+  })
+})
+
+describe('draftIdResolve', () => {
+  test('queries the $draftid: keyword newest first and returns the hit', async () => {
+    const f = mock((_url: string, init?: RequestInit) => {
+      const [method, params] = JSON.parse((init?.body as string) ?? '{}').methodCalls[0]
+      expect(method).toBe('Email/query')
+      expect(params.filter).toEqual({ hasKeyword: '$draftid:d1' })
+      expect(params.sort).toEqual([{ isAscending: false, property: 'receivedAt' }])
+      expect(params.limit).toBe(1)
+      return Promise.resolve(jmapResponse([['Email/query', { ids: ['d3'] }, '0']]))
+    })
+    expect(await withFetch(f, () => draftIdResolve({ ...call, draftId: 'd1' }))).toBe('d3')
+  })
+
+  test('returns null when no message carries the keyword', async () => {
+    const f = mock(() => Promise.resolve(jmapResponse([['Email/query', { ids: [] }, '0']])))
+    expect(await withFetch(f, () => draftIdResolve({ ...call, draftId: 'd1' }))).toBeNull()
+  })
+})
+
+describe('threadMessageFind', () => {
+  test('reads the thread by back-reference and matches the Message-ID', async () => {
+    const f = mock((_url: string, init?: RequestInit) => {
+      const calls = JSON.parse((init?.body as string) ?? '{}').methodCalls
+      expect(calls.map(([method]: [string]) => method)).toEqual(['Email/get', 'Thread/get', 'Email/get'])
+      expect(calls[0][1].ids).toEqual(['d1'])
+      expect(calls[2][1]['#ids']).toEqual({ name: 'Thread/get', path: '/list/*/emailIds', resultOf: '1' })
+      return Promise.resolve(
+        jmapResponse([
+          ['Email/get', { list: [{ id: 'd1', threadId: 't1' }] }, '0'],
+          ['Thread/get', { list: [{ emailIds: ['e1', 'd1'], id: 't1' }] }, '1'],
+          [
+            'Email/get',
+            {
+              list: [
+                { id: 'e1', messageId: ['orig@example.org'] },
+                { id: 'd1', messageId: ['draft@langmail.me'] },
+              ],
+            },
+            '2',
+          ],
+        ])
+      )
+    })
+    const found = await withFetch(f, () => threadMessageFind({ ...call, emailId: 'd1', messageId: 'orig@example.org' }))
+    expect(found).toBe('e1')
+  })
+
+  test('returns null when no message in the thread has that Message-ID', async () => {
+    const f = mock(() =>
+      Promise.resolve(
+        jmapResponse([
+          ['Email/get', { list: [{ id: 'd1', threadId: 't1' }] }, '0'],
+          ['Thread/get', { list: [{ emailIds: ['d1'], id: 't1' }] }, '1'],
+          ['Email/get', { list: [{ id: 'd1', messageId: ['draft@langmail.me'] }] }, '2'],
+        ])
+      )
+    )
+    const found = await withFetch(f, () => threadMessageFind({ ...call, emailId: 'd1', messageId: 'orig@example.org' }))
+    expect(found).toBeNull()
   })
 })

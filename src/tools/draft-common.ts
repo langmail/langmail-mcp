@@ -17,11 +17,15 @@ import {
   accountIdForSubmission,
   type BlobUploadParams,
   blobUpload,
+  DRAFT_ID_KEYWORD_PREFIX,
   DRAFT_KEYWORD,
+  DRAFT_REPLY_TO_KEYWORD_PREFIX,
   type DraftAttachment,
   type DraftCreateParams,
   type DraftCreateResult,
+  type DraftIdResolveParams,
   draftCreate,
+  draftIdResolve,
   type EmailAddress,
   type EmailComposeGetParams,
   type EmailComposeRecord,
@@ -37,6 +41,8 @@ import {
   type JmapLive,
   LABEL_KEYWORD_PREFIX,
   mailboxIdsByRoles,
+  type ThreadMessageFindParams,
+  threadMessageFind,
 } from '@langmail/jmap'
 
 import { formatAddressList, formatSize } from './format.ts'
@@ -70,6 +76,9 @@ export interface DraftToolDeps {
   // see drafts/attachments.ts for why bytes never reach Email/set directly.
   blobUpload: (p: BlobUploadParams) => Promise<string>
   draftCreate: (p: DraftCreateParams) => Promise<DraftCreateResult>
+  // The current revision of an edited draft, by its stable id — see
+  // `loadDraft`.
+  draftIdResolve: (p: DraftIdResolveParams) => Promise<string | null>
   emailComposeGet: (p: EmailComposeGetParams) => Promise<EmailComposeRecord | null>
   emailSubmissionCreate: (p: EmailSubmissionCreateParams) => Promise<EmailSubmissionResult>
   identityGet: (p: IdentityGetParams) => Promise<IdentityRecord[]>
@@ -79,6 +88,8 @@ export interface DraftToolDeps {
   // which Stalwart co-locates with mail but the session resource may name
   // separately.
   resolveSubmissionAccountId: (authorization: string) => Promise<string>
+  // The message a reply draft answers, found in the draft's own thread.
+  threadMessageFind: (p: ThreadMessageFindParams) => Promise<string | null>
 }
 
 // --- addresses -------------------------------------------------------------
@@ -470,6 +481,65 @@ export const draftFromRecord = (record: EmailComposeRecord): EmailDraft => {
 
 export const isDraft = (record: EmailComposeRecord): boolean => Boolean(record.keywords?.[DRAFT_KEYWORD])
 
+// --- stable draft ids --------------------------------------------------------
+
+const keywordSuffix = (record: EmailComposeRecord, prefix: string): string | null => {
+  const keyword = Object.keys(record.keywords ?? {}).find((k) => k.startsWith(prefix))
+  return keyword ? keyword.slice(prefix.length) : null
+}
+
+// The id a draft is known by on this surface: a random token create_draft mints
+// and every revision carries as a `$draftid:` keyword (see @langmail/jmap
+// drafts.ts). A token, not the first revision's JMAP id: Stalwart may hand a
+// freed id out again, and a stale keyword naming it would then resolve another
+// draft's id to this one. Null for a draft staged by another client, which gets
+// its token on its first edit and until then is known by its JMAP id. This is
+// what create_draft, update_draft and get_draft report, so the id an agent
+// holds keeps working across any number of edits.
+export const stableDraftId = (record: EmailComposeRecord): string | null =>
+  keywordSuffix(record, DRAFT_ID_KEYWORD_PREFIX)
+
+// The keyword a revision carries so `loadDraft` can find it by its stable id.
+export const stableDraftIdKeyword = (draftId: string): string => `${DRAFT_ID_KEYWORD_PREFIX}${draftId}`
+
+// The keyword create_draft puts on a reply, naming the message it answers — see
+// @langmail/jmap drafts.ts for why the In-Reply-To header is not enough.
+export const replyOriginalKeyword = (originalId: string): string => `${DRAFT_REPLY_TO_KEYWORD_PREFIX}${originalId}`
+
+// The JMAP id of the message a reply draft answers, when create_draft recorded it.
+export const replyOriginalId = (record: EmailComposeRecord): string | null =>
+  keywordSuffix(record, DRAFT_REPLY_TO_KEYWORD_PREFIX)
+
+// RFC 8620 §1.2 Id syntax. Anything else cannot be a draft id, and spliced into
+// a keyword it could make the query itself invalid.
+const JMAP_ID_RE = /^[\w-]{1,255}$/u
+
+// Read a draft by the id the caller holds: its stable id, or the JMAP id of
+// any message (a draft found through search_emails, say). The keyword lookup
+// runs first, because a stable id may still name a message — the first
+// revision, when an edit created its replacement but failed to destroy it — and
+// that superseded copy must never be what is read, edited, or sent.
+export const loadDraft = async (
+  deps: DraftToolDeps,
+  p: { accountId: string; authorization: string; draftId: string }
+): Promise<EmailComposeRecord | null> => {
+  const current = JMAP_ID_RE.test(p.draftId)
+    ? await deps.draftIdResolve({
+        accountId: p.accountId,
+        apiUrl: '',
+        authorization: p.authorization,
+        draftId: p.draftId,
+      })
+    : null
+  return deps.emailComposeGet({
+    accountId: p.accountId,
+    apiUrl: '',
+    authorization: p.authorization,
+    id: current ?? p.draftId,
+    maxBodyValueBytes: MAX_DRAFT_BODY_VALUE_BYTES,
+  })
+}
+
 // Why the server refused to write a draft, phrased for the agent that has to
 // fix it — or null when the failure was not the server saying no, in which case
 // the caller rethrows rather than reporting a refusal that never happened.
@@ -597,6 +667,7 @@ const attachmentLines = (attachments: DraftAttachment[], unreferencable: string[
 export const makeLiveDeps = (live: JmapLive): DraftToolDeps => ({
   blobUpload: async (p) => blobUpload({ ...p, uploadUrl: (await live.getSession(p.authorization)).uploadUrl }),
   draftCreate: async (p) => draftCreate({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
+  draftIdResolve: async (p) => draftIdResolve({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   emailComposeGet: async (p) => emailComposeGet({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   emailSubmissionCreate: async (p) =>
     emailSubmissionCreate({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
@@ -613,4 +684,5 @@ export const makeLiveDeps = (live: JmapLive): DraftToolDeps => ({
     return { drafts: byRole.drafts ?? null, sent: byRole.sent ?? null }
   },
   resolveSubmissionAccountId: async (authorization) => accountIdForSubmission(await live.getSession(authorization)),
+  threadMessageFind: async (p) => threadMessageFind({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
 })

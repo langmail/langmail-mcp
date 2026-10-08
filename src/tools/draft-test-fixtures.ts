@@ -59,6 +59,17 @@ export const draftDeps = (opts: DraftDepsOptions = {}): DraftToolDeps => {
       nextDraft += 1
       return Promise.resolve(opts.created ?? { id: `dNew${nextDraft}`, threadId: 'tNew' })
     },
+    // Like the server: the newest record carrying the `$draftid:` keyword — by
+    // receivedAt, and among equals the one listed last.
+    draftIdResolve: (p) =>
+      Promise.resolve(
+        Object.values(opts.records ?? {})
+          .filter((record) => record.keywords?.[`$draftid:${p.draftId}`])
+          .reduce<EmailComposeRecord | null>(
+            (newest, record) => (newest && (newest.receivedAt ?? '') > (record.receivedAt ?? '') ? newest : record),
+            null
+          )?.id ?? null
+      ),
     emailComposeGet: (p) => Promise.resolve(opts.records?.[p.id] ?? null),
     emailSubmissionCreate: (p) => {
       opts.submissions?.push(p)
@@ -71,6 +82,15 @@ export const draftDeps = (opts: DraftDepsOptions = {}): DraftToolDeps => {
     resolveAccountId: () => Promise.resolve('acct'),
     resolveComposeMailboxes: () => Promise.resolve(opts.mailboxes ?? TEST_MAILBOXES),
     resolveSubmissionAccountId: () => Promise.resolve('acct'),
+    // Like the server: a message of the same thread with that Message-ID.
+    threadMessageFind: (p) => {
+      const threadId = opts.records?.[p.emailId]?.threadId
+      return Promise.resolve(
+        Object.values(opts.records ?? {}).find(
+          (record) => record.threadId === threadId && record.messageId?.includes(p.messageId)
+        )?.id ?? null
+      )
+    },
   }
 }
 
@@ -91,7 +111,9 @@ export const stagedDraft = (overrides: Partial<EmailComposeRecord> = {}): EmailC
   bodyValues: { '1': { value: 'Here they are.' } },
   from: [{ email: TEST_PRINCIPAL, name: 'Dana Okonjo' }],
   id: 'd1',
-  keywords: { $draft: true, $seen: true },
+  // Staged by create_draft, so it carries the draftId token — `d1` here, the
+  // same as its JMAP id until an edit replaces it.
+  keywords: { $draft: true, $seen: true, '$draftid:d1': true },
   mailboxIds: { mbDrafts: true },
   subject: 'Quarterly numbers',
   textBody: [{ partId: '1', type: 'text/plain' }],

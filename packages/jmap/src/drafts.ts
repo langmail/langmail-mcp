@@ -32,6 +32,23 @@ const USING = ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail']
 // (and Langmail's own UI) key "this is editable, not delivered" off it.
 export const DRAFT_KEYWORD = '$draft'
 
+// The prefix of the keyword that keeps a draft's id stable across edits. An
+// edit writes a new Email (see the header), so the JMAP id changes every time;
+// every revision carries `$draftid:<token>`, and a lookup by that keyword finds
+// the current revision from the token the caller was first handed. A keyword
+// rather than a header because Stalwart answers an Email/query `header`
+// condition with nothing, while `hasKeyword` is indexed — and a keyword never
+// leaves the mailbox, where a header would ride along on the sent mail.
+export const DRAFT_ID_KEYWORD_PREFIX = '$draftid:'
+
+// The prefix of the keyword a reply draft carries naming the message it
+// answers, by JMAP id. The draft's In-Reply-To header names it too, but only by
+// Message-ID, which Stalwart cannot query — and once an edit changes the
+// subject, Stalwart files the replacement in a thread of its own, so the
+// original is not even a thread sibling any more. update_draft reads this to
+// re-quote the original below edited text.
+export const DRAFT_REPLY_TO_KEYWORD_PREFIX = '$draftreplyto:'
+
 // A draft the user composed is not unread mail — Stalwart would otherwise
 // count it towards the Drafts folder's unread badge.
 const SEEN_KEYWORD = '$seen'
@@ -261,6 +278,35 @@ const destroyedQuietly = async (p: JmapCall & { accountId: string; id: string })
   }
 }
 
+// Take the `$draftid:` keyword off a superseded draft the destroy left behind,
+// so the draft id names exactly one message: the replacement. Left on, the two
+// copies tie on `receivedAt` (one-second resolution) when an edit follows
+// quickly, and `draftIdResolve` could pick the pre-edit one — even after the
+// replacement was sent, delivering the old wording a second time. Keywords are
+// the one thing RFC 8621 lets a client patch, so this can land where the
+// destroy did not; if it fails as well, the caller's leftover note still names
+// the stale copy.
+const supersededQuietly = async (p: DraftCreateParams & { id: string }): Promise<void> => {
+  const patch = buildEmailSetPatch({
+    keywords: Object.fromEntries(
+      (p.keywords ?? [])
+        .filter((keyword) => keyword.startsWith(DRAFT_ID_KEYWORD_PREFIX))
+        .map((keyword) => [keyword, false])
+    ),
+  })
+  if (Object.keys(patch).length === 0) {
+    return
+  }
+  try {
+    await call(p, {
+      methodCalls: [['Email/set', { accountId: p.accountId, update: { [p.id]: patch } }, '0']],
+      using: USING,
+    })
+  } catch {
+    // Reported through `replacedDestroyed: false` either way.
+  }
+}
+
 // Stage a draft and return its id. When `replaces` is given, the superseded
 // draft is destroyed only after the new one exists — see the header for why that
 // is a second round trip and not one batched Email/set.
@@ -289,11 +335,14 @@ export const draftCreate = async (p: DraftCreateParams): Promise<DraftCreateResu
     const refusal = out.notCreated?.[CREATE_ID]
     throw new JmapError(200, `Email/set did not create the draft: ${refusal?.type ?? 'unknown'}`, refusal?.type)
   }
-  return {
-    id: created.id,
-    threadId: created.threadId ?? null,
-    ...(p.replaces ? { replacedDestroyed: await destroyedQuietly({ ...p, id: p.replaces }) } : {}),
+  if (!p.replaces) {
+    return { id: created.id, threadId: created.threadId ?? null }
   }
+  const replacedDestroyed = await destroyedQuietly({ ...p, id: p.replaces })
+  if (!replacedDestroyed) {
+    await supersededQuietly({ ...p, id: p.replaces })
+  }
+  return { id: created.id, replacedDestroyed, threadId: created.threadId ?? null }
 }
 
 export interface EmailComposeGetParams extends JmapCall {
@@ -348,8 +397,84 @@ export const emailComposeGet = async (p: EmailComposeGetParams): Promise<EmailCo
 // mailbox move depends on the account having a Sent mailbox; skipping the whole
 // patch when it doesn't would leave the message looking unsent forever, so a
 // retried call would deliver it again.
+//
+// The `$draftid:` and `$draftreplyto:` keywords are deliberately left on. The
+// draft id still naming the sent message is what turns a later send of the
+// same draft id into "already sent" rather than "not found" — clearing it
+// would leave that retry nothing to resolve and nothing to explain.
 export const sentEmailPatch = (draftsMailboxId: string, sentMailboxId?: string): Record<string, boolean | null> =>
   buildEmailSetPatch({
     keywords: { [DRAFT_KEYWORD]: false },
     ...(sentMailboxId ? { mailboxIds: { [draftsMailboxId]: false, [sentMailboxId]: true } } : {}),
   })
+
+export interface DraftIdResolveParams extends JmapCall {
+  accountId: string
+  // The stable draft id — the token every revision carries.
+  draftId: string
+}
+
+// The current revision of the draft known as `draftId`, or null when no
+// message carries its `$draftid:` keyword (it is a JMAP id, not a draft id).
+// Newest first as a backstop: `draftCreate` takes the token off a superseded
+// revision its destroy left behind, so only if that patch failed too can two
+// messages answer to the token — and then the replacement wins.
+export const draftIdResolve = async (p: DraftIdResolveParams): Promise<string | null> => {
+  const resp = await call(p, {
+    methodCalls: [
+      [
+        'Email/query',
+        {
+          accountId: p.accountId,
+          calculateTotal: false,
+          filter: { hasKeyword: `${DRAFT_ID_KEYWORD_PREFIX}${p.draftId}` },
+          limit: 1,
+          sort: [{ isAscending: false, property: 'receivedAt' }],
+        },
+        '0',
+      ],
+    ],
+    using: USING,
+  })
+  const out = methodResponse<{ ids?: string[] }>(resp, 'Email/query', '0')
+  return out.ids?.[0] ?? null
+}
+
+export interface ThreadMessageFindParams extends JmapCall {
+  accountId: string
+  // Any message of the thread to search — the reply draft itself.
+  emailId: string
+  // RFC 8621 "asMessageIds" form: bare, without angle brackets.
+  messageId: string
+}
+
+// The id of the message in `emailId`'s thread whose Message-ID is `messageId`,
+// or null. This is how an edited reply finds the message it quotes: the draft
+// keeps only the In-Reply-To header, and Stalwart cannot query by header, but
+// it threads a reply onto its original — so the original is one of the
+// thread's messages. One round trip: the draft's threadId, the thread, and the
+// Message-ID of every message in it.
+export const threadMessageFind = async (p: ThreadMessageFindParams): Promise<string | null> => {
+  const resp = await call(p, {
+    methodCalls: [
+      ['Email/get', { accountId: p.accountId, ids: [p.emailId], properties: ['threadId'] }, '0'],
+      [
+        'Thread/get',
+        { '#ids': { name: 'Email/get', path: '/list/*/threadId', resultOf: '0' }, accountId: p.accountId },
+        '1',
+      ],
+      [
+        'Email/get',
+        {
+          '#ids': { name: 'Thread/get', path: '/list/*/emailIds', resultOf: '1' },
+          accountId: p.accountId,
+          properties: ['id', 'messageId'],
+        },
+        '2',
+      ],
+    ],
+    using: USING,
+  })
+  const out = methodResponse<{ list?: { id: string; messageId?: string[] | null }[] }>(resp, 'Email/get', '2')
+  return out.list?.find((email) => email.messageId?.includes(p.messageId))?.id ?? null
+}

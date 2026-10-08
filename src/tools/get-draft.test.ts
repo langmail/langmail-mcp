@@ -36,6 +36,13 @@ describe('getDraftInput schema', () => {
 })
 
 describe('getDraft', () => {
+  test('reads an edited draft by the id create_draft returned, and reports that id', async () => {
+    const edited = stagedDraft({ id: 'd2', keywords: { $draft: true, $seen: true, '$draftid:d1': true } })
+    const { result, text } = await run({ draftId: 'd1' }, { records: { d2: edited } })
+    expect(result.isError).toBeUndefined()
+    expect(text).toContain('draftId: d1')
+  })
+
   test('reads the staged fields back, bcc included', async () => {
     const staged = stagedDraft({ bcc: [{ email: 'quiet@example.org' }], cc: [{ email: 'carl@example.org' }] })
     const { text } = await run({ draftId: 'd1' }, { records: { d1: staged } })
