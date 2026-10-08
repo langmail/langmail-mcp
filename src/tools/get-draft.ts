@@ -17,13 +17,20 @@ import {
   draftFromRecord,
   formatDraft,
   isDraft,
-  MAX_DRAFT_BODY_VALUE_BYTES,
+  loadDraft,
+  stableDraftId,
   unreferencableAttachments,
 } from './draft-common.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 export const getDraftInput = z.object({
-  draftId: z.string().min(1).describe('The draft id, as returned by create_draft or update_draft.'),
+  draftId: z
+    .string()
+    .min(1)
+    .describe(
+      'The draft id, as returned by create_draft, or a message id from search_emails with `mailbox: "Drafts"`. ' +
+        'Edits do not change it.'
+    ),
 })
 
 export type GetDraftArgs = z.infer<typeof getDraftInput>
@@ -36,15 +43,9 @@ export interface GetDraftContext {
 export const getDraft = async (deps: DraftToolDeps, ctx: GetDraftContext): Promise<ToolResult> => {
   const authorization = bearerAuthorization(ctx.token)
   const accountId = await deps.resolveAccountId(authorization)
-  const record = await deps.emailComposeGet({
-    accountId,
-    apiUrl: '',
-    authorization,
-    id: ctx.args.draftId,
-    maxBodyValueBytes: MAX_DRAFT_BODY_VALUE_BYTES,
-  })
+  const record = await loadDraft(deps, { accountId, authorization, draftId: ctx.args.draftId })
   if (!record) {
-    return errorResult(`Draft not found: ${ctx.args.draftId}`)
+    return errorResult(`Draft not found: ${ctx.args.draftId}. Find it with search_emails using mailbox "Drafts".`)
   }
   if (!isDraft(record)) {
     return errorResult(
@@ -52,7 +53,7 @@ export const getDraft = async (deps: DraftToolDeps, ctx: GetDraftContext): Promi
     )
   }
   return textResult(
-    `Draft (not sent):\ndraftId: ${record.id}\n${formatDraft(draftFromRecord(record), {
+    `Draft (not sent):\ndraftId: ${stableDraftId(record) ?? record.id}\n${formatDraft(draftFromRecord(record), {
       threadId: record.threadId,
       // A file with no blobId is dropped from the composable model, so without
       // this the one surface a human reviews the draft on would report it as

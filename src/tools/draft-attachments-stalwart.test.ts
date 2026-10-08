@@ -37,6 +37,7 @@ import {
   blobDownload,
   blobUpload,
   draftCreate,
+  draftIdResolve,
   emailComposeGet,
   emailGetDetail,
   emailQuery,
@@ -45,6 +46,7 @@ import {
   mailboxCreate,
   mailboxIdByRole,
   makeJmapLive,
+  threadMessageFind,
 } from '@langmail/jmap'
 
 import { MAX_ATTACHMENT_BYTES } from '../drafts/attachments.ts'
@@ -242,11 +244,14 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
     }
   }
 
-  const stage = async (args: Record<string, unknown>): Promise<{ draftId: string; text: string }> => {
+  // The draftId is a token the draft carries as a keyword; `emailId` is the
+  // message it names right now.
+  const stage = async (args: Record<string, unknown>): Promise<{ draftId: string; emailId: string; text: string }> => {
     const result = await createDraft(deps, replays, { ...toolCtx, args: createDraftInput.parse(args) })
     expect(result.isError).toBeUndefined()
     const text = result.content[0]?.text ?? ''
-    return { draftId: DRAFT_ID_RE.exec(text)?.[1] ?? '', text }
+    const draftId = DRAFT_ID_RE.exec(text)?.[1] ?? ''
+    return { draftId, emailId: (await draftIdResolve({ ...ctx(), draftId })) ?? '', text }
   }
 
   beforeAll(async () => {
@@ -311,12 +316,14 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
     deps = {
       blobUpload: (p) => blobUpload({ ...p, authorization, uploadUrl }),
       draftCreate: (p) => draftCreate({ ...p, apiUrl, authorization }),
+      draftIdResolve: (p) => draftIdResolve({ ...p, apiUrl, authorization }),
       emailComposeGet: (p) => emailComposeGet({ ...p, apiUrl, authorization }),
       emailSubmissionCreate: (p) => emailSubmissionCreate({ ...p, apiUrl, authorization }),
       identityGet: (p) => identityGet({ ...p, apiUrl, authorization }),
       resolveAccountId: () => Promise.resolve(accountId),
       resolveComposeMailboxes: () => Promise.resolve({ drafts: draftsId, sent: sentId }),
       resolveSubmissionAccountId: () => Promise.resolve(accountId),
+      threadMessageFind: (p) => threadMessageFind({ ...p, apiUrl, authorization }),
     }
     getEmailDeps = {
       downloadRawMessage: async (p) => {
@@ -349,7 +356,7 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
   // --- acceptance criterion: generate a file, stage a draft carrying it ------
 
   test('create_draft stages a generated file as a real attachment, in one call', async () => {
-    const { draftId, text } = await stage({
+    const { draftId, emailId, text } = await stage({
       attachments: [{ content: invoiceBase64, filename: 'RE-2026-006.pdf' }],
       subject: 'Corrected invoice',
       text: 'The corrected invoice is attached.',
@@ -361,7 +368,7 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
     expect(text).toContain('RE-2026-006.pdf')
 
     // Stalwart filed it as an unsent draft…
-    const record = await emailComposeGet({ ...ctx(), id: draftId, maxBodyValueBytes: 10_000 })
+    const record = await emailComposeGet({ ...ctx(), id: emailId, maxBodyValueBytes: 10_000 })
     expect(record?.keywords?.$draft).toBe(true)
     expect(record?.mailboxIds?.[draftsId]).toBe(true)
     expect(record?.hasAttachment).toBe(true)
@@ -369,7 +376,7 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
     // …carrying a part whose name, media type, size, and bytes are all the
     // file the agent handed over. Size and bytes both, because a truncated or
     // re-encoded upload still has the right name.
-    const attachment = await soleAttachment(draftId)
+    const attachment = await soleAttachment(emailId)
     expect(attachment.name).toBe('RE-2026-006.pdf')
     expect(attachment.type).toBe('application/pdf')
     expect(attachment.size).toBe(invoiceBytes.byteLength)
@@ -386,14 +393,14 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
     const contractBlobId = CONTRACT_LINE_RE.exec(read.content[0]?.text ?? '')?.[1] ?? ''
     expect(contractBlobId).not.toBe('')
 
-    const { draftId } = await stage({
+    const { emailId } = await stage({
       attachments: [{ blobId: contractBlobId, filename: 'contract.pdf', mimeType: 'application/pdf' }],
       subject: 'Fwd: Signed contract',
       text: 'Forwarding the countersigned copy.',
       to: ['lawyer@example.org'],
     })
 
-    const attachment = await soleAttachment(draftId)
+    const attachment = await soleAttachment(emailId)
     expect(attachment.name).toBe('contract.pdf')
     expect(attachment.type).toBe('application/pdf')
     // The forwarded part is the file that arrived, byte for byte, having made
@@ -427,7 +434,7 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
   // --- editing an attached draft -------------------------------------------
 
   test('update_draft rewrites the message and keeps the file it never mentioned', async () => {
-    const { draftId } = await stage({
+    const { draftId, emailId } = await stage({
       attachments: [{ content: invoiceBase64, filename: 'RE-2026-008.pdf' }],
       subject: 'Invoice',
       text: 'Draft body.',
@@ -439,15 +446,16 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
       token: TOKEN,
     })
     expect(result.isError).toBeUndefined()
-    const updatedId = DRAFT_ID_RE.exec(result.content[0]?.text ?? '')?.[1] ?? ''
-    expect(updatedId).not.toBe(draftId)
+    expect(DRAFT_ID_RE.exec(result.content[0]?.text ?? '')?.[1]).toBe(draftId)
+    const updatedId = (await draftIdResolve({ ...ctx(), draftId })) ?? ''
 
     // The edit is create-then-destroy (RFC 8621 §4.6), so this is a different
-    // message that happens to reference the same blob. Losing the file here
+    // message — behind the same draftId — that happens to reference the same blob. Losing the file here
     // would be unrecoverable — the original is already gone.
     const inDrafts = await idsIn(draftsId)
     expect(inDrafts).toContain(updatedId)
-    expect(inDrafts).not.toContain(draftId)
+    expect(updatedId).not.toBe(emailId)
+    expect(inDrafts).not.toContain(emailId)
 
     const attachment = await soleAttachment(updatedId)
     expect(attachment.name).toBe('RE-2026-008.pdf')
@@ -470,7 +478,7 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
       token: TOKEN,
     })
     expect(swapped.isError).toBeUndefined()
-    const swappedId = DRAFT_ID_RE.exec(swapped.content[0]?.text ?? '')?.[1] ?? ''
+    const swappedId = (await draftIdResolve({ ...ctx(), draftId })) ?? ''
 
     const attachment = await soleAttachment(swappedId)
     expect(attachment.name).toBe('note.txt')
@@ -479,11 +487,11 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
 
     // …and an empty list takes the file off entirely.
     const cleared = await updateDraft(deps, {
-      args: updateDraftInput.parse({ attachments: [], draftId: swappedId }),
+      args: updateDraftInput.parse({ attachments: [], draftId }),
       token: TOKEN,
     })
     expect(cleared.isError).toBeUndefined()
-    const clearedId = DRAFT_ID_RE.exec(cleared.content[0]?.text ?? '')?.[1] ?? ''
+    const clearedId = (await draftIdResolve({ ...ctx(), draftId })) ?? ''
     const record = await emailComposeGet({ ...ctx(), id: clearedId, maxBodyValueBytes: 10_000 })
     expect(record?.attachments ?? []).toHaveLength(0)
     expect(record?.hasAttachment ?? false).toBe(false)

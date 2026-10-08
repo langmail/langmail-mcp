@@ -19,14 +19,20 @@ export {
   contactCardUpdate,
 } from './contacts.ts'
 export {
+  DRAFT_ID_KEYWORD_PREFIX,
   DRAFT_KEYWORD,
+  DRAFT_REPLY_TO_KEYWORD_PREFIX,
   type DraftAttachment,
   type DraftCreateParams,
   type DraftCreateResult,
+  type DraftIdResolveParams,
   draftCreate,
+  draftIdResolve,
   type EmailComposeGetParams,
   type EmailDraft,
   emailComposeGet,
+  type ThreadMessageFindParams,
+  threadMessageFind,
 } from './drafts.ts'
 export {
   type EmailChangesParams,

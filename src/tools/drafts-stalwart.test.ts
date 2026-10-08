@@ -35,6 +35,7 @@ import {
   blobDownload,
   blobUpload,
   draftCreate,
+  draftIdResolve,
   emailComposeGet,
   emailGetDetail,
   emailQuery,
@@ -43,6 +44,7 @@ import {
   mailboxCreate,
   mailboxIdByRole,
   makeJmapLive,
+  threadMessageFind,
 } from '@langmail/jmap'
 
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
@@ -229,12 +231,14 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
     deps = {
       blobUpload: (p) => blobUpload({ ...p, authorization, uploadUrl: session.uploadUrl }),
       draftCreate: (p) => draftCreate({ ...p, apiUrl, authorization }),
+      draftIdResolve: (p) => draftIdResolve({ ...p, apiUrl, authorization }),
       emailComposeGet: (p) => emailComposeGet({ ...p, apiUrl, authorization }),
       emailSubmissionCreate: (p) => emailSubmissionCreate({ ...p, apiUrl, authorization }),
       identityGet: (p) => identityGet({ ...p, apiUrl, authorization }),
       resolveAccountId: () => Promise.resolve(accountId),
       resolveComposeMailboxes: () => Promise.resolve({ drafts: draftsId, sent: sentId }),
       resolveSubmissionAccountId: () => Promise.resolve(accountId),
+      threadMessageFind: (p) => threadMessageFind({ ...p, apiUrl, authorization }),
     }
     getEmailDeps = {
       downloadRawMessage: async (p) => {
@@ -275,6 +279,7 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
   // --- acceptance criterion, phase 1 ---------------------------------------
 
   let replyDraftId = ''
+  let replyEmailId = ''
 
   test('create_draft stages a correctly threaded reply that lands in Drafts unsent', async () => {
     const result = await createDraft(deps, replays, {
@@ -290,16 +295,19 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
 
     replyDraftId = DRAFT_ID_RE.exec(text)?.[1] ?? ''
     expect(replyDraftId).not.toBe('')
+    // The draftId is a token the message carries as a keyword.
+    replyEmailId = (await draftIdResolve({ ...ctx(), draftId: replyDraftId })) ?? ''
+    expect(replyEmailId).not.toBe('')
 
     // Stalwart filed it as a draft, in the Drafts mailbox, with the threading
     // headers set — which is what makes it look human-written in the UI.
-    const record = await emailComposeGet({ ...ctx(), id: replyDraftId, maxBodyValueBytes: 10_000 })
+    const record = await emailComposeGet({ ...ctx(), id: replyEmailId, maxBodyValueBytes: 10_000 })
     expect(record?.keywords?.$draft).toBe(true)
     expect(record?.mailboxIds?.[draftsId]).toBe(true)
     expect(record?.inReplyTo).toEqual([`original-${run}@example.org`])
     expect(record?.references).toEqual([`original-${run}@example.org`])
     expect(record?.to?.[0]?.email).toBe(CORRESPONDENT_ADDRESS)
-    expect(await idsIn(draftsId)).toContain(replyDraftId)
+    expect(await idsIn(draftsId)).toContain(replyEmailId)
 
     // Stalwart threaded the reply onto the original conversation.
     const [original] = await emailGetDetail({ ...ctx(), ids: [originalId], maxBodyValueBytes: 1 })
@@ -314,7 +322,7 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
     expect(text).toContain('Confirmed — the Q2 figures are final.')
   })
 
-  test('update_draft replaces the draft: new id present, old id gone', async () => {
+  test('update_draft keeps the draftId: one draft in Drafts, read back by the same id', async () => {
     const result = await updateDraft(deps, {
       args: updateDraftInput.parse({ draftId: replyDraftId, subject: 'Re: Quarterly numbers (final)' }),
       token: TOKEN,
@@ -322,20 +330,58 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
     expect(result.isError).toBeUndefined()
     const text = result.content[0]?.text ?? ''
     expect(text).not.toContain('could not be removed')
+    expect(DRAFT_ID_RE.exec(text)?.[1]).toBe(replyDraftId)
 
-    const updatedId = DRAFT_ID_RE.exec(text)?.[1] ?? ''
-    expect(updatedId).not.toBe(replyDraftId)
-
+    // The edit replaced the message rather than leaving two drafts behind: the
+    // first revision is gone, and the draftId now names its replacement.
     const inDrafts = await idsIn(draftsId)
-    expect(inDrafts).toContain(updatedId)
-    // The edit replaced the message rather than leaving two drafts behind.
-    expect(inDrafts).not.toContain(replyDraftId)
+    expect(inDrafts).not.toContain(replyEmailId)
+    const current = await draftIdResolve({ ...ctx(), draftId: replyDraftId })
+    expect(current).not.toBeNull()
+    expect(current).not.toBe(replyEmailId)
+    expect(inDrafts).toContain(current ?? '')
 
-    const record = await emailComposeGet({ ...ctx(), id: updatedId, maxBodyValueBytes: 10_000 })
+    const record = await emailComposeGet({ ...ctx(), id: current ?? '', maxBodyValueBytes: 10_000 })
     expect(record?.subject).toBe('Re: Quarterly numbers (final)')
     // The body and the threading survived an edit that named neither.
     expect(record?.inReplyTo).toEqual([`original-${run}@example.org`])
-    replyDraftId = updatedId
+
+    const read = await getDraft(deps, { args: getDraftInput.parse({ draftId: replyDraftId }), token: TOKEN })
+    expect(read.content[0]?.text).toContain('Re: Quarterly numbers (final)')
+  })
+
+  test('update_draft rewords a reply and keeps the quoted original below it', async () => {
+    const result = await updateDraft(deps, {
+      args: updateDraftInput.parse({ draftId: replyDraftId, text: 'Confirmed.' }),
+      token: TOKEN,
+    })
+    expect(result.isError).toBeUndefined()
+    expect(DRAFT_ID_RE.exec(result.content[0]?.text ?? '')?.[1]).toBe(replyDraftId)
+
+    const current = await draftIdResolve({ ...ctx(), draftId: replyDraftId })
+    const record = await emailComposeGet({ ...ctx(), id: current ?? '', maxBodyValueBytes: 10_000 })
+    const body = Object.values(record?.bodyValues ?? {})[0]?.value ?? ''
+    expect(body.startsWith('Confirmed.')).toBe(true)
+    expect(body).not.toContain('the Q2 figures are final')
+    expect(body).toContain('wrote:')
+    expect(body).toContain('> ')
+  })
+
+  test('send_draft by the draftId sends the edited revision, once', async () => {
+    const current = (await draftIdResolve({ ...ctx(), draftId: replyDraftId })) ?? ''
+    const sent = await sendDraft(deps, replays, guard, {
+      ...toolCtx,
+      args: sendDraftInput.parse({ draftId: replyDraftId }),
+    })
+    expect(sent.isError).toBeUndefined()
+    expect(MESSAGE_ID_RE.exec(sent.content[0]?.text ?? '')?.[1]).toBe(current)
+
+    const again = await sendDraft(deps, replays, guard, {
+      ...toolCtx,
+      args: sendDraftInput.parse({ draftId: replyDraftId }),
+    })
+    expect(again.isError).toBe(true)
+    expect(again.content[0]?.text).toContain('already been sent')
   })
 
   // --- acceptance criterion, phase 2 ---------------------------------------
@@ -355,8 +401,9 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
     expect(text).toContain('Sent.')
 
     const messageId = MESSAGE_ID_RE.exec(text)?.[1] ?? ''
-    // The Email id survives the move, so the draft id is the sent message's id.
-    expect(messageId).toBe(draftId)
+    // The Email id survives the move, so the message the draftId named is the
+    // sent message.
+    expect(messageId).toBe((await draftIdResolve({ ...ctx(), draftId })) ?? '')
 
     // onSuccessUpdateEmail moved it out of Drafts into Sent and cleared $draft.
     const record = await emailComposeGet({ ...ctx(), id: messageId, maxBodyValueBytes: 10_000 })
@@ -398,7 +445,11 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
     expect(sent.isError).toBeUndefined()
 
     // The Sent copy keeps bcc — that copy is the user's own record.
-    const sentCopy = await emailComposeGet({ ...ctx(), id: draftId, maxBodyValueBytes: 10_000 })
+    const sentCopy = await emailComposeGet({
+      ...ctx(),
+      id: MESSAGE_ID_RE.exec(sent.content[0]?.text ?? '')?.[1] ?? '',
+      maxBodyValueBytes: 10_000,
+    })
     expect(sentCopy?.bcc?.[0]?.email).toBe(address)
 
     // The delivered copy is a different Email; it must carry no bcc at all.

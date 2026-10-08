@@ -8,6 +8,8 @@ import { type DraftDepsOptions, draftDeps, receivedMessage, TEST_PRINCIPAL } fro
 
 const store = () => createIdempotencyStore<string>()
 
+const DRAFT_ID_RE = /draftId: (\S+)/u
+
 const run = async (args: Record<string, unknown>, opts: DraftDepsOptions = {}) => {
   const result = await createDraft(draftDeps(opts), store(), {
     args: createDraftInput.parse(args),
@@ -44,7 +46,10 @@ describe('createDraft', () => {
     expect(creates[0]?.draft.text).toBe('Here they are.')
 
     expect(text).toContain('Nothing has been sent')
-    expect(text).toContain('draftId: dNew')
+    // The draftId is a token the draft carries as a keyword, not its JMAP id.
+    const draftId = DRAFT_ID_RE.exec(text)?.[1] ?? ''
+    expect(draftId).not.toBe('dNew1')
+    expect(creates[0]?.keywords).toEqual([`$draftid:${draftId}`])
     expect(text).toContain('to: Nadia Bram <nadia@example.org>')
     expect(text).toContain('body (text): Here they are.')
   })
@@ -83,6 +88,14 @@ describe('createDraft', () => {
         '> Can you send the numbers?\n'
     )
     expect(creates[1]?.draft.text).toBe('Here they are.')
+  })
+
+  test('records the message a reply answers, so update_draft can quote it again', async () => {
+    const creates: DraftCreateParams[] = []
+    await run({ inReplyTo: 'e1', text: 'Here they are.' }, { creates, records: { e1: receivedMessage() } })
+    await run({ text: 'Hello.', to: ['nadia@example.org'] }, { creates })
+    expect(creates[0]?.keywords?.[0]).toBe('$draftreplyto:e1')
+    expect(creates[1]?.keywords?.some((keyword) => keyword.startsWith('$draftreplyto:'))).toBe(false)
   })
 
   test('does not quote the original to a recipient it was never addressed to, unless asked', async () => {
@@ -297,7 +310,9 @@ describe('createDraft', () => {
 
     expect(creates).toHaveLength(1)
     expect(second.content[0]?.text).toContain('Replayed')
-    expect(second.content[0]?.text).toContain('draftId: dNew')
+    expect(DRAFT_ID_RE.exec(second.content[0]?.text ?? '')?.[1]).toBe(
+      DRAFT_ID_RE.exec(first.content[0]?.text ?? '')?.[1]
+    )
     expect(first.content[0]?.text).not.toContain('Replayed')
   })
 

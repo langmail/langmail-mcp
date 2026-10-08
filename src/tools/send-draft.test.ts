@@ -42,14 +42,21 @@ describe('sendDraft', () => {
     expect(text).toContain('get_email')
   })
 
+  test('sends the current revision of an edited draft, by the id create_draft returned', async () => {
+    const submissions: EmailSubmissionCreateParams[] = []
+    const edited = stagedDraft({ id: 'd2', keywords: { $draft: true, $seen: true, '$draftid:d1': true } })
+    const { text } = await run({ draftId: 'd1' }, { records: { d2: edited }, submissions })
+    // The submission names the message as it is now, not the id the caller holds.
+    expect(submissions[0]?.emailId).toBe('d2')
+    expect(text).toContain('messageId: d2')
+  })
+
   test('refuses a draft id that does not exist, and says nothing was sent', async () => {
     const submissions: EmailSubmissionCreateParams[] = []
     const { result, text } = await run({ draftId: 'gone' }, { submissions })
     expect(result.isError).toBe(true)
     expect(text).toContain('Draft not found: gone')
     expect(text).toContain('Nothing was sent')
-    // Points at the update_draft id churn, which is the likely cause.
-    expect(text).toContain('update_draft returned')
     expect(submissions).toEqual([])
   })
 
@@ -74,7 +81,7 @@ describe('sendDraft', () => {
     const { result, text } = await run({ draftId: 'd1' }, { records: { d1: attached }, submissions })
     expect(result.isError).toBe(true)
     expect(text).toContain('has no recipients')
-    expect(text).toContain('send the draftId it returns')
+    expect(text).toContain('then send it again')
     expect(submissions).toEqual([])
   })
 
@@ -308,6 +315,27 @@ describe('sendDraft', () => {
     expect(result.isError).toBe(true)
     expect(result.content[0]?.text ?? '').toContain('could deliver a duplicate')
     expect(submissions).toEqual([])
+  })
+
+  test('a send whose outcome is unknown also blocks a retry through the draft’s other id', async () => {
+    const submissions: EmailSubmissionCreateParams[] = []
+    const guard = createSendGuard()
+    // Sent by its draftId `tok1`, answer lost; the retry comes in with the
+    // message id search_emails shows for the same draft.
+    const tokenSubject = { key: 'tok1', tool: 'send_draft' }
+    guard.reserve(TEST_PRINCIPAL, tokenSubject)
+    guard.markUnknown(TEST_PRINCIPAL, tokenSubject)
+    const edited = stagedDraft({ id: 'd2', keywords: { $draft: true, $seen: true, '$draftid:tok1': true } })
+    const result = await sendDraft(draftDeps({ records: { d2: edited }, submissions }), store(), guard, {
+      args: sendDraftInput.parse({ draftId: 'd2' }),
+      principal: TEST_PRINCIPAL,
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text ?? '').toContain('could deliver a duplicate')
+    expect(submissions).toEqual([])
+    // Refused before anything was sent, so its own reservation is released.
+    expect(guard.reserve(TEST_PRINCIPAL, { key: 'd2', tool: 'send_draft' })).toBeNull()
   })
 
   test('releases the reservation once the message is marked no longer a draft', async () => {

@@ -408,6 +408,15 @@ export const withQuotedOriginal = (body: ReplyBody, original: EmailComposeRecord
   }
 }
 
+// Whether a body already quotes `original` — by its attribution line, which is
+// how update_draft tells a reply that carries the quote from a bare one, and a
+// caller who passed the whole body (quote included) from one who passed only
+// the new part.
+export const carriesQuoteOf = (body: ReplyBody, original: EmailComposeRecord): boolean => {
+  const attribution = attributionLine(original)
+  return Boolean(body.text?.includes(attribution) || body.html?.includes(escapeHtml(attribution)))
+}
+
 // The quoting decision both reply paths make: the caller's `quoteOriginal`
 // when given, the recipient rule otherwise. Returns the body to stage and,
 // when the default withheld the quote, the note the result should carry.

@@ -1,10 +1,16 @@
 // update_draft tool — edit a staged draft.
 //
-// The draft id changes. RFC 8621 makes an Email's content immutable (only
-// `keywords` and `mailboxIds` can be patched), so editing a draft means writing
-// a new message and destroying the old one — see @langmail/jmap `drafts.ts`,
-// which does both halves in one Email/set so the edit is never visible as two
-// drafts. The new id is returned and is the one send_draft must be given.
+// The draft id does not change. RFC 8621 makes an Email's content immutable
+// (only `keywords` and `mailboxIds` can be patched), so editing a draft means
+// writing a new message and destroying the old one — see @langmail/jmap
+// `drafts.ts`. The JMAP id therefore changes on every edit, but the replacement
+// carries the draft's stable id as a `$draftid:` keyword (`stableDraftId` in
+// draft-common.ts), so the id create_draft handed out keeps resolving to the
+// current revision in get_draft, update_draft and send_draft.
+//
+// On a reply, `text` and `html` are the new part only: the quoted original is
+// re-attached below them the way create_draft attaches it, if the staged draft
+// carried it — so rewording a reply never drops the conversation it answers.
 //
 // Merge semantics are field-by-field: an omitted field keeps its staged value,
 // a supplied one replaces it, and an empty recipient array clears that field.
@@ -12,6 +18,7 @@
 // message is from or which conversation it belongs to is a different message,
 // so stage it with create_draft.
 
+import { randomUUID } from 'node:crypto'
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
@@ -33,10 +40,16 @@ import {
   draftRefusalReason,
   formatDraft,
   isDraft,
+  loadDraft,
   MAX_DRAFT_BODY_VALUE_BYTES,
   parseRecipients,
+  replyOriginalId,
+  replyOriginalKeyword,
+  stableDraftId,
+  stableDraftIdKeyword,
   unreferencableAttachments,
 } from './draft-common.ts'
+import { carriesQuoteOf, type ReplyBody, withQuotedOriginal } from './reply-quote.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 const MAX_RECIPIENTS = 50
@@ -62,20 +75,36 @@ export const updateDraftInput = z.object({
     ),
   bcc: addressListSchema('Bcc'),
   cc: addressListSchema('Cc'),
-  draftId: z.string().min(1).describe('The draft to edit, as returned by create_draft or a previous update_draft.'),
+  draftId: z
+    .string()
+    .min(1)
+    .describe(
+      'The draft id, as returned by create_draft, or a message id from search_emails with `mailbox: "Drafts"`. ' +
+        'Edits do not change it.'
+    ),
   html: z
     .string()
     .max(MAX_BODY_CHARS)
     .optional()
-    .describe('Replace the HTML body — all of it, including the quoted original a reply carries. Omit to keep it.'),
+    .describe(
+      'Replace the HTML body. On a reply, write only the new part: the quoted original is re-attached below ' +
+        'it, so do not paste the quote from get_draft back in. Omit to keep the body.'
+    ),
+  quoteOriginal: z
+    .boolean()
+    .optional()
+    .describe(
+      'On a reply, with `text` or `html`: whether the original is quoted below the new text. Defaults to ' +
+        'whatever the staged draft does. Pass false to drop the quote, true to add it to a bare reply.'
+    ),
   subject: z.string().max(500).optional().describe('Replace the subject. Omit to keep it.'),
   text: z
     .string()
     .max(MAX_BODY_CHARS)
     .optional()
     .describe(
-      'Replace the plain-text body — all of it, including the quoted original a reply carries. To reword ' +
-        'a reply and keep the quote, stage a fresh one with create_draft and `inReplyTo`. Omit to keep it.'
+      'Replace the plain-text body. On a reply, write only the new part: the quoted original is ' +
+        're-attached below it, so do not paste the quote from get_draft back in. Omit to keep the body.'
     ),
   to: addressListSchema('To'),
 })
@@ -112,8 +141,8 @@ const staleBodyPart = (
 }
 
 // Whether the caller asked for any change at all. A bare `draftId` would
-// otherwise replace and destroy the draft for nothing, invalidating every stored
-// reference to it and running the replacement's failure modes for no benefit.
+// otherwise replace and destroy the draft for nothing, running the
+// replacement's failure modes for no benefit.
 const editsNothing = (args: UpdateDraftArgs): boolean =>
   args.to === undefined &&
   args.cc === undefined &&
@@ -155,15 +184,15 @@ const loadEditableDraft = async (
   p: { accountId: string; args: UpdateDraftArgs; authorization: string }
 ): Promise<{ error: ToolResult } | { record: EmailComposeRecord }> => {
   const { args } = p
-  const record = await deps.emailComposeGet({
+  const record = await loadDraft(deps, {
     accountId: p.accountId,
-    apiUrl: '',
     authorization: p.authorization,
-    id: args.draftId,
-    maxBodyValueBytes: MAX_DRAFT_BODY_VALUE_BYTES,
+    draftId: args.draftId,
   })
   if (!record) {
-    return { error: errorResult(`Draft not found: ${args.draftId}`) }
+    return {
+      error: errorResult(`Draft not found: ${args.draftId}. Find it with search_emails using mailbox "Drafts".`),
+    }
   }
   if (!isDraft(record)) {
     return {
@@ -198,13 +227,148 @@ const loadEditableDraft = async (
   return { record }
 }
 
-export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext): Promise<ToolResult> => {
-  const { args } = ctx
+// The body the edit stages: what the caller supplied, with the original quoted
+// below it when the draft is a reply that quotes it (or the caller asks for the
+// quote). `note` says when a quote could not be re-attached, so the agent learns
+// the reply now goes out without it.
+//
+// The default follows the staged draft rather than the recipient rule
+// create_draft applies: the quoting decision was made when the reply was staged
+// — by the user, when they asked for a quote despite a new recipient — and an
+// edit of the wording is not a reason to revisit it.
+// The tail of an attribution line ("On …, Name <address> wrote:"), as a sign a
+// body quotes something when the quoted message itself cannot be read.
+const QUOTE_ATTRIBUTION_RE = / wrote:$/mu
+
+// Quoted history in either body form: a `>`-prefixed line or a blockquote.
+const FOREIGN_QUOTE_RE = /^>|<blockquote\b/imu
+
+const editedBody = async (
+  deps: DraftToolDeps,
+  p: { accountId: string; args: UpdateDraftArgs; authorization: string; record: EmailComposeRecord; staged: EmailDraft }
+): Promise<{ body: ReplyBody; note?: string; originalId?: string }> => {
+  const { args } = p
+  const supplied: ReplyBody = {
+    ...(args.text === undefined ? {} : { text: args.text }),
+    ...(args.html === undefined ? {} : { html: args.html }),
+  }
+  const answers = p.staged.inReplyTo?.[0]
+  if ((args.text === undefined && args.html === undefined) || !answers || args.quoteOriginal === false) {
+    return { body: supplied }
+  }
+  // The id create_draft recorded; failing that — a reply staged by another
+  // client — the thread, which holds the original as long as the subject has
+  // not changed.
+  const originalId =
+    replyOriginalId(p.record) ??
+    (await deps.threadMessageFind({
+      accountId: p.accountId,
+      apiUrl: '',
+      authorization: p.authorization,
+      emailId: p.record.id,
+      messageId: answers,
+    }))
+  const original = originalId
+    ? await deps.emailComposeGet({
+        accountId: p.accountId,
+        apiUrl: '',
+        authorization: p.authorization,
+        bodyValues: 'body',
+        id: originalId,
+        maxBodyValueBytes: MAX_DRAFT_BODY_VALUE_BYTES,
+      })
+    : null
+  if (!original) {
+    // Only worth saying when a quote was wanted or looks to have been there —
+    // a bare reply never had one to lose.
+    const wanted = args.quoteOriginal === true || QUOTE_ATTRIBUTION_RE.test(p.staged.text ?? p.staged.html ?? '')
+    return wanted
+      ? {
+          body: supplied,
+          note:
+            'The message this draft replies to could not be found, so no quote was re-attached: the body is ' +
+            'exactly the text given.',
+        }
+      : { body: supplied }
+  }
+  // A caller who passed the whole body, quote included, gets it as written
+  // rather than quoted twice.
+  if (carriesQuoteOf(supplied, original)) {
+    return { body: supplied, originalId: original.id }
+  }
+  if (!(args.quoteOriginal ?? carriesQuoteOf(p.staged, original))) {
+    // A quote in a format this tool did not write — another mail client's —
+    // goes with the old wording. Say so, since the description promised the
+    // quote would be kept.
+    const foreignQuote = args.quoteOriginal === undefined && FOREIGN_QUOTE_RE.test(p.staged.text ?? p.staged.html ?? '')
+    return {
+      body: supplied,
+      originalId: original.id,
+      ...(foreignQuote
+        ? {
+            note:
+              'The staged body held quoted text in a format this tool did not write, and it was replaced along ' +
+              'with the old wording. Pass `quoteOriginal: true` with the text to quote the original below it.',
+          }
+        : {}),
+    }
+  }
+  return { body: withQuotedOriginal(supplied, original), originalId: original.id }
+}
+
+// Why the arguments alone describe no edit, if they don't — checked before
+// anything is read.
+const argumentRefusal = (args: UpdateDraftArgs): ToolResult | null => {
+  if (args.quoteOriginal !== undefined && args.text === undefined && args.html === undefined) {
+    return errorResult(
+      '`quoteOriginal` only applies together with a new `text` or `html`: pass the new wording as well. ' +
+        `Draft ${args.draftId} was left unchanged.`
+    )
+  }
   if (editsNothing(args)) {
     return errorResult(
-      `No changes were given, so draft ${args.draftId} was left exactly as it is — its id still works. Pass at ` +
-        'least one of to/cc/bcc/subject/text/html/attachments to edit it.'
+      `No changes were given, so draft ${args.draftId} was left exactly as it is. Pass at least one of ` +
+        'to/cc/bcc/subject/text/html/attachments to edit it.'
     )
+  }
+  return null
+}
+
+// The result of a landed edit.
+const updatedSummary = (p: {
+  args: UpdateDraftArgs
+  created: DraftCreateResult
+  draftId: string
+  merged: EmailDraft
+  note: string | undefined
+  replacedId: string
+}): string => {
+  // A create that landed while the destroy didn't leaves the superseded copy in
+  // the folder, holding the *pre-edit* content. The draftId resolves to the new
+  // revision (see `loadDraft`), but the user sees two drafts in their client, so
+  // the note says which one is stale.
+  const leftover =
+    p.created.replacedDestroyed === false
+      ? `\nNote: the pre-edit copy (message ${p.replacedId}) could not be removed and is still in Drafts. ` +
+        `send_draft with draftId ${p.draftId} sends the edited version. Do not send ${p.replacedId}; with the ` +
+        "user's OK, remove it with trash_emails."
+      : ''
+  const note = p.note ? `\n${p.note}` : ''
+  // A caller who came in with a revision's message id (from search_emails) is
+  // told the id that keeps working; one who held the draftId already is told it
+  // still does.
+  const heading =
+    p.args.draftId === p.draftId
+      ? 'Draft updated and still unsent — the draftId is unchanged.'
+      : `Draft updated and still unsent. Its draftId is ${p.draftId}; use that from now on.`
+  return `${heading}\ndraftId: ${p.draftId}\n${formatDraft(p.merged, { threadId: p.created.threadId })}${note}${leftover}`
+}
+
+export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext): Promise<ToolResult> => {
+  const { args } = ctx
+  const refused = argumentRefusal(args)
+  if (refused) {
+    return refused
   }
   const authorization = bearerAuthorization(ctx.token)
   const accountId = await deps.resolveAccountId(authorization)
@@ -248,14 +412,19 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
     return errorResult(attachments.error)
   }
 
+  const edited = await editedBody(deps, { accountId, args, authorization, record, staged })
   const merged: EmailDraft = {
     ...staged,
     ...recipients,
     ...(args.subject === undefined ? {} : { subject: args.subject }),
-    ...(args.text === undefined ? {} : { text: args.text }),
-    ...(args.html === undefined ? {} : { html: args.html }),
+    ...edited.body,
     ...(attachments.attachments === undefined ? {} : { attachments: attachments.attachments }),
   }
+  // A draft another client staged gets its token now — see `stableDraftId`.
+  const draftId = stableDraftId(record) ?? randomUUID()
+  // Recorded by create_draft, or found in the thread just now — kept either way
+  // so the next edit does not have to search again.
+  const originalId = edited.originalId ?? replyOriginalId(record)
 
   let created: DraftCreateResult
   try {
@@ -266,9 +435,15 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
       draft: merged,
       mailboxId: mailboxes.drafts,
       // The user's own labels survive the edit — an edit shouldn't quietly
-      // untag a draft they filed.
-      keywords: draftLabelKeywords(record),
-      replaces: args.draftId,
+      // untag a draft they filed. The reply's original rides along so the next
+      // edit can quote it, and the stable id is what keeps the caller's
+      // draftId pointing at this revision.
+      keywords: [
+        ...draftLabelKeywords(record),
+        ...(originalId ? [replyOriginalKeyword(originalId)] : []),
+        stableDraftIdKeyword(draftId),
+      ],
+      replaces: record.id,
     })
   } catch (error) {
     const refusal = draftRefusalReason(error, merged)
@@ -277,22 +452,10 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
     }
     // The destroy only runs once the replacement exists (@langmail/jmap
     // drafts.ts), so a refused create leaves the original exactly as it was.
-    return errorResult(`${refusal} Draft ${args.draftId} was left unchanged and its id still works.`)
+    return errorResult(`${refusal} Draft ${args.draftId} was left unchanged.`)
   }
 
-  // A create that landed while the destroy didn't leaves the superseded draft in
-  // the folder — still sendable, and still holding the *pre-edit* content. That
-  // makes it actively dangerous, not just untidy, so the note says which id to
-  // send and which to leave alone.
-  const leftover =
-    created.replacedDestroyed === false
-      ? `\nNote: the previous draft ${args.draftId} could not be removed and is still in Drafts. It holds the ` +
-        `PRE-EDIT content and is still sendable — do not send it; send ${created.id}.`
-      : ''
-  return textResult(
-    `Draft updated and still unsent — its id is now ${created.id} (the previous id is gone; use the new one ` +
-      `for send_draft).\ndraftId: ${created.id}\n${formatDraft(merged, { threadId: created.threadId })}${leftover}`
-  )
+  return textResult(updatedSummary({ args, created, draftId, merged, note: edited.note, replacedId: record.id }))
 }
 
 // --- MCP registration ----------------------------------------------------
@@ -306,10 +469,10 @@ export const registerUpdateDraft = (server: McpServer, deps: DraftToolDeps, getT
         'Edit a staged draft that has not been sent. Omitted fields keep their staged values; an empty ' +
         'recipient or `attachments` array clears that field. Files already attached are carried across ' +
         'untouched unless `attachments` is given, in which case the list is replaced wholesale — read the ' +
-        'existing blobIds back with get_draft first if you mean to add one rather than swap them. Returns ' +
-        'a NEW draftId — the edit replaces the message, so the ' +
-        'old id stops working and later calls (including send_draft) must use the returned one. The ' +
-        'previous version is not recoverable. If the draft has both a plain-text and an HTML body, pass ' +
+        'existing blobIds back with get_draft first if you mean to add one rather than swap them. The ' +
+        'draftId stays the same across edits, so keep using the one create_draft returned. On a reply, ' +
+        '`text`/`html` is the new part only: the quoted original is kept below it (`quoteOriginal: false` ' +
+        'drops it, `true` adds one to a bare reply). The previous version is not recoverable. If the draft has both a plain-text and an HTML body, pass ' +
         'both `text` and `html` or neither; replacing one would leave the other saying the old thing. The ' +
         'sender and the reply threading cannot be changed here; stage a new draft with create_draft instead.',
       inputSchema: updateDraftInput.shape,

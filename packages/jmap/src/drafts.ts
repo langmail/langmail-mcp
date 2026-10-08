@@ -32,6 +32,23 @@ const USING = ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail']
 // (and Langmail's own UI) key "this is editable, not delivered" off it.
 export const DRAFT_KEYWORD = '$draft'
 
+// The prefix of the keyword that keeps a draft's id stable across edits. An
+// edit writes a new Email (see the header), so the JMAP id changes every time;
+// every revision carries `$draftid:<token>`, and a lookup by that keyword finds
+// the current revision from the token the caller was first handed. A keyword
+// rather than a header because Stalwart answers an Email/query `header`
+// condition with nothing, while `hasKeyword` is indexed — and a keyword never
+// leaves the mailbox, where a header would ride along on the sent mail.
+export const DRAFT_ID_KEYWORD_PREFIX = '$draftid:'
+
+// The prefix of the keyword a reply draft carries naming the message it
+// answers, by JMAP id. The draft's In-Reply-To header names it too, but only by
+// Message-ID, which Stalwart cannot query — and once an edit changes the
+// subject, Stalwart files the replacement in a thread of its own, so the
+// original is not even a thread sibling any more. update_draft reads this to
+// re-quote the original below edited text.
+export const DRAFT_REPLY_TO_KEYWORD_PREFIX = '$draftreplyto:'
+
 // A draft the user composed is not unread mail — Stalwart would otherwise
 // count it towards the Drafts folder's unread badge.
 const SEEN_KEYWORD = '$seen'
@@ -353,3 +370,72 @@ export const sentEmailPatch = (draftsMailboxId: string, sentMailboxId?: string):
     keywords: { [DRAFT_KEYWORD]: false },
     ...(sentMailboxId ? { mailboxIds: { [draftsMailboxId]: false, [sentMailboxId]: true } } : {}),
   })
+
+export interface DraftIdResolveParams extends JmapCall {
+  accountId: string
+  // The stable draft id — the token every revision carries.
+  draftId: string
+}
+
+// The current revision of the draft known as `draftId`, or null when no
+// message carries its `$draftid:` keyword (it is a JMAP id, not a draft id). Newest first, so a superseded revision an edit failed to
+// destroy never wins over the one that replaced it.
+export const draftIdResolve = async (p: DraftIdResolveParams): Promise<string | null> => {
+  const resp = await call(p, {
+    methodCalls: [
+      [
+        'Email/query',
+        {
+          accountId: p.accountId,
+          calculateTotal: false,
+          filter: { hasKeyword: `${DRAFT_ID_KEYWORD_PREFIX}${p.draftId}` },
+          limit: 1,
+          sort: [{ isAscending: false, property: 'receivedAt' }],
+        },
+        '0',
+      ],
+    ],
+    using: USING,
+  })
+  const out = methodResponse<{ ids?: string[] }>(resp, 'Email/query', '0')
+  return out.ids?.[0] ?? null
+}
+
+export interface ThreadMessageFindParams extends JmapCall {
+  accountId: string
+  // Any message of the thread to search — the reply draft itself.
+  emailId: string
+  // RFC 8621 "asMessageIds" form: bare, without angle brackets.
+  messageId: string
+}
+
+// The id of the message in `emailId`'s thread whose Message-ID is `messageId`,
+// or null. This is how an edited reply finds the message it quotes: the draft
+// keeps only the In-Reply-To header, and Stalwart cannot query by header, but
+// it threads a reply onto its original — so the original is one of the
+// thread's messages. One round trip: the draft's threadId, the thread, and the
+// Message-ID of every message in it.
+export const threadMessageFind = async (p: ThreadMessageFindParams): Promise<string | null> => {
+  const resp = await call(p, {
+    methodCalls: [
+      ['Email/get', { accountId: p.accountId, ids: [p.emailId], properties: ['threadId'] }, '0'],
+      [
+        'Thread/get',
+        { '#ids': { name: 'Email/get', path: '/list/*/threadId', resultOf: '0' }, accountId: p.accountId },
+        '1',
+      ],
+      [
+        'Email/get',
+        {
+          '#ids': { name: 'Thread/get', path: '/list/*/emailIds', resultOf: '1' },
+          accountId: p.accountId,
+          properties: ['id', 'messageId'],
+        },
+        '2',
+      ],
+    ],
+    using: USING,
+  })
+  const out = methodResponse<{ list?: { id: string; messageId?: string[] | null }[] }>(resp, 'Email/get', '2')
+  return out.list?.find((email) => email.messageId?.includes(p.messageId))?.id ?? null
+}

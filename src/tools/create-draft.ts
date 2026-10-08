@@ -9,6 +9,7 @@
 // a header, and a reply staged this way lands in the same conversation in every
 // client, not just in Langmail's own threading.
 
+import { randomUUID } from 'node:crypto'
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
@@ -26,10 +27,12 @@ import {
   parseRecipients,
   type ResolvedIdentity,
   replyConflictError,
+  replyOriginalKeyword,
   replyRecipients,
   replySubject,
   replyThreading,
   resolveIdentity,
+  stableDraftIdKeyword,
 } from './draft-common.ts'
 import { quoteReply } from './reply-quote.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
@@ -125,7 +128,7 @@ const composeDraft = async (
   deps: DraftToolDeps,
   ctx: CreateDraftContext,
   p: { accountId: string; authorization: string; identity: ResolvedIdentity }
-): Promise<{ error: ToolResult } | { draft: EmailDraft; quoteNote?: string }> => {
+): Promise<{ error: ToolResult } | { draft: EmailDraft; keywords: string[]; quoteNote?: string }> => {
   const { args } = ctx
   const recipients = parseRecipients({
     ...(args.to ? { to: args.to } : {}),
@@ -145,7 +148,7 @@ const composeDraft = async (
   }
 
   if (!args.inReplyTo) {
-    return { draft: base }
+    return { draft: base, keywords: [] }
   }
 
   const original = await deps.emailComposeGet({
@@ -186,6 +189,8 @@ const composeDraft = async (
   })
   return {
     ...(quoted.note ? { quoteNote: quoted.note } : {}),
+    // So update_draft can find the original again to re-quote it.
+    keywords: [replyOriginalKeyword(original.id)],
     draft: {
       ...base,
       ...quoted.body,
@@ -263,6 +268,9 @@ export const createDraft = async (
     ...(resolved.attachments.length > 0 ? { attachments: resolved.attachments } : {}),
   }
 
+  // The id this draft is known by from now on, whatever its JMAP id becomes
+  // across edits — see `stableDraftId`.
+  const draftId = randomUUID()
   let created: DraftCreateResult
   try {
     created = await deps.draftCreate({
@@ -271,6 +279,7 @@ export const createDraft = async (
       authorization,
       draft,
       mailboxId: mailboxes.drafts,
+      keywords: [...composed.keywords, stableDraftIdKeyword(draftId)],
     })
   } catch (error) {
     const refusal = draftRefusalReason(error, draft)
@@ -282,7 +291,7 @@ export const createDraft = async (
 
   const summary =
     'Draft staged in Drafts. Nothing has been sent — send it with send_draft, or leave it for the user ' +
-    `to review and send in Langmail.\ndraftId: ${created.id}\n${formatDraft(draft, { threadId: created.threadId })}` +
+    `to review and send in Langmail.\ndraftId: ${draftId}\n${formatDraft(draft, { threadId: created.threadId })}` +
     (composed.quoteNote ? `\n${composed.quoteNote}` : '')
   if (args.idempotencyKey) {
     replays.record(TOOL_NAME, principal, args.idempotencyKey, summary)
