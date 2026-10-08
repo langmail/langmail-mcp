@@ -507,6 +507,7 @@ describe('updateDraft on a reply', () => {
     expect(creates[0]?.draft.text).toBe(quotedReply.bodyValues?.['1']?.value)
     expect(text).toContain('now goes to them too')
     expect(text).toContain('quoteOriginal: false')
+    expect(text).toContain('drop that recipient again')
   })
 
   test("a recipients-only edit that adds an outsider to another client's quoted reply says so too", async () => {

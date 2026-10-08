@@ -338,7 +338,9 @@ const replyOriginalForEdit = (
 // Every address that is the user — the authenticated principal, the draft's
 // sender, and every identity the account can send as — as `resolveIdentity`
 // counts them (see `ResolvedIdentity.selfAddresses`). Read only when an edit
-// adds recipients to a quoted reply.
+// puts the quote in front of recipients that have not been checked against the
+// original — one that adds recipients to a quoted reply, or one that pastes the
+// quote onto a reply that did not carry it.
 const selfAddressesOf = async (
   deps: DraftToolDeps,
   p: { authorization: string; principal: string; staged: EmailDraft }
@@ -361,7 +363,7 @@ const selfAddressesOf = async (
 // re-passing them is not a new decision. When it did not — the quote arrives
 // in the caller's own text — nobody on the draft has seen it yet, so every
 // recipient is checked.
-const addedOutsider = async (
+const outsiderShownQuote = async (
   deps: DraftToolDeps,
   p: {
     args: UpdateDraftArgs
@@ -404,13 +406,16 @@ const missingOriginalNote = (args: UpdateDraftArgs, staged: EmailDraft): { note?
 }
 
 // The note for quoted text going to someone the original was never addressed to.
-// The remedy needs both halves. Without `quoteOriginal: false`, the staged body
+// Dropping that recipient again works on every path, and is the only remedy for
+// a body another mail client wrote: the agent cannot read it back whole, so it
+// has no "own wording" to pass. The other remedy needs both halves. Without `quoteOriginal: false`, the staged body
 // this edit writes — quote included — makes the next edit's default re-attach
 // it; and `quoteOriginal: false` on a text that still holds the quote stages it
 // verbatim.
 const quotedTextNote = (outsider: string): string =>
   `The draft carries quoted text from the original, and ${outsider} was not on it, so that now goes to them ` +
-  'too. To take it off, pass your own wording again — without the quoted part — with `quoteOriginal: false`.'
+  'too. To take it off, drop that recipient again, or pass your own wording again — without the quoted ' +
+  'part — with `quoteOriginal: false`.'
 
 // An edit that leaves the body alone re-stages it as it is, quote included —
 // the same as changing the recipients of a quoted reply in a mail client. When
@@ -436,7 +441,7 @@ const stagedQuoteNote = async (
   if (!(original && (carriesQuoteOf(p.staged, original) || FOREIGN_QUOTE_RE.test(bothParts(p.staged))))) {
     return {}
   }
-  const outsider = await addedOutsider(deps, { ...p, original, stagedCarriedQuote: true })
+  const outsider = await outsiderShownQuote(deps, { ...p, original, stagedCarriedQuote: true })
   return outsider
     ? {
         note: quotedTextNote(outsider),
@@ -489,7 +494,7 @@ const editedBody = async (
     // an added outsider is told about, as on a recipients-only edit.
     const outsider =
       args.quoteOriginal === undefined
-        ? await addedOutsider(deps, { ...p, original, stagedCarriedQuote: carriesQuoteOf(p.staged, original) })
+        ? await outsiderShownQuote(deps, { ...p, original, stagedCarriedQuote: carriesQuoteOf(p.staged, original) })
         : null
     return outsider ? { body: supplied, note: quotedTextNote(outsider) } : { body: supplied }
   }
@@ -510,7 +515,9 @@ const editedBody = async (
     }
   }
   const outsider =
-    args.quoteOriginal === undefined ? await addedOutsider(deps, { ...p, original, stagedCarriedQuote: true }) : null
+    args.quoteOriginal === undefined
+      ? await outsiderShownQuote(deps, { ...p, original, stagedCarriedQuote: true })
+      : null
   if (outsider) {
     return { body: supplied, note: quoteWithheldNote(outsider) }
   }
