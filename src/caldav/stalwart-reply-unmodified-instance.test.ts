@@ -48,8 +48,9 @@ const ADMIN_AUTH =
 const DOMAIN = 'langmail.me'
 const TOKEN = 'e2e-basic-auth' // ignored — cfg.authHeaders carries Basic auth
 const TZID = 'Europe/Berlin'
-// Wall-clock start/end of every instance. The attendee override must repeat them
-// exactly, or Stalwart sees a time change instead of a PARTSTAT edit.
+// Wall-clock start/end of the series' instances. An attendee's accept override
+// must repeat them exactly, or Stalwart sees a time change instead of a
+// PARTSTAT edit. (The control test moves one instance on purpose.)
 const START = 'T100000'
 const END = 'T110000'
 
