@@ -201,7 +201,7 @@ const loadSendableDraft = async (
     return {
       error: errorResult(
         `${p.draftId} is no longer a draft — it has already been sent. Nothing was sent again. ` +
-          `Read it back with get_email using messageId ${record.id}.`
+          `Read it back with get_email, passing id ${record.id}.`
       ),
     }
   }
@@ -329,7 +329,7 @@ const sendHeld = async (
       wasRefused(error)
         ? `The server refused to send ${args.draftId} (${detail}). Nothing was sent; it is still a draft.`
         : `${args.draftId} was handed to the server, but the answer was lost (${detail}), so it may already ` +
-            `have gone out. Do NOT send it again yet: read it back with get_email using messageId ${record.id}, ` +
+            `have gone out. Do NOT send it again yet: read it back with get_email, passing id ${record.id}, ` +
             "or check the user's Sent folder, before deciding."
     )
   }

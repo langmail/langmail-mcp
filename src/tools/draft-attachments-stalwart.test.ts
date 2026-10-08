@@ -443,7 +443,7 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
 
     const result = await updateDraft(deps, {
       args: updateDraftInput.parse({ draftId, subject: 'Invoice RE-2026-008 (corrected)' }),
-      token: TOKEN,
+      ...toolCtx,
     })
     expect(result.isError).toBeUndefined()
     expect(DRAFT_ID_RE.exec(result.content[0]?.text ?? '')?.[1]).toBe(draftId)
@@ -475,7 +475,7 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
         attachments: [{ content: Buffer.from('replacement note').toString('base64'), filename: 'note.txt' }],
         draftId,
       }),
-      token: TOKEN,
+      ...toolCtx,
     })
     expect(swapped.isError).toBeUndefined()
     const swappedId = (await draftIdResolve({ ...ctx(), draftId })) ?? ''
@@ -488,7 +488,7 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
     // …and an empty list takes the file off entirely.
     const cleared = await updateDraft(deps, {
       args: updateDraftInput.parse({ attachments: [], draftId }),
-      token: TOKEN,
+      ...toolCtx,
     })
     expect(cleared.isError).toBeUndefined()
     const clearedId = (await draftIdResolve({ ...ctx(), draftId })) ?? ''

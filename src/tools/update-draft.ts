@@ -120,6 +120,7 @@ export type UpdateDraftArgs = z.infer<typeof updateDraftInput>
 
 export interface UpdateDraftContext {
   args: UpdateDraftArgs
+  principal: string
   token: string
 }
 
@@ -204,8 +205,8 @@ const loadEditableDraft = async (
   if (!isDraft(record)) {
     return {
       error: errorResult(
-        `${args.draftId} is not a draft — it has already been sent or received, and cannot be edited. Its ` +
-          `messageId is ${record.id}; read it with get_email.`
+        `${args.draftId} is not a draft — it has already been sent or received, and cannot be edited. Read ` +
+          `it with get_email, passing id ${record.id}.`
       ),
     }
   }
@@ -294,31 +295,43 @@ const replyOriginal = async (
 // What a failed lookup of the original costs depends on the edit. One that
 // rewrites the body needs the original to quote, and one that changes the
 // subject moves the reply out of the thread that could still find it — both
-// fail loudly. Any other edit only misses recording the id, and the next edit
-// can still find it in the thread, so it goes ahead without.
+// fail loudly. Any other edit goes ahead, keeping whatever id was already
+// recorded — the next edit can verify it, or find the original in the thread.
+//
+// `id` is what the replacement records; `record` is the original itself, when
+// it was read and verified.
 const replyOriginalForEdit = (
   deps: DraftToolDeps,
   p: { accountId: string; args: UpdateDraftArgs; authorization: string; record: EmailComposeRecord; staged: EmailDraft }
-): Promise<EmailComposeRecord | null> =>
-  replyOriginal(deps, p).catch((error: unknown) => {
-    if (p.args.subject !== undefined || p.args.text !== undefined || p.args.html !== undefined) {
-      throw error
+): Promise<{ id: string | null; record: EmailComposeRecord | null }> =>
+  replyOriginal(deps, p).then(
+    (original) => ({ id: original?.id ?? null, record: original }),
+    (error: unknown) => {
+      if (p.args.subject !== undefined || p.args.text !== undefined || p.args.html !== undefined) {
+        throw error
+      }
+      return { id: replyOriginalId(p.record), record: null }
     }
-    return null
-  })
+  )
 
-// Every address that is the user: the draft's sender and every identity the
-// account can send as. Read only when an edit adds recipients to a quoted reply.
+// Every address that is the user — the authenticated principal, the draft's
+// sender, and every identity the account can send as — as `resolveIdentity`
+// counts them (see `ResolvedIdentity.selfAddresses`). Read only when an edit
+// adds recipients to a quoted reply.
 const selfAddressesOf = async (
   deps: DraftToolDeps,
-  p: { authorization: string; staged: EmailDraft }
+  p: { authorization: string; principal: string; staged: EmailDraft }
 ): Promise<string[]> => {
   const identities = await deps.identityGet({
     accountId: await deps.resolveSubmissionAccountId(p.authorization),
     apiUrl: '',
     authorization: p.authorization,
   })
-  return [...p.staged.from.map((address) => address.email), ...identities.map((identity) => identity.email)]
+  return [
+    p.principal,
+    ...p.staged.from.map((address) => address.email),
+    ...identities.map((identity) => identity.email),
+  ]
 }
 
 // Someone this edit adds who the original was never addressed to, or null.
@@ -331,6 +344,7 @@ const addedOutsider = async (
     args: UpdateDraftArgs
     authorization: string
     original: EmailComposeRecord
+    principal: string
     recipients: ParsedRecipients
     staged: EmailDraft
   }
@@ -363,6 +377,7 @@ const editedBody = async (
     args: UpdateDraftArgs
     authorization: string
     original: EmailComposeRecord | null
+    principal: string
     recipients: ParsedRecipients
     staged: EmailDraft
   }
@@ -518,13 +533,20 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
 
   // Recorded by create_draft, or found in the thread just now — kept on the
   // replacement either way, so the next edit does not have to search again.
-  const original = await replyOriginalForEdit(deps, { accountId, args, authorization, record, staged })
+  const resolvedOriginal = await replyOriginalForEdit(deps, { accountId, args, authorization, record, staged })
   const mergedRecipients: ParsedRecipients = {
     to: recipients.to ?? staged.to ?? [],
     cc: recipients.cc ?? staged.cc ?? [],
     bcc: recipients.bcc ?? staged.bcc ?? [],
   }
-  const edited = await editedBody(deps, { args, authorization, original, recipients: mergedRecipients, staged })
+  const edited = await editedBody(deps, {
+    args,
+    authorization,
+    original: resolvedOriginal.record,
+    principal: ctx.principal,
+    recipients: mergedRecipients,
+    staged,
+  })
   const merged: EmailDraft = {
     ...staged,
     ...recipients,
@@ -549,7 +571,7 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
       // draftId pointing at this revision.
       keywords: [
         ...draftLabelKeywords(record),
-        ...(original ? [replyOriginalKeyword(original.id)] : []),
+        ...(resolvedOriginal.id ? [replyOriginalKeyword(resolvedOriginal.id)] : []),
         stableDraftIdKeyword(draftId),
       ],
       replaces: record.id,
@@ -569,7 +591,13 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
 
 // --- MCP registration ----------------------------------------------------
 
-export const registerUpdateDraft = (server: McpServer, deps: DraftToolDeps, getToken: () => string): void => {
+export const registerUpdateDraft = (
+  server: McpServer,
+  deps: DraftToolDeps,
+  // Bearer + principal are threaded per request — see mcp/handler.ts.
+  getToken: () => string,
+  getPrincipal: () => string
+): void => {
   server.registerTool(
     'update_draft',
     {
@@ -589,7 +617,7 @@ export const registerUpdateDraft = (server: McpServer, deps: DraftToolDeps, getT
     },
     (args) => {
       const parsed = updateDraftInput.parse(args)
-      return updateDraft(deps, { args: parsed, token: getToken() })
+      return updateDraft(deps, { args: parsed, principal: getPrincipal(), token: getToken() })
     }
   )
 }

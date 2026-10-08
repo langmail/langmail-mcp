@@ -56,7 +56,7 @@ describe('sendDraft', () => {
     const { result, text } = await run({ draftId: 'tok1' }, { records: { d2: sent } })
     expect(result.isError).toBe(true)
     expect(text).toContain('already been sent')
-    expect(text).toContain('messageId d2')
+    expect(text).toContain('passing id d2')
   })
 
   test('refuses a draft id that does not exist, and says nothing was sent', async () => {

@@ -2,12 +2,22 @@ import { describe, expect, test } from 'bun:test'
 
 import { type BlobUploadParams, type DraftCreateParams } from '@langmail/jmap'
 
-import { type DraftDepsOptions, draftDeps, receivedMessage, stagedDraft } from './draft-test-fixtures.ts'
+import {
+  type DraftDepsOptions,
+  draftDeps,
+  receivedMessage,
+  stagedDraft,
+  TEST_PRINCIPAL,
+} from './draft-test-fixtures.ts'
 import { attributionLine, withQuotedOriginal } from './reply-quote.ts'
 import { updateDraft, updateDraftInput } from './update-draft.ts'
 
 const run = async (args: Record<string, unknown>, opts: DraftDepsOptions = {}) => {
-  const result = await updateDraft(draftDeps(opts), { args: updateDraftInput.parse(args), token: 'tok' })
+  const result = await updateDraft(draftDeps(opts), {
+    args: updateDraftInput.parse(args),
+    principal: TEST_PRINCIPAL,
+    token: 'tok',
+  })
   return { result, text: result.content[0]?.text ?? '' }
 }
 
@@ -499,6 +509,39 @@ describe('updateDraft on a reply', () => {
     expect(text).toContain('no quote was re-attached')
   })
 
+  test('counts the signed-in address as the user, even when it is not a sending identity', async () => {
+    const creates: DraftCreateParams[] = []
+    // An aliased login: the principal is not among the account's identities.
+    const result = await updateDraft(draftDeps({ creates, records: { d1: quotedReply, e1: original } }), {
+      args: updateDraftInput.parse({ cc: ['login@langmail.me'], draftId: 'd1', text: 'Here they are.' }),
+      principal: 'login@langmail.me',
+      token: 'tok',
+    })
+    expect(result.content[0]?.text).not.toContain('was not on it')
+    expect(occurrences(creates[0]?.draft.text, ATTRIBUTION)).toBe(1)
+  })
+
+  test('a tolerated read failure keeps the original id already recorded', async () => {
+    const creates: DraftCreateParams[] = []
+    const recorded = {
+      ...quotedReply,
+      keywords: { $draft: true, $seen: true, '$draftid:d1': true, '$draftreplyto:e1': true },
+    }
+    const base = draftDeps({ creates, records: { d1: recorded, e1: original } })
+    const deps = {
+      ...base,
+      emailComposeGet: (p: Parameters<typeof base.emailComposeGet>[0]) =>
+        p.id === 'e1' ? Promise.reject(new Error('socket hang up')) : base.emailComposeGet(p),
+    }
+    const result = await updateDraft(deps, {
+      args: updateDraftInput.parse({ cc: ['carl@example.org'], draftId: 'd1' }),
+      principal: TEST_PRINCIPAL,
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(creates[0]?.keywords).toContain('$draftreplyto:e1')
+  })
+
   test('a recipients-only edit goes ahead when the thread lookup fails', async () => {
     const creates: DraftCreateParams[] = []
     const deps = {
@@ -507,6 +550,7 @@ describe('updateDraft on a reply', () => {
     }
     const result = await updateDraft(deps, {
       args: updateDraftInput.parse({ cc: ['carl@example.org'], draftId: 'd1' }),
+      principal: TEST_PRINCIPAL,
       token: 'tok',
     })
     expect(result.isError).toBeUndefined()

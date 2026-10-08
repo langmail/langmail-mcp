@@ -50,7 +50,7 @@ export const getDraft = async (deps: DraftToolDeps, ctx: GetDraftContext): Promi
   if (!isDraft(record)) {
     return errorResult(
       `${ctx.args.draftId} is not a draft — it has already been sent or received. Read it with get_email ` +
-        `using messageId ${record.id} instead.`
+        `instead, passing id ${record.id}.`
     )
   }
   return textResult(

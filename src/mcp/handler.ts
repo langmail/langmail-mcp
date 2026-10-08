@@ -191,7 +191,12 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
       () => ctx.principal
     )
     registerGetDraft(server, draftDeps, () => ctx.token)
-    registerUpdateDraft(server, draftDeps, () => ctx.token)
+    registerUpdateDraft(
+      server,
+      draftDeps,
+      () => ctx.token,
+      () => ctx.principal
+    )
     registerSendDraft(
       server,
       draftDeps,

@@ -325,7 +325,7 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
   test('update_draft keeps the draftId: one draft in Drafts, read back by the same id', async () => {
     const result = await updateDraft(deps, {
       args: updateDraftInput.parse({ draftId: replyDraftId, subject: 'Re: Quarterly numbers (final)' }),
-      token: TOKEN,
+      ...toolCtx,
     })
     expect(result.isError).toBeUndefined()
     const text = result.content[0]?.text ?? ''
@@ -353,7 +353,7 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
   test('update_draft rewords a reply and keeps the quoted original below it', async () => {
     const result = await updateDraft(deps, {
       args: updateDraftInput.parse({ draftId: replyDraftId, text: 'Confirmed.' }),
-      token: TOKEN,
+      ...toolCtx,
     })
     expect(result.isError).toBeUndefined()
     expect(DRAFT_ID_RE.exec(result.content[0]?.text ?? '')?.[1]).toBe(replyDraftId)
