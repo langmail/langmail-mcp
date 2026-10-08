@@ -48,6 +48,10 @@ const ADMIN_AUTH =
 const DOMAIN = 'langmail.me'
 const TOKEN = 'e2e-basic-auth' // ignored — cfg.authHeaders carries Basic auth
 const TZID = 'Europe/Berlin'
+// Wall-clock start/end of every instance. The attendee override must repeat them
+// exactly, or Stalwart sees a time change instead of a PARTSTAT edit.
+const START = 'T100000'
+const END = 'T110000'
 
 const live = ADMIN_URL ? describe : describe.skip
 
@@ -155,8 +159,8 @@ const series = (uid: string, org: Principal, attendees: Principal[]): string =>
     'BEGIN:VEVENT',
     `UID:${uid}`,
     `DTSTAMP:${stamp(new Date())}`,
-    `DTSTART;TZID=${TZID}:${tuesday(0)}T100000`,
-    `DTEND;TZID=${TZID}:${tuesday(0)}T110000`,
+    `DTSTART;TZID=${TZID}:${tuesday(0)}${START}`,
+    `DTEND;TZID=${TZID}:${tuesday(0)}${END}`,
     'RRULE:FREQ=WEEKLY;BYDAY=TU',
     'SUMMARY:Weekly sync',
     'SEQUENCE:0',
@@ -226,7 +230,7 @@ const shapeOf = (vevent: string): Shape => {
     .map((l) => l.split(PROP_NAME_END_RE)[0] ?? l)
   const attendees = lines(vevent)
     .filter((l) => l.startsWith('ATTENDEE'))
-    .map((l) => `${l.slice(l.lastIndexOf(':') + 1)} ${l.match(PARTSTAT_RE)?.[0] ?? 'PARTSTAT=?'}`)
+    .map((l) => `${l.slice(l.lastIndexOf(':') + 1).toLowerCase()} ${l.match(PARTSTAT_RE)?.[0] ?? 'PARTSTAT=?'}`)
   return { attendees, props: [...new Set(props)] }
 }
 
@@ -250,9 +254,9 @@ const acceptNewInstance = async (p: Principal, uid: string, day: string): Promis
       l === 'BEGIN:VEVENT'
         ? [
             l,
-            `RECURRENCE-ID;TZID=${TZID}:${day}T100000`,
-            `DTSTART;TZID=${TZID}:${day}T100000`,
-            `DTEND;TZID=${TZID}:${day}T110000`,
+            `RECURRENCE-ID;TZID=${TZID}:${day}${START}`,
+            `DTSTART;TZID=${TZID}:${day}${START}`,
+            `DTEND;TZID=${TZID}:${day}${END}`,
           ]
         : [l]
     )
@@ -321,7 +325,7 @@ live('iTIP REPLY for one instance of a recurring series (upstream regression gua
   test('a REPLY for a never-modified instance leaves a stub that drops the second attendee', async () => {
     const uid = `reply-unmodified-${run}@mcp-e2e`
     const day = tuesday(2)
-    const recurrenceId = `${day}T100000`
+    const recurrenceId = `${day}${START}`
     await putEvent(org.cfg, { calendarUrl: org.defaultUrl, ical: series(uid, org, [attA, attB]), token: TOKEN })
     log('organizer after PUT', (await loadObject(org, uid)).body)
 
@@ -346,13 +350,16 @@ live('iTIP REPLY for one instance of a recurring series (upstream regression gua
     // The defect, part 2: B's REPLY is rejected ("is not a participant") — the
     // stub never learns B's answer, and the master still lists B as pending.
     expect(accepted(instanceOf(afterB, recurrenceId), attB.addr)).toBe(false)
+    expect(shapeOf(instanceOf(afterB, recurrenceId) ?? '').attendees).toEqual([
+      `${attA.addr.toLowerCase()} PARTSTAT=ACCEPTED`,
+    ])
     expect(shapeOf(masterOf(afterB)).attendees).toContain(`${attB.addr.toLowerCase()} PARTSTAT=NEEDS-ACTION`)
   }, 120_000)
 
   test('control: REPLYs for an instance the organizer already overrode both land', async () => {
     const uid = `reply-overridden-${run}@mcp-e2e`
     const day = tuesday(3)
-    const recurrenceId = `${day}T100000`
+    const recurrenceId = `${day}${START}`
     await putEvent(org.cfg, { calendarUrl: org.defaultUrl, ical: series(uid, org, [attA, attB]), token: TOKEN })
 
     // The organizer moves the instance two hours later — a full override.
@@ -383,7 +390,8 @@ live('iTIP REPLY for one instance of a recurring series (upstream regression gua
     }
 
     expect(await acceptExistingInstance(attA, uid, recurrenceId)).toBe(204)
-    await organizerUntil(org, uid, (ical) => accepted(instanceOf(ical, recurrenceId), attA.addr))
+    const afterA = await organizerUntil(org, uid, (ical) => accepted(instanceOf(ical, recurrenceId), attA.addr))
+    expect(accepted(instanceOf(afterA, recurrenceId), attA.addr)).toBe(true)
     expect(await acceptExistingInstance(attB, uid, recurrenceId)).toBe(204)
     const afterB = await organizerUntil(org, uid, (ical) => accepted(instanceOf(ical, recurrenceId), attB.addr))
     log('control: organizer after A and B reply', afterB)
