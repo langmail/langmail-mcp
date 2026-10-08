@@ -196,6 +196,20 @@ describe('parseEvents', () => {
     ])
   })
 
+  test('reads each attendee ROLE when present', () => {
+    const ics = [
+      'BEGIN:VEVENT',
+      'UID:evt-role@langmail.me',
+      'ATTENDEE;ROLE=OPT-PARTICIPANT;PARTSTAT=TENTATIVE:mailto:maybe@example.com',
+      'ATTENDEE;PARTSTAT=ACCEPTED:mailto:plain@example.com',
+      'END:VEVENT',
+    ].join('\r\n')
+    expect(parseEvents(ics)[0]?.attendees).toEqual([
+      { email: 'maybe@example.com', role: 'OPT-PARTICIPANT', status: 'TENTATIVE' },
+      { email: 'plain@example.com', status: 'ACCEPTED' },
+    ])
+  })
+
   test('gives an attendee-less event an empty attendee list', () => {
     const ics = 'BEGIN:VEVENT\r\nUID:solo@langmail.me\r\nSUMMARY:Solo\r\nEND:VEVENT'
     expect(parseEvents(ics)[0]?.attendees).toEqual([])

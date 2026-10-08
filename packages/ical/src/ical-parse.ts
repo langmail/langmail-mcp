@@ -8,13 +8,16 @@ import { parseWallClockInZone } from './timezone.ts'
 // One ATTENDEE of a VEVENT, reduced to what the calendar tools and contact
 // collection need: the bare email (mailto: stripped), the CN display name
 // when the stored line carries one — the pairing of a name with an address
-// is exactly what contact collection feeds on — and the PARTSTAT
-// (ACCEPTED / DECLINED / TENTATIVE / NEEDS-ACTION). Surfaced so list_calendar_events
-// can show who is invited and update_calendar_event's attendee deltas can merge
-// against the real stored list instead of a caller-supplied guess.
+// is exactly what contact collection feeds on — the PARTSTAT
+// (ACCEPTED / DECLINED / TENTATIVE / NEEDS-ACTION) and the ROLE
+// (REQ-PARTICIPANT / OPT-PARTICIPANT / CHAIR / NON-PARTICIPANT). Surfaced so
+// list_calendar_events can show who is invited and update_calendar_event can
+// merge against the real stored list and keep each attendee's reply across a
+// rebuild instead of resetting it.
 export interface ParsedAttendee {
   email: string
   name?: string
+  role?: string
   status?: string
 }
 
@@ -327,12 +330,15 @@ const parseRecurrenceInstant = (property: ParsedProperty | undefined): string | 
 // not-yet-answered attendee only when the client omits the NEEDS-ACTION default.
 const PARTSTAT_RE = /(?:^|;)PARTSTAT=([^;:]+)/iu
 
+// ROLE on an ATTENDEE parameter list, same shape as PARTSTAT.
+const ROLE_RE = /(?:^|;)ROLE=([^;:]+)/iu
+
 // CN on an ATTENDEE parameter list: quoted (CN="Fairweather, Robin" — commas,
 // semicolons, and colons are legal inside the quotes) or unquoted (CN=Robin,
 // value runs to the next `;` or `:`).
 const CN_RE = /(?:^|;)CN=(?:"([^"]*)"|([^;:]+))/iu
 
-// Bare attendee email + CN + PARTSTAT from an ATTENDEE line. Same
+// Bare attendee email + CN + PARTSTAT + ROLE from an ATTENDEE line. Same
 // trailing-mailto anchoring as parseOrganizerEmail: params can smuggle colons
 // past the first-colon split (SENT-BY, CN), so read the address off the last
 // mailto:. An ATTENDEE we can't reduce to a clean bare address is dropped
@@ -350,11 +356,13 @@ const parseAttendee = (property: ParsedProperty): ParsedAttendee | undefined => 
   const addressAt = reassembled.toLowerCase().lastIndexOf('mailto:')
   const paramSection = addressAt === -1 ? reassembled : reassembled.slice(0, addressAt)
   const status = PARTSTAT_RE.exec(paramSection)?.[1]?.replace(/^"|"$/gu, '')
+  const role = ROLE_RE.exec(paramSection)?.[1]?.replace(/^"|"$/gu, '')
   const cnMatch = CN_RE.exec(paramSection)
   const name = (cnMatch?.[1] ?? cnMatch?.[2])?.trim()
   return {
     email,
     ...(name ? { name } : {}),
+    ...(role ? { role } : {}),
     ...(status ? { status } : {}),
   }
 }
