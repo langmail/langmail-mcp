@@ -1,5 +1,6 @@
-// Upstream regression guard, against a REAL Stalwart, for how the organizer's
-// server merges an iTIP REPLY scoped to ONE instance of a recurring series.
+// Regression guard for docs/upstream/stalwart/reply-for-unmodified-instance-creates-stub-override.md,
+// against a REAL Stalwart: how the organizer's server merges an iTIP REPLY
+// scoped to ONE instance of a recurring series.
 //
 // When a REPLY names an instance (RECURRENCE-ID) that has no override VEVENT in
 // the organizer's stored object yet, Stalwart's `handle_reply`
@@ -330,6 +331,8 @@ live('iTIP REPLY for one instance of a recurring series (upstream regression gua
 
     // The defect, part 1: the instance is a stub carrying only the REPLY's
     // identity properties and the replying attendee.
+    // NB: the stub keeps the REPLY's TZID form of RECURRENCE-ID; a release that
+    // normalises it to UTC also reads as red here, not only one that fixes it.
     const stub = shapeOf(instanceOf(afterA, recurrenceId) ?? '')
     expect(stub.props).toContain('RECURRENCE-ID')
     expect(stub.props).not.toContain('DTSTART')
@@ -337,12 +340,7 @@ live('iTIP REPLY for one instance of a recurring series (upstream regression gua
     expect(stub.attendees).toEqual([`${attA.addr.toLowerCase()} PARTSTAT=ACCEPTED`])
 
     expect(await acceptNewInstance(attB, uid, day)).toBe(204)
-    const afterB = await organizerUntil(
-      org,
-      uid,
-      (ical) =>
-        ical.toLowerCase().includes(`mailto:${attB.addr}`) && accepted(instanceOf(ical, recurrenceId), attB.addr)
-    )
+    const afterB = await organizerUntil(org, uid, (ical) => accepted(instanceOf(ical, recurrenceId), attB.addr))
     log('organizer after B replies', afterB)
 
     // The defect, part 2: B's REPLY is rejected ("is not a participant") — the
