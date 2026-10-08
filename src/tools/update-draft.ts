@@ -102,7 +102,9 @@ export const updateDraftInput = z.object({
     .optional()
     .describe(
       'On a reply, with `text` or `html`: whether the original is quoted below the new text. Defaults to ' +
-        'whatever the staged draft does. Pass false to drop the quote, true to add it to a bare reply.'
+        'whatever the staged draft does — unless the same call adds a `to`/`cc`/`bcc` recipient the ' +
+        'original was not addressed to, where quoting would forward it to them, so the quote is left off. ' +
+        'Pass false to drop the quote, true to add it to a bare reply or to quote it for a new recipient.'
     ),
   subject: z.string().max(500).optional().describe('Replace the subject. Omit to keep it.'),
   text: z
@@ -282,14 +284,28 @@ const replyOriginal = async (
   if (fromRecorded) {
     return fromRecorded
   }
-  const inThread = await deps.threadMessageFind({
-    accountId: p.accountId,
-    apiUrl: '',
-    authorization: p.authorization,
-    emailId: p.record.id,
-    messageId: answers,
-  })
+  const inThread = await deps
+    .threadMessageFind({
+      accountId: p.accountId,
+      apiUrl: '',
+      authorization: p.authorization,
+      emailId: p.record.id,
+      messageId: answers,
+    })
+    .catch((error: unknown) => {
+      // The recorded id was read and named another message: say so, so a
+      // tolerated failure here does not carry it forward again.
+      throw recorded ? new RecordedOriginalDisproved(error) : error
+    })
   return inThread && inThread !== recorded ? await read(inThread) : null
+}
+
+// A lookup that failed after the recorded original id was read and found to
+// name a different message — that id must not be recorded again.
+class RecordedOriginalDisproved extends Error {
+  constructor(cause: unknown) {
+    super('the recorded original no longer matches, and the thread lookup failed', { cause })
+  }
 }
 
 // What a failed lookup of the original costs depends on the edit. One that
@@ -310,7 +326,7 @@ const replyOriginalForEdit = (
       if (p.args.subject !== undefined || p.args.text !== undefined || p.args.html !== undefined) {
         throw error
       }
-      return { id: replyOriginalId(p.record), record: null }
+      return { id: error instanceof RecordedOriginalDisproved ? null : replyOriginalId(p.record), record: null }
     }
   )
 
@@ -375,15 +391,20 @@ const stagedQuoteNote = async (
     staged: EmailDraft
   }
 ): Promise<{ note?: string }> => {
-  if (!(p.original && carriesQuoteOf(p.staged, p.original))) {
+  // Any quoted history counts — another client's quote as much as one this
+  // tool wrote. The note is advisory, so a hand-typed `>` line costs a spare
+  // sentence, never a changed body. Without the original there is no roster
+  // to compare against, so nothing is said.
+  const { original } = p
+  if (!(original && (carriesQuoteOf(p.staged, original) || FOREIGN_QUOTE_RE.test(bothParts(p.staged))))) {
     return {}
   }
-  const outsider = await addedOutsider(deps, { ...p, original: p.original })
+  const outsider = await addedOutsider(deps, { ...p, original })
   return outsider
     ? {
         note:
-          `The draft quotes the original, and ${outsider} was not on it, so the quote now goes to them too. ` +
-          'To take it off, pass the text again with `quoteOriginal: false`.',
+          `The draft carries quoted text from the original, and ${outsider} was not on it, so that now goes to ` +
+          'them too. To take it off, pass the text again with `quoteOriginal: false`.',
       }
     : {}
 }

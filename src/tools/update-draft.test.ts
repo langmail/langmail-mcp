@@ -505,8 +505,37 @@ describe('updateDraft on a reply', () => {
       { creates, records: { d1: quotedReply, e1: original } }
     )
     expect(creates[0]?.draft.text).toBe(quotedReply.bodyValues?.['1']?.value)
-    expect(text).toContain('the quote now goes to them too')
+    expect(text).toContain('now goes to them too')
     expect(text).toContain('quoteOriginal: false')
+  })
+
+  test("a recipients-only edit that adds an outsider to another client's quoted reply says so too", async () => {
+    const foreign = replyDraft('Sure.\n\nOn 10/5/26 12:00, Nadia Bram wrote:\n> Can you send the Q2 figures?')
+    const { text } = await run(
+      { cc: ['outsider@example.net'], draftId: 'd1' },
+      { records: { d1: foreign, e1: original } }
+    )
+    expect(text).toContain('now goes to them too')
+  })
+
+  test('a disproved recorded original is not recorded again when the thread lookup fails', async () => {
+    const creates: DraftCreateParams[] = []
+    const recorded = {
+      ...quotedReply,
+      keywords: { $draft: true, $seen: true, '$draftid:d1': true, '$draftreplyto:e9': true },
+    }
+    const stranger = receivedMessage({ id: 'e9', messageId: ['other@example.org'], threadId: 't9' })
+    const deps = {
+      ...draftDeps({ creates, records: { d1: recorded, e9: stranger } }),
+      threadMessageFind: () => Promise.reject(new Error('socket hang up')),
+    }
+    const result = await updateDraft(deps, {
+      args: updateDraftInput.parse({ cc: ['carl@example.org'], draftId: 'd1' }),
+      principal: TEST_PRINCIPAL,
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(creates[0]?.keywords).not.toContain('$draftreplyto:e9')
   })
 
   test('a recipients-only edit adding someone already on the original says nothing', async () => {
