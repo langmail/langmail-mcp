@@ -477,6 +477,17 @@ describe('updateDraft on a reply', () => {
     expect(occurrences(creates[1]?.draft.text, ATTRIBUTION)).toBe(1)
   })
 
+  test('keeps the quote when the edit re-passes an outsider the staged quoted reply already named', async () => {
+    const creates: DraftCreateParams[] = []
+    // Staged with `quoteOriginal: true` despite the outsider: the user already decided.
+    const consented = { ...quotedReply, cc: [{ email: 'outsider@example.net' }] }
+    await run(
+      { cc: ['outsider@example.net', 'carl@example.org'], draftId: 'd1', text: 'Reworded.' },
+      { creates, records: { d1: consented, e1: original } }
+    )
+    expect(occurrences(creates[0]?.draft.text, ATTRIBUTION)).toBe(1)
+  })
+
   test('says the quote is gone for an HTML reply whose original cannot be found', async () => {
     const html = stagedDraft({
       bodyValues: { '1': { value: '<p>Sure.</p>\n<br>\n<div>On Mon, 5 Oct 2026, Nadia Bram wrote:</div>' } },

@@ -321,6 +321,30 @@ const selfAddressesOf = async (
   return [...p.staged.from.map((address) => address.email), ...identities.map((identity) => identity.email)]
 }
 
+// Someone this edit adds who the original was never addressed to, or null.
+// Only an added recipient counts: an edit reaches this check only when the
+// staged body carried the quote, so everyone already on the draft was allowed
+// to see the original, and re-passing them is not a new decision.
+const addedOutsider = async (
+  deps: DraftToolDeps,
+  p: {
+    args: UpdateDraftArgs
+    authorization: string
+    original: EmailComposeRecord
+    recipients: ParsedRecipients
+    staged: EmailDraft
+  }
+): Promise<string | null> => {
+  if (p.args.to === undefined && p.args.cc === undefined && p.args.bcc === undefined) {
+    return null
+  }
+  const alreadyNamed = [...(p.staged.to ?? []), ...(p.staged.cc ?? []), ...(p.staged.bcc ?? [])]
+  return quoteWithheldFrom(p.original, p.recipients, [
+    ...(await selfAddressesOf(deps, p)),
+    ...alreadyNamed.map((address) => address.email),
+  ])
+}
+
 // The body the edit stages: what the caller supplied, with the original quoted
 // below it when the draft is a reply that quotes it (or the caller asks for the
 // quote). `note` says when a quote could not be re-attached, so the agent learns
@@ -389,12 +413,9 @@ const editedBody = async (
         : {}),
     }
   }
-  const recipientsChanged = args.to !== undefined || args.cc !== undefined || args.bcc !== undefined
-  if (args.quoteOriginal === undefined && recipientsChanged) {
-    const outsider = quoteWithheldFrom(original, p.recipients, await selfAddressesOf(deps, p))
-    if (outsider) {
-      return { body: supplied, note: quoteWithheldNote(outsider) }
-    }
+  const outsider = args.quoteOriginal === undefined ? await addedOutsider(deps, { ...p, original }) : null
+  if (outsider) {
+    return { body: supplied, note: quoteWithheldNote(outsider) }
   }
   return { body: withQuotedOriginal(supplied, original) }
 }
