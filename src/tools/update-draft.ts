@@ -373,7 +373,9 @@ const addedOutsider = async (
     stagedCarriedQuote: boolean
   }
 ): Promise<string | null> => {
-  if (p.args.to === undefined && p.args.cc === undefined && p.args.bcc === undefined) {
+  // With the quote already staged, an edit that touches no recipients leaves
+  // the disclosure where it was. Without it, the quote is new to everyone.
+  if (p.stagedCarriedQuote && p.args.to === undefined && p.args.cc === undefined && p.args.bcc === undefined) {
     return null
   }
   const alreadyNamed = p.stagedCarriedQuote
@@ -402,14 +404,13 @@ const missingOriginalNote = (args: UpdateDraftArgs, staged: EmailDraft): { note?
 }
 
 // The note for quoted text going to someone the original was never addressed to.
-// `supplied` when the quote came in the caller's own text: re-passing that text
-// with `quoteOriginal: false` stages it unchanged, quote included, so the only
-// remedy there is to leave the quoted part out.
-const quotedTextNote = (outsider: string, supplied: boolean): string =>
+// The remedy needs both halves. Without `quoteOriginal: false`, the staged body
+// this edit writes — quote included — makes the next edit's default re-attach
+// it; and `quoteOriginal: false` on a text that still holds the quote stages it
+// verbatim.
+const quotedTextNote = (outsider: string): string =>
   `The draft carries quoted text from the original, and ${outsider} was not on it, so that now goes to them ` +
-  (supplied
-    ? 'too. To take it off, pass the text again without the quoted part.'
-    : 'too. To take it off, pass the new wording again with `quoteOriginal: false`.')
+  'too. To take it off, pass your own wording again — without the quoted part — with `quoteOriginal: false`.'
 
 // An edit that leaves the body alone re-stages it as it is, quote included —
 // the same as changing the recipients of a quoted reply in a mail client. When
@@ -438,7 +439,7 @@ const stagedQuoteNote = async (
   const outsider = await addedOutsider(deps, { ...p, original, stagedCarriedQuote: true })
   return outsider
     ? {
-        note: quotedTextNote(outsider, false),
+        note: quotedTextNote(outsider),
       }
     : {}
 }
@@ -490,7 +491,7 @@ const editedBody = async (
       args.quoteOriginal === undefined
         ? await addedOutsider(deps, { ...p, original, stagedCarriedQuote: carriesQuoteOf(p.staged, original) })
         : null
-    return outsider ? { body: supplied, note: quotedTextNote(outsider, true) } : { body: supplied }
+    return outsider ? { body: supplied, note: quotedTextNote(outsider) } : { body: supplied }
   }
   if (!(args.quoteOriginal ?? carriesQuoteOf(p.staged, original))) {
     // A quote in a format this tool did not write — another mail client's —

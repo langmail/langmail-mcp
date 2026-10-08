@@ -547,10 +547,28 @@ describe('updateDraft on a reply', () => {
     )
     expect(creates[0]?.draft.text).toBe(whole)
     expect(text).toContain('now goes to them too')
-    // Re-passing the same text with `quoteOriginal: false` would stage it
-    // unchanged, so the remedy here is to leave the quoted part out.
+    // The remedy needs both halves: the quoted part left out, and the flag.
     expect(text).toContain('without the quoted part')
-    expect(text).not.toContain('quoteOriginal: false')
+    expect(text).toContain('quoteOriginal: false')
+  })
+
+  test('passed-back quoted text on a bare reply is checked even when the edit names no recipients', async () => {
+    const bare = { ...replyDraft('Noted.'), cc: [{ email: 'outsider@example.net' }] }
+    const whole = withQuotedOriginal({ text: 'Here they are.' }, original).text ?? ''
+    const { text } = await run({ draftId: 'd1', text: whole }, { records: { d1: bare, e1: original } })
+    expect(text).toContain('outsider@example.net was not on it')
+  })
+
+  test('following the note takes the quote off for good', async () => {
+    const creates: DraftCreateParams[] = []
+    const whole = withQuotedOriginal({ text: 'Here they are.' }, original).text ?? ''
+    // The revision the first call staged: the quote passed back, outsider on Cc.
+    const restaged = { ...replyDraft(whole), cc: [{ email: 'outsider@example.net' }] }
+    await run(
+      { draftId: 'd1', quoteOriginal: false, text: 'Here they are.' },
+      { creates, records: { d1: restaged, e1: original } }
+    )
+    expect(occurrences(creates[0]?.draft.text, ATTRIBUTION)).toBe(0)
   })
 
   test('passed-back quoted text is checked against every recipient when the staged reply was bare', async () => {
