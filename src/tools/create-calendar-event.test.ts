@@ -14,6 +14,7 @@ import {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u
 const UID_LINE_RE = /^UID:(.+)$/mu
 const FOLD_RE = /\r\n /gu
+const HASH_RE = /^[0-9a-f]{12}$/u
 
 const account = (over: Partial<DiscoveredAccount> = {}): DiscoveredAccount => ({
   calendars: [{ displayName: 'Default', url: 'https://m/dav/cal/u/default/' }],
@@ -509,12 +510,15 @@ describe('scheduling handover audit log', () => {
       expect(info).toHaveBeenCalledTimes(1)
       const fields = info.mock.calls[0]?.[0] as Record<string, unknown>
       const uid = UID_LINE_RE.exec(captured[0]?.ical.replace(FOLD_RE, '') ?? '')?.[1]
+      expect(uid).toMatch(UUID_RE)
+      expect(fields.tool).toBe('create_calendar_event')
       expect(fields.attendeeHashes).toEqual(['513935c4d2db'])
       expect(fields.removedAttendeeHashes).toEqual([])
       expect(fields.scheduleAgent).toBe('SERVER')
       expect(fields.sequence).toBe(0)
       expect(fields.recurrenceId).toBeUndefined()
       // REVIEW.md: no email addresses in logs — only 12-hex hashes appear.
+      expect(fields.uidHash).toMatch(HASH_RE)
       expect(JSON.stringify(fields)).not.toContain('guest@example.com')
       expect(JSON.stringify(fields)).not.toContain(uid)
     } finally {

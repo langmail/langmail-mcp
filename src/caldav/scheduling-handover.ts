@@ -17,6 +17,8 @@ export const logSchedulingHandover = (handover: {
   // possibly-undefined value straight through instead of conditional-spreading.
   scheduleAgent: 'NONE' | undefined
   sequence: number
+  // Which tool's PUT this was: create and update emit the same message.
+  tool: 'create_calendar_event' | 'update_calendar_event'
   uid: string
 }): void => {
   logger.info(
@@ -26,6 +28,7 @@ export const logSchedulingHandover = (handover: {
       removedAttendeeHashes: handover.removedAttendees.map(hashEmail),
       scheduleAgent: handover.scheduleAgent ?? 'SERVER',
       sequence: handover.sequence,
+      tool: handover.tool,
       // Calendar UIDs are commonly email-shaped, so they need the same
       // log-safe deterministic hashing as addresses.
       uidHash: hashEmail(handover.uid),

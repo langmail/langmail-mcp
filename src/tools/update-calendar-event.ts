@@ -81,6 +81,8 @@ const NO_REMINDER = 'none'
 
 const shared = createCalendarEventInput.shape
 
+const TOOL_NAME = 'update_calendar_event'
+
 export const updateCalendarEventInput = z.object({
   addedAttendees: z
     .array(z.email())
@@ -327,6 +329,7 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
     removedAttendees,
     scheduleAgent,
     sequence,
+    tool: TOOL_NAME,
     uid: args.uid,
   })
 
@@ -1119,6 +1122,7 @@ export const updateCalendarEvent = async (
     removedAttendees: removed,
     scheduleAgent: f.scheduleAgent,
     sequence,
+    tool: TOOL_NAME,
     uid: args.uid,
   })
 
@@ -1164,7 +1168,7 @@ export const registerUpdateCalendarEvent = (
   getToken: () => string
 ): void => {
   server.registerTool(
-    'update_calendar_event',
+    TOOL_NAME,
     {
       annotations: OUTWARD_DESTRUCTIVE,
       // Kept short and front-loaded with the words a user actually types

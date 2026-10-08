@@ -29,6 +29,8 @@ import { OUTWARD_WRITE } from './annotations.ts'
 import { type AttendeeWriteThrough } from './contact-write-through.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
+const TOOL_NAME = 'create_calendar_event'
+
 // An event's iCalendar UID, as accepted by the update/delete/RSVP tools and
 // returned by create_calendar_event. Deliberately permissive: it must keep
 // accepting the legacy `<uuid>@<domain>` form, because events created before
@@ -179,6 +181,7 @@ export const createCalendarEvent = async (
   // leaves an event with no attendees must still name one — see the field's
   // comment on InviteInput for the two ways that goes silently wrong.
   const attendees = args.attendees ?? []
+  const isSchedulingObject = attendees.length > 0
   // A bare UUID: RFC 7986 §5.3 (2016) supersedes the RFC 5545 advice to
   // qualify a UID with a domain — it MUST NOT carry host or domain data. Side
   // benefit: the mail domain no longer leaks into every invitation sent to an
@@ -192,7 +195,7 @@ export const createCalendarEvent = async (
     timeZone,
     title: args.title,
     uid,
-    ...(attendees.length > 0 ? { organizer: account.organizer } : {}),
+    ...(isSchedulingObject ? { organizer: account.organizer } : {}),
     ...(args.description ? { description: args.description } : {}),
     ...(args.location ? { location: args.location } : {}),
     ...(rrule ? { rrule } : {}),
@@ -203,13 +206,15 @@ export const createCalendarEvent = async (
   await deps.putEvent({ calendarUrl, ical, token })
   // A personal event hands Stalwart nothing to schedule, so only a scheduling
   // object gets the audit line.
-  if (attendees.length > 0) {
+  if (isSchedulingObject) {
     logSchedulingHandover({
       attendees,
       ical,
       removedAttendees: [],
       scheduleAgent: args.notify === 'none' ? 'NONE' : undefined,
+      // buildInvite emits no SEQUENCE, so the RFC 5545 default of 0 applies.
       sequence: 0,
+      tool: TOOL_NAME,
       uid,
     })
   }
@@ -256,7 +261,7 @@ export const registerCreateCalendarEvent = (
   getToken: () => string
 ): void => {
   server.registerTool(
-    'create_calendar_event',
+    TOOL_NAME,
     {
       annotations: OUTWARD_WRITE,
       // Front-loaded with what a user types to want this tool ("schedule a
