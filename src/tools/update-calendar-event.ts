@@ -27,7 +27,6 @@ import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
 import { type ParsedAttendee, type ParsedEvent, parseEvents } from '@langmail/ical'
-import { hashEmail, logger } from '@langmail/logger'
 
 import { type AccountTimeZoneResolver, makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
 import { describeReminder, MAX_REMINDER_MINUTES } from '../caldav/alarm.ts'
@@ -52,6 +51,7 @@ import {
   startContradictsRule,
   toRRule,
 } from '../caldav/recurrence.ts'
+import { logSchedulingHandover } from '../caldav/scheduling-handover.ts'
 import {
   allDayEndError,
   dateOnlyToInstant,
@@ -80,6 +80,8 @@ const updateRecurrenceSchema = z.union([z.literal(NO_RECURRENCE), recurrenceSche
 const NO_REMINDER = 'none'
 
 const shared = createCalendarEventInput.shape
+
+const TOOL_NAME = 'update_calendar_event'
 
 export const updateCalendarEventInput = z.object({
   addedAttendees: z
@@ -327,6 +329,7 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
     removedAttendees,
     scheduleAgent,
     sequence,
+    tool: TOOL_NAME,
     uid: args.uid,
   })
 
@@ -357,39 +360,6 @@ const reminderSummary = (args: UpdateCalendarEventArgs, allDay: boolean): string
   return args.reminderMinutesBefore === NO_REMINDER
     ? '; reminders removed'
     : `; reminder ${describeReminder(args.reminderMinutesBefore, allDay)}`
-}
-
-// Audit line for the accepted PUT: the iMIP fan-out it triggers is otherwise
-// unobservable (Stalwart archives nothing outbound), so record enough to answer
-// "was a message due, to whom, at which revision" after the fact. Emitted only
-// after the PUT succeeds — a rejected PUT hands nothing to Stalwart and must
-// not leave an audit line claiming otherwise. Attendee addresses are logged as
-// hashes (REVIEW.md: no email addresses in logs).
-const logSchedulingHandover = (handover: {
-  attendees: string[]
-  ical: string
-  recurrenceId?: string
-  removedAttendees: string[]
-  // Deliberately non-optional (undefined = SERVER) so call sites pass their
-  // possibly-undefined value straight through instead of conditional-spreading.
-  scheduleAgent: 'NONE' | undefined
-  sequence: number
-  uid: string
-}): void => {
-  logger.info(
-    {
-      attendeeHashes: handover.attendees.map(hashEmail),
-      bytes: Buffer.byteLength(handover.ical),
-      removedAttendeeHashes: handover.removedAttendees.map(hashEmail),
-      scheduleAgent: handover.scheduleAgent ?? 'SERVER',
-      sequence: handover.sequence,
-      // Calendar UIDs are commonly email-shaped, so they need the same
-      // log-safe deterministic hashing as addresses.
-      uidHash: hashEmail(handover.uid),
-      ...(handover.recurrenceId ? { recurrenceId: handover.recurrenceId } : {}),
-    },
-    'event PUT to CalDAV; iMIP fan-out delegated to Stalwart'
-  )
 }
 
 // One-line human summary of who the PUT notified. Dropping an attendee is
@@ -1152,6 +1122,7 @@ export const updateCalendarEvent = async (
     removedAttendees: removed,
     scheduleAgent: f.scheduleAgent,
     sequence,
+    tool: TOOL_NAME,
     uid: args.uid,
   })
 
@@ -1197,7 +1168,7 @@ export const registerUpdateCalendarEvent = (
   getToken: () => string
 ): void => {
   server.registerTool(
-    'update_calendar_event',
+    TOOL_NAME,
     {
       annotations: OUTWARD_DESTRUCTIVE,
       // Kept short and front-loaded with the words a user actually types

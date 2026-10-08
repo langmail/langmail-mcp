@@ -1,4 +1,6 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
+
+import { logger } from '@langmail/logger'
 
 import { type PutEventParams } from '../caldav/client.ts'
 import { type DiscoveredAccount } from '../caldav/types.ts'
@@ -12,6 +14,7 @@ import {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u
 const UID_LINE_RE = /^UID:(.+)$/mu
 const FOLD_RE = /\r\n /gu
+const HASH_RE = /^[0-9a-f]{12}$/u
 
 const account = (over: Partial<DiscoveredAccount> = {}): DiscoveredAccount => ({
   calendars: [{ displayName: 'Default', url: 'https://m/dav/cal/u/default/' }],
@@ -492,5 +495,67 @@ describe('createCalendarEvent — reminder', () => {
 
   test('the schema rejects a negative reminder', () => {
     expect(createCalendarEventInput.safeParse(args({ reminderMinutesBefore: -5 })).success).toBe(false)
+  })
+})
+
+// The handover line is the outbound-scheduling audit trail: a new invitation
+// is the commonest iMIP fan-out, so create logs it exactly as update does.
+describe('scheduling handover audit log', () => {
+  test('logs one handover line, with hashed identifiers, after a successful PUT', async () => {
+    const info = spyOn(logger, 'info').mockImplementation(() => undefined)
+    try {
+      const captured: PutEventParams[] = []
+      const result = await createCalendarEvent(makeDeps(account(), captured), { args: args(), token: 'tok' })
+      expect(result.isError).toBeUndefined()
+      expect(info).toHaveBeenCalledTimes(1)
+      const fields = info.mock.calls[0]?.[0] as Record<string, unknown>
+      const uid = UID_LINE_RE.exec(captured[0]?.ical.replace(FOLD_RE, '') ?? '')?.[1]
+      expect(uid).toMatch(UUID_RE)
+      expect(fields.tool).toBe('create_calendar_event')
+      expect(fields.attendeeHashes).toEqual(['513935c4d2db'])
+      expect(fields.removedAttendeeHashes).toEqual([])
+      expect(fields.scheduleAgent).toBe('SERVER')
+      expect(fields.sequence).toBe(0)
+      expect(fields.recurrenceId).toBeUndefined()
+      // REVIEW.md: no email addresses in logs — only 12-hex hashes appear.
+      expect(fields.uidHash).toMatch(HASH_RE)
+      expect(JSON.stringify(fields)).not.toContain('guest@example.com')
+      expect(JSON.stringify(fields)).not.toContain(uid)
+    } finally {
+      info.mockRestore()
+    }
+  })
+
+  test('records a suppressed fan-out as SCHEDULE-AGENT NONE', async () => {
+    const info = spyOn(logger, 'info').mockImplementation(() => undefined)
+    try {
+      await createCalendarEvent(makeDeps(account()), { args: args({ notify: 'none' }), token: 'tok' })
+      expect(info).toHaveBeenCalledTimes(1)
+      const fields = info.mock.calls[0]?.[0] as Record<string, unknown>
+      expect(fields.scheduleAgent).toBe('NONE')
+    } finally {
+      info.mockRestore()
+    }
+  })
+
+  test('logs nothing for a personal event', async () => {
+    const info = spyOn(logger, 'info').mockImplementation(() => undefined)
+    try {
+      await createCalendarEvent(makeDeps(account()), { args: args({ attendees: [] }), token: 'tok' })
+      expect(info).not.toHaveBeenCalled()
+    } finally {
+      info.mockRestore()
+    }
+  })
+
+  test('logs nothing when the PUT is rejected', async () => {
+    const info = spyOn(logger, 'info').mockImplementation(() => undefined)
+    try {
+      const deps = { ...makeDeps(account()), putEvent: () => Promise.reject(new Error('412 precondition failed')) }
+      await expect(createCalendarEvent(deps, { args: args(), token: 'tok' })).rejects.toThrow('412 precondition failed')
+      expect(info).not.toHaveBeenCalled()
+    } finally {
+      info.mockRestore()
+    }
   })
 })

@@ -1374,6 +1374,7 @@ describe('scheduling handover audit log', () => {
       expect(fields.recurrenceId).toBe('2026-06-23T10:00:00Z')
       expect(fields.sequence).toBe(3)
       expect(fields.uidHash).toBe('17809b5be7d6')
+      expect(fields.tool).toBe('update_calendar_event')
       // REVIEW.md: no email addresses in logs — only 12-hex hashes appear.
       expect(JSON.stringify(fields)).not.toContain('guest@example.com')
       expect(JSON.stringify(fields)).not.toContain(UID)
@@ -1398,6 +1399,7 @@ describe('scheduling handover audit log', () => {
       expect(fields.recurrenceId).toBeUndefined()
       expect(fields.sequence).toBe(3)
       expect(fields.uidHash).toBe('17809b5be7d6')
+      expect(fields.tool).toBe('update_calendar_event')
       expect(fields.attendeeHashes).toEqual(['72497f475e4f'])
       expect(fields.removedAttendeeHashes).toEqual(['513935c4d2db'])
       expect(JSON.stringify(fields)).not.toContain('someone@example.com')
