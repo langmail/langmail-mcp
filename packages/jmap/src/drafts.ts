@@ -397,6 +397,11 @@ export const emailComposeGet = async (p: EmailComposeGetParams): Promise<EmailCo
 // mailbox move depends on the account having a Sent mailbox; skipping the whole
 // patch when it doesn't would leave the message looking unsent forever, so a
 // retried call would deliver it again.
+//
+// The `$draftid:` and `$draftreplyto:` keywords are deliberately left on. The
+// draft id still naming the sent message is what turns a later send of the
+// same draft id into "already sent" rather than "not found" — clearing it
+// would leave that retry nothing to resolve and nothing to explain.
 export const sentEmailPatch = (draftsMailboxId: string, sentMailboxId?: string): Record<string, boolean | null> =>
   buildEmailSetPatch({
     keywords: { [DRAFT_KEYWORD]: false },

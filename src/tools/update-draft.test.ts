@@ -432,6 +432,12 @@ describe('updateDraft on a reply', () => {
     expect(text).toContain('format this tool did not write')
   })
 
+  test('says the quote is gone for a CRLF body whose original cannot be found', async () => {
+    const crlf = replyDraft('Sure.\r\n\r\nOn Mon, 5 Oct 2026, Nadia Bram wrote:\r\n> Q2?\r\n')
+    const { text } = await run({ draftId: 'd1', text: 'Here they are.' }, { records: { d1: crlf } })
+    expect(text).toContain('no quote was re-attached')
+  })
+
   test('a bare reply whose original is gone is edited without a note', async () => {
     const { text } = await run({ draftId: 'd1', text: 'Here they are.' }, { records: { d1: replyDraft('Bare.') } })
     expect(text).not.toContain('no quote was re-attached')
@@ -470,5 +476,8 @@ describe('updateDraft on a reply', () => {
     const creates: DraftCreateParams[] = []
     await run({ draftId: 'd1', subject: 'Re: Q2' }, { creates, records: { d1: quotedReply, e1: original } })
     expect(creates[0]?.draft.text).toBe(quotedReply.bodyValues?.['1']?.value)
+    // A reply another client staged has no recorded original; the thread finds
+    // it now, before the new subject moves the reply out of that thread.
+    expect(creates[0]?.keywords).toContain('$draftreplyto:e1')
   })
 })

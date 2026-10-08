@@ -13,6 +13,12 @@
 // when the client retries a call whose response it never saw. Both are checked
 // inside a reservation taken before either is read (see drafts/send-guard.ts);
 // the protocol is model-checked in `spec/SendProtocol.tla`.
+//
+// A draft answers to two ids — its draftId and its current message id — and
+// the reservation is taken on the one the caller passed, before anything is
+// read. The other is covered once the draft is loaded, so two calls through
+// different ids exclude each other rather than replay: when both are in flight
+// at once, both may refuse, and neither sends.
 
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'

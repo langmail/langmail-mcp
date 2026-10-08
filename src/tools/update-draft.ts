@@ -227,6 +227,39 @@ const loadEditableDraft = async (
   return { record }
 }
 
+// The tail of an attribution line ("On …, Name <address> wrote:"), as a sign a
+// body quotes something when the quoted message itself cannot be read. `\r?`
+// because `$` does not match before a CR in a CRLF body.
+const QUOTE_ATTRIBUTION_RE = / wrote:\r?$/mu
+
+// Quoted history in either body form: a `>`-prefixed line or a blockquote.
+const FOREIGN_QUOTE_RE = /^>|<blockquote\b/imu
+
+// The id of the message a reply draft answers: the one create_draft recorded,
+// failing that — a reply staged by another client — the thread, which holds
+// the original only while the subject is unchanged. Resolved on every edit of a
+// reply, not only on body edits, so it can be recorded on the replacement
+// before a subject edit moves the reply out of that thread for good.
+const replyOriginal = async (
+  deps: DraftToolDeps,
+  p: { accountId: string; authorization: string; record: EmailComposeRecord; staged: EmailDraft }
+): Promise<string | null> => {
+  const answers = p.staged.inReplyTo?.[0]
+  if (!answers) {
+    return null
+  }
+  return (
+    replyOriginalId(p.record) ??
+    (await deps.threadMessageFind({
+      accountId: p.accountId,
+      apiUrl: '',
+      authorization: p.authorization,
+      emailId: p.record.id,
+      messageId: answers,
+    }))
+  )
+}
+
 // The body the edit stages: what the caller supplied, with the original quoted
 // below it when the draft is a reply that quotes it (or the caller asks for the
 // quote). `note` says when a quote could not be re-attached, so the agent learns
@@ -236,38 +269,28 @@ const loadEditableDraft = async (
 // create_draft applies: the quoting decision was made when the reply was staged
 // — by the user, when they asked for a quote despite a new recipient — and an
 // edit of the wording is not a reason to revisit it.
-// The tail of an attribution line ("On …, Name <address> wrote:"), as a sign a
-// body quotes something when the quoted message itself cannot be read.
-const QUOTE_ATTRIBUTION_RE = / wrote:$/mu
-
-// Quoted history in either body form: a `>`-prefixed line or a blockquote.
-const FOREIGN_QUOTE_RE = /^>|<blockquote\b/imu
-
 const editedBody = async (
   deps: DraftToolDeps,
-  p: { accountId: string; args: UpdateDraftArgs; authorization: string; record: EmailComposeRecord; staged: EmailDraft }
-): Promise<{ body: ReplyBody; note?: string; originalId?: string }> => {
-  const { args } = p
+  p: {
+    accountId: string
+    args: UpdateDraftArgs
+    authorization: string
+    originalId: string | null
+    staged: EmailDraft
+  }
+): Promise<{ body: ReplyBody; note?: string }> => {
+  const { args, originalId } = p
   const supplied: ReplyBody = {
     ...(args.text === undefined ? {} : { text: args.text }),
     ...(args.html === undefined ? {} : { html: args.html }),
   }
-  const answers = p.staged.inReplyTo?.[0]
-  if ((args.text === undefined && args.html === undefined) || !answers || args.quoteOriginal === false) {
+  if (
+    (args.text === undefined && args.html === undefined) ||
+    !p.staged.inReplyTo?.[0] ||
+    args.quoteOriginal === false
+  ) {
     return { body: supplied }
   }
-  // The id create_draft recorded; failing that — a reply staged by another
-  // client — the thread, which holds the original as long as the subject has
-  // not changed.
-  const originalId =
-    replyOriginalId(p.record) ??
-    (await deps.threadMessageFind({
-      accountId: p.accountId,
-      apiUrl: '',
-      authorization: p.authorization,
-      emailId: p.record.id,
-      messageId: answers,
-    }))
   const original = originalId
     ? await deps.emailComposeGet({
         accountId: p.accountId,
@@ -294,7 +317,7 @@ const editedBody = async (
   // A caller who passed the whole body, quote included, gets it as written
   // rather than quoted twice.
   if (carriesQuoteOf(supplied, original)) {
-    return { body: supplied, originalId: original.id }
+    return { body: supplied }
   }
   if (!(args.quoteOriginal ?? carriesQuoteOf(p.staged, original))) {
     // A quote in a format this tool did not write — another mail client's —
@@ -303,7 +326,6 @@ const editedBody = async (
     const foreignQuote = args.quoteOriginal === undefined && FOREIGN_QUOTE_RE.test(p.staged.text ?? p.staged.html ?? '')
     return {
       body: supplied,
-      originalId: original.id,
       ...(foreignQuote
         ? {
             note:
@@ -313,7 +335,7 @@ const editedBody = async (
         : {}),
     }
   }
-  return { body: withQuotedOriginal(supplied, original), originalId: original.id }
+  return { body: withQuotedOriginal(supplied, original) }
 }
 
 // Why the arguments alone describe no edit, if they don't — checked before
@@ -412,7 +434,10 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
     return errorResult(attachments.error)
   }
 
-  const edited = await editedBody(deps, { accountId, args, authorization, record, staged })
+  // Recorded by create_draft, or found in the thread just now — kept on the
+  // replacement either way, so the next edit does not have to search again.
+  const originalId = await replyOriginal(deps, { accountId, authorization, record, staged })
+  const edited = await editedBody(deps, { accountId, args, authorization, originalId, staged })
   const merged: EmailDraft = {
     ...staged,
     ...recipients,
@@ -422,9 +447,6 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
   }
   // A draft another client staged gets its token now — see `stableDraftId`.
   const draftId = stableDraftId(record) ?? randomUUID()
-  // Recorded by create_draft, or found in the thread just now — kept either way
-  // so the next edit does not have to search again.
-  const originalId = edited.originalId ?? replyOriginalId(record)
 
   let created: DraftCreateResult
   try {
