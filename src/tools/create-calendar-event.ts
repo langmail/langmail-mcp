@@ -22,6 +22,7 @@ import {
 } from '../caldav/client.ts'
 import { buildInvite } from '../caldav/ical.ts'
 import { alignUntil, recurrenceDescription, recurrenceSchema, toRRule } from '../caldav/recurrence.ts'
+import { logSchedulingHandover } from '../caldav/scheduling-handover.ts'
 import { eventTimeSchema, resolveEventTimes, timeZoneSchema, UTC_TIME_ZONE } from '../caldav/timezone.ts'
 import { type DiscoveredAccount } from '../caldav/types.ts'
 import { OUTWARD_WRITE } from './annotations.ts'
@@ -200,6 +201,18 @@ export const createCalendarEvent = async (
   })
 
   await deps.putEvent({ calendarUrl, ical, token })
+  // A personal event hands Stalwart nothing to schedule, so only a scheduling
+  // object gets the audit line.
+  if (attendees.length > 0) {
+    logSchedulingHandover({
+      attendees,
+      ical,
+      removedAttendees: [],
+      scheduleAgent: args.notify === 'none' ? 'NONE' : undefined,
+      sequence: 0,
+      uid,
+    })
+  }
 
   await deps.collectAttendees?.({
     attendees: attendees.map((email) => ({ email })),
