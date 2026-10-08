@@ -498,6 +498,25 @@ describe('updateDraft on a reply', () => {
     expect(occurrences(creates[0]?.draft.text, ATTRIBUTION)).toBe(1)
   })
 
+  test('a recipients-only edit that adds an outsider keeps the quote and says it now goes to them', async () => {
+    const creates: DraftCreateParams[] = []
+    const { text } = await run(
+      { cc: ['outsider@example.net'], draftId: 'd1' },
+      { creates, records: { d1: quotedReply, e1: original } }
+    )
+    expect(creates[0]?.draft.text).toBe(quotedReply.bodyValues?.['1']?.value)
+    expect(text).toContain('the quote now goes to them too')
+    expect(text).toContain('quoteOriginal: false')
+  })
+
+  test('a recipients-only edit adding someone already on the original says nothing', async () => {
+    const { text } = await run(
+      { cc: ['carl@example.org'], draftId: 'd1' },
+      { records: { d1: quotedReply, e1: original } }
+    )
+    expect(text).not.toContain('the quote now goes to them')
+  })
+
   test('says the quote is gone for an HTML reply whose original cannot be found', async () => {
     const html = stagedDraft({
       bodyValues: { '1': { value: '<p>Sure.</p>\n<br>\n<div>On Mon, 5 Oct 2026, Nadia Bram wrote:</div>' } },

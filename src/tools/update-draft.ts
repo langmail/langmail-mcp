@@ -359,6 +359,35 @@ const addedOutsider = async (
   ])
 }
 
+// An edit that leaves the body alone re-stages it as it is, quote included —
+// the same as changing the recipients of a quoted reply in a mail client. When
+// that edit adds someone the original was never addressed to, the quote now
+// goes to them too: say so, since the agent did not ask for it in so many
+// words, and say how to take it off.
+const stagedQuoteNote = async (
+  deps: DraftToolDeps,
+  p: {
+    args: UpdateDraftArgs
+    authorization: string
+    original: EmailComposeRecord | null
+    principal: string
+    recipients: ParsedRecipients
+    staged: EmailDraft
+  }
+): Promise<{ note?: string }> => {
+  if (!(p.original && carriesQuoteOf(p.staged, p.original))) {
+    return {}
+  }
+  const outsider = await addedOutsider(deps, { ...p, original: p.original })
+  return outsider
+    ? {
+        note:
+          `The draft quotes the original, and ${outsider} was not on it, so the quote now goes to them too. ` +
+          'To take it off, pass the text again with `quoteOriginal: false`.',
+      }
+    : {}
+}
+
 // The body the edit stages: what the caller supplied, with the original quoted
 // below it when the draft is a reply that quotes it (or the caller asks for the
 // quote). `note` says when a quote could not be re-attached, so the agent learns
@@ -370,7 +399,8 @@ const addedOutsider = async (
 // edit of the wording is not a reason to revisit it. An edit that also changes
 // the recipients is: re-attaching the quote for someone the original was never
 // addressed to would forward it to them, so that takes `quoteOriginal: true`,
-// as it does on create_draft.
+// as it does on create_draft. An edit that leaves the body alone keeps the
+// staged quote as it is and only says so — see `stagedQuoteNote`.
 const editedBody = async (
   deps: DraftToolDeps,
   p: {
@@ -387,11 +417,10 @@ const editedBody = async (
     ...(args.text === undefined ? {} : { text: args.text }),
     ...(args.html === undefined ? {} : { html: args.html }),
   }
-  if (
-    (args.text === undefined && args.html === undefined) ||
-    !p.staged.inReplyTo?.[0] ||
-    args.quoteOriginal === false
-  ) {
+  if (args.text === undefined && args.html === undefined) {
+    return { body: supplied, ...(await stagedQuoteNote(deps, p)) }
+  }
+  if (!p.staged.inReplyTo?.[0] || args.quoteOriginal === false) {
     return { body: supplied }
   }
   if (!original) {
