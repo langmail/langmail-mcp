@@ -1,9 +1,10 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 
+import { parseEvents } from '@langmail/ical'
 import { logger } from '@langmail/logger'
 
 import { type FetchEventParams, type UpdateEventParams } from '../caldav/client.ts'
-import { buildInvite } from '../caldav/ical.ts'
+import { buildInvite, maxSequence } from '../caldav/ical.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
 import {
   mergeAttendees,
@@ -1160,8 +1161,8 @@ describe('updateCalendarEvent — attendee delta', () => {
     expect(ical).toContain('DTSTART:20260616T100000Z')
     expect(ical).toContain('LOCATION:Zoom')
     expect(ical).toContain('DESCRIPTION:Weekly unvibe')
-    // SEQUENCE still bumps so attendee clients treat it as an update.
-    expect(ical).toContain('SEQUENCE:3')
+    // Not a reschedule (RFC 5546 §3.2.2.2), so SEQUENCE stays.
+    expect(ical).toContain('SEQUENCE:2')
   })
 
   test('adds an attendee onto the stored list', async () => {
@@ -2046,5 +2047,118 @@ describe('updateCalendarEvent — cancelled occurrences', () => {
     })
     expect(result.isError).toBe(true)
     expect(cap.updated).toHaveLength(0)
+  })
+})
+
+// RFC 5546 §3.2.2.2: a detail edit keeps every attendee's reply; only a
+// reschedule (start, end, all-day flag, repeat rule) asks them to answer again.
+describe('updateCalendarEvent — attendee replies', () => {
+  const REPLIED = [
+    { email: 'yes@example.com', name: 'Robin Yes', role: 'OPT-PARTICIPANT', status: 'ACCEPTED' },
+    { email: 'no@example.com', status: 'DECLINED' },
+  ]
+
+  const repliedSeries = (): CalendarObject =>
+    storedEvent({
+      data: buildInvite({
+        attendees: REPLIED,
+        end: new Date('2026-06-16T10:30:00Z'),
+        organizer: 'host@langmail.me',
+        rrule: 'FREQ=WEEKLY;BYDAY=TU',
+        sequence: 2,
+        start: new Date('2026-06-16T10:00:00Z'),
+        timeZone: 'UTC',
+        title: 'Weekly Sync',
+        uid: UID,
+      }),
+    })
+
+  const edit = async (stored: CalendarObject, over: Partial<UpdateCalendarEventArgs>): Promise<string> => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), stored, cap), {
+      args: { uid: UID, ...over },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    return cap.updated[0]?.ical ?? ''
+  }
+
+  // The VEVENT whose RECURRENCE-ID names `at`, or the master when omitted.
+  const eventIn = (ical: string, at?: string) =>
+    parseEvents(ical).find((e) =>
+      at === undefined ? e.recurrenceId === undefined : Date.parse(e.recurrenceId ?? '') === Date.parse(at)
+    )
+
+  const statuses = (ical: string, at?: string): Record<string, string | undefined> =>
+    Object.fromEntries((eventIn(ical, at)?.attendees ?? []).map((a) => [a.email, a.status]))
+
+  test('a description-only edit keeps ACCEPTED and DECLINED, CN, ROLE and SEQUENCE', async () => {
+    const ical = await edit(repliedSeries(), { description: 'New agenda' })
+    expect(statuses(ical)).toEqual({ 'no@example.com': 'DECLINED', 'yes@example.com': 'ACCEPTED' })
+    expect(eventIn(ical)?.attendees[0]).toEqual(REPLIED[0] as (typeof REPLIED)[number])
+    expect(ical).toContain('SEQUENCE:2')
+    expect(ical).not.toContain('SEQUENCE:3')
+  })
+
+  test('a start change resets every reply to NEEDS-ACTION and bumps SEQUENCE', async () => {
+    const ical = await edit(repliedSeries(), { start: '2026-06-16T11:00:00Z' })
+    expect(statuses(ical)).toEqual({ 'no@example.com': 'NEEDS-ACTION', 'yes@example.com': 'NEEDS-ACTION' })
+    // The display name and role are the attendee's, not their reply.
+    expect(eventIn(ical)?.attendees[0]?.name).toBe('Robin Yes')
+    expect(eventIn(ical)?.attendees[0]?.role).toBe('OPT-PARTICIPANT')
+    expect(ical).toContain('SEQUENCE:3')
+  })
+
+  test('a repeat-rule change resets every reply', async () => {
+    const ical = await edit(repliedSeries(), { recurrence: 'FREQ=WEEKLY;BYDAY=TU;COUNT=4' })
+    expect(statuses(ical)).toEqual({ 'no@example.com': 'NEEDS-ACTION', 'yes@example.com': 'NEEDS-ACTION' })
+    expect(ical).toContain('SEQUENCE:3')
+  })
+
+  test('re-specifying the stored rule in another spelling is not a reschedule', async () => {
+    const stored = repliedSeries()
+    const ical = await edit(
+      storedEvent({ data: stored.data.replace('RRULE:FREQ=WEEKLY;BYDAY=TU', 'RRULE:FREQ=WEEKLY;WKST=MO;BYDAY=TU') }),
+      { description: 'New agenda', recurrence: { byDay: ['TU'], frequency: 'weekly' } }
+    )
+    expect(statuses(ical)).toEqual({ 'no@example.com': 'DECLINED', 'yes@example.com': 'ACCEPTED' })
+    expect(ical).toContain('SEQUENCE:2')
+  })
+
+  test('addedAttendees leaves existing replies alone and invites the newcomer at NEEDS-ACTION', async () => {
+    const ical = await edit(repliedSeries(), { addedAttendees: ['new@example.com'] })
+    expect(statuses(ical)).toEqual({
+      'new@example.com': 'NEEDS-ACTION',
+      'no@example.com': 'DECLINED',
+      'yes@example.com': 'ACCEPTED',
+    })
+  })
+
+  test('a title edit on one occurrence inherits the master’s replies', async () => {
+    const at = '2026-06-23T10:00:00Z'
+    const ical = await edit(repliedSeries(), { recurrenceId: at, title: 'Weekly Sync (special)' })
+    expect(statuses(ical, at)).toEqual({ 'no@example.com': 'DECLINED', 'yes@example.com': 'ACCEPTED' })
+    expect(maxSequence(ical)).toBe(2)
+  })
+
+  test('a detail edit of an existing override keeps the override’s own replies', async () => {
+    const at = '2026-06-23T10:00:00Z'
+    const once = await edit(repliedSeries(), { recurrenceId: at, title: 'Weekly Sync (special)' })
+    // The attendee then answered this occurrence differently from the series:
+    // the override (spliced after the master) carries its own reply.
+    const cut = once.lastIndexOf('PARTSTAT=DECLINED')
+    const answered = `${once.slice(0, cut)}PARTSTAT=TENTATIVE${once.slice(cut + 'PARTSTAT=DECLINED'.length)}`
+    expect(statuses(answered, at)['no@example.com']).toBe('TENTATIVE')
+    const ical = await edit(storedEvent({ data: answered }), { description: 'Bring slides', recurrenceId: at })
+    expect(statuses(ical, at)).toEqual({ 'no@example.com': 'TENTATIVE', 'yes@example.com': 'ACCEPTED' })
+    expect(statuses(ical)).toEqual({ 'no@example.com': 'DECLINED', 'yes@example.com': 'ACCEPTED' })
+  })
+
+  test('moving one occurrence resets its replies and bumps SEQUENCE, leaving the master alone', async () => {
+    const at = '2026-06-23T10:00:00Z'
+    const ical = await edit(repliedSeries(), { recurrenceId: at, start: '2026-06-23T11:00:00Z' })
+    expect(statuses(ical, at)).toEqual({ 'no@example.com': 'NEEDS-ACTION', 'yes@example.com': 'NEEDS-ACTION' })
+    expect(statuses(ical)).toEqual({ 'no@example.com': 'DECLINED', 'yes@example.com': 'ACCEPTED' })
+    expect(maxSequence(ical)).toBe(3)
   })
 })

@@ -1,6 +1,8 @@
 // update_calendar_event tool — edits an existing VEVENT in place and re-sends
-// DKIM-signed iMIP invitations with a bumped SEQUENCE, so the attendees' clients
-// treat it as an update rather than a new invite.
+// DKIM-signed iMIP invitations, so the attendees' clients treat it as an update
+// rather than a new invite. Only a reschedule (start, end, all-day flag or
+// repeat rule) bumps SEQUENCE and resets every reply to NEEDS-ACTION; any other
+// edit keeps each attendee's reply (RFC 5546 §3.2.2.2).
 //
 // The edit is a *partial* one: the caller passes the stable UID returned from
 // create_calendar_event plus only the fields it wants to change, and every field
@@ -38,7 +40,7 @@ import {
   type UpdateEventParams,
   updateEvent,
 } from '../caldav/client.ts'
-import { buildInvite, type InviteAlarm, maxSequence, parseSequence } from '../caldav/ical.ts'
+import { buildInvite, type InviteAlarm, type InviteAttendee, maxSequence, parseSequence } from '../caldav/ical.ts'
 import { spliceAlarms, spliceOccurrenceOverride } from '../caldav/occurrence.ts'
 import {
   alignUntil,
@@ -198,6 +200,8 @@ interface OccurrenceUpdate {
   description?: string
   end: Date
   existing: CalendarObject
+  // The override's ATTENDEE lines, each carrying its reply (see inviteAttendees).
+  invitees: InviteAttendee[]
   location?: string
   // Bare organizer email — already confirmed non-null by the caller.
   organizer: string
@@ -205,6 +209,8 @@ interface OccurrenceUpdate {
   // Attendees dropped from this occurrence. Stalwart may send them a
   // cancellation regardless of `notify`, so the audit log must retain them.
   removedAttendees: string[]
+  // True when the edit moves the occurrence; only then does SEQUENCE bump.
+  rescheduled: boolean
   // RFC 6638 SCHEDULE-AGENT for the override's attendees; undefined = SERVER
   // (notify), 'NONE' = silent. See buildInvite.
   scheduleAgent?: 'NONE'
@@ -227,10 +233,12 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
     description,
     end,
     existing,
+    invitees,
     location,
     organizer,
     recurrenceId,
     removedAttendees,
+    rescheduled,
     scheduleAgent,
     start,
     timeZone,
@@ -281,13 +289,15 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
     )
   }
 
-  // Bump past every SEQUENCE already in the object so this override supersedes
-  // any prior edit of the same instance.
-  const sequence = maxSequence(existing.data) + 1
+  // A move bumps past every SEQUENCE already in the object so this override
+  // supersedes any prior edit of the same instance. Any other edit is not a
+  // reschedule (RFC 5546 §3.2.2.2) and keeps the highest one, which never
+  // ranks the override below the revision it replaces.
+  const sequence = nextSequence(maxSequence(existing.data), rescheduled)
   const override = buildInvite({
     alarms,
     allDay,
-    attendees,
+    attendees: invitees,
     end,
     // The master's stored ORGANIZER wins over the discovered principal: an
     // event created under a previous account address (still an alias) would
@@ -434,6 +444,9 @@ interface EditBase {
   location?: string
   recurrence?: string
   start?: string
+  // The stored attendees with their reply, CN and ROLE, so a rebuild can write
+  // them back instead of resetting everyone (see inviteAttendees).
+  storedAttendees: ParsedAttendee[]
   // The zone `start`/`end` are wall-clock in (the stored DTSTART's TZID).
   // Distinct from the caller's `timeZone`: a preserved value must be read in the
   // zone it was *stored* in, while the caller's own values — and the rendering
@@ -450,6 +463,7 @@ const baseOf = (event: ParsedEvent | undefined): EditBase => ({
   allDay: event?.allDay === true,
   attendees: (event?.attendees ?? []).map((a) => a.email),
   hasExcludedDates: (event?.excludedDates?.length ?? 0) > 0,
+  storedAttendees: event?.attendees ?? [],
   unparsedAttendeeCount: event?.unparsedAttendeeCount ?? 0,
   ...(event?.description ? { description: event.description } : {}),
   ...(event?.end ? { end: event.end } : {}),
@@ -744,6 +758,69 @@ const resolveRrule = (
   return rrule === undefined ? undefined : alignUntil(rrule, allDay, timeZone)
 }
 
+// True when the edit moves the event: its start, end or all-day flag changes.
+// A reschedule (this, or a new repeat rule — see isSeriesRescheduled) is the
+// one edit every attendee must answer again (RFC 5546 §3.2.2.2); any other
+// edit keeps their replies. Stored times are read exactly the way
+// resolveEditTimes reads preserved ones, so an omitted start/end compares equal.
+const isRescheduled = (f: ResolvedFields, base: EditBase, timeZone: string): boolean => {
+  if (f.allDay !== base.allDay || !(isReadableTime(base.start) && isReadableTime(base.end))) {
+    return true
+  }
+  const storedStart = resolveStored(base.start ?? '', base, timeZone)
+  const storedEnd = resolveStored(base.end ?? '', base, timeZone)
+  return f.start.getTime() !== storedStart.getTime() || f.end.getTime() !== storedEnd.getTime()
+}
+
+// A whole-event edit also reschedules when its resolved rule differs from the
+// stored one, aligned the same way resolveRrule aligns it.
+// Compared by meaning, not spelling (see sameRule).
+const isSeriesRescheduled = (f: ResolvedFields, base: EditBase, timeZone: string, rrule: string | undefined): boolean =>
+  isRescheduled(f, base, timeZone) ||
+  !sameRule(rrule, base.recurrence === undefined ? undefined : alignUntil(base.recurrence, f.allDay, timeZone))
+
+// RRULE parts whose value is the RFC 5545 §3.3.10 default, so their presence
+// changes nothing.
+const DEFAULT_RULE_PARTS = new Set(['INTERVAL=1', 'WKST=MO'])
+
+// True when two RRULEs say the same thing: equal as sets of uppercased
+// KEY=VALUE parts, defaults ignored. A rule another client wrote
+// (`FREQ=WEEKLY;WKST=MO;BYDAY=TU`) and the one toRRule writes for the same
+// series (`FREQ=WEEKLY;BYDAY=TU`) must not read as a reschedule.
+const sameRule = (a: string | undefined, b: string | undefined): boolean => {
+  const parts = (rule: string | undefined): string[] =>
+    (rule ?? '')
+      .toUpperCase()
+      .split(';')
+      .filter((part) => part !== '' && !DEFAULT_RULE_PARTS.has(part))
+      .sort()
+  return parts(a).join(';') === parts(b).join(';')
+}
+
+// RFC 5546 §3.2.2.2: only a reschedule is a new revision, so only it bumps
+// SEQUENCE; a detail edit keeps the current one.
+const nextSequence = (current: number, rescheduled: boolean): number => (rescheduled ? current + 1 : current)
+
+// The ATTENDEE lines of the rebuilt VEVENT. A newly invited address starts at
+// NEEDS-ACTION; a stored attendee keeps its CN and ROLE, and its reply too
+// unless the event was rescheduled. SCHEDULE-STATUS is never carried: the
+// server owns it.
+const inviteAttendees = (attendees: string[], stored: ParsedAttendee[], rescheduled: boolean): InviteAttendee[] => {
+  const byEmail = new Map(stored.map((a) => [a.email.toLowerCase(), a]))
+  return attendees.map((email) => {
+    const known = byEmail.get(email.toLowerCase())
+    if (!known) {
+      return email
+    }
+    return {
+      email,
+      ...(known.name ? { name: known.name } : {}),
+      ...(known.role ? { role: known.role } : {}),
+      ...(!rescheduled && known.status ? { status: known.status } : {}),
+    }
+  })
+}
+
 // Names for the effective attendees of the contact write-through, recovered
 // from the stored parse where available (a CN survives the rebuild; a
 // freshly added address has none).
@@ -823,9 +900,9 @@ const isExcluded = (master: ParsedEvent, recurrenceId: string): boolean => {
 }
 
 // An edit that changes nothing but the reminder. It takes its own path
-// (spliceAlarms) instead of the rebuild: a rebuild re-creates every ATTENDEE
-// as NEEDS-ACTION and bumps SEQUENCE, so setting one's own reminder would wipe
-// the guests' responses and re-invite them.
+// (spliceAlarms) instead of the rebuild: a rebuild hands the event to
+// Stalwart's scheduler, so setting one's own reminder would re-send the
+// invitation to every guest.
 const isReminderOnly = (args: UpdateCalendarEventArgs): boolean =>
   args.reminderMinutesBefore !== undefined &&
   MUTATING_FIELDS.every((field) => field === 'reminderMinutesBefore' || args[field] === undefined)
@@ -833,10 +910,9 @@ const isReminderOnly = (args: UpdateCalendarEventArgs): boolean =>
 // The reminder-only path for one occurrence. An existing override already
 // holds that occurrence's attendee state, so its alarms are spliced like the
 // whole event's. Without one, an override has to be created, which hands the
-// occurrence to Stalwart's scheduler as a fresh REQUEST with every response
-// reset — acceptable for a personal series (nobody to re-invite, so the
-// caller falls through to the normal occurrence path) but not for one with
-// attendees.
+// occurrence to Stalwart's scheduler as a fresh REQUEST to every attendee —
+// acceptable for a personal series (nobody to re-invite, so the caller falls
+// through to the normal occurrence path) but not for one with attendees.
 const occurrenceReminderPath = (
   stored: ParsedEvent[],
   master: ParsedEvent | undefined,
@@ -911,8 +987,9 @@ const reminderOnlyResult = (e: ReminderOnlyEdit): Promise<ToolResult> | ToolResu
   }
   if (target.path === 'refuse') {
     return errorResult(
-      'This occurrence has no individual changes yet, so setting its reminder alone would reset the attendees’ ' +
-        'responses to it. Set the reminder on the whole series instead (omit `recurrenceId`). Nothing was changed.'
+      'This occurrence has no individual changes yet, so setting its reminder alone would re-send the ' +
+        'invitation for it to every attendee. Set the reminder on the whole series instead (omit `recurrenceId`). ' +
+        'Nothing was changed.'
     )
   }
   return
@@ -939,6 +1016,7 @@ const editScope = (
 interface RebuildEvent {
   args: UpdateCalendarEventArgs
   f: ResolvedFields
+  invitees: InviteAttendee[]
   // Discovered principal — the fallback when the stored object names nobody.
   organizer: string
   rrule?: string
@@ -948,18 +1026,18 @@ interface RebuildEvent {
 }
 
 // Serializes the whole-event edit as a single VEVENT.
-const rebuildEvent = ({ args, f, organizer, rrule, sequence, stored, timeZone }: RebuildEvent): string =>
+const rebuildEvent = ({ args, f, invitees, organizer, rrule, sequence, stored, timeZone }: RebuildEvent): string =>
   buildInvite({
     alarms: f.alarms,
     allDay: f.allDay,
-    attendees: f.attendees,
+    attendees: invitees,
     end: f.end,
     // Keep the stored ORGANIZER (see updateOccurrence): re-stamping the freshly
     // discovered principal onto an event created under a previous account
     // address silently changes the organizer, which Stalwart's scheduler treats
     // as an unsupported organizer replacement (RFC 6638).
     organizer: stored.find((e) => e.organizer)?.organizer ?? organizer,
-    // Bump past the stored SEQUENCE so the re-sent REQUEST supersedes it.
+    // Bumped past the stored SEQUENCE only on a reschedule (see the caller).
     sequence,
     start: f.start,
     timeZone,
@@ -1032,13 +1110,16 @@ export const updateCalendarEvent = async (
   const removed = removedAttendees(base.attendees, f.attendees)
 
   if (recurrenceId !== undefined) {
+    const rescheduled = isRescheduled(f, base, timeZone)
     return updateOccurrence({
       args,
       deps,
       existing,
+      invitees: inviteAttendees(f.attendees, base.storedAttendees, rescheduled),
       organizer: account.organizer,
       recurrenceId,
       removedAttendees: removed,
+      rescheduled,
       timeZone,
       token,
       ...f,
@@ -1051,10 +1132,12 @@ export const updateCalendarEvent = async (
   if (ruleConflict) {
     return errorResult(ruleConflict)
   }
-  const sequence = parseSequence(existing.data) + 1
+  const rescheduled = isSeriesRescheduled(f, base, timeZone, rrule)
+  const sequence = nextSequence(parseSequence(existing.data), rescheduled)
   const ical = rebuildEvent({
     args,
     f,
+    invitees: inviteAttendees(f.attendees, base.storedAttendees, rescheduled),
     organizer: account.organizer,
     sequence,
     stored,

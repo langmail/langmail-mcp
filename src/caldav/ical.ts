@@ -4,7 +4,13 @@
 // invite shape onto it.
 
 import { getVtimezoneComponent } from '@touch4it/ical-timezones'
-import ical, { ICalAlarmType, ICalAttendeeRole, ICalAttendeeStatus, ICalCalendarMethod } from 'ical-generator'
+import ical, {
+  ICalAlarmType,
+  type ICalAttendeeData,
+  ICalAttendeeRole,
+  ICalAttendeeStatus,
+  ICalCalendarMethod,
+} from 'ical-generator'
 
 import { toZonedDate, UTC_TIME_ZONE } from './timezone.ts'
 
@@ -22,6 +28,10 @@ const DTSTAMP_LINE_RE = /^DTSTAMP(?:;[^:]*)?:.*$/gmu
 // delimiter); multiline + global so every attendee is matched, folded
 // continuation lines (leading space) are not.
 const ATTENDEE_LINE_START_RE = /^ATTENDEE(?=[;:])/gmu
+// The value-position `:MAILTO:` scheme, matched across a line fold (CRLF +
+// space) between any two of its characters: ical-generator folds at 75
+// octets, and a CN on the ATTENDEE pushes the scheme right onto the fold.
+const UPPERCASE_MAILTO_RE = new RegExp([...':MAILTO:'].join(String.raw`(?:\r\n )?`), 'gu')
 
 // A VALARM on the built VEVENT. `minutesBefore` writes a fresh DISPLAY alarm
 // that fires that many minutes before the start (the reminder the tools
@@ -59,6 +69,20 @@ export const foldLine = (line: string): string => {
   return out.join(CRLF)
 }
 
+// One ATTENDEE on the built VEVENT. A bare email string is a fresh invitee:
+// NEEDS-ACTION, REQ-PARTICIPANT, no CN. The object form carries a stored
+// attendee's reply, display name and role across an edit (RFC 5546 §3.2.2.2:
+// a non-rescheduling update keeps each reply). `status`/`role` are the raw
+// PARTSTAT/ROLE values; an unknown value falls back to the default.
+export type InviteAttendee = string | { email: string; name?: string; role?: string; status?: string }
+
+const ATTENDEE_STATUSES: ReadonlyMap<string, ICalAttendeeStatus> = new Map(
+  Object.values(ICalAttendeeStatus).map((status) => [status, status])
+)
+const ATTENDEE_ROLES: ReadonlyMap<string, ICalAttendeeRole> = new Map(
+  Object.values(ICalAttendeeRole).map((role) => [role, role])
+)
+
 export interface InviteInput {
   // VALARMs to attach, in order. See InviteAlarm.
   alarms?: InviteAlarm[]
@@ -67,7 +91,7 @@ export interface InviteInput {
   // last day (RFC 5545 §3.6.1). `start`/`end` must then be UTC midnights (see
   // dateOnlyToInstant); `timeZone` is ignored, since dates are floating.
   allDay?: boolean
-  attendees: string[]
+  attendees: InviteAttendee[]
   description?: string
   end: Date
   location?: string
@@ -174,16 +198,23 @@ export const buildInvite = (input: InviteInput): string => {
     }
   }
 
-  for (const email of input.attendees) {
-    event.createAttendee({
-      email,
-      role: ICalAttendeeRole.REQ,
-      rsvp: true,
-      status: ICalAttendeeStatus.NEEDSACTION,
-    })
+  for (const attendee of input.attendees) {
+    event.createAttendee(attendeeData(attendee))
   }
 
   return rewriteSerialized(cal.toString(), input, timeZone)
+}
+
+// An InviteAttendee as ical-generator attendee data, RSVP always requested.
+const attendeeData = (attendee: InviteAttendee): ICalAttendeeData => {
+  const { email, name, role, status } = typeof attendee === 'string' ? { email: attendee } : attendee
+  return {
+    email,
+    role: ATTENDEE_ROLES.get(role?.toUpperCase() ?? '') ?? ICalAttendeeRole.REQ,
+    rsvp: true,
+    status: ATTENDEE_STATUSES.get(status?.toUpperCase() ?? '') ?? ICalAttendeeStatus.NEEDSACTION,
+    ...(name ? { name } : {}),
+  }
 }
 
 // The fixes ical-generator's output needs on the way out, in order. Each one
@@ -220,8 +251,9 @@ const rewriteSerialized = (generated: string, input: InviteInput, timeZone: stri
   // (`:MAILTO:`) but the ORGANIZER in lowercase. Stalwart's iMIP scheduler
   // only strips a lowercase `mailto:` to derive the SMTP recipient, so the
   // uppercase scheme leaks into `RCPT TO:<mailto:…>` and the invite bounces.
-  // Normalize the value-position scheme to lowercase on every line.
-  serialized = serialized.replaceAll(':MAILTO:', ':mailto:')
+  // Normalize the value-position scheme to lowercase on every line, folded or
+  // not (lowercasing the fold's CRLF + space leaves it intact).
+  serialized = serialized.replace(UPPERCASE_MAILTO_RE, (scheme) => scheme.toLowerCase())
 
   // Stored alarms go in last, after every rewrite above, so they stay exactly
   // as another client wrote them (an EMAIL alarm's ATTENDEE must not pick up

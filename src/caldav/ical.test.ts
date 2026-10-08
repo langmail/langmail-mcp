@@ -98,6 +98,34 @@ describe('buildInvite', () => {
     expect(ics).toContain('PARTSTAT=NEEDS-ACTION')
   })
 
+  test('writes a carried attendee’s reply, CN and ROLE back', () => {
+    const ics = unfold(
+      buildInvite({
+        ...baseInput,
+        attendees: [{ email: 'a@example.com', name: 'Robin', role: 'opt-participant', status: 'accepted' }],
+      })
+    )
+    expect(ics).toContain('ATTENDEE;ROLE=OPT-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=TRUE;CN="Robin":mailto:a@example.com')
+  })
+
+  // A CN lengthens the ATTENDEE line until ical-generator's 75-octet fold lands
+  // inside the uppercase `:MAILTO:` scheme; it must still come out lowercase.
+  test('lowercases the mailto: scheme even when a line fold splits it', () => {
+    const raw = buildInvite({
+      ...baseInput,
+      attendees: [{ email: 'a@example.com', name: 'Robin', status: 'ACCEPTED' }],
+    })
+    expect(raw).toContain(':mailt\r\n o:')
+    expect(unfold(raw)).not.toContain('MAILTO')
+  })
+
+  test('falls back to NEEDS-ACTION and REQ-PARTICIPANT for an unknown PARTSTAT or ROLE', () => {
+    const ics = unfold(
+      buildInvite({ ...baseInput, attendees: [{ email: 'a@example.com', role: 'X-HOST', status: 'X-MAYBE' }] })
+    )
+    expect(ics).toContain('ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION')
+  })
+
   // ical-generator emits the ATTENDEE CAL-ADDRESS scheme in uppercase
   // (`:MAILTO:`) while the ORGANIZER gets lowercase (`:mailto:`). Stalwart's
   // iMIP scheduler only strips the lowercase prefix to derive the SMTP
