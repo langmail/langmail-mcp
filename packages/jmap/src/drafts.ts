@@ -278,6 +278,35 @@ const destroyedQuietly = async (p: JmapCall & { accountId: string; id: string })
   }
 }
 
+// Take the `$draftid:` keyword off a superseded draft the destroy left behind,
+// so the draft id names exactly one message: the replacement. Left on, the two
+// copies tie on `receivedAt` (one-second resolution) when an edit follows
+// quickly, and `draftIdResolve` could pick the pre-edit one — even after the
+// replacement was sent, delivering the old wording a second time. Keywords are
+// the one thing RFC 8621 lets a client patch, so this can land where the
+// destroy did not; if it fails as well, the caller's leftover note still names
+// the stale copy.
+const supersededQuietly = async (p: DraftCreateParams & { id: string }): Promise<void> => {
+  const patch = buildEmailSetPatch({
+    keywords: Object.fromEntries(
+      (p.keywords ?? [])
+        .filter((keyword) => keyword.startsWith(DRAFT_ID_KEYWORD_PREFIX))
+        .map((keyword) => [keyword, false])
+    ),
+  })
+  if (Object.keys(patch).length === 0) {
+    return
+  }
+  try {
+    await call(p, {
+      methodCalls: [['Email/set', { accountId: p.accountId, update: { [p.id]: patch } }, '0']],
+      using: USING,
+    })
+  } catch {
+    // Reported through `replacedDestroyed: false` either way.
+  }
+}
+
 // Stage a draft and return its id. When `replaces` is given, the superseded
 // draft is destroyed only after the new one exists — see the header for why that
 // is a second round trip and not one batched Email/set.
@@ -306,11 +335,14 @@ export const draftCreate = async (p: DraftCreateParams): Promise<DraftCreateResu
     const refusal = out.notCreated?.[CREATE_ID]
     throw new JmapError(200, `Email/set did not create the draft: ${refusal?.type ?? 'unknown'}`, refusal?.type)
   }
-  return {
-    id: created.id,
-    threadId: created.threadId ?? null,
-    ...(p.replaces ? { replacedDestroyed: await destroyedQuietly({ ...p, id: p.replaces }) } : {}),
+  if (!p.replaces) {
+    return { id: created.id, threadId: created.threadId ?? null }
   }
+  const replacedDestroyed = await destroyedQuietly({ ...p, id: p.replaces })
+  if (!replacedDestroyed) {
+    await supersededQuietly({ ...p, id: p.replaces })
+  }
+  return { id: created.id, replacedDestroyed, threadId: created.threadId ?? null }
 }
 
 export interface EmailComposeGetParams extends JmapCall {

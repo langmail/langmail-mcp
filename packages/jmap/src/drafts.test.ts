@@ -296,6 +296,56 @@ describe('draftCreate', () => {
     expect(result.replacedDestroyed).toBe(false)
   })
 
+  test('takes the draft id off a superseded draft the destroy left behind', async () => {
+    const calls: Record<string, unknown>[] = []
+    const f = mock((_url: string, init?: RequestInit) => {
+      const params = JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1]
+      calls.push(params)
+      if (params.create) {
+        return Promise.resolve(jmapResponse([['Email/set', { created: { draft: { id: 'd1' } } }, '0']]))
+      }
+      return Promise.resolve(
+        jmapResponse([['Email/set', params.destroy ? { destroyed: [] } : { updated: { d0: null } }, '0']])
+      )
+    })
+    const result = await withFetch(f, () =>
+      draftCreate({
+        ...call,
+        draft: { from: [{ email: 'me@example.com' }], text: 'edited' },
+        keywords: ['$label:invoices', '$draftid:tok1'],
+        mailboxId: 'mbDrafts',
+        replaces: 'd0',
+      })
+    )
+    expect(result.replacedDestroyed).toBe(false)
+    // Only the draft id goes: the token must name the replacement alone, while
+    // the stale copy keeps its labels and stays a draft the user can delete.
+    expect(calls[2]).toEqual({ accountId: 'acct', update: { d0: { 'keywords/$draftid:tok1': false } } })
+  })
+
+  test('does not touch a superseded draft that was destroyed', async () => {
+    const calls: Record<string, unknown>[] = []
+    const f = mock((_url: string, init?: RequestInit) => {
+      const params = JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1]
+      calls.push(params)
+      return Promise.resolve(
+        params.create
+          ? jmapResponse([['Email/set', { created: { draft: { id: 'd1' } } }, '0']])
+          : jmapResponse([['Email/set', { destroyed: ['d0'] }, '0']])
+      )
+    })
+    await withFetch(f, () =>
+      draftCreate({
+        ...call,
+        draft: { from: [{ email: 'me@example.com' }], text: 'edited' },
+        keywords: ['$draftid:tok1'],
+        mailboxId: 'mbDrafts',
+        replaces: 'd0',
+      })
+    )
+    expect(calls).toHaveLength(2)
+  })
+
   test('throws with the JMAP error type when the create is refused', async () => {
     const f = mock(() =>
       Promise.resolve(jmapResponse([['Email/set', { notCreated: { draft: { type: 'invalidProperties' } } }, '0']]))
