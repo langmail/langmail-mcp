@@ -331,7 +331,7 @@ export const quoteWithheldFrom = (
 
 // The line a result carries when the default withheld the quote, so the agent
 // learns it at the moment it matters rather than only from the description.
-const quoteWithheldNote = (outsider: string): string =>
+export const quoteWithheldNote = (outsider: string): string =>
   `The original was not quoted: ${outsider} was not on it, and quoting would forward it to them. ` +
   'Pass `quoteOriginal: true` if the user wants it included.'
 

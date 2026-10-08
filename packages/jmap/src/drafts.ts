@@ -415,8 +415,10 @@ export interface DraftIdResolveParams extends JmapCall {
 }
 
 // The current revision of the draft known as `draftId`, or null when no
-// message carries its `$draftid:` keyword (it is a JMAP id, not a draft id). Newest first, so a superseded revision an edit failed to
-// destroy never wins over the one that replaced it.
+// message carries its `$draftid:` keyword (it is a JMAP id, not a draft id).
+// Newest first as a backstop: `draftCreate` takes the token off a superseded
+// revision its destroy left behind, so only if that patch failed too can two
+// messages answer to the token — and then the replacement wins.
 export const draftIdResolve = async (p: DraftIdResolveParams): Promise<string | null> => {
   const resp = await call(p, {
     methodCalls: [

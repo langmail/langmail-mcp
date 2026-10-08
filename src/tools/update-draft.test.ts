@@ -443,6 +443,65 @@ describe('updateDraft on a reply', () => {
     expect(text).not.toContain('no quote was re-attached')
   })
 
+  test('does not quote a recorded id that now names a different message', async () => {
+    const creates: DraftCreateParams[] = []
+    // The recorded id was handed to another message after the original went.
+    const recorded = {
+      ...quotedReply,
+      keywords: { $draft: true, $seen: true, '$draftid:d1': true, '$draftreplyto:e9': true },
+      threadId: 't2',
+    }
+    const stranger = receivedMessage({ id: 'e9', messageId: ['other@example.org'], threadId: 't9' })
+    const { text } = await run(
+      { draftId: 'd1', text: 'Here they are.' },
+      { creates, records: { d1: recorded, e9: stranger } }
+    )
+    expect(creates[0]?.draft.text).toBe('Here they are.')
+    expect(creates[0]?.keywords).not.toContain('$draftreplyto:e9')
+    expect(text).toContain('no quote was re-attached')
+  })
+
+  test('leaves the quote off when the same edit adds someone the original was not addressed to', async () => {
+    const creates: DraftCreateParams[] = []
+    const { text } = await run(
+      { cc: ['outsider@example.net'], draftId: 'd1', text: 'Looping you in.' },
+      { creates, records: { d1: quotedReply, e1: original } }
+    )
+    expect(creates[0]?.draft.text).toBe('Looping you in.')
+    expect(text).toContain('outsider@example.net was not on it')
+
+    await run(
+      { cc: ['outsider@example.net'], draftId: 'd1', quoteOriginal: true, text: 'Looping you in.' },
+      { creates, records: { d1: quotedReply, e1: original } }
+    )
+    expect(occurrences(creates[1]?.draft.text, ATTRIBUTION)).toBe(1)
+  })
+
+  test('says the quote is gone for an HTML reply whose original cannot be found', async () => {
+    const html = stagedDraft({
+      bodyValues: { '1': { value: '<p>Sure.</p>\n<br>\n<div>On Mon, 5 Oct 2026, Nadia Bram wrote:</div>' } },
+      htmlBody: [{ partId: '1', type: 'text/html' }],
+      inReplyTo: ['orig@example.org'],
+      textBody: [],
+    })
+    const { text } = await run({ draftId: 'd1', html: '<p>Here they are.</p>' }, { records: { d1: html } })
+    expect(text).toContain('no quote was re-attached')
+  })
+
+  test('a recipients-only edit goes ahead when the thread lookup fails', async () => {
+    const creates: DraftCreateParams[] = []
+    const deps = {
+      ...draftDeps({ creates, records: { d1: quotedReply, e1: original } }),
+      threadMessageFind: () => Promise.reject(new Error('socket hang up')),
+    }
+    const result = await updateDraft(deps, {
+      args: updateDraftInput.parse({ cc: ['carl@example.org'], draftId: 'd1' }),
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(creates).toHaveLength(1)
+  })
+
   test('quoteOriginal: false drops the quote', async () => {
     const creates: DraftCreateParams[] = []
     await run(

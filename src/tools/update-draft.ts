@@ -42,6 +42,7 @@ import {
   isDraft,
   loadDraft,
   MAX_DRAFT_BODY_VALUE_BYTES,
+  type ParsedRecipients,
   parseRecipients,
   replyOriginalId,
   replyOriginalKeyword,
@@ -49,7 +50,13 @@ import {
   stableDraftIdKeyword,
   unreferencableAttachments,
 } from './draft-common.ts'
-import { carriesQuoteOf, type ReplyBody, withQuotedOriginal } from './reply-quote.ts'
+import {
+  carriesQuoteOf,
+  quoteWithheldFrom,
+  quoteWithheldNote,
+  type ReplyBody,
+  withQuotedOriginal,
+} from './reply-quote.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 const MAX_RECIPIENTS = 50
@@ -79,8 +86,8 @@ export const updateDraftInput = z.object({
     .string()
     .min(1)
     .describe(
-      'The draft id, as returned by create_draft, or a message id from search_emails with `mailbox: "Drafts"`. ' +
-        'Edits do not change it.'
+      'The draft id, as returned by create_draft — edits do not change it — or a message id from search_emails ' +
+        'with `mailbox: "Drafts"`. Editing a draft found that way returns the draftId to use from then on.'
     ),
   html: z
     .string()
@@ -197,7 +204,8 @@ const loadEditableDraft = async (
   if (!isDraft(record)) {
     return {
       error: errorResult(
-        `${args.draftId} is not a draft — it has already been sent or received, and cannot be edited.`
+        `${args.draftId} is not a draft — it has already been sent or received, and cannot be edited. Its ` +
+          `messageId is ${record.id}; read it with get_email.`
       ),
     }
   }
@@ -227,37 +235,90 @@ const loadEditableDraft = async (
   return { record }
 }
 
-// The tail of an attribution line ("On …, Name <address> wrote:"), as a sign a
-// body quotes something when the quoted message itself cannot be read. `\r?`
-// because `$` does not match before a CR in a CRLF body.
-const QUOTE_ATTRIBUTION_RE = / wrote:\r?$/mu
+// The tail of an attribution line ("On …, Name <address> wrote:") in either
+// body form — the end of a text line, `\r?` because `$` does not match before
+// a CR, or the end of the `<div>` the HTML quote wraps it in — as a sign a body
+// quotes something when the quoted message itself cannot be read.
+const QUOTE_ATTRIBUTION_RE = / wrote:(?:\r?$|<\/div>)/mu
 
 // Quoted history in either body form: a `>`-prefixed line or a blockquote.
 const FOREIGN_QUOTE_RE = /^>|<blockquote\b/imu
 
-// The id of the message a reply draft answers: the one create_draft recorded,
-// failing that — a reply staged by another client — the thread, which holds
-// the original only while the subject is unchanged. Resolved on every edit of a
-// reply, not only on body edits, so it can be recorded on the replacement
-// before a subject edit moves the reply out of that thread for good.
+// Both body parts, so a test finds a quote in whichever one carries it.
+const bothParts = (draft: EmailDraft): string => `${draft.text ?? ''}\n${draft.html ?? ''}`
+
+// The message a reply draft answers: the one create_draft recorded, failing
+// that — a reply staged by another client — the one the thread holds, which it
+// does only while the subject is unchanged. Resolved on every edit of a reply,
+// not only on body edits, so it can be recorded on the replacement before a
+// subject edit moves the reply out of that thread for good.
+//
+// A candidate counts only if its Message-ID is the one the draft's In-Reply-To
+// names: a recorded id outlives the message it named, and should the server
+// hand it to another message, quoting that one would put unrelated mail into
+// the user's outgoing reply.
 const replyOriginal = async (
   deps: DraftToolDeps,
   p: { accountId: string; authorization: string; record: EmailComposeRecord; staged: EmailDraft }
-): Promise<string | null> => {
+): Promise<EmailComposeRecord | null> => {
   const answers = p.staged.inReplyTo?.[0]
   if (!answers) {
     return null
   }
-  return (
-    replyOriginalId(p.record) ??
-    (await deps.threadMessageFind({
+  const read = async (id: string): Promise<EmailComposeRecord | null> => {
+    const candidate = await deps.emailComposeGet({
       accountId: p.accountId,
       apiUrl: '',
       authorization: p.authorization,
-      emailId: p.record.id,
-      messageId: answers,
-    }))
-  )
+      bodyValues: 'body',
+      id,
+      maxBodyValueBytes: MAX_DRAFT_BODY_VALUE_BYTES,
+    })
+    return candidate?.messageId?.includes(answers) ? candidate : null
+  }
+  const recorded = replyOriginalId(p.record)
+  const fromRecorded = recorded ? await read(recorded) : null
+  if (fromRecorded) {
+    return fromRecorded
+  }
+  const inThread = await deps.threadMessageFind({
+    accountId: p.accountId,
+    apiUrl: '',
+    authorization: p.authorization,
+    emailId: p.record.id,
+    messageId: answers,
+  })
+  return inThread && inThread !== recorded ? await read(inThread) : null
+}
+
+// What a failed lookup of the original costs depends on the edit. One that
+// rewrites the body needs the original to quote, and one that changes the
+// subject moves the reply out of the thread that could still find it — both
+// fail loudly. Any other edit only misses recording the id, and the next edit
+// can still find it in the thread, so it goes ahead without.
+const replyOriginalForEdit = (
+  deps: DraftToolDeps,
+  p: { accountId: string; args: UpdateDraftArgs; authorization: string; record: EmailComposeRecord; staged: EmailDraft }
+): Promise<EmailComposeRecord | null> =>
+  replyOriginal(deps, p).catch((error: unknown) => {
+    if (p.args.subject !== undefined || p.args.text !== undefined || p.args.html !== undefined) {
+      throw error
+    }
+    return null
+  })
+
+// Every address that is the user: the draft's sender and every identity the
+// account can send as. Read only when an edit adds recipients to a quoted reply.
+const selfAddressesOf = async (
+  deps: DraftToolDeps,
+  p: { authorization: string; staged: EmailDraft }
+): Promise<string[]> => {
+  const identities = await deps.identityGet({
+    accountId: await deps.resolveSubmissionAccountId(p.authorization),
+    apiUrl: '',
+    authorization: p.authorization,
+  })
+  return [...p.staged.from.map((address) => address.email), ...identities.map((identity) => identity.email)]
 }
 
 // The body the edit stages: what the caller supplied, with the original quoted
@@ -268,18 +329,21 @@ const replyOriginal = async (
 // The default follows the staged draft rather than the recipient rule
 // create_draft applies: the quoting decision was made when the reply was staged
 // — by the user, when they asked for a quote despite a new recipient — and an
-// edit of the wording is not a reason to revisit it.
+// edit of the wording is not a reason to revisit it. An edit that also changes
+// the recipients is: re-attaching the quote for someone the original was never
+// addressed to would forward it to them, so that takes `quoteOriginal: true`,
+// as it does on create_draft.
 const editedBody = async (
   deps: DraftToolDeps,
   p: {
-    accountId: string
     args: UpdateDraftArgs
     authorization: string
-    originalId: string | null
+    original: EmailComposeRecord | null
+    recipients: ParsedRecipients
     staged: EmailDraft
   }
 ): Promise<{ body: ReplyBody; note?: string }> => {
-  const { args, originalId } = p
+  const { args, original } = p
   const supplied: ReplyBody = {
     ...(args.text === undefined ? {} : { text: args.text }),
     ...(args.html === undefined ? {} : { html: args.html }),
@@ -291,20 +355,10 @@ const editedBody = async (
   ) {
     return { body: supplied }
   }
-  const original = originalId
-    ? await deps.emailComposeGet({
-        accountId: p.accountId,
-        apiUrl: '',
-        authorization: p.authorization,
-        bodyValues: 'body',
-        id: originalId,
-        maxBodyValueBytes: MAX_DRAFT_BODY_VALUE_BYTES,
-      })
-    : null
   if (!original) {
     // Only worth saying when a quote was wanted or looks to have been there —
     // a bare reply never had one to lose.
-    const wanted = args.quoteOriginal === true || QUOTE_ATTRIBUTION_RE.test(p.staged.text ?? p.staged.html ?? '')
+    const wanted = args.quoteOriginal === true || QUOTE_ATTRIBUTION_RE.test(bothParts(p.staged))
     return wanted
       ? {
           body: supplied,
@@ -323,7 +377,7 @@ const editedBody = async (
     // A quote in a format this tool did not write — another mail client's —
     // goes with the old wording. Say so, since the description promised the
     // quote would be kept.
-    const foreignQuote = args.quoteOriginal === undefined && FOREIGN_QUOTE_RE.test(p.staged.text ?? p.staged.html ?? '')
+    const foreignQuote = args.quoteOriginal === undefined && FOREIGN_QUOTE_RE.test(bothParts(p.staged))
     return {
       body: supplied,
       ...(foreignQuote
@@ -333,6 +387,13 @@ const editedBody = async (
               'with the old wording. Pass `quoteOriginal: true` with the text to quote the original below it.',
           }
         : {}),
+    }
+  }
+  const recipientsChanged = args.to !== undefined || args.cc !== undefined || args.bcc !== undefined
+  if (args.quoteOriginal === undefined && recipientsChanged) {
+    const outsider = quoteWithheldFrom(original, p.recipients, await selfAddressesOf(deps, p))
+    if (outsider) {
+      return { body: supplied, note: quoteWithheldNote(outsider) }
     }
   }
   return { body: withQuotedOriginal(supplied, original) }
@@ -436,8 +497,13 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
 
   // Recorded by create_draft, or found in the thread just now — kept on the
   // replacement either way, so the next edit does not have to search again.
-  const originalId = await replyOriginal(deps, { accountId, authorization, record, staged })
-  const edited = await editedBody(deps, { accountId, args, authorization, originalId, staged })
+  const original = await replyOriginalForEdit(deps, { accountId, args, authorization, record, staged })
+  const mergedRecipients: ParsedRecipients = {
+    to: recipients.to ?? staged.to ?? [],
+    cc: recipients.cc ?? staged.cc ?? [],
+    bcc: recipients.bcc ?? staged.bcc ?? [],
+  }
+  const edited = await editedBody(deps, { args, authorization, original, recipients: mergedRecipients, staged })
   const merged: EmailDraft = {
     ...staged,
     ...recipients,
@@ -462,7 +528,7 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
       // draftId pointing at this revision.
       keywords: [
         ...draftLabelKeywords(record),
-        ...(originalId ? [replyOriginalKeyword(originalId)] : []),
+        ...(original ? [replyOriginalKeyword(original.id)] : []),
         stableDraftIdKeyword(draftId),
       ],
       replaces: record.id,

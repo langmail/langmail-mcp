@@ -51,6 +51,14 @@ describe('sendDraft', () => {
     expect(text).toContain('messageId: d2')
   })
 
+  test('names the sent message when the draft was already sent', async () => {
+    const sent = stagedDraft({ id: 'd2', keywords: { $seen: true, '$draftid:tok1': true } })
+    const { result, text } = await run({ draftId: 'tok1' }, { records: { d2: sent } })
+    expect(result.isError).toBe(true)
+    expect(text).toContain('already been sent')
+    expect(text).toContain('messageId d2')
+  })
+
   test('refuses a draft id that does not exist, and says nothing was sent', async () => {
     const submissions: EmailSubmissionCreateParams[] = []
     const { result, text } = await run({ draftId: 'gone' }, { submissions })

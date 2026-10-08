@@ -201,7 +201,7 @@ const loadSendableDraft = async (
     return {
       error: errorResult(
         `${p.draftId} is no longer a draft — it has already been sent. Nothing was sent again. ` +
-          'Read it back with get_email.'
+          `Read it back with get_email using messageId ${record.id}.`
       ),
     }
   }
