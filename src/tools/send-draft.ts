@@ -55,8 +55,8 @@ export const sendDraftInput = z.object({
     .string()
     .min(1)
     .describe(
-      'The draft id, as returned by create_draft, or a message id from search_emails with `mailbox: "Drafts"`. ' +
-        'Edits do not change it.'
+      'The draft id, as returned by create_draft or update_draft — edits do not change it — or a message id ' +
+        'from search_emails with `mailbox: "Drafts"`, which an edit replaces with the draftId it returns.'
     ),
   idempotencyKey: z
     .string()

@@ -284,6 +284,12 @@ const replyOriginal = async (
   if (fromRecorded) {
     return fromRecorded
   }
+  // From here on the recorded id, if there was one, has been read and is
+  // missing or names a different message, so a tolerated failure must not
+  // carry it forward again.
+  const disproved = (error: unknown): never => {
+    throw recorded ? new RecordedOriginalDisproved(error) : error
+  }
   const inThread = await deps
     .threadMessageFind({
       accountId: p.accountId,
@@ -292,16 +298,15 @@ const replyOriginal = async (
       emailId: p.record.id,
       messageId: answers,
     })
-    .catch((error: unknown) => {
-      // The recorded id was read and named another message: say so, so a
-      // tolerated failure here does not carry it forward again.
-      throw recorded ? new RecordedOriginalDisproved(error) : error
-    })
-  return inThread && inThread !== recorded ? await read(inThread) : null
+    .catch(disproved)
+  if (!(inThread && inThread !== recorded)) {
+    return null
+  }
+  return await read(inThread).catch(disproved)
 }
 
-// A lookup that failed after the recorded original id was read and found to
-// name a different message — that id must not be recorded again.
+// A lookup that failed after the recorded original id was read and found to be
+// missing or to name a different message — that id must not be recorded again.
 class RecordedOriginalDisproved extends Error {
   constructor(cause: unknown) {
     super('the recorded original no longer matches, and the thread lookup failed', { cause })
@@ -375,6 +380,27 @@ const addedOutsider = async (
   ])
 }
 
+// What to say when the original cannot be read, so no quote can be re-attached.
+// Only worth saying when a quote was wanted or looks to have been there — in
+// this tool's format or another client's — since a bare reply never had one to
+// lose.
+const missingOriginalNote = (args: UpdateDraftArgs, staged: EmailDraft): { note?: string } => {
+  const body = bothParts(staged)
+  const wanted = args.quoteOriginal === true || QUOTE_ATTRIBUTION_RE.test(body) || FOREIGN_QUOTE_RE.test(body)
+  return wanted
+    ? {
+        note:
+          'The message this draft replies to could not be found, so no quote was re-attached: the body is ' +
+          'exactly the text given.',
+      }
+    : {}
+}
+
+// The note for quoted text going to someone the original was never addressed to.
+const quotedTextNote = (outsider: string): string =>
+  `The draft carries quoted text from the original, and ${outsider} was not on it, so that now goes to them ` +
+  'too. To take it off, pass the new wording again with `quoteOriginal: false`.'
+
 // An edit that leaves the body alone re-stages it as it is, quote included —
 // the same as changing the recipients of a quoted reply in a mail client. When
 // that edit adds someone the original was never addressed to, the quote now
@@ -402,9 +428,7 @@ const stagedQuoteNote = async (
   const outsider = await addedOutsider(deps, { ...p, original })
   return outsider
     ? {
-        note:
-          `The draft carries quoted text from the original, and ${outsider} was not on it, so that now goes to ` +
-          'them too. To take it off, pass the text again with `quoteOriginal: false`.',
+        note: quotedTextNote(outsider),
       }
     : {}
 }
@@ -445,22 +469,15 @@ const editedBody = async (
     return { body: supplied }
   }
   if (!original) {
-    // Only worth saying when a quote was wanted or looks to have been there —
-    // a bare reply never had one to lose.
-    const wanted = args.quoteOriginal === true || QUOTE_ATTRIBUTION_RE.test(bothParts(p.staged))
-    return wanted
-      ? {
-          body: supplied,
-          note:
-            'The message this draft replies to could not be found, so no quote was re-attached: the body is ' +
-            'exactly the text given.',
-        }
-      : { body: supplied }
+    return { body: supplied, ...missingOriginalNote(args, p.staged) }
   }
   // A caller who passed the whole body, quote included, gets it as written
   // rather than quoted twice.
   if (carriesQuoteOf(supplied, original)) {
-    return { body: supplied }
+    // The quote came in the caller's own text, so it goes out as written — but
+    // an added outsider is told about, as on a recipients-only edit.
+    const outsider = args.quoteOriginal === undefined ? await addedOutsider(deps, { ...p, original }) : null
+    return outsider ? { body: supplied, note: quotedTextNote(outsider) } : { body: supplied }
   }
   if (!(args.quoteOriginal ?? carriesQuoteOf(p.staged, original))) {
     // A quote in a format this tool did not write — another mail client's —

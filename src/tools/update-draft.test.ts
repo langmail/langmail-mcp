@@ -538,6 +538,47 @@ describe('updateDraft on a reply', () => {
     expect(creates[0]?.keywords).not.toContain('$draftreplyto:e9')
   })
 
+  test('a whole body passed back with the quote and a new outsider says the quote goes to them', async () => {
+    const creates: DraftCreateParams[] = []
+    const whole = withQuotedOriginal({ text: 'Here they are.' }, original).text ?? ''
+    const { text } = await run(
+      { cc: ['outsider@example.net'], draftId: 'd1', text: whole },
+      { creates, records: { d1: quotedReply, e1: original } }
+    )
+    expect(creates[0]?.draft.text).toBe(whole)
+    expect(text).toContain('now goes to them too')
+  })
+
+  test("says the quote is gone for another client's attribution-less quote whose original cannot be found", async () => {
+    const { text } = await run(
+      { draftId: 'd1', text: 'Here they are.' },
+      { records: { d1: replyDraft('Sure.\n\n> Can you send the Q2 figures?') } }
+    )
+    expect(text).toContain('no quote was re-attached')
+  })
+
+  test('a disproved recorded original is not recorded again when reading the thread hit fails', async () => {
+    const creates: DraftCreateParams[] = []
+    const recorded = {
+      ...quotedReply,
+      keywords: { $draft: true, $seen: true, '$draftid:d1': true, '$draftreplyto:e9': true },
+    }
+    const stranger = receivedMessage({ id: 'e9', messageId: ['other@example.org'], threadId: 't9' })
+    const base = draftDeps({ creates, records: { d1: recorded, e1: original, e9: stranger } })
+    const deps = {
+      ...base,
+      emailComposeGet: (p: Parameters<typeof base.emailComposeGet>[0]) =>
+        p.id === 'e1' ? Promise.reject(new Error('socket hang up')) : base.emailComposeGet(p),
+    }
+    const result = await updateDraft(deps, {
+      args: updateDraftInput.parse({ cc: ['carl@example.org'], draftId: 'd1' }),
+      principal: TEST_PRINCIPAL,
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(creates[0]?.keywords).not.toContain('$draftreplyto:e9')
+  })
+
   test('a recipients-only edit adding someone already on the original says nothing', async () => {
     const { text } = await run(
       { cc: ['carl@example.org'], draftId: 'd1' },
