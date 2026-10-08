@@ -2115,6 +2115,16 @@ describe('updateCalendarEvent — attendee replies', () => {
     expect(ical).toContain('SEQUENCE:3')
   })
 
+  test('re-specifying the stored rule in another spelling is not a reschedule', async () => {
+    const stored = repliedSeries()
+    const ical = await edit(
+      storedEvent({ data: stored.data.replace('RRULE:FREQ=WEEKLY;BYDAY=TU', 'RRULE:FREQ=WEEKLY;WKST=MO;BYDAY=TU') }),
+      { description: 'New agenda', recurrence: { byDay: ['TU'], frequency: 'weekly' } }
+    )
+    expect(statuses(ical)).toEqual({ 'no@example.com': 'DECLINED', 'yes@example.com': 'ACCEPTED' })
+    expect(ical).toContain('SEQUENCE:2')
+  })
+
   test('addedAttendees leaves existing replies alone and invites the newcomer at NEEDS-ACTION', async () => {
     const ical = await edit(repliedSeries(), { addedAttendees: ['new@example.com'] })
     expect(statuses(ical)).toEqual({

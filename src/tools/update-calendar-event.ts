@@ -774,9 +774,28 @@ const isRescheduled = (f: ResolvedFields, base: EditBase, timeZone: string): boo
 
 // A whole-event edit also reschedules when its resolved rule differs from the
 // stored one, aligned the same way resolveRrule aligns it.
+// Compared by meaning, not spelling (see sameRule).
 const isSeriesRescheduled = (f: ResolvedFields, base: EditBase, timeZone: string, rrule: string | undefined): boolean =>
   isRescheduled(f, base, timeZone) ||
-  rrule !== (base.recurrence === undefined ? undefined : alignUntil(base.recurrence, f.allDay, timeZone))
+  !sameRule(rrule, base.recurrence === undefined ? undefined : alignUntil(base.recurrence, f.allDay, timeZone))
+
+// RRULE parts whose value is the RFC 5545 §3.3.10 default, so their presence
+// changes nothing.
+const DEFAULT_RULE_PARTS = new Set(['INTERVAL=1', 'WKST=MO'])
+
+// True when two RRULEs say the same thing: equal as sets of uppercased
+// KEY=VALUE parts, defaults ignored. A rule another client wrote
+// (`FREQ=WEEKLY;WKST=MO;BYDAY=TU`) and the one toRRule writes for the same
+// series (`FREQ=WEEKLY;BYDAY=TU`) must not read as a reschedule.
+const sameRule = (a: string | undefined, b: string | undefined): boolean => {
+  const parts = (rule: string | undefined): string[] =>
+    (rule ?? '')
+      .toUpperCase()
+      .split(';')
+      .filter((part) => part !== '' && !DEFAULT_RULE_PARTS.has(part))
+      .sort()
+  return parts(a).join(';') === parts(b).join(';')
+}
 
 // RFC 5546 §3.2.2.2: only a reschedule is a new revision, so only it bumps
 // SEQUENCE; a detail edit keeps the current one.
@@ -968,8 +987,9 @@ const reminderOnlyResult = (e: ReminderOnlyEdit): Promise<ToolResult> | ToolResu
   }
   if (target.path === 'refuse') {
     return errorResult(
-      'This occurrence has no individual changes yet, so setting its reminder alone would reset the attendees’ ' +
-        'responses to it. Set the reminder on the whole series instead (omit `recurrenceId`). Nothing was changed.'
+      'This occurrence has no individual changes yet, so setting its reminder alone would re-send the ' +
+        'invitation for it to every attendee. Set the reminder on the whole series instead (omit `recurrenceId`). ' +
+        'Nothing was changed.'
     )
   }
   return
