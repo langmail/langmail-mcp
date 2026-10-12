@@ -18,7 +18,7 @@
 // enforced on the actual stream, not the declared length.
 
 import { lookup } from 'node:dns/promises'
-import { BlockList, isIPv6 } from 'node:net'
+import { BlockList, isIPv4, isIPv6 } from 'node:net'
 
 import { logger } from '@langmail/logger'
 
@@ -92,8 +92,14 @@ for (const [network, prefix, family] of NON_PUBLIC_RANGES) {
   nonPublic.addSubnet(network, prefix, family)
 }
 
-export const isPublicAddress = (address: string): boolean =>
-  !nonPublic.check(address, isIPv6(address) ? 'ipv6' : 'ipv4')
+// Fails closed: BlockList.check reports an unparseable string as unblocked,
+// so anything that is not an IP literal is refused here.
+export const isPublicAddress = (address: string): boolean => {
+  if (isIPv6(address)) {
+    return !nonPublic.check(address, 'ipv6')
+  }
+  return isIPv4(address) && !nonPublic.check(address, 'ipv4')
+}
 
 // All addresses the hostname resolves to; injectable so tests need no DNS.
 export type ResolveHost = (hostname: string) => Promise<string[]>
@@ -187,14 +193,28 @@ export const byteLimit = (maxBytes: number): TransformStream<Uint8Array, Uint8Ar
   })
 }
 
+// dns.lookup takes no signal, so the request deadline is raced against it:
+// a sender domain whose nameservers never answer must not hold the request
+// past FETCH_TIMEOUT_MS.
+const withDeadline = <T>(promise: Promise<T>, signal: AbortSignal): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(signal.reason)
+    if (signal.aborted) {
+      onAbort()
+      return
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
+  })
+
 // Resolve the upstream hostname and pick the address to connect to. Every
 // resolved address must be public, not just the one picked: a mixed answer
 // is a rebinding tell, not a host worth serving images from. IPv4 wins over
 // IPv6 regardless of resolver order: the container runs on podman's default
 // bridge without IPv6 egress (infra/modules/mcp.nix), and pinning removes
 // fetch's own fallback between families.
-const pinAddress = async (hostname: string, resolve: ResolveHost): Promise<string | null> => {
-  const addresses = await resolve(hostname)
+const pinAddress = async (hostname: string, resolve: ResolveHost, signal: AbortSignal): Promise<string | null> => {
+  const addresses = await withDeadline(resolve(hostname), signal)
   if (!addresses.every(isPublicAddress)) {
     return null
   }
@@ -207,14 +227,21 @@ const pinAddress = async (hostname: string, resolve: ResolveHost): Promise<strin
 // the sender wrote, not the IP.
 const pinnedUrl = (url: URL, address: string): string => {
   const pinned = new URL(url)
-  pinned.hostname = isIPv6(address) ? `[${address}]` : address
+  const host = isIPv6(address) ? `[${address}]` : address
+  pinned.hostname = host
+  // The hostname setter silently ignores a value it cannot parse, which
+  // would leave the fetch unpinned; refuse instead.
+  if (pinned.hostname !== new URL(`https://${host}`).hostname) {
+    throw new Error('image proxy could not pin the upstream address')
+  }
   return pinned.toString()
 }
 
 export const createImageProxy = (
   store: ImageProxyStore,
   fetchImpl: typeof fetch = fetch,
-  resolve: ResolveHost = resolveHost
+  resolve: ResolveHost = resolveHost,
+  timeoutMs: number = FETCH_TIMEOUT_MS
 ): ImageProxy => {
   return async (token) => {
     const raw = store.lookup(token)
@@ -223,11 +250,14 @@ export const createImageProxy = (
     }
     const url = new URL(raw)
     let upstream: Response
+    // One deadline for the DNS lookup and the fetch together.
+    const signal = AbortSignal.timeout(timeoutMs)
     try {
-      const address = await pinAddress(url.hostname, resolve)
+      const address = await pinAddress(url.hostname, resolve, signal)
       if (!address) {
-        // No URL, no address: both are sender infrastructure (see below).
-        logger.warn({ status: null }, 'image proxy upstream has no public address')
+        // Logs neither the URL nor the resolved addresses: both are sender
+        // infrastructure (see below).
+        logger.warn('image proxy upstream has no public address')
         return upstreamError()
       }
       // redirect: 'error' — a redirect could bounce to a host neither check
@@ -238,7 +268,7 @@ export const createImageProxy = (
       upstream = await fetchImpl(pinnedUrl(url, address), {
         headers: { host: url.host },
         redirect: 'error',
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        signal,
         tls: { serverName: url.hostname },
       })
     } catch {

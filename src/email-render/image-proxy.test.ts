@@ -95,6 +95,14 @@ describe('isPublicAddress', () => {
   test('accepts public IPv4 and IPv6 addresses', () => {
     expect(isPublicAddress('192.0.2.10')).toBe(true)
     expect(isPublicAddress('2001:db8::1')).toBe(true)
+    // BlockList checks a mapped address against the IPv4 rules; it must not
+    // over-block a public one.
+    expect(isPublicAddress('::ffff:192.0.2.10')).toBe(true)
+  })
+
+  test('fails closed on a string that is not an IP literal', () => {
+    expect(isPublicAddress('cdn.example.com')).toBe(false)
+    expect(isPublicAddress('')).toBe(false)
   })
 
   test('rejects loopback, RFC 1918, link-local, CGNAT and unspecified IPv4', () => {
@@ -211,6 +219,8 @@ describe('createImageProxy', () => {
     expect(calls[0]?.url).toBe('https://192.0.2.10/img/qr.png?v=2')
     expect(new Headers(calls[0]?.init.headers).get('host')).toBe('cdn.example.com')
     expect(calls[0]?.init.tls?.serverName).toBe('cdn.example.com')
+    expect(calls[0]?.init.redirect).toBe('error')
+    expect(calls[0]?.init.signal).toBeInstanceOf(AbortSignal)
   })
 
   test('brackets a pinned IPv6 address in the URL', async () => {
@@ -251,6 +261,28 @@ describe('createImageProxy', () => {
       const res = await createImageProxy(store, spy, resolve)(token)
       expect(res.status).toBe(502)
     }
+    expect(fetched).toBe(false)
+  })
+
+  test('502s once the deadline passes while DNS never answers', async () => {
+    const store = createImageProxyStore()
+    const token = store.mint('https://cdn.example.com/qr.png')
+    const hanging: ResolveHost = () => new Promise(() => undefined)
+    const proxy = createImageProxy(store, upstreamOk('PNG', { 'content-type': 'image/png' }), hanging, 20)
+    const res = await proxy(token)
+    expect(res.status).toBe(502)
+  })
+
+  test('502s without fetching when the resolver returns a non-literal address', async () => {
+    const store = createImageProxyStore()
+    const token = store.mint('https://cdn.example.com/qr.png')
+    let fetched = false
+    const spy = (() => {
+      fetched = true
+      return Promise.resolve(new Response('PNG', { headers: { 'content-type': 'image/png' } }))
+    }) as unknown as typeof fetch
+    const res = await createImageProxy(store, spy, resolvesTo('cdn.example.com'))(token)
+    expect(res.status).toBe(502)
     expect(fetched).toBe(false)
   })
 
