@@ -189,14 +189,16 @@ export const byteLimit = (maxBytes: number): TransformStream<Uint8Array, Uint8Ar
 
 // Resolve the upstream hostname and pick the address to connect to. Every
 // resolved address must be public, not just the one picked: a mixed answer
-// is a rebinding tell, not a host worth serving images from.
+// is a rebinding tell, not a host worth serving images from. IPv4 wins over
+// IPv6 regardless of resolver order: the container runs on podman's default
+// bridge without IPv6 egress (infra/modules/mcp.nix), and pinning removes
+// fetch's own fallback between families.
 const pinAddress = async (hostname: string, resolve: ResolveHost): Promise<string | null> => {
   const addresses = await resolve(hostname)
-  const [first] = addresses
-  if (first === undefined || !addresses.every(isPublicAddress)) {
+  if (!addresses.every(isPublicAddress)) {
     return null
   }
-  return first
+  return addresses.find((address) => !isIPv6(address)) ?? addresses[0] ?? null
 }
 
 // The URL with its hostname swapped for the pinned address. The original
@@ -229,7 +231,10 @@ export const createImageProxy = (
         return upstreamError()
       }
       // redirect: 'error' — a redirect could bounce to a host neither check
-      // ever saw, so it is refused instead of followed.
+      // ever saw, so it is refused instead of followed. Verified on Bun
+      // 1.3.13 (the Dockerfile and CI pin) and 1.4.2: fetch verifies the
+      // certificate against tls.serverName, not the IP, and sends the host
+      // override. Re-check both when bumping Bun; the tests fake fetch.
       upstream = await fetchImpl(pinnedUrl(url, address), {
         headers: { host: url.host },
         redirect: 'error',

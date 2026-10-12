@@ -226,6 +226,19 @@ describe('createImageProxy', () => {
     expect(urls).toEqual(['https://[2001:db8::1]/qr.png'])
   })
 
+  test('pins a dual-stack host to its IPv4 address whatever the resolver order', async () => {
+    const store = createImageProxyStore()
+    const token = store.mint('https://cdn.example.com/qr.png')
+    const urls: string[] = []
+    const recording = ((url: string) => {
+      urls.push(url)
+      return Promise.resolve(new Response('PNG', { headers: { 'content-type': 'image/png' } }))
+    }) as unknown as typeof fetch
+    const proxy = createImageProxy(store, recording, resolvesTo('2001:db8::1', '192.0.2.10'))
+    await proxy(token)
+    expect(urls).toEqual(['https://192.0.2.10/qr.png'])
+  })
+
   test('502s without fetching when the hostname resolves to a private address — DNS rebinding', async () => {
     const store = createImageProxyStore()
     const token = store.mint('https://cdn.example.com/qr.png')
