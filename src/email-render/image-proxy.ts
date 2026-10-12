@@ -10,9 +10,15 @@
 //
 // The upstream URL is sender-controlled, so this is an SSRF surface:
 // `isProxyableImageUrl` gates what gets minted (https, default port, public
-// hostname shape, no credentials), redirects are refused rather than
+// hostname shape, no credentials); at fetch time the hostname is resolved,
+// every address must be public, and the connection is pinned to the checked
+// address (resolve-and-pin), so a DNS-rebinding domain cannot swap in an
+// internal one between check and connect. Redirects are refused rather than
 // followed, and the response must be a raster image type within a byte cap
 // enforced on the actual stream, not the declared length.
+
+import { lookup } from 'node:dns/promises'
+import { BlockList, isIPv6 } from 'node:net'
 
 import { logger } from '@langmail/logger'
 
@@ -30,9 +36,8 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const FETCH_TIMEOUT_MS = 10_000
 
 // Hostname shapes that smell like an internal target rather than a public
-// image host. Not a full SSRF defense (no DNS resolution check), but it
-// removes the obvious ways an email could point this proxy at loopback,
-// RFC 1918 space, or service-discovery names.
+// image host. A cheap mint-time filter; the resolved address is checked again
+// at fetch time (`isPublicAddress`), which is the actual SSRF defense.
 const IP_LITERAL_RE = /^(\d{1,3}\.){3}\d{1,3}$/
 const INTERNAL_SUFFIXES = ['.internal', '.local', '.localdomain']
 
@@ -55,6 +60,46 @@ export const isProxyableImageUrl = (raw: string): boolean => {
   }
   return true
 }
+
+// Non-public ranges a resolved upstream address must not fall into. An
+// IPv4-mapped IPv6 address (::ffff:10.0.0.1) is matched against the IPv4
+// rules by BlockList itself.
+const NON_PUBLIC_RANGES: ReadonlyArray<readonly [string, number, 'ipv4' | 'ipv6']> = [
+  ['0.0.0.0', 8, 'ipv4'], // "this network"
+  ['10.0.0.0', 8, 'ipv4'], // RFC 1918
+  ['100.64.0.0', 10, 'ipv4'], // CGNAT, also the tailnet range
+  ['127.0.0.0', 8, 'ipv4'], // loopback
+  ['169.254.0.0', 16, 'ipv4'], // link-local, cloud metadata
+  ['172.16.0.0', 12, 'ipv4'], // RFC 1918
+  ['192.0.0.0', 24, 'ipv4'], // IETF protocol assignments
+  ['192.168.0.0', 16, 'ipv4'], // RFC 1918
+  ['198.18.0.0', 15, 'ipv4'], // benchmarking
+  ['224.0.0.0', 4, 'ipv4'], // multicast
+  ['240.0.0.0', 4, 'ipv4'], // reserved, broadcast
+  ['::', 96, 'ipv6'], // unspecified, loopback, IPv4-compatible
+  ['::ffff:0:0:0', 96, 'ipv6'], // SIIT, embeds an IPv4 address
+  ['64:ff9b::', 96, 'ipv6'], // NAT64, embeds an IPv4 address
+  ['64:ff9b:1::', 48, 'ipv6'], // local-use NAT64
+  ['2002::', 16, 'ipv6'], // 6to4, embeds an IPv4 address
+  ['fc00::', 7, 'ipv6'], // unique local
+  ['fec0::', 10, 'ipv6'], // deprecated site-local
+  ['fe80::', 10, 'ipv6'], // link-local
+  ['ff00::', 8, 'ipv6'], // multicast
+]
+
+const nonPublic = new BlockList()
+for (const [network, prefix, family] of NON_PUBLIC_RANGES) {
+  nonPublic.addSubnet(network, prefix, family)
+}
+
+export const isPublicAddress = (address: string): boolean =>
+  !nonPublic.check(address, isIPv6(address) ? 'ipv6' : 'ipv4')
+
+// All addresses the hostname resolves to; injectable so tests need no DNS.
+export type ResolveHost = (hostname: string) => Promise<string[]>
+
+const resolveHost: ResolveHost = async (hostname) =>
+  (await lookup(hostname, { all: true })).map((entry) => entry.address)
 
 export interface ImageProxyStore {
   // The upstream URL, or null when unknown/expired (indistinguishable).
@@ -142,17 +187,55 @@ export const byteLimit = (maxBytes: number): TransformStream<Uint8Array, Uint8Ar
   })
 }
 
-export const createImageProxy = (store: ImageProxyStore, fetchImpl: typeof fetch = fetch): ImageProxy => {
+// Resolve the upstream hostname and pick the address to connect to. Every
+// resolved address must be public, not just the one picked: a mixed answer
+// is a rebinding tell, not a host worth serving images from.
+const pinAddress = async (hostname: string, resolve: ResolveHost): Promise<string | null> => {
+  const addresses = await resolve(hostname)
+  const [first] = addresses
+  if (first === undefined || !addresses.every(isPublicAddress)) {
+    return null
+  }
+  return first
+}
+
+// The URL with its hostname swapped for the pinned address. The original
+// hostname still goes out as the Host header and as the TLS server name, so
+// virtual hosting works and the certificate is verified against the name
+// the sender wrote, not the IP.
+const pinnedUrl = (url: URL, address: string): string => {
+  const pinned = new URL(url)
+  pinned.hostname = isIPv6(address) ? `[${address}]` : address
+  return pinned.toString()
+}
+
+export const createImageProxy = (
+  store: ImageProxyStore,
+  fetchImpl: typeof fetch = fetch,
+  resolve: ResolveHost = resolveHost
+): ImageProxy => {
   return async (token) => {
-    const url = store.lookup(token)
-    if (!url) {
+    const raw = store.lookup(token)
+    if (!raw) {
       return notFound()
     }
+    const url = new URL(raw)
     let upstream: Response
     try {
-      // redirect: 'error' — a redirect could bounce to a host the mint-time
-      // check never saw, so it is refused instead of followed.
-      upstream = await fetchImpl(url, { redirect: 'error', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
+      const address = await pinAddress(url.hostname, resolve)
+      if (!address) {
+        // No URL, no address: both are sender infrastructure (see below).
+        logger.warn({ status: null }, 'image proxy upstream has no public address')
+        return upstreamError()
+      }
+      // redirect: 'error' — a redirect could bounce to a host neither check
+      // ever saw, so it is refused instead of followed.
+      upstream = await fetchImpl(pinnedUrl(url, address), {
+        headers: { host: url.host },
+        redirect: 'error',
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        tls: { serverName: url.hostname },
+      })
     } catch {
       // Log carries no URL: the target embeds sender infrastructure and the
       // occasional tracking id (REVIEW.md: no request bodies/PII in logs).

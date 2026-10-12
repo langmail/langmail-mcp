@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 
-import { byteLimit, createImageProxy, createImageProxyStore, isProxyableImageUrl } from './image-proxy.ts'
+import {
+  byteLimit,
+  createImageProxy,
+  createImageProxyStore,
+  isProxyableImageUrl,
+  isPublicAddress,
+  type ResolveHost,
+} from './image-proxy.ts'
 
 describe('isProxyableImageUrl', () => {
   test('accepts a plain https URL with a public hostname', () => {
@@ -76,9 +83,60 @@ describe('byteLimit', () => {
 const upstreamOk = (body: string, headers: Record<string, string>): typeof fetch =>
   (() => Promise.resolve(new Response(body, { headers }))) as unknown as typeof fetch
 
+// 192.0.2.0/24 and 2001:db8::/32 are documentation ranges: not in the
+// non-public list, and provably not anyone's real host.
+const resolvesTo =
+  (...addresses: string[]): ResolveHost =>
+  () =>
+    Promise.resolve(addresses)
+const publicHost = resolvesTo('192.0.2.10')
+
+describe('isPublicAddress', () => {
+  test('accepts public IPv4 and IPv6 addresses', () => {
+    expect(isPublicAddress('192.0.2.10')).toBe(true)
+    expect(isPublicAddress('2001:db8::1')).toBe(true)
+  })
+
+  test('rejects loopback, RFC 1918, link-local, CGNAT and unspecified IPv4', () => {
+    for (const address of [
+      '127.0.0.1',
+      '10.1.2.3',
+      '172.20.0.1',
+      '192.168.1.7',
+      '169.254.169.254',
+      '100.100.1.1',
+      '0.0.0.0',
+    ]) {
+      expect(isPublicAddress(address)).toBe(false)
+    }
+  })
+
+  test('rejects loopback, unique-local, link-local and IPv4-embedding IPv6 addresses', () => {
+    for (const address of [
+      '::1',
+      '::',
+      'fd00::1',
+      'fe80::1',
+      '::ffff:10.0.0.1',
+      '::ffff:127.0.0.1',
+      '::7f00:1',
+      '64:ff9b::a9fe:a9fe',
+      '2002:7f00:1::',
+      '::ffff:0:7f00:1',
+      'fec0::1',
+    ]) {
+      expect(isPublicAddress(address)).toBe(false)
+    }
+  })
+})
+
 describe('createImageProxy', () => {
   test('404s an unknown token', async () => {
-    const proxy = createImageProxy(createImageProxyStore(), upstreamOk('x', { 'content-type': 'image/png' }))
+    const proxy = createImageProxy(
+      createImageProxyStore(),
+      upstreamOk('x', { 'content-type': 'image/png' }),
+      publicHost
+    )
     const res = await proxy('nope')
     expect(res.status).toBe(404)
   })
@@ -86,7 +144,7 @@ describe('createImageProxy', () => {
   test('streams an upstream image back with its content type', async () => {
     const store = createImageProxyStore()
     const token = store.mint('https://cdn.example.com/qr.png')
-    const proxy = createImageProxy(store, upstreamOk('PNGBYTES', { 'content-type': 'image/png' }))
+    const proxy = createImageProxy(store, upstreamOk('PNGBYTES', { 'content-type': 'image/png' }), publicHost)
     const res = await proxy(token)
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toBe('image/png')
@@ -100,7 +158,11 @@ describe('createImageProxy', () => {
   test('502s an SVG upstream — the image type that executes when navigated to', async () => {
     const store = createImageProxyStore()
     const token = store.mint('https://cdn.example.com/qr.png')
-    const proxy = createImageProxy(store, upstreamOk('<svg onload="x()">', { 'content-type': 'image/svg+xml' }))
+    const proxy = createImageProxy(
+      store,
+      upstreamOk('<svg onload="x()">', { 'content-type': 'image/svg+xml' }),
+      publicHost
+    )
     const res = await proxy(token)
     expect(res.status).toBe(502)
   })
@@ -108,7 +170,7 @@ describe('createImageProxy', () => {
   test('502s when upstream is not an image', async () => {
     const store = createImageProxyStore()
     const token = store.mint('https://cdn.example.com/qr.png')
-    const proxy = createImageProxy(store, upstreamOk('<html>', { 'content-type': 'text/html' }))
+    const proxy = createImageProxy(store, upstreamOk('<html>', { 'content-type': 'text/html' }), publicHost)
     const res = await proxy(token)
     expect(res.status).toBe(502)
   })
@@ -118,7 +180,8 @@ describe('createImageProxy', () => {
     const token = store.mint('https://cdn.example.com/qr.png')
     const proxy = createImageProxy(
       store,
-      upstreamOk('x', { 'content-length': String(20 * 1024 * 1024), 'content-type': 'image/png' })
+      upstreamOk('x', { 'content-length': String(20 * 1024 * 1024), 'content-type': 'image/png' }),
+      publicHost
     )
     const res = await proxy(token)
     expect(res.status).toBe(502)
@@ -128,7 +191,62 @@ describe('createImageProxy', () => {
     const store = createImageProxyStore()
     const token = store.mint('https://cdn.example.com/qr.png')
     const failing = (() => Promise.reject(new Error('boom'))) as unknown as typeof fetch
-    const proxy = createImageProxy(store, failing)
+    const proxy = createImageProxy(store, failing, publicHost)
+    const res = await proxy(token)
+    expect(res.status).toBe(502)
+  })
+
+  test('connects to the resolved address while presenting the original hostname', async () => {
+    const store = createImageProxyStore()
+    const token = store.mint('https://cdn.example.com/img/qr.png?v=2')
+    const calls: Array<{ init: RequestInit & { tls?: { serverName?: string } }; url: string }> = []
+    const recording = ((url: string, init: RequestInit) => {
+      calls.push({ init, url })
+      return Promise.resolve(new Response('PNG', { headers: { 'content-type': 'image/png' } }))
+    }) as unknown as typeof fetch
+    const proxy = createImageProxy(store, recording, publicHost)
+    const res = await proxy(token)
+    expect(res.status).toBe(200)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.url).toBe('https://192.0.2.10/img/qr.png?v=2')
+    expect(new Headers(calls[0]?.init.headers).get('host')).toBe('cdn.example.com')
+    expect(calls[0]?.init.tls?.serverName).toBe('cdn.example.com')
+  })
+
+  test('brackets a pinned IPv6 address in the URL', async () => {
+    const store = createImageProxyStore()
+    const token = store.mint('https://cdn.example.com/qr.png')
+    const urls: string[] = []
+    const recording = ((url: string) => {
+      urls.push(url)
+      return Promise.resolve(new Response('PNG', { headers: { 'content-type': 'image/png' } }))
+    }) as unknown as typeof fetch
+    const proxy = createImageProxy(store, recording, resolvesTo('2001:db8::1'))
+    await proxy(token)
+    expect(urls).toEqual(['https://[2001:db8::1]/qr.png'])
+  })
+
+  test('502s without fetching when the hostname resolves to a private address — DNS rebinding', async () => {
+    const store = createImageProxyStore()
+    const token = store.mint('https://cdn.example.com/qr.png')
+    let fetched = false
+    const spy = (() => {
+      fetched = true
+      return Promise.resolve(new Response('PNG', { headers: { 'content-type': 'image/png' } }))
+    }) as unknown as typeof fetch
+    for (const resolve of [resolvesTo('127.0.0.1'), resolvesTo('192.0.2.10', '10.0.0.5'), resolvesTo()]) {
+      const res = await createImageProxy(store, spy, resolve)(token)
+      expect(res.status).toBe(502)
+    }
+    expect(fetched).toBe(false)
+  })
+
+  test('502s when the hostname does not resolve', async () => {
+    const store = createImageProxyStore()
+    const token = store.mint('https://cdn.example.com/qr.png')
+    const proxy = createImageProxy(store, upstreamOk('PNG', { 'content-type': 'image/png' }), () =>
+      Promise.reject(new Error('ENOTFOUND'))
+    )
     const res = await proxy(token)
     expect(res.status).toBe(502)
   })
