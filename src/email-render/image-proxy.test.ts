@@ -249,6 +249,38 @@ describe('createImageProxy', () => {
     expect(urls).toEqual(['https://192.0.2.10/qr.png'])
   })
 
+  test('falls back to the next checked address when one does not connect', async () => {
+    const store = createImageProxyStore()
+    const token = store.mint('https://cdn.example.com/qr.png')
+    const urls: string[] = []
+    const firstDown = ((url: string) => {
+      urls.push(url)
+      if (url.startsWith('https://192.0.2.10/')) {
+        return Promise.reject(new Error('ECONNREFUSED'))
+      }
+      return Promise.resolve(new Response('PNG', { headers: { 'content-type': 'image/png' } }))
+    }) as unknown as typeof fetch
+    const proxy = createImageProxy(store, firstDown, resolvesTo('2001:db8::1', '192.0.2.10', '192.0.2.11'))
+    const res = await proxy(token)
+    expect(res.status).toBe(200)
+    // IPv4 first, in resolver order; the IPv6 address is never needed.
+    expect(urls).toEqual(['https://192.0.2.10/qr.png', 'https://192.0.2.11/qr.png'])
+  })
+
+  test('502s when no checked address connects', async () => {
+    const store = createImageProxyStore()
+    const token = store.mint('https://cdn.example.com/qr.png')
+    const urls: string[] = []
+    const allDown = ((url: string) => {
+      urls.push(url)
+      return Promise.reject(new Error('ECONNREFUSED'))
+    }) as unknown as typeof fetch
+    const proxy = createImageProxy(store, allDown, resolvesTo('192.0.2.10', '2001:db8::1'))
+    const res = await proxy(token)
+    expect(res.status).toBe(502)
+    expect(urls).toEqual(['https://192.0.2.10/qr.png', 'https://[2001:db8::1]/qr.png'])
+  })
+
   test('502s without fetching when the hostname resolves to a private address — DNS rebinding', async () => {
     const store = createImageProxyStore()
     const token = store.mint('https://cdn.example.com/qr.png')

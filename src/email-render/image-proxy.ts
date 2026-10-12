@@ -207,18 +207,17 @@ const withDeadline = <T>(promise: Promise<T>, signal: AbortSignal): Promise<T> =
     promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
   })
 
-// Resolve the upstream hostname and pick the address to connect to. Every
-// resolved address must be public, not just the one picked: a mixed answer
-// is a rebinding tell, not a host worth serving images from. IPv4 wins over
-// IPv6 regardless of resolver order: the container runs on podman's default
-// bridge without IPv6 egress (infra/modules/mcp.nix), and pinning removes
-// fetch's own fallback between families.
-const pinAddress = async (hostname: string, resolve: ResolveHost, signal: AbortSignal): Promise<string | null> => {
+// Resolve the upstream hostname into the addresses to try, in order. Every
+// resolved address must be public: a mixed answer is a rebinding tell, not a
+// host worth serving images from. IPv4 goes first regardless of resolver
+// order: the container runs on podman's default bridge without IPv6 egress
+// (infra/modules/mcp.nix).
+const pinCandidates = async (hostname: string, resolve: ResolveHost, signal: AbortSignal): Promise<string[]> => {
   const addresses = await withDeadline(resolve(hostname), signal)
   if (!addresses.every(isPublicAddress)) {
-    return null
+    return []
   }
-  return addresses.find((address) => !isIPv6(address)) ?? addresses[0] ?? null
+  return [...addresses.filter((address) => !isIPv6(address)), ...addresses.filter((address) => isIPv6(address))]
 }
 
 // The URL with its hostname swapped for the pinned address. The original
@@ -237,6 +236,40 @@ const pinnedUrl = (url: URL, address: string): string => {
   return pinned.toString()
 }
 
+// Fetch from each checked address in turn until one connects. A pinned fetch
+// has no fallback of its own, so a host with one dead A record would
+// otherwise 502 although its other checked addresses are healthy. All tries
+// share the request deadline; once it passes, nothing more is tried.
+const fetchPinned = async (
+  url: URL,
+  candidates: string[],
+  fetchImpl: typeof fetch,
+  signal: AbortSignal
+): Promise<Response> => {
+  let lastError: unknown = new Error('image proxy has no address to try')
+  for (const address of candidates) {
+    try {
+      // redirect: 'error' — a redirect could bounce to a host neither check
+      // ever saw, so it is refused instead of followed. Verified on Bun
+      // 1.3.13 (the Dockerfile and CI pin) and 1.4.2: fetch verifies the
+      // certificate against tls.serverName, not the IP, and sends the host
+      // override. Re-check both when bumping Bun; the tests fake fetch.
+      return await fetchImpl(pinnedUrl(url, address), {
+        headers: { host: url.host },
+        redirect: 'error',
+        signal,
+        tls: { serverName: url.hostname },
+      })
+    } catch (error) {
+      if (signal.aborted) {
+        throw error
+      }
+      lastError = error
+    }
+  }
+  throw lastError
+}
+
 export const createImageProxy = (
   store: ImageProxyStore,
   fetchImpl: typeof fetch = fetch,
@@ -253,28 +286,19 @@ export const createImageProxy = (
     // One deadline for the DNS lookup and the fetch together.
     const signal = AbortSignal.timeout(timeoutMs)
     try {
-      const address = await pinAddress(url.hostname, resolve, signal)
-      if (!address) {
+      const candidates = await pinCandidates(url.hostname, resolve, signal)
+      if (candidates.length === 0) {
         // Logs neither the URL nor the resolved addresses: both are sender
         // infrastructure (see below).
         logger.warn('image proxy upstream has no public address')
         return upstreamError()
       }
-      // redirect: 'error' — a redirect could bounce to a host neither check
-      // ever saw, so it is refused instead of followed. Verified on Bun
-      // 1.3.13 (the Dockerfile and CI pin) and 1.4.2: fetch verifies the
-      // certificate against tls.serverName, not the IP, and sends the host
-      // override. Re-check both when bumping Bun; the tests fake fetch.
-      upstream = await fetchImpl(pinnedUrl(url, address), {
-        headers: { host: url.host },
-        redirect: 'error',
-        signal,
-        tls: { serverName: url.hostname },
-      })
+      upstream = await fetchPinned(url, candidates, fetchImpl, signal)
     } catch {
       // Log carries no URL: the target embeds sender infrastructure and the
       // occasional tracking id (REVIEW.md: no request bodies/PII in logs).
-      logger.warn({ status: null }, 'image proxy upstream fetch failed')
+      // A timeout during DNS is told apart from a failed connection.
+      logger.warn(signal.aborted ? 'image proxy upstream timed out' : 'image proxy upstream fetch failed')
       return upstreamError()
     }
     const type = upstream.headers.get('content-type') ?? ''
