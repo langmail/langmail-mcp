@@ -48,6 +48,16 @@ describe('updateDraft', () => {
     expect(text).toContain(`Its draftId is ${token}; use that from now on.`)
   })
 
+  test('refuses to edit a draft moved to Trash, rather than re-staging it into Drafts', async () => {
+    const creates: DraftCreateParams[] = []
+    const trashed = stagedDraft({ mailboxIds: { mbTrash: true } })
+    const { result, text } = await run({ draftId: 'd1', subject: 'New' }, { creates, records: { d1: trashed } })
+    expect(result.isError).toBe(true)
+    expect(text).toContain('Draft d1 is in Trash')
+    expect(text).toContain('left unchanged')
+    expect(creates).toEqual([])
+  })
+
   test('refuses quoteOriginal without new wording, changing nothing', async () => {
     const creates: DraftCreateParams[] = []
     const { result, text } = await run(

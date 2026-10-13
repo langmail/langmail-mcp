@@ -65,10 +65,13 @@ const BODY_PREVIEW_CHARS = 500
 
 // The mailboxes composition needs, resolved by RFC 8621 special-use role
 // rather than name: a stock Stalwart account calls them "Drafts" and
-// "Sent Items", and a name lookup for "Sent" misses the second one.
+// "Sent Items", and a name lookup for "Sent" misses the second one. Trash is
+// here because trash_emails is how a draft is discarded, and the `$draft`
+// keyword survives the move.
 export interface ComposeMailboxes {
   drafts: string | null
   sent: string | null
+  trash: string | null
 }
 
 export interface DraftToolDeps {
@@ -481,6 +484,15 @@ export const draftFromRecord = (record: EmailComposeRecord): EmailDraft => {
 
 export const isDraft = (record: EmailComposeRecord): boolean => Boolean(record.keywords?.[DRAFT_KEYWORD])
 
+// A draft moved to Trash still carries `$draft`, so `isDraft` alone would read,
+// edit or send one the user has already discarded.
+export const isTrashed = (record: EmailComposeRecord, mailboxes: ComposeMailboxes): boolean =>
+  mailboxes.trash !== null && Boolean(record.mailboxIds?.[mailboxes.trash])
+
+// How to get a discarded draft back, for the refusals that meet one.
+export const restoreFromTrashHint = (record: EmailComposeRecord): string =>
+  `To restore it, move it back with move_emails, passing id ${record.id} and mailbox "Drafts".`
+
 // --- stable draft ids --------------------------------------------------------
 
 const keywordSuffix = (record: EmailComposeRecord, prefix: string): string | null => {
@@ -679,9 +691,9 @@ export const makeLiveDeps = (live: JmapLive): DraftToolDeps => ({
       accountId: accountIdForMail(session),
       apiUrl: session.apiUrl,
       authorization,
-      roles: ['drafts', 'sent'],
+      roles: ['drafts', 'sent', 'trash'],
     })
-    return { drafts: byRole.drafts ?? null, sent: byRole.sent ?? null }
+    return { drafts: byRole.drafts ?? null, sent: byRole.sent ?? null, trash: byRole.trash ?? null }
   },
   resolveSubmissionAccountId: async (authorization) => accountIdForSubmission(await live.getSession(authorization)),
   threadMessageFind: async (p) => threadMessageFind({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),

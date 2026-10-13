@@ -236,7 +236,7 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
       emailSubmissionCreate: (p) => emailSubmissionCreate({ ...p, apiUrl, authorization }),
       identityGet: (p) => identityGet({ ...p, apiUrl, authorization }),
       resolveAccountId: () => Promise.resolve(accountId),
-      resolveComposeMailboxes: () => Promise.resolve({ drafts: draftsId, sent: sentId }),
+      resolveComposeMailboxes: () => Promise.resolve({ drafts: draftsId, sent: sentId, trash: null }),
       resolveSubmissionAccountId: () => Promise.resolve(accountId),
       threadMessageFind: (p) => threadMessageFind({ ...p, apiUrl, authorization }),
     }

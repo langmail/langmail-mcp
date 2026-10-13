@@ -329,11 +329,15 @@ describe('createDraft', () => {
   })
 
   test('errors when the account has no Drafts folder', async () => {
-    const result = await createDraft(draftDeps({ mailboxes: { drafts: null, sent: 'mbSent' } }), store(), {
-      args: createDraftInput.parse({ text: 'hi', to: ['nadia@example.org'] }),
-      principal: TEST_PRINCIPAL,
-      token: 'tok',
-    })
+    const result = await createDraft(
+      draftDeps({ mailboxes: { drafts: null, sent: 'mbSent', trash: 'mbTrash' } }),
+      store(),
+      {
+        args: createDraftInput.parse({ text: 'hi', to: ['nadia@example.org'] }),
+        principal: TEST_PRINCIPAL,
+        token: 'tok',
+      }
+    )
     expect(result.isError).toBe(true)
     expect(result.content[0]?.text).toContain('no Drafts folder')
   })

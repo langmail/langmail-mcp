@@ -321,7 +321,7 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
       emailSubmissionCreate: (p) => emailSubmissionCreate({ ...p, apiUrl, authorization }),
       identityGet: (p) => identityGet({ ...p, apiUrl, authorization }),
       resolveAccountId: () => Promise.resolve(accountId),
-      resolveComposeMailboxes: () => Promise.resolve({ drafts: draftsId, sent: sentId }),
+      resolveComposeMailboxes: () => Promise.resolve({ drafts: draftsId, sent: sentId, trash: null }),
       resolveSubmissionAccountId: () => Promise.resolve(accountId),
       threadMessageFind: (p) => threadMessageFind({ ...p, apiUrl, authorization }),
     }

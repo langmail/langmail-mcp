@@ -113,6 +113,16 @@ describe('sendDraft', () => {
     expect(submissions).toEqual([])
   })
 
+  test('refuses a draft moved to Trash and sends nothing', async () => {
+    const submissions: EmailSubmissionCreateParams[] = []
+    const trashed = stagedDraft({ mailboxIds: { mbTrash: true } })
+    const { result, text } = await run({ draftId: 'd1' }, { records: { d1: trashed }, submissions })
+    expect(result.isError).toBe(true)
+    expect(text).toContain('Draft d1 is in Trash')
+    expect(text).toContain('Nothing was sent')
+    expect(submissions).toEqual([])
+  })
+
   test('replays the first answer for a repeated idempotencyKey and does not resend', async () => {
     const submissions: EmailSubmissionCreateParams[] = []
     const replays = store()
@@ -137,7 +147,7 @@ describe('sendDraft', () => {
   test('says where the message went when the account has no Sent folder', async () => {
     const { text } = await run(
       { draftId: 'd1' },
-      { mailboxes: { drafts: 'mbDrafts', sent: null }, records: { d1: stagedDraft() } }
+      { mailboxes: { drafts: 'mbDrafts', sent: null, trash: 'mbTrash' }, records: { d1: stagedDraft() } }
     )
     expect(text).toContain('stayed in Drafts')
   })

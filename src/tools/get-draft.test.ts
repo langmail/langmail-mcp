@@ -114,6 +114,36 @@ describe('getDraft', () => {
     expect(text).toContain('get_email')
   })
 
+  test('refuses a draft moved to Trash, saying how to restore it', async () => {
+    // trash_emails moves the message but leaves the $draft keyword in place.
+    const trashed = stagedDraft({ mailboxIds: { mbTrash: true } })
+    const { result, text } = await run({ draftId: 'd1' }, { records: { d1: trashed } })
+    expect(result.isError).toBe(true)
+    expect(text).toContain('Draft d1 is in Trash')
+    expect(text).not.toContain('Draft (not sent)')
+    expect(text).toContain('move_emails')
+  })
+
+  test('refuses a trashed draft found by its stable draftId, and names its message id for the restore', async () => {
+    const edited = stagedDraft({
+      id: 'd2',
+      keywords: { $draft: true, '$draftid:d1': true },
+      mailboxIds: { mbTrash: true },
+    })
+    const { result, text } = await run({ draftId: 'd1' }, { records: { d2: edited } })
+    expect(result.isError).toBe(true)
+    expect(text).toContain('Draft d1 is in Trash')
+    expect(text).toContain('passing id d2')
+  })
+
+  test('reads a draft as usual when the account has no Trash mailbox', async () => {
+    const { result } = await run(
+      { draftId: 'd1' },
+      { mailboxes: { drafts: 'mbDrafts', sent: 'mbSent', trash: null }, records: { d1: stagedDraft() } }
+    )
+    expect(result.isError).toBeUndefined()
+  })
+
   test('treats a record carrying no keywords at all as not a draft', async () => {
     const { result, text } = await run({ draftId: 'd1' }, { records: { d1: stagedDraft({ keywords: undefined }) } })
     expect(result.isError).toBe(true)
