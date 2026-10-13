@@ -34,18 +34,21 @@ import { attachmentsSchema, resolveAttachments } from '../drafts/attachments.ts'
 import { ACCOUNT_DESTRUCTIVE } from './annotations.ts'
 import {
   bodyTruncated,
+  type ComposeMailboxes,
   type DraftToolDeps,
   draftFromRecord,
   draftLabelKeywords,
   draftRefusalReason,
   formatDraft,
   isDraft,
+  isTrashed,
   loadDraft,
   MAX_DRAFT_BODY_VALUE_BYTES,
   type ParsedRecipients,
   parseRecipients,
   replyOriginalId,
   replyOriginalKeyword,
+  restoreFromTrashHint,
   stableDraftId,
   stableDraftIdKeyword,
   unreferencableAttachments,
@@ -184,14 +187,13 @@ const mergedAttachments = async (
 
 // The staged draft, or the reason it cannot be edited at all.
 //
-// Every refusal here shares one shape: the edit is a rewrite followed by a
-// destroy, so anything the rewrite could not carry across would be lost for
-// good — and reported as a success. All of these therefore run *before* the
-// replacement is written, while the draft is still whole and nothing has
-// changed.
+// The edit is a rewrite followed by a destroy, so anything the rewrite could
+// not carry across would be lost for good — and reported as a success. Every
+// refusal here therefore runs *before* the replacement is written, while the
+// draft is still whole and nothing has changed.
 const loadEditableDraft = async (
   deps: DraftToolDeps,
-  p: { accountId: string; args: UpdateDraftArgs; authorization: string }
+  p: { accountId: string; args: UpdateDraftArgs; authorization: string; mailboxes: ComposeMailboxes }
 ): Promise<{ error: ToolResult } | { record: EmailComposeRecord }> => {
   const { args } = p
   const record = await loadDraft(deps, {
@@ -209,6 +211,16 @@ const loadEditableDraft = async (
       error: errorResult(
         `${args.draftId} is not a draft — it has already been sent or received, and cannot be edited. Read ` +
           `it with get_email, passing id ${record.id}.`
+      ),
+    }
+  }
+  // Re-staging would put the discarded draft back into Drafts behind the
+  // user's back.
+  if (isTrashed(record, p.mailboxes)) {
+    return {
+      error: errorResult(
+        `Draft ${args.draftId} is in Trash — it was discarded, so it was left unchanged. ` +
+          restoreFromTrashHint(record)
       ),
     }
   }
@@ -581,7 +593,8 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
   const authorization = bearerAuthorization(ctx.token)
   const accountId = await deps.resolveAccountId(authorization)
 
-  const loaded = await loadEditableDraft(deps, { accountId, args, authorization })
+  const mailboxes = await deps.resolveComposeMailboxes(authorization)
+  const loaded = await loadEditableDraft(deps, { accountId, args, authorization, mailboxes })
   if ('error' in loaded) {
     return loaded.error
   }
@@ -610,7 +623,6 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
     return errorResult(recipients.error)
   }
 
-  const mailboxes = await deps.resolveComposeMailboxes(authorization)
   if (!mailboxes.drafts) {
     return errorResult('This account has no Drafts folder, so the draft cannot be re-staged.')
   }

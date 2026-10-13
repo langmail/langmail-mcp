@@ -17,7 +17,9 @@ import {
   draftFromRecord,
   formatDraft,
   isDraft,
+  isTrashed,
   loadDraft,
+  restoreFromTrashHint,
   stableDraftId,
   unreferencableAttachments,
 } from './draft-common.ts'
@@ -51,6 +53,11 @@ export const getDraft = async (deps: DraftToolDeps, ctx: GetDraftContext): Promi
     return errorResult(
       `${ctx.args.draftId} is not a draft — it has already been sent or received. Read it with get_email ` +
         `instead, passing id ${record.id}.`
+    )
+  }
+  if (isTrashed(record, await deps.resolveComposeMailboxes(authorization))) {
+    return errorResult(
+      `Draft ${ctx.args.draftId} is in Trash — it was discarded and is no longer pending. ${restoreFromTrashHint(record)}`
     )
   }
   return textResult(

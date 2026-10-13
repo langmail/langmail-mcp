@@ -22,7 +22,7 @@ export const TEST_PRINCIPAL = 'user@langmail.me'
 
 const TEST_IDENTITIES: IdentityRecord[] = [{ email: TEST_PRINCIPAL, id: 'i1', name: 'Dana Okonjo' }]
 
-const TEST_MAILBOXES: ComposeMailboxes = { drafts: 'mbDrafts', sent: 'mbSent' }
+const TEST_MAILBOXES: ComposeMailboxes = { drafts: 'mbDrafts', sent: 'mbSent', trash: 'mbTrash' }
 
 export interface DraftDepsOptions {
   // Recorded blob uploads, newest last — what a test asserts on to tell

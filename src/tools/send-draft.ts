@@ -31,13 +31,16 @@ import { holdSend, reservationRefusal, type SendGuard, type SendHold, type SendS
 import { describeError } from '../observability/errors.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import {
+  type ComposeMailboxes,
   countRecipients,
   type DraftToolDeps,
   draftFromRecord,
   formatDraft,
   isDraft,
+  isTrashed,
   loadDraft,
   resolveIdentity,
+  restoreFromTrashHint,
   stableDraftId,
   unreferencableAttachments,
 } from './draft-common.ts'
@@ -187,7 +190,7 @@ export const formatSent = (
 // has already gone.
 const loadSendableDraft = async (
   deps: DraftToolDeps,
-  p: { accountId: string; authorization: string; draftId: string }
+  p: { accountId: string; authorization: string; draftId: string; mailboxes: ComposeMailboxes }
 ): Promise<{ error: ToolResult } | { record: EmailComposeRecord }> => {
   const record = await loadDraft(deps, p)
   if (!record) {
@@ -202,6 +205,14 @@ const loadSendableDraft = async (
       error: errorResult(
         `${p.draftId} is no longer a draft — it has already been sent. Nothing was sent again. ` +
           `Read it back with get_email, passing id ${record.id}.`
+      ),
+    }
+  }
+  if (isTrashed(record, p.mailboxes)) {
+    return {
+      error: errorResult(
+        `Draft ${p.draftId} is in Trash — it was discarded, so it cannot be sent. Nothing was sent. ` +
+          restoreFromTrashHint(record)
       ),
     }
   }
@@ -262,7 +273,8 @@ const sendHeld = async (
   const { args, principal, token } = ctx
   const authorization = bearerAuthorization(token)
   const accountId = await deps.resolveAccountId(authorization)
-  const loaded = await loadSendableDraft(deps, { accountId, authorization, draftId: args.draftId })
+  const mailboxes = await deps.resolveComposeMailboxes(authorization)
+  const loaded = await loadSendableDraft(deps, { accountId, authorization, draftId: args.draftId, mailboxes })
   if ('error' in loaded) {
     return loaded.error
   }
@@ -283,7 +295,6 @@ const sendHeld = async (
     }
   }
 
-  const mailboxes = await deps.resolveComposeMailboxes(authorization)
   if (!mailboxes.drafts) {
     return errorResult('This account has no Drafts folder, so the draft cannot be sent.')
   }
