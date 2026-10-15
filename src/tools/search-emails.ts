@@ -1,9 +1,10 @@
 // search_emails tool — structured search over the authenticated user's
 // mailbox. Supports free-text search plus optional date-range, sender,
 // keyword (classified email type), and mailbox filters, returning a token-frugal
-// hit list (id/subject/sender/date/tags/snippet/attachments). Multi-term
-// queries rank messages matching more terms first; everything else is
-// newest-first. Full bodies are fetched separately via get_email.
+// hit list (id/subject/sender/date/tags/snippet/attachments) headed by how
+// many of the total matches it shows. Multi-term queries rank messages
+// matching more terms first; everything else is newest-first. Full bodies
+// are fetched separately via get_email.
 //
 // The tool logic lives behind a `Deps` interface so it can be unit-tested
 // without spinning up Stalwart. `makeLiveDeps` wires the live JMAP deps.
@@ -17,10 +18,12 @@ import {
   type EmailGetParams,
   type EmailQueryParams,
   type EmailQueryPerTermParams,
+  type EmailQueryTotalParams,
   type EmailRecord,
   emailGet,
   emailQuery,
   emailQueryPerTerm,
+  emailQueryTotal,
   type JmapLive,
 } from '@langmail/jmap'
 
@@ -134,10 +137,33 @@ const rankByMatchCount = (lists: string[][], limit: number, window: number): Ran
   }
 }
 
+// How many messages match beyond what the page shows: everything is on the
+// page, the server counted them, or the count failed.
+type MatchTotal = { kind: 'complete' } | { kind: 'counted'; n: number } | { kind: 'unknown' }
+
+const NARROW_HINT = 'Narrow with after/before or other filters'
+
+// A full page is indistinguishable from a complete result unless we say how
+// many matches there are — silent truncation is what turns "capped at 20"
+// into a false negative. Mail arriving between page and count can't make the
+// total smaller than what is shown.
+const matchHeader = (shown: number, total: MatchTotal, limit: number): string => {
+  const raise = limit < 100 ? ', or raise limit (max 100)' : ''
+  if (total.kind === 'unknown') {
+    return `${shown} of at least ${shown} message(s) matched (the total could not be counted). ${NARROW_HINT}${raise} to be sure nothing was cut off:`
+  }
+  const n = total.kind === 'counted' ? Math.max(total.n, shown) : shown
+  if (n === shown) {
+    return `${shown} of ${n} message(s) matched:`
+  }
+  return `${shown} of ${n} message(s) matched — ${n - shown} more not shown. ${NARROW_HINT}${raise}:`
+}
+
 export interface SearchEmailsDeps {
   emailGet: (p: EmailGetParams) => Promise<EmailRecord[]>
   emailQuery: (p: EmailQueryParams) => Promise<string[]>
   emailQueryPerTerm: (p: EmailQueryPerTermParams) => Promise<string[][]>
+  emailQueryTotal: (p: EmailQueryTotalParams) => Promise<number>
   resolveAccountId: (authorization: string) => Promise<string>
   resolveMailbox: (authorization: string, name: string) => Promise<MailboxLookup>
 }
@@ -196,6 +222,10 @@ export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsCont
     ...(mailboxId ? { mailboxId } : {}),
   }
 
+  // The whole query as one filter: text terms OR'd, AND'd with the scalars.
+  // The single-term page and the total both use it.
+  const textFilters = { ...filters, ...(terms.length > 0 ? { text: terms } : {}) }
+
   // apiUrl is wired by live deps; mock deps ignore it.
   let hits: RankedHits
   if (terms.length > 1) {
@@ -210,13 +240,7 @@ export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsCont
     })
     hits = rankByMatchCount(lists, args.limit, window)
   } else {
-    const ids = await deps.emailQuery({
-      accountId,
-      apiUrl: '',
-      authorization,
-      filters: { ...filters, ...(terms.length > 0 ? { text: terms } : {}) },
-      limit: args.limit,
-    })
+    const ids = await deps.emailQuery({ accountId, apiUrl: '', authorization, filters: textFilters, limit: args.limit })
     hits = { hitLimit: ids.length === args.limit, ids }
   }
 
@@ -224,7 +248,18 @@ export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsCont
     return textResult('No messages matched.')
   }
 
-  const list = await deps.emailGet({ accountId, apiUrl: '', authorization, ids: hits.ids })
+  // A page that did not fill up holds every match, so only a full one pays
+  // for the server-side count. A count that fails must not cost the caller
+  // the page it already has — it degrades to "at least".
+  const [list, total] = await Promise.all([
+    deps.emailGet({ accountId, apiUrl: '', authorization, ids: hits.ids }),
+    hits.hitLimit
+      ? deps.emailQueryTotal({ accountId, apiUrl: '', authorization, filters: textFilters }).then(
+          (n): MatchTotal => ({ kind: 'counted', n }),
+          (): MatchTotal => ({ kind: 'unknown' })
+        )
+      : Promise.resolve<MatchTotal>({ kind: 'complete' }),
+  ])
   // Restore the ranking order (Email/get doesn't preserve id order), then —
   // for ranked results — replace the pre-fetch recency proxy with the real
   // receivedAt as the within-count tie-break.
@@ -240,12 +275,7 @@ export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsCont
     const line = formatEmailLine(i + 1, e)
     return counts ? `${line}\n   matched: ${counts.get(e.id) ?? 0}/${terms.length} terms` : line
   })
-  // A full page is indistinguishable from a complete result unless we say so
-  // — silent truncation is what turns "capped at 20" into a false negative.
-  const truncationNote = hits.hitLimit
-    ? `\n\nResult hit the limit of ${args.limit} — more matches may exist. Narrow with after/before or other filters, or raise limit.`
-    : ''
-  return textResult(`${ordered.length} message(s) matched:\n\n${lines.join('\n\n')}${truncationNote}`)
+  return textResult(`${matchHeader(ordered.length, total, args.limit)}\n\n${lines.join('\n\n')}`)
 }
 
 // --- live-deps wiring ----------------------------------------------------
@@ -256,6 +286,7 @@ export const makeLiveDeps = (live: JmapLive): SearchEmailsDeps => ({
   emailGet: async (p) => emailGet({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   emailQuery: async (p) => emailQuery({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   emailQueryPerTerm: async (p) => emailQueryPerTerm({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
+  emailQueryTotal: async (p) => emailQueryTotal({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   resolveAccountId: live.resolveAccountId,
   resolveMailbox: async (authorization, name) => {
     const s = await live.getSession(authorization)
@@ -282,7 +313,8 @@ export const registerSearchEmails = (
         'any-term match, quoted phrases supported) with optional filters: date ' +
         'range (after/before), sender (from), classified email type ' +
         '(keywords), and mailbox. At least one filter is required. Returns ' +
-        'matching messages — multi-term queries rank messages matching more terms ' +
+        'matching messages, headed by how many of the total matches are shown (e.g. ' +
+        '"20 of 213") — multi-term queries rank messages matching more terms ' +
         'first, otherwise newest-first — with id, subject, sender, date, tags, a ' +
         'body snippet, and attachment metadata including blobId. Use get_email ' +
         'for full bodies and recipients; call download_attachment directly from ' +

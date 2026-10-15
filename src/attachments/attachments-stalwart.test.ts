@@ -30,6 +30,7 @@ import {
   emailGetDetail,
   emailQuery,
   emailQueryPerTerm,
+  emailQueryTotal,
   mailboxCreate,
   mailboxIdByRole,
   makeJmapLive,
@@ -266,6 +267,7 @@ live('attachments against live Stalwart — metadata, capability URL, blob strea
       emailGet: (p) => emailGet({ ...p, apiUrl, authorization }),
       emailQuery: (p) => emailQuery({ ...p, apiUrl, authorization }),
       emailQueryPerTerm: (p) => emailQueryPerTerm({ ...p, apiUrl, authorization }),
+      emailQueryTotal: (p) => emailQueryTotal({ ...p, apiUrl, authorization }),
       resolveAccountId: () => Promise.resolve(accountId),
       resolveMailbox: () => Promise.resolve({ available: [], id: null }),
     }
