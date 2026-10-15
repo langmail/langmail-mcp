@@ -261,8 +261,9 @@ export const emailQueryTotal = async (p: EmailQueryTotalParams): Promise<number>
           accountId: p.accountId,
           calculateTotal: true,
           filter: buildFilter(p.filters),
-          // RFC 8620 §5.5: a client-supplied limit must be positive; the one
-          // id that comes back is discarded.
+          // `limit: 0` is spec-legal (RFC 8620 §5.5 types it UnsignedInt) but
+          // servers disagree on whether it means "none" or "no limit"; ask for
+          // one id and discard it. Only `total` is wanted here.
           limit: 1,
         },
         '0',

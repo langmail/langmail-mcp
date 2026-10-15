@@ -365,6 +365,29 @@ describe('searchEmails', () => {
     expect(seenTotal?.filters.text).toEqual(['alpha', 'bravo'])
   })
 
+  // A per-term window that filled up may hide older multi-term hits, so the
+  // page counts as full even though the ranked list fits the limit.
+  test('a filled per-term window triggers the count', async () => {
+    const window = Array.from({ length: 60 }, (_, i) => `w${i}`)
+    const emails: EmailRecord[] = window
+      .slice(0, 20)
+      .map((id) => ({ id, receivedAt: '2026-06-01T00:00:00Z', subject: id }))
+    let counted = false
+    const result = await searchEmails(
+      fakeDeps({
+        emails,
+        onTotalQuery: () => {
+          counted = true
+        },
+        perTermIds: [window, []],
+        total: 75,
+      }),
+      { args: { limit: 20, query: 'alpha bravo' }, token: 'tok' }
+    )
+    expect(counted).toBe(true)
+    expect(result.content[0]?.text).toStartWith('20 of 75 message(s) matched — 55 more not shown.')
+  })
+
   test('caps the fan-out at 10 terms and widens the per-term window', async () => {
     let seen: EmailQueryPerTermParams | undefined
     await searchEmails(
@@ -514,6 +537,20 @@ describe('searchEmails', () => {
     expect(result.isError).toBeFalsy()
     expect(txt).toStartWith('2 of at least 2 message(s) matched')
     expect(txt).toContain('1. alpha')
+  })
+
+  test('a count that misses its deadline keeps the page and reports a lower bound', async () => {
+    const emails: EmailRecord[] = [
+      { id: 'a', receivedAt: '2026-06-01T00:00:00Z', subject: 'alpha' },
+      { id: 'b', receivedAt: '2026-05-01T00:00:00Z', subject: 'bravo' },
+    ]
+    const result = await searchEmails(
+      { ...fakeDeps({ emails, queryIds: ['a', 'b'] }), emailQueryTotal: () => new Promise<number>(() => undefined) },
+      { args: { limit: 2, query: 'invoice' }, countDeadlineMs: 10, token: 'tok' }
+    )
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toStartWith('2 of at least 2 message(s) matched')
+    expect(txt).toContain('2. bravo')
   })
 
   test('a message gone between query and fetch on a partial page is not reported as cut off', async () => {

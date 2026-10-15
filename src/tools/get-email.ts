@@ -19,12 +19,12 @@ import {
   type EmailDetailRecord,
   type EmailGetDetailParams,
   emailGetDetail,
-  JmapError,
   type JmapLive,
 } from '@langmail/jmap'
 import { logger } from '@langmail/logger'
 
 import { READ_ONLY } from './annotations.ts'
+import { errorDetail } from './error-detail.ts'
 import { emailTags, formatAddressList, formatAttachmentLine } from './format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
@@ -77,16 +77,6 @@ export const bodyText = (e: EmailDetailRecord): string => {
     .filter((v) => v.length > 0)
     .join('\n')
     .trim()
-}
-
-// JmapError messages are status-only; anything else is reduced to its name
-// so a fetch-level error can't leak the download URL — it embeds the
-// accountId (REVIEW.md: no user IDs in logs).
-const errorDetail = (err: unknown): string => {
-  if (err instanceof JmapError) {
-    return err.message
-  }
-  return err instanceof Error ? err.name : 'unknown'
 }
 
 // Primary body path: download the raw message and run it through langmail's

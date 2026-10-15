@@ -26,12 +26,18 @@ import {
   emailQueryTotal,
   type JmapLive,
 } from '@langmail/jmap'
+import { logger } from '@langmail/logger'
 
 import { READ_ONLY } from './annotations.ts'
+import { errorDetail } from './error-detail.ts'
 import { formatEmailLine, orderById } from './format.ts'
 import { KEYWORD_VALUES, KEYWORDS_DESCRIPTION, keywordToJmapKeyword } from './keywords.ts'
 import { lookupMailbox, type MailboxLookup } from './mailbox-lookup.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
+
+// The largest page a caller can ask for; the per-term window and the
+// truncation hint follow it.
+const MAX_LIMIT = 100
 
 // Raw shape handed to registerTool (JSON-schema source). The "at least one
 // filter" rule can't live here — it's cross-field — so it's a refine on the
@@ -53,7 +59,7 @@ const searchEmailsShape = {
     ),
   from: z.string().min(1).max(200).optional().describe('Substring match on the sender name or address.'),
   keywords: z.array(z.enum(KEYWORD_VALUES)).min(1).optional().describe(KEYWORDS_DESCRIPTION),
-  limit: z.number().int().min(1).max(100).default(20),
+  limit: z.number().int().min(1).max(MAX_LIMIT).default(20),
   mailbox: z
     .string()
     .optional()
@@ -102,7 +108,7 @@ const MAX_QUERY_TERMS = 10
 // overflows would otherwise undercount older multi-term hits. Ids are cheap;
 // the wider window shrinks that bias and a full window still triggers the
 // truncation note.
-const perTermWindow = (limit: number): number => Math.min(limit * 3, 100)
+const perTermWindow = (limit: number): number => Math.min(limit * 3, MAX_LIMIT)
 
 interface RankedHits {
   hitLimit: boolean
@@ -148,7 +154,7 @@ const NARROW_HINT = 'Narrow with after/before or other filters'
 // into a false negative. Mail arriving between page and count can't make the
 // total smaller than what is shown.
 const matchHeader = (shown: number, total: MatchTotal, limit: number): string => {
-  const raise = limit < 100 ? ', or raise limit (max 100)' : ''
+  const raise = limit < MAX_LIMIT ? `, or raise limit (max ${MAX_LIMIT})` : ''
   if (total.kind === 'unknown') {
     return `${shown} of at least ${shown} message(s) matched (the total could not be counted). ${NARROW_HINT}${raise} to be sure nothing was cut off:`
   }
@@ -170,7 +176,31 @@ export interface SearchEmailsDeps {
 
 export interface SearchEmailsContext {
   args: SearchEmailsArgs
+  // How long a full page waits for its total; tests shorten it.
+  countDeadlineMs?: number
   token: string
+}
+
+// The page is already in hand when the count runs, and a Stalwart FTS count
+// on a big mailbox can take far longer than the page did. Past this deadline
+// the header says "at least" rather than holding the page back.
+const COUNT_DEADLINE_MS = 3000
+
+// Settle the count as a MatchTotal: counted, or unknown once it fails or
+// misses the deadline.
+const countWithin = (count: Promise<number>, ms: number): Promise<MatchTotal> => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<MatchTotal>((resolve) => {
+    timer = setTimeout(() => resolve({ kind: 'unknown' }), ms)
+  })
+  const counted = count.then(
+    (n): MatchTotal => ({ kind: 'counted', n }),
+    (err: unknown): MatchTotal => {
+      logger.warn({ detail: errorDetail(err) }, 'search total count failed, reporting a lower bound')
+      return { kind: 'unknown' }
+    }
+  )
+  return Promise.race([counted, deadline]).finally(() => clearTimeout(timer))
 }
 
 // Resolve the optional mailbox filter to an id, or an error result. The error
@@ -249,14 +279,14 @@ export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsCont
   }
 
   // A page that did not fill up holds every match, so only a full one pays
-  // for the server-side count. A count that fails must not cost the caller
-  // the page it already has — it degrades to "at least".
+  // for the server-side count. A count that fails or is slow must not cost
+  // the caller the page it already has — it degrades to "at least".
   const [list, total] = await Promise.all([
     deps.emailGet({ accountId, apiUrl: '', authorization, ids: hits.ids }),
     hits.hitLimit
-      ? deps.emailQueryTotal({ accountId, apiUrl: '', authorization, filters: textFilters }).then(
-          (n): MatchTotal => ({ kind: 'counted', n }),
-          (): MatchTotal => ({ kind: 'unknown' })
+      ? countWithin(
+          deps.emailQueryTotal({ accountId, apiUrl: '', authorization, filters: textFilters }),
+          ctx.countDeadlineMs ?? COUNT_DEADLINE_MS
         )
       : Promise.resolve<MatchTotal>({ kind: 'complete' }),
   ])
