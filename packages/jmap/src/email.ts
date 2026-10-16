@@ -47,6 +47,7 @@ const EMAIL_DETAIL_PROPERTIES = [
   'to',
   'cc',
   'receivedAt',
+  'mailboxIds',
   'keywords',
   'messageId',
   'textBody',
