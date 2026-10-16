@@ -36,8 +36,9 @@ const EMAIL_PROPERTIES = [
 ] as const
 
 // Richer properties for get_email and the poller's analysis input:
-// recipients, the text body parts, the RFC 5322 Message-ID list, and the
-// raw-message blob handle (blobId/size) for langmail preprocessing.
+// recipients, the text body parts, the RFC 5322 Message-ID list, the
+// raw-message blob handle (blobId/size) for langmail preprocessing, and
+// mailboxIds so the poller can tell sent mail by its Sent membership.
 const EMAIL_DETAIL_PROPERTIES = [
   'id',
   'blobId',
