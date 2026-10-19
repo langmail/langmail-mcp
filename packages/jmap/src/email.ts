@@ -225,8 +225,8 @@ export const emailQuery = async (p: EmailQueryParams): Promise<string[]> => {
         'Email/query',
         {
           accountId: p.accountId,
-          // Stalwart FTS full totals are expensive on a big mailbox and we
-          // don't show them.
+          // Stalwart FTS full totals are expensive on a big mailbox; callers
+          // that need one ask `emailQueryTotal` once a page comes back full.
           calculateTotal: false,
           filter: buildFilter(p.filters),
           limit: p.limit,
@@ -241,6 +241,41 @@ export const emailQuery = async (p: EmailQueryParams): Promise<string[]> => {
   })
   const out = methodResponse<{ ids?: string[] }>(resp, 'Email/query', '0')
   return out.ids ?? []
+}
+
+export interface EmailQueryTotalParams extends JmapCall {
+  accountId: string
+  filters: EmailQueryFilters
+}
+
+// How many messages match the filters in total, regardless of any page limit.
+// Text terms are OR'd exactly as in `emailQuery`, so a multi-term search's
+// total counts the union of its per-term hits. Totals cost a full FTS count on
+// Stalwart, so callers ask only when a page came back full.
+export const emailQueryTotal = async (p: EmailQueryTotalParams): Promise<number> => {
+  const resp = await call(p, {
+    methodCalls: [
+      [
+        'Email/query',
+        {
+          accountId: p.accountId,
+          calculateTotal: true,
+          filter: buildFilter(p.filters),
+          // `limit: 0` is spec-legal (RFC 8620 §5.5 types it UnsignedInt) but
+          // servers disagree on whether it means "none" or "no limit"; ask for
+          // one id and discard it. Only `total` is wanted here.
+          limit: 1,
+        },
+        '0',
+      ],
+    ],
+    using: USING,
+  })
+  const out = methodResponse<{ total?: number }>(resp, 'Email/query', '0')
+  if (out.total === undefined) {
+    throw new Error('Email/query returned no total despite calculateTotal')
+  }
+  return out.total
 }
 
 // --- Email/get (lightweight) ---------------------------------------------

@@ -23,7 +23,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
 const TRAILING_SLASHES_RE = /\/+$/u
-const SINGLE_MATCH_RE = /^1 message\(s\) matched/mu
+const SINGLE_MATCH_RE = /^1 of 1 message\(s\) matched/mu
 const FIRST_ID_RE = /^\s*id:\s*(\S+)/mu
 // The smoke message's attachment as get_email lists it (human size varies
 // with the exact PDF bytes, so only name/type/blobId are pinned).
@@ -262,7 +262,7 @@ const main = async () => {
       fail(`smoke-tag '${smokeTag}' not found after ${maxAttempts} attempts: ${text}`)
     }
     // Tighten: exactly one hit, with the right sender. The tool formats
-    // hits as "N message(s) matched:\n\n1. <subject>\n   from: ...\n   date: ...".
+    // hits as "N of M message(s) matched:\n\n1. <subject>\n   from: ...\n   date: ...".
     if (!SINGLE_MATCH_RE.test(text)) {
       fail(`expected exactly one hit for unique tag; got: ${text}`)
     }
