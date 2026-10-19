@@ -51,6 +51,7 @@ import {
   registerListCalendarEvents,
 } from '../tools/list-calendar-events.ts'
 import { makeLiveDeps as makeListCalendarsDeps, registerListCalendars } from '../tools/list-calendars.ts'
+import { registerListDrafts } from '../tools/list-drafts.ts'
 import { registerListMailRules } from '../tools/list-mail-rules.ts'
 import { registerListUpcomingBirthdays } from '../tools/list-upcoming-birthdays.ts'
 import { type MailRuleToolDeps } from '../tools/mail-rule-common.ts'
@@ -191,6 +192,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
       () => ctx.principal
     )
     registerGetDraft(server, draftDeps, () => ctx.token)
+    registerListDrafts(server, draftDeps, () => ctx.token)
     registerUpdateDraft(
       server,
       draftDeps,

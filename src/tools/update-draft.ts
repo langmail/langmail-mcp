@@ -89,8 +89,8 @@ export const updateDraftInput = z.object({
     .string()
     .min(1)
     .describe(
-      'The draft id, as returned by create_draft — edits do not change it — or a message id from search_emails ' +
-        'with `mailbox: "Drafts"`. Editing a draft found that way returns the draftId to use from then on.'
+      'The draft id, as returned by create_draft or list_drafts — edits do not change it — or a message id ' +
+        'from search_emails with `mailbox: "Drafts"`. Editing a draft found that way returns the draftId to use from then on.'
     ),
   html: z
     .string()
@@ -203,7 +203,7 @@ const loadEditableDraft = async (
   })
   if (!record) {
     return {
-      error: errorResult(`Draft not found: ${args.draftId}. Find it with search_emails using mailbox "Drafts".`),
+      error: errorResult(`Draft not found: ${args.draftId}. Find it with list_drafts.`),
     }
   }
   if (!isDraft(record)) {

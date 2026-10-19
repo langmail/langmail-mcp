@@ -30,8 +30,8 @@ export const getDraftInput = z.object({
     .string()
     .min(1)
     .describe(
-      'The draft id, as returned by create_draft or update_draft — edits do not change it — or a message id ' +
-        'from search_emails with `mailbox: "Drafts"`, which an edit replaces with the draftId it returns.'
+      'The draft id, as returned by create_draft, update_draft or list_drafts — edits do not change it — or a ' +
+        'message id from search_emails with `mailbox: "Drafts"`, which an edit replaces with the draftId it returns.'
     ),
 })
 
@@ -47,7 +47,7 @@ export const getDraft = async (deps: DraftToolDeps, ctx: GetDraftContext): Promi
   const accountId = await deps.resolveAccountId(authorization)
   const record = await loadDraft(deps, { accountId, authorization, draftId: ctx.args.draftId })
   if (!record) {
-    return errorResult(`Draft not found: ${ctx.args.draftId}. Find it with search_emails using mailbox "Drafts".`)
+    return errorResult(`Draft not found: ${ctx.args.draftId}. Find it with list_drafts.`)
   }
   if (!isDraft(record)) {
     return errorResult(

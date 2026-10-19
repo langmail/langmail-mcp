@@ -36,6 +36,7 @@ import {
   blobUpload,
   draftCreate,
   draftIdResolve,
+  draftList,
   emailComposeGet,
   emailGetDetail,
   emailQuery,
@@ -53,6 +54,7 @@ import { createDraft, createDraftInput } from './create-draft.ts'
 import { type DraftToolDeps } from './draft-common.ts'
 import { getDraft, getDraftInput } from './get-draft.ts'
 import { type GetEmailDeps, getEmail, getEmailInput } from './get-email.ts'
+import { listDrafts, listDraftsInput } from './list-drafts.ts'
 import { replyToMessage, replyToMessageInput } from './reply-to-message.ts'
 import { sendDraft, sendDraftInput } from './send-draft.ts'
 import { updateDraft, updateDraftInput } from './update-draft.ts'
@@ -232,6 +234,7 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
       blobUpload: (p) => blobUpload({ ...p, authorization, uploadUrl: session.uploadUrl }),
       draftCreate: (p) => draftCreate({ ...p, apiUrl, authorization }),
       draftIdResolve: (p) => draftIdResolve({ ...p, apiUrl, authorization }),
+      draftList: (p) => draftList({ ...p, apiUrl, authorization }),
       emailComposeGet: (p) => emailComposeGet({ ...p, apiUrl, authorization }),
       emailSubmissionCreate: (p) => emailSubmissionCreate({ ...p, apiUrl, authorization }),
       identityGet: (p) => identityGet({ ...p, apiUrl, authorization }),
@@ -365,6 +368,27 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
     expect(body).not.toContain('the Q2 figures are final')
     expect(body).toContain('wrote:')
     expect(body).toContain('> ')
+  })
+
+  test('list_drafts finds the edited reply once, by its draftId, and narrows by recipient', async () => {
+    const list = async (args: Record<string, unknown>) =>
+      (await listDrafts(deps, { args: listDraftsInput.parse(args), token: TOKEN })).content[0]?.text ?? ''
+
+    const all = await list({})
+    // Edits replaced the revision each time, so the draftId appears once.
+    expect(all.split(`draftId: ${replyDraftId}`)).toHaveLength(2)
+    const current = await draftIdResolve({ ...ctx(), draftId: replyDraftId })
+    expect(all).toContain(`messageId: ${current}`)
+    expect(all).toContain(`reply to: message ${originalId}`)
+
+    // The nested OR over subject and recipients, and the date window, are
+    // conditions Stalwart has to evaluate — the fixture cannot prove them.
+    expect(await list({ query: CORRESPONDENT_ADDRESS })).toContain(`draftId: ${replyDraftId}`)
+    // A partial address, to hold the description's "substring" promise to the server.
+    expect(await list({ query: 'nadia@' })).toContain(`draftId: ${replyDraftId}`)
+    expect(await list({ query: '(final)' })).toContain(`draftId: ${replyDraftId}`)
+    expect(await list({ query: 'no-such-recipient.example' })).toBe('No drafts matched.')
+    expect(await list({ before: '2000-01-01T00:00:00Z' })).toBe('No drafts matched.')
   })
 
   test('send_draft by the draftId sends the edited revision, once', async () => {

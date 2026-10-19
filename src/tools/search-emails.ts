@@ -286,7 +286,8 @@ export const registerSearchEmails = (
         'first, otherwise newest-first — with id, subject, sender, date, tags, a ' +
         'body snippet, and attachment metadata including blobId. Use get_email ' +
         'for full bodies and recipients; call download_attachment directly from ' +
-        'a hit when the attachment blobId is present. Searching never marks anything read; use ' +
+        'a hit when the attachment blobId is present. For staged drafts use list_drafts, which returns the ' +
+        'draftIds the draft tools take. Searching never marks anything read; use ' +
         'mark_emails for that. ' +
         'Filter first, search second: use query for words the sender actually ' +
         'wrote, and reach for keywords + a date window when the request names a ' +

@@ -1,5 +1,5 @@
 // Shared plumbing for the composition tools (create_draft, get_draft,
-// update_draft, send_draft, reply_to_message).
+// list_drafts, update_draft, send_draft, reply_to_message).
 //
 // Three things live here because getting them wrong in one tool and right in
 // another is exactly the failure the sending surface can't afford:
@@ -24,8 +24,11 @@ import {
   type DraftCreateParams,
   type DraftCreateResult,
   type DraftIdResolveParams,
+  type DraftListParams,
+  type DraftListResult,
   draftCreate,
   draftIdResolve,
+  draftList,
   type EmailAddress,
   type EmailComposeGetParams,
   type EmailComposeRecord,
@@ -82,6 +85,7 @@ export interface DraftToolDeps {
   // The current revision of an edited draft, by its stable id — see
   // `loadDraft`.
   draftIdResolve: (p: DraftIdResolveParams) => Promise<string | null>
+  draftList: (p: DraftListParams) => Promise<DraftListResult>
   emailComposeGet: (p: EmailComposeGetParams) => Promise<EmailComposeRecord | null>
   emailSubmissionCreate: (p: EmailSubmissionCreateParams) => Promise<EmailSubmissionResult>
   identityGet: (p: IdentityGetParams) => Promise<IdentityRecord[]>
@@ -680,6 +684,7 @@ export const makeLiveDeps = (live: JmapLive): DraftToolDeps => ({
   blobUpload: async (p) => blobUpload({ ...p, uploadUrl: (await live.getSession(p.authorization)).uploadUrl }),
   draftCreate: async (p) => draftCreate({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   draftIdResolve: async (p) => draftIdResolve({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
+  draftList: async (p) => draftList({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   emailComposeGet: async (p) => emailComposeGet({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   emailSubmissionCreate: async (p) =>
     emailSubmissionCreate({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),

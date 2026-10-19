@@ -440,6 +440,89 @@ export const draftIdResolve = async (p: DraftIdResolveParams): Promise<string | 
   return out.ids?.[0] ?? null
 }
 
+export interface DraftListParams extends JmapCall {
+  accountId: string
+  // UTCDate bounds on `receivedAt`, which for a draft is when it was staged.
+  after?: string
+  before?: string
+  limit: number
+  // The account's Drafts mailbox — resolved by role, not name.
+  mailboxId: string
+  maxBodyValueBytes: number
+  // Substring match over the subject and every recipient field.
+  text?: string
+}
+
+export interface DraftListResult {
+  records: EmailComposeRecord[]
+  // Every draft the filter matched, not just the page returned.
+  total: number
+}
+
+// The drafts staged in the Drafts mailbox, newest first, read with the same
+// properties as `emailComposeGet` so a listed draft formats exactly like one
+// read on its own. One round trip: the query, and an Email/get that
+// back-references its ids. `$draft` is required as well as the mailbox,
+// because a message filed into Drafts by hand is not something send_draft
+// would accept. Only the body parts are fetched — a listing previews the
+// body and never re-stages it.
+export const draftList = async (p: DraftListParams): Promise<DraftListResult> => {
+  const conditions: Record<string, unknown>[] = [{ inMailbox: p.mailboxId }, { hasKeyword: DRAFT_KEYWORD }]
+  if (p.after) {
+    conditions.push({ after: p.after })
+  }
+  if (p.before) {
+    conditions.push({ before: p.before })
+  }
+  if (p.text) {
+    const text = p.text
+    conditions.push({
+      conditions: (['subject', 'to', 'cc', 'bcc'] as const).map((field) => ({ [field]: text })),
+      operator: 'OR',
+    })
+  }
+  const resp = await call(p, {
+    methodCalls: [
+      [
+        'Email/query',
+        {
+          accountId: p.accountId,
+          calculateTotal: true,
+          filter: { conditions, operator: 'AND' },
+          limit: p.limit,
+          sort: [{ isAscending: false, property: 'receivedAt' }],
+        },
+        '0',
+      ],
+      [
+        'Email/get',
+        {
+          '#ids': { name: 'Email/query', path: '/ids', resultOf: '0' },
+          accountId: p.accountId,
+          bodyProperties: [...COMPOSE_BODY_PROPERTIES],
+          fetchHTMLBodyValues: true,
+          fetchTextBodyValues: true,
+          maxBodyValueBytes: p.maxBodyValueBytes,
+          properties: [...COMPOSE_PROPERTIES],
+        },
+        '1',
+      ],
+    ],
+    using: USING,
+  })
+  const query = methodResponse<{ ids?: string[]; total?: number }>(resp, 'Email/query', '0')
+  const got = methodResponse<{ list?: EmailComposeRecord[] }>(resp, 'Email/get', '1')
+  // Email/get does not promise the order of `ids`, so the query's order is
+  // restored here.
+  const byId = new Map((got.list ?? []).map((record) => [record.id, record]))
+  const ids = query.ids ?? []
+  const records = ids.flatMap((id) => {
+    const record = byId.get(id)
+    return record ? [record] : []
+  })
+  return { records, total: query.total ?? ids.length }
+}
+
 export interface ThreadMessageFindParams extends JmapCall {
   accountId: string
   // Any message of the thread to search — the reply draft itself.

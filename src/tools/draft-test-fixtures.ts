@@ -70,6 +70,30 @@ export const draftDeps = (opts: DraftDepsOptions = {}): DraftToolDeps => {
             null
           )?.id ?? null
       ),
+    // Like the server: `$draft` mail in the given mailbox, newest first, with
+    // the text matched against the subject and every recipient.
+    draftList: (p) => {
+      const matches = Object.values(opts.records ?? {})
+        .filter((record) => record.keywords?.$draft && record.mailboxIds?.[p.mailboxId])
+        .filter((record) => (p.after ? (record.receivedAt ?? '') >= p.after : true))
+        .filter((record) => (p.before ? (record.receivedAt ?? '') < p.before : true))
+        .filter((record) => {
+          if (!p.text) {
+            return true
+          }
+          const needle = p.text.toLowerCase()
+          const haystack = [
+            record.subject ?? '',
+            ...[...(record.to ?? []), ...(record.cc ?? []), ...(record.bcc ?? [])].flatMap((a) => [
+              a.email,
+              a.name ?? '',
+            ]),
+          ]
+          return haystack.some((value) => value.toLowerCase().includes(needle))
+        })
+        .sort((a, b) => (b.receivedAt ?? '').localeCompare(a.receivedAt ?? ''))
+      return Promise.resolve({ records: matches.slice(0, p.limit), total: matches.length })
+    },
     emailComposeGet: (p) => Promise.resolve(opts.records?.[p.id] ?? null),
     emailSubmissionCreate: (p) => {
       opts.submissions?.push(p)
