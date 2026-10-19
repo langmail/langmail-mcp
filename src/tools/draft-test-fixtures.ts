@@ -22,6 +22,9 @@ export const TEST_PRINCIPAL = 'user@langmail.me'
 
 const TEST_IDENTITIES: IdentityRecord[] = [{ email: TEST_PRINCIPAL, id: 'i1', name: 'Dana Okonjo' }]
 
+// What separates the words the server indexes a subject or name into.
+const NON_WORD_RE = /[^\p{L}\p{N}]+/u
+
 const TEST_MAILBOXES: ComposeMailboxes = { drafts: 'mbDrafts', sent: 'mbSent', trash: 'mbTrash' }
 
 export interface DraftDepsOptions {
@@ -70,11 +73,13 @@ export const draftDeps = (opts: DraftDepsOptions = {}): DraftToolDeps => {
             null
           )?.id ?? null
       ),
-    // Like the server: `$draft` mail in the given mailbox, newest first, with
-    // the text matched against the subject and every recipient.
+    // Like the server: `$draft` mail in the given mailbox and not the excluded
+    // one, newest first, with the text matched as a whole word (or address)
+    // against the subject and every recipient.
     draftList: (p) => {
       const matches = Object.values(opts.records ?? {})
         .filter((record) => record.keywords?.$draft && record.mailboxIds?.[p.mailboxId])
+        .filter((record) => !(p.excludeMailboxId && record.mailboxIds?.[p.excludeMailboxId]))
         .filter((record) => (p.after ? (record.receivedAt ?? '') >= p.after : true))
         .filter((record) => (p.before ? (record.receivedAt ?? '') < p.before : true))
         .filter((record) => {
@@ -89,7 +94,9 @@ export const draftDeps = (opts: DraftDepsOptions = {}): DraftToolDeps => {
               a.name ?? '',
             ]),
           ]
-          return haystack.some((value) => value.toLowerCase().includes(needle))
+          return haystack.some((value) =>
+            [value.toLowerCase(), ...value.toLowerCase().split(NON_WORD_RE)].includes(needle)
+          )
         })
         .sort((a, b) => (b.receivedAt ?? '').localeCompare(a.receivedAt ?? ''))
       return Promise.resolve({ records: matches.slice(0, p.limit), total: matches.length })

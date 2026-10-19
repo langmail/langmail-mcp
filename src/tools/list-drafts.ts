@@ -28,6 +28,8 @@ import { errorResult, type ToolResult, textResult } from './result.ts'
 // UTF-8. A listing never re-stages a body, so a truncated read is harmless here.
 const LIST_BODY_VALUE_BYTES = 2000
 
+const MAX_LIST_LIMIT = 50
+
 const listDraftsShape = {
   after: z.iso
     .datetime()
@@ -39,7 +41,13 @@ const listDraftsShape = {
     .describe(
       'Only drafts last staged or edited strictly before this UTC ISO-8601 timestamp, e.g. "2026-10-08T00:00:00Z".'
     ),
-  limit: z.number().int().min(1).max(50).default(20).describe('How many drafts to return, newest first. Up to 50.'),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_LIST_LIMIT)
+    .default(20)
+    .describe(`How many drafts to return, newest first. Up to ${MAX_LIST_LIMIT}.`),
   query: z
     .string()
     .trim()
@@ -47,8 +55,9 @@ const listDraftsShape = {
     .max(200)
     .optional()
     .describe(
-      'Substring matched against the subject and every recipient (to, cc, bcc), by name or address — e.g. ' +
-        '"invoice" or "nadia@example.org". Does not search the body.'
+      'Whole words matched against the subject and every recipient (to, cc, bcc), by name or address — e.g. ' +
+        '"invoice", "Nadia" or "nadia@example.org". A fragment of a word does not match: "invo" finds nothing. ' +
+        'Does not search the body.'
     ),
 }
 
@@ -103,6 +112,9 @@ export const listDrafts = async (deps: DraftToolDeps, ctx: ListDraftsContext): P
     limit: args.limit,
     mailboxId: mailboxes.drafts,
     maxBodyValueBytes: LIST_BODY_VALUE_BYTES,
+    // A draft another client left in Trash as well as Drafts is one the draft
+    // tools refuse as discarded (`isTrashed`), so it is not listed as pending.
+    ...(mailboxes.trash ? { excludeMailboxId: mailboxes.trash } : {}),
     ...(args.after ? { after: args.after } : {}),
     ...(args.before ? { before: args.before } : {}),
     ...(args.query ? { text: args.query } : {}),
@@ -111,15 +123,16 @@ export const listDrafts = async (deps: DraftToolDeps, ctx: ListDraftsContext): P
   if (records.length === 0) {
     return textResult(filtered ? 'No drafts matched.' : 'The Drafts folder is empty.')
   }
-  const heading =
-    total > records.length
-      ? `Showing the newest ${records.length} of ${total} draft(s) (not sent):`
-      : `${records.length} draft(s) (not sent), newest first:`
+  const hasMore = total > records.length
+  const heading = hasMore
+    ? `Showing the newest ${records.length} of ${total} draft(s) (not sent):`
+    : `${records.length} draft(s) (not sent), newest first:`
   // The total is what makes a short page distinguishable from a complete one.
-  const truncationNote =
-    total > records.length
-      ? `\n\n${total - records.length} more draft(s) not shown. Narrow with query or after/before, or raise limit.`
-      : ''
+  // There is no paging, so at the cap narrowing is the only way on.
+  const raise = args.limit < MAX_LIST_LIMIT ? ', or raise limit' : ''
+  const truncationNote = hasMore
+    ? `\n\n${total - records.length} more draft(s) not shown. Narrow with query or after/before${raise}.`
+    : ''
   const body = records.map((record, i) => formatListedDraft(i + 1, record)).join('\n\n')
   return textResult(`${heading}\n\n${body}${truncationNote}`)
 }

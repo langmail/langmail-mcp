@@ -445,11 +445,15 @@ export interface DraftListParams extends JmapCall {
   // UTCDate bounds on `receivedAt`, which for a draft is when it was staged.
   after?: string
   before?: string
+  // A mailbox a listed draft must not also be in — Trash, so a draft another
+  // client copied there rather than moving it is not listed as pending.
+  excludeMailboxId?: string
   limit: number
   // The account's Drafts mailbox — resolved by role, not name.
   mailboxId: string
   maxBodyValueBytes: number
-  // Substring match over the subject and every recipient field.
+  // Matched over the subject and every recipient field. Stalwart matches
+  // whole words (a name, an address, a subject word), not fragments of one.
   text?: string
 }
 
@@ -468,6 +472,9 @@ export interface DraftListResult {
 // body and never re-stages it.
 export const draftList = async (p: DraftListParams): Promise<DraftListResult> => {
   const conditions: Record<string, unknown>[] = [{ inMailbox: p.mailboxId }, { hasKeyword: DRAFT_KEYWORD }]
+  if (p.excludeMailboxId) {
+    conditions.push({ inMailboxOtherThan: [p.excludeMailboxId] })
+  }
   if (p.after) {
     conditions.push({ after: p.after })
   }

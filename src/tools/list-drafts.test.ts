@@ -85,6 +85,13 @@ describe('listDrafts', () => {
     expect(text).toContain('threading: In-Reply-To/References set')
   })
 
+  test('leaves out a draft another client left in Trash as well as Drafts', async () => {
+    const both = stagedDraft({ id: 'd2', mailboxIds: { mbDrafts: true, mbTrash: true } })
+    const { text } = await run({}, { records: { d1: older, d2: both } })
+    expect(text).toContain('1 draft(s)')
+    expect(text).not.toContain('messageId: d2')
+  })
+
   test('leaves out sent mail, trashed drafts, and anything without $draft', async () => {
     const trashed = stagedDraft({ id: 'd2', mailboxIds: { mbTrash: true } })
     const sent = stagedDraft({ id: 'd3', keywords: { $seen: true }, mailboxIds: { mbSent: true } })
@@ -107,6 +114,7 @@ describe('listDrafts', () => {
     expect(lists[0]).toMatchObject({
       after: '2026-10-01T00:00:00Z',
       before: '2026-10-08T00:00:00Z',
+      excludeMailboxId: 'mbTrash',
       limit: 5,
       mailboxId: 'mbDrafts',
       maxBodyValueBytes: 2000,
@@ -115,7 +123,7 @@ describe('listDrafts', () => {
   })
 
   test('matches the query against recipients as well as the subject', async () => {
-    const { text } = await run({ query: 'billing@' }, { records: { d1: older, d7: newer } })
+    const { text } = await run({ query: 'billing@example.com' }, { records: { d1: older, d7: newer } })
     expect(text).toContain('1 draft(s)')
     expect(text).toContain('draftId: tok7')
   })
@@ -124,6 +132,19 @@ describe('listDrafts', () => {
     const { text } = await run({ limit: 1 }, { records: { d1: older, d7: newer } })
     expect(text).toContain('Showing the newest 1 of 2 draft(s) (not sent):')
     expect(text).toContain('1 more draft(s) not shown. Narrow with query or after/before, or raise limit.')
+  })
+
+  test('does not suggest raising the limit once it is at the cap', async () => {
+    const records = Object.fromEntries(
+      Array.from({ length: 51 }, (_, i) => [`d${i}`, stagedDraft({ id: `d${i}`, keywords: { $draft: true } })])
+    )
+    const { text } = await run({ limit: 50 }, { records })
+    expect(text).toContain('1 more draft(s) not shown. Narrow with query or after/before.')
+  })
+
+  test('matches whole words, not fragments of one, like the server', async () => {
+    expect((await run({ query: 'invo' }, { records: { d7: newer } })).text).toBe('No drafts matched.')
+    expect((await run({ query: 'invoice' }, { records: { d7: newer } })).text).toContain('draftId: tok7')
   })
 
   test('tells an empty folder apart from a filter that matched nothing', async () => {

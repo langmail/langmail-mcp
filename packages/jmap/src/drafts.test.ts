@@ -449,6 +449,7 @@ describe('draftList', () => {
         conditions: [
           { inMailbox: 'mbDrafts' },
           { hasKeyword: '$draft' },
+          { inMailboxOtherThan: ['mbTrash'] },
           { after: '2026-10-01T00:00:00Z' },
           { before: '2026-10-08T00:00:00Z' },
           {
@@ -479,6 +480,7 @@ describe('draftList', () => {
         ...call,
         after: '2026-10-01T00:00:00Z',
         before: '2026-10-08T00:00:00Z',
+        excludeMailboxId: 'mbTrash',
         limit: 2,
         mailboxId: 'mbDrafts',
         maxBodyValueBytes: 2000,

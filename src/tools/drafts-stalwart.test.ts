@@ -384,11 +384,15 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
     // The nested OR over subject and recipients, and the date window, are
     // conditions Stalwart has to evaluate — the fixture cannot prove them.
     expect(await list({ query: CORRESPONDENT_ADDRESS })).toContain(`draftId: ${replyDraftId}`)
-    // A partial address, to hold the description's "substring" promise to the server.
-    expect(await list({ query: 'nadia@' })).toContain(`draftId: ${replyDraftId}`)
+    // Stalwart matches whole words — a display name, an address, a subject
+    // word — and not fragments of one, which is what the query description
+    // promises.
+    expect(await list({ query: 'Nadia' })).toContain(`draftId: ${replyDraftId}`)
+    expect(await list({ query: 'adia' })).toBe('No drafts matched.')
     expect(await list({ query: '(final)' })).toContain(`draftId: ${replyDraftId}`)
     expect(await list({ query: 'no-such-recipient.example' })).toBe('No drafts matched.')
     expect(await list({ before: '2000-01-01T00:00:00Z' })).toBe('No drafts matched.')
+    expect(await list({ after: '2000-01-01T00:00:00Z' })).toContain(`draftId: ${replyDraftId}`)
   })
 
   test('send_draft by the draftId sends the edited revision, once', async () => {
