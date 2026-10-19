@@ -94,9 +94,12 @@ export const draftDeps = (opts: DraftDepsOptions = {}): DraftToolDeps => {
               a.name ?? '',
             ]),
           ]
-          return haystack.some((value) =>
-            [value.toLowerCase(), ...value.toLowerCase().split(NON_WORD_RE)].includes(needle)
-          )
+          return haystack.some((value) => {
+            const lower = value.toLowerCase()
+            // The server also matches an address's domain as one term.
+            const domain = lower.includes('@') ? [lower.slice(lower.indexOf('@') + 1)] : []
+            return [lower, ...domain, ...lower.split(NON_WORD_RE)].includes(needle)
+          })
         })
         .sort((a, b) => (b.receivedAt ?? '').localeCompare(a.receivedAt ?? ''))
       return Promise.resolve({ records: matches.slice(0, p.limit), total: matches.length })

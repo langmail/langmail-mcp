@@ -449,7 +449,7 @@ describe('draftList', () => {
         conditions: [
           { inMailbox: 'mbDrafts' },
           { hasKeyword: '$draft' },
-          { inMailboxOtherThan: ['mbTrash'] },
+          { conditions: [{ inMailbox: 'mbTrash' }], operator: 'NOT' },
           { after: '2026-10-01T00:00:00Z' },
           { before: '2026-10-08T00:00:00Z' },
           {

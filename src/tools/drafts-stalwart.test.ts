@@ -40,6 +40,7 @@ import {
   emailComposeGet,
   emailGetDetail,
   emailQuery,
+  emailSet,
   emailSubmissionCreate,
   identityGet,
   mailboxCreate,
@@ -393,6 +394,26 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
     expect(await list({ query: 'no-such-recipient.example' })).toBe('No drafts matched.')
     expect(await list({ before: '2000-01-01T00:00:00Z' })).toBe('No drafts matched.')
     expect(await list({ after: '2000-01-01T00:00:00Z' })).toContain(`draftId: ${replyDraftId}`)
+
+    // A copy another client left in Trash as well as Drafts is one the draft
+    // tools refuse as discarded, so the listing must leave it out too — the
+    // NOT filter is the server's to evaluate.
+    const trashId =
+      (await mailboxIdByRole({ ...ctx(), role: 'trash' })) ??
+      (await mailboxCreate({ ...ctx(), name: 'Trash', role: 'trash' }))
+    const withTrash: DraftToolDeps = {
+      ...deps,
+      resolveComposeMailboxes: () => Promise.resolve({ drafts: draftsId, sent: sentId, trash: trashId }),
+    }
+    const listWithTrash = async () =>
+      (await listDrafts(withTrash, { args: listDraftsInput.parse({}), token: TOKEN })).content[0]?.text ?? ''
+    expect(await listWithTrash()).toContain(`messageId: ${current}`)
+    await emailSet({ ...ctx(), changes: { mailboxIds: { [trashId]: true } }, id: current ?? '' })
+    try {
+      expect(await listWithTrash()).not.toContain(`messageId: ${current}`)
+    } finally {
+      await emailSet({ ...ctx(), changes: { mailboxIds: { [trashId]: false } }, id: current ?? '' })
+    }
   })
 
   test('send_draft by the draftId sends the edited revision, once', async () => {

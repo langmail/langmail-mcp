@@ -472,8 +472,10 @@ export interface DraftListResult {
 // body and never re-stages it.
 export const draftList = async (p: DraftListParams): Promise<DraftListResult> => {
   const conditions: Record<string, unknown>[] = [{ inMailbox: p.mailboxId }, { hasKeyword: DRAFT_KEYWORD }]
+  // NOT, and not `inMailboxOtherThan`: that one means "in at least one other
+  // mailbox" (RFC 8621 §4.4.1), which every message in Drafts already is.
   if (p.excludeMailboxId) {
-    conditions.push({ inMailboxOtherThan: [p.excludeMailboxId] })
+    conditions.push({ conditions: [{ inMailbox: p.excludeMailboxId }], operator: 'NOT' })
   }
   if (p.after) {
     conditions.push({ after: p.after })

@@ -145,6 +145,7 @@ describe('listDrafts', () => {
   test('matches whole words, not fragments of one, like the server', async () => {
     expect((await run({ query: 'invo' }, { records: { d7: newer } })).text).toBe('No drafts matched.')
     expect((await run({ query: 'invoice' }, { records: { d7: newer } })).text).toContain('draftId: tok7')
+    expect((await run({ query: 'example.com' }, { records: { d7: newer } })).text).toContain('draftId: tok7')
   })
 
   test('tells an empty folder apart from a filter that matched nothing', async () => {
