@@ -38,7 +38,7 @@ describe('delete_draft', () => {
   test('names every recipient of the deleted draft, cc and bcc included', async () => {
     const draft = stagedDraft({ bcc: [{ email: 'b@example.org' }], cc: [{ email: 'c@example.org' }] })
     const result = await call({ records: { d1: draft } }, 'd1')
-    expect(text(result)).toContain('to nadia@example.org, c@example.org, b@example.org')
+    expect(text(result)).toContain('to nadia@example.org; cc c@example.org; bcc b@example.org')
   })
 
   test('deletes by the raw message id search_emails shows', async () => {

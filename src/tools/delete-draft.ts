@@ -113,10 +113,22 @@ const deleteHeld = async (deps: DraftToolDeps, hold: SendHold, ctx: DeleteDraftC
   if ('notDestroyed' in outcome) {
     return errorResult(destroyRefusal(draftId, outcome.notDestroyed))
   }
+  // Labelled per field, as formatDraft does: a blind-copied address must not
+  // read as a visible recipient.
+  const fields = [
+    ['to', record.to],
+    ['cc', record.cc],
+    ['bcc', record.bcc],
+  ] as const
   const recipients =
-    formatAddressList([...(record.to ?? []), ...(record.cc ?? []), ...(record.bcc ?? [])]) || 'no recipients'
+    fields
+      .flatMap(([label, addresses]) => {
+        const formatted = formatAddressList(addresses)
+        return formatted ? [`${label} ${formatted}`] : []
+      })
+      .join('; ') || 'no recipients'
   return textResult(
-    `Deleted draft ${draftId} ("${record.subject || '(no subject)'}", to ${recipients}). The deleted version cannot be recovered.`
+    `Deleted draft ${draftId} ("${record.subject || '(no subject)'}", ${recipients}). The deleted version cannot be recovered.`
   )
 }
 
