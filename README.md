@@ -117,10 +117,11 @@ Parameters (at least one of `query`, `after`, `before`, `from`, `keywords`, or `
 
 Returns:
 
+- A header stating how many messages are shown out of how many match in total (e.g. `20 of 213 message(s) matched`)
 - A list of matching messages, each with its id, subject, sender, date, and tags — multi-term
   queries rank messages matching more terms first (with a `matched: X/N terms` line per hit),
   otherwise newest-first
-- A truncation note when the result filled `limit` — more matches may exist beyond the page
+- When more messages match than are shown, how many were cut off (`20 of 213 message(s) matched — 193 more not shown`)
 
 ### get_email
 

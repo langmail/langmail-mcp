@@ -148,7 +148,7 @@ export const registerListDrafts = (server: McpServer, deps: DraftToolDeps, getTo
         "List the drafts staged in the user's Drafts folder, newest first, optionally narrowed by a subject or " +
         'recipient match and a window on when each was last staged or edited. Use this to find a draft you staged in an earlier session, ' +
         'to spot a stale or duplicate copy before staging another, or to report to the user what is waiting ' +
-        'to be sent. Each draft comes with its draftId — which get_draft, update_draft and send_draft accept — ' +
+        'to be sent. Each draft comes with its draftId — which get_draft, update_draft, send_draft and delete_draft accept — ' +
         'plus sender, every recipient including bcc, subject, when it was last staged or edited, the message it replies to, ' +
         'a body preview and its attachments, and the messageId trash_emails takes to discard it. Use get_draft to read one draft in full, and search_emails to ' +
         'search mail that has already been sent or received. ' +

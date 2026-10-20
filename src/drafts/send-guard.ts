@@ -142,7 +142,8 @@ export const createSendGuard = (now: () => number = Date.now): SendGuard => {
 // Why a send was refused because another call holds its subject. Nothing was
 // sent by the refused call in either case. A reply's subject is the message
 // being answered, and reading that back says nothing about the reply — so a
-// reply is pointed at the Sent folder, a draft at the draft itself.
+// reply is pointed at the Sent folder, a draft at the draft itself. delete_draft
+// reserves a draft's subject too, so an in-flight draft holder may be a delete.
 export const reservationRefusal = (subject: SendSubject, held: SendReservation): string => {
   if (subject.tool === REPLY_TOOL) {
     return held.state === 'in_flight'
@@ -152,8 +153,8 @@ export const reservationRefusal = (subject: SendSubject, held: SendReservation):
           "again — a second attempt could deliver a duplicate. Check the user's Sent folder before deciding."
   }
   return held.state === 'in_flight'
-    ? `A send of ${subject.key} is already in progress. Nothing was sent by this call. Wait, then read ` +
-        'the message back with get_email to see whether it went out.'
+    ? `A send or delete of ${subject.key} is already in progress. Nothing was sent by this call. Wait, ` +
+        'then read it back with get_draft — or get_email, if it is no longer a draft — to see what happened.'
     : `An earlier send of ${subject.key} failed without saying whether the message went out, so it was ` +
         'NOT sent again — a second attempt could deliver a duplicate. Read it back with get_email, or check ' +
         "the user's Sent folder, before deciding."

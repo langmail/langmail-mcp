@@ -243,7 +243,11 @@ export const updateCalendar = async (cfg: CalDavConfig, p: UpdateCalendarParams)
   if (res.length === 0) {
     throw new Error('caldav PROPPATCH returned no response')
   }
-  const failed = res.find((r) => !r.ok)
+  const isMultistatus = typeof res[0]?.raw === 'object' && res[0]?.raw !== null && 'multistatus' in res[0].raw
+  // tsdav takes a response's status from its propstats when every one fails,
+  // so a refused property also lands here as `!ok`. Leave that to the propstat
+  // check below, which names every refused status rather than just the first.
+  const failed = isMultistatus ? undefined : res.find((r) => !r.ok)
   if (failed) {
     throw new CalDavError(failed.status, `caldav PROPPATCH returned ${failed.status}`)
   }
@@ -256,7 +260,6 @@ export const updateCalendar = async (cfg: CalDavConfig, p: UpdateCalendarParams)
   // RFC 4918 §9.2.1 requires a propstat per property, so a multistatus without
   // any confirms nothing. A reply that is not a multistatus at all (a bare 2xx)
   // is the server saying it applied the change, and passes.
-  const isMultistatus = typeof res[0]?.raw === 'object' && res[0]?.raw !== null && 'multistatus' in res[0].raw
   if (isMultistatus && statuses.length === 0) {
     throw new Error('caldav PROPPATCH confirmed no property')
   }

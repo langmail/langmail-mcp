@@ -253,26 +253,44 @@ const attachmentPart = (attachment: DraftAttachment): Record<string, unknown> =>
   ...(attachment.name === undefined ? {} : { name: attachment.name }),
 })
 
-// Destroy one draft. Returns whether the server actually destroyed it, rather
-// than throwing: the only caller is the second half of an edit, where the new
-// draft already exists and a leftover old one is a thing to report, not a
-// failure to abort on.
-const destroyDraft = async (p: JmapCall & { accountId: string; id: string }): Promise<boolean> => {
+export interface DraftDestroyParams extends JmapCall {
+  accountId: string
+  id: string
+}
+
+// What became of one destroy: gone, or the RFC 8620 §5.3 SetError type the
+// server refused it with (`notFound`, `forbidden`, …). A value rather than a
+// throw, because both callers need the refusal: delete_draft reports it, the
+// second half of an edit reports a leftover draft. `unknown` when the server
+// named the id in neither list.
+export type DraftDestroyResult = { destroyed: true } | { notDestroyed: string }
+
+// Permanently destroy one draft — no Trash copy. The one Email/set destroy path
+// on this surface: an edit retires the revision it replaces through it, and
+// delete_draft retires a whole draft.
+export const draftDestroy = async (p: DraftDestroyParams): Promise<DraftDestroyResult> => {
   const resp = await call(p, {
     methodCalls: [['Email/set', { accountId: p.accountId, destroy: [p.id] }, '0']],
     using: USING,
   })
-  const out = methodResponse<{ destroyed?: string[] }>(resp, 'Email/set', '0')
-  return (out.destroyed ?? []).includes(p.id)
+  const out = methodResponse<{ destroyed?: string[]; notDestroyed?: Record<string, { type?: string }> }>(
+    resp,
+    'Email/set',
+    '0'
+  )
+  if ((out.destroyed ?? []).includes(p.id)) {
+    return { destroyed: true }
+  }
+  return { notDestroyed: out.notDestroyed?.[p.id]?.type ?? 'unknown' }
 }
 
 // The destroy half of an edit, with every failure folded into `false`. Once the
 // replacement exists, throwing would discard its id — and the caller, told only
 // that the edit failed, would retry against the old id and pile up more drafts.
 // A leftover draft the caller is told about beats a lost id.
-const destroyedQuietly = async (p: JmapCall & { accountId: string; id: string }): Promise<boolean> => {
+const destroyedQuietly = async (p: DraftDestroyParams): Promise<boolean> => {
   try {
-    return await destroyDraft(p)
+    return 'destroyed' in (await draftDestroy(p))
   } catch {
     return false
   }

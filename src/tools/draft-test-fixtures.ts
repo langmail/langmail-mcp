@@ -10,6 +10,7 @@ import {
   type BlobUploadParams,
   type DraftCreateParams,
   type DraftCreateResult,
+  type DraftDestroyResult,
   type EmailComposeRecord,
   type EmailSubmissionCreateParams,
   type EmailSubmissionResult,
@@ -35,6 +36,10 @@ export interface DraftDepsOptions {
   created?: DraftCreateResult
   // Recorded Email/set creates, newest last.
   creates?: DraftCreateParams[]
+  // What draftDestroy reports back. Defaults to destroying the record.
+  destroyResult?: DraftDestroyResult
+  // Recorded Email/set destroys, by id — empty means nothing was deleted.
+  destroys?: string[]
   identities?: IdentityRecord[]
   mailboxes?: ComposeMailboxes
   // The mailbox emailComposeGet reads from, keyed by id. A missing id reads as null.
@@ -61,6 +66,17 @@ export const draftDeps = (opts: DraftDepsOptions = {}): DraftToolDeps => {
       opts.creates?.push(p)
       nextDraft += 1
       return Promise.resolve(opts.created ?? { id: `dNew${nextDraft}`, threadId: 'tNew' })
+    },
+    draftDestroy: (p) => {
+      opts.destroys?.push(p.id)
+      if (opts.destroyResult) {
+        return Promise.resolve(opts.destroyResult)
+      }
+      if (!opts.records?.[p.id]) {
+        return Promise.resolve({ notDestroyed: 'notFound' })
+      }
+      delete opts.records[p.id]
+      return Promise.resolve({ destroyed: true })
     },
     // Like the server: the newest record carrying the `$draftid:` keyword — by
     // receivedAt, and among equals the one listed last.

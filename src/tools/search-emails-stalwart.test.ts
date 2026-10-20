@@ -25,7 +25,14 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 
-import { emailGet, emailQuery, emailQueryPerTerm, mailboxIdByNameOrRole, makeJmapLive } from '@langmail/jmap'
+import {
+  emailGet,
+  emailQuery,
+  emailQueryPerTerm,
+  emailQueryTotal,
+  mailboxIdByNameOrRole,
+  makeJmapLive,
+} from '@langmail/jmap'
 
 import { type SearchEmailsDeps, searchEmails } from './search-emails.ts'
 
@@ -252,6 +259,7 @@ live('search_emails email-type filter against live Stalwart', () => {
       emailGet: (p) => emailGet({ ...p, apiUrl, authorization }),
       emailQuery: (p) => emailQuery({ ...p, apiUrl, authorization }),
       emailQueryPerTerm: (p) => emailQueryPerTerm({ ...p, apiUrl, authorization }),
+      emailQueryTotal: (p) => emailQueryTotal({ ...p, apiUrl, authorization }),
       resolveAccountId: () => Promise.resolve(accountId),
       resolveMailbox: async (_authorization, name) => ({
         available: [],
@@ -339,6 +347,22 @@ live('search_emails email-type filter against live Stalwart', () => {
     expect(order).not.toContain('$seen')
     expect(order).not.toContain('$type:')
     expect(order).not.toContain('$label:')
+  })
+
+  // Two ticket-typed messages, a page of one: the header must report the real
+  // total from Stalwart, not the page size.
+  test('a full page reports the total number of matches and how many were cut off', async () => {
+    const text = await textOf({ keywords: ['ticket'], limit: 1 })
+
+    expect(text).toStartWith('1 of 2 message(s) matched — 1 more not shown.')
+  })
+
+  // A full page asks Stalwart for the count; it must agree nothing was cut off.
+  test('a full page that holds every match reports the total without a truncation note', async () => {
+    const text = await textOf({ keywords: ['ticket'], limit: 2 })
+
+    expect(text).toStartWith('2 of 2 message(s) matched:')
+    expect(text).not.toContain('not shown')
   })
 
   test('a type with no mail returns the empty-result message, not an error', async () => {
