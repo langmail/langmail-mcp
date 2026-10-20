@@ -113,7 +113,8 @@ const deleteHeld = async (deps: DraftToolDeps, hold: SendHold, ctx: DeleteDraftC
   if ('notDestroyed' in outcome) {
     return errorResult(destroyRefusal(draftId, outcome.notDestroyed))
   }
-  const recipients = formatAddressList(record.to) || 'no recipients'
+  const recipients =
+    formatAddressList([...(record.to ?? []), ...(record.cc ?? []), ...(record.bcc ?? [])]) || 'no recipients'
   return textResult(
     `Deleted draft ${draftId} ("${record.subject || '(no subject)'}", to ${recipients}). The deleted version cannot be recovered.`
   )
