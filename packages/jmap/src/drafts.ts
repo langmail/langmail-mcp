@@ -253,26 +253,44 @@ const attachmentPart = (attachment: DraftAttachment): Record<string, unknown> =>
   ...(attachment.name === undefined ? {} : { name: attachment.name }),
 })
 
-// Destroy one draft. Returns whether the server actually destroyed it, rather
-// than throwing: the only caller is the second half of an edit, where the new
-// draft already exists and a leftover old one is a thing to report, not a
-// failure to abort on.
-const destroyDraft = async (p: JmapCall & { accountId: string; id: string }): Promise<boolean> => {
+export interface DraftDestroyParams extends JmapCall {
+  accountId: string
+  id: string
+}
+
+// What became of one destroy: gone, or the RFC 8620 §5.3 SetError type the
+// server refused it with (`notFound`, `forbidden`, …). A value rather than a
+// throw, because both callers need the refusal: delete_draft reports it, the
+// second half of an edit reports a leftover draft. `unknown` when the server
+// named the id in neither list.
+export type DraftDestroyResult = { destroyed: true } | { notDestroyed: string }
+
+// Permanently destroy one draft — no Trash copy. The one Email/set destroy path
+// on this surface: an edit retires the revision it replaces through it, and
+// delete_draft retires a whole draft.
+export const draftDestroy = async (p: DraftDestroyParams): Promise<DraftDestroyResult> => {
   const resp = await call(p, {
     methodCalls: [['Email/set', { accountId: p.accountId, destroy: [p.id] }, '0']],
     using: USING,
   })
-  const out = methodResponse<{ destroyed?: string[] }>(resp, 'Email/set', '0')
-  return (out.destroyed ?? []).includes(p.id)
+  const out = methodResponse<{ destroyed?: string[]; notDestroyed?: Record<string, { type?: string }> }>(
+    resp,
+    'Email/set',
+    '0'
+  )
+  if ((out.destroyed ?? []).includes(p.id)) {
+    return { destroyed: true }
+  }
+  return { notDestroyed: out.notDestroyed?.[p.id]?.type ?? 'unknown' }
 }
 
 // The destroy half of an edit, with every failure folded into `false`. Once the
 // replacement exists, throwing would discard its id — and the caller, told only
 // that the edit failed, would retry against the old id and pile up more drafts.
 // A leftover draft the caller is told about beats a lost id.
-const destroyedQuietly = async (p: JmapCall & { accountId: string; id: string }): Promise<boolean> => {
+const destroyedQuietly = async (p: DraftDestroyParams): Promise<boolean> => {
   try {
-    return await destroyDraft(p)
+    return 'destroyed' in (await draftDestroy(p))
   } catch {
     return false
   }
@@ -438,6 +456,101 @@ export const draftIdResolve = async (p: DraftIdResolveParams): Promise<string | 
   })
   const out = methodResponse<{ ids?: string[] }>(resp, 'Email/query', '0')
   return out.ids?.[0] ?? null
+}
+
+export interface DraftListParams extends JmapCall {
+  accountId: string
+  // UTCDate bounds on `receivedAt`, which for a draft is when it was staged.
+  after?: string
+  before?: string
+  // A mailbox a listed draft must not also be in — Trash, so a draft another
+  // client copied there rather than moving it is not listed as pending.
+  excludeMailboxId?: string
+  limit: number
+  // The account's Drafts mailbox — resolved by role, not name.
+  mailboxId: string
+  maxBodyValueBytes: number
+  // Matched over the subject and every recipient field. Stalwart matches
+  // whole words (a name, an address, a subject word), not fragments of one.
+  text?: string
+}
+
+export interface DraftListResult {
+  records: EmailComposeRecord[]
+  // Every draft the filter matched, not just the page returned.
+  total: number
+}
+
+// The drafts staged in the Drafts mailbox, newest first, read with the same
+// properties as `emailComposeGet` so a listed draft formats exactly like one
+// read on its own. One round trip: the query, and an Email/get that
+// back-references its ids. `$draft` is required as well as the mailbox,
+// because a message filed into Drafts by hand is not something send_draft
+// would accept. Only the body parts are fetched — a listing previews the
+// body and never re-stages it.
+export const draftList = async (p: DraftListParams): Promise<DraftListResult> => {
+  const conditions: Record<string, unknown>[] = [{ inMailbox: p.mailboxId }, { hasKeyword: DRAFT_KEYWORD }]
+  // NOT, and not `inMailboxOtherThan`: that one means "in at least one other
+  // mailbox" (RFC 8621 §4.4.1), which every message in Drafts already is.
+  if (p.excludeMailboxId) {
+    conditions.push({ conditions: [{ inMailbox: p.excludeMailboxId }], operator: 'NOT' })
+  }
+  if (p.after) {
+    conditions.push({ after: p.after })
+  }
+  if (p.before) {
+    conditions.push({ before: p.before })
+  }
+  if (p.text) {
+    const text = p.text
+    conditions.push({
+      conditions: (['subject', 'to', 'cc', 'bcc'] as const).map((field) => ({ [field]: text })),
+      operator: 'OR',
+    })
+  }
+  const resp = await call(p, {
+    methodCalls: [
+      [
+        'Email/query',
+        {
+          accountId: p.accountId,
+          // Unconditional, unlike search_emails' deadlined count: Drafts is a
+          // small folder, and a count riding this batch cannot be raced or
+          // dropped, so it is paid on every call — cheaply.
+          calculateTotal: true,
+          filter: { conditions, operator: 'AND' },
+          limit: p.limit,
+          sort: [{ isAscending: false, property: 'receivedAt' }],
+        },
+        '0',
+      ],
+      [
+        'Email/get',
+        {
+          '#ids': { name: 'Email/query', path: '/ids', resultOf: '0' },
+          accountId: p.accountId,
+          bodyProperties: [...COMPOSE_BODY_PROPERTIES],
+          fetchHTMLBodyValues: true,
+          fetchTextBodyValues: true,
+          maxBodyValueBytes: p.maxBodyValueBytes,
+          properties: [...COMPOSE_PROPERTIES],
+        },
+        '1',
+      ],
+    ],
+    using: USING,
+  })
+  const query = methodResponse<{ ids?: string[]; total?: number }>(resp, 'Email/query', '0')
+  const got = methodResponse<{ list?: EmailComposeRecord[] }>(resp, 'Email/get', '1')
+  // Email/get does not promise the order of `ids`, so the query's order is
+  // restored here.
+  const byId = new Map((got.list ?? []).map((record) => [record.id, record]))
+  const ids = query.ids ?? []
+  const records = ids.flatMap((id) => {
+    const record = byId.get(id)
+    return record ? [record] : []
+  })
+  return { records, total: query.total ?? ids.length }
 }
 
 export interface ThreadMessageFindParams extends JmapCall {

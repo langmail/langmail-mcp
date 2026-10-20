@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type EmailQueryParams, type EmailQueryPerTermParams, type EmailRecord } from '@langmail/jmap'
+import {
+  type EmailQueryParams,
+  type EmailQueryPerTermParams,
+  type EmailQueryTotalParams,
+  type EmailRecord,
+} from '@langmail/jmap'
 
 import { queryTerms, searchEmails, searchEmailsInput } from './search-emails.ts'
 
@@ -17,6 +22,8 @@ const fakeDeps = (opts: {
   emails?: EmailRecord[]
   onQuery?: (p: EmailQueryParams) => void
   onPerTermQuery?: (p: EmailQueryPerTermParams) => void
+  onTotalQuery?: (p: EmailQueryTotalParams) => void
+  total?: number
 }) => ({
   emailGet: () => Promise.resolve(opts.emails ?? []),
   emailQuery: (p: EmailQueryParams) => {
@@ -26,6 +33,10 @@ const fakeDeps = (opts: {
   emailQueryPerTerm: (p: EmailQueryPerTermParams) => {
     opts.onPerTermQuery?.(p)
     return Promise.resolve(opts.perTermIds ?? p.terms.map(() => []))
+  },
+  emailQueryTotal: (p: EmailQueryTotalParams) => {
+    opts.onTotalQuery?.(p)
+    return Promise.resolve(opts.total ?? 0)
   },
   resolveAccountId: () => Promise.resolve(opts.accountId ?? 'acct'),
   resolveMailbox: (_authorization: string, name: string) =>
@@ -326,7 +337,8 @@ describe('searchEmails', () => {
     expect(txt).toContain('2. old tie')
   })
 
-  test('caps ranked hits at the limit and flags truncation', async () => {
+  test('caps ranked hits at the limit and reports the total', async () => {
+    let seenTotal: EmailQueryTotalParams | undefined
     const emails: EmailRecord[] = [
       { id: 'a', receivedAt: '2026-06-03T00:00:00Z', subject: 'hit a' },
       { id: 'b', receivedAt: '2026-06-02T00:00:00Z', subject: 'hit b' },
@@ -334,17 +346,46 @@ describe('searchEmails', () => {
     const result = await searchEmails(
       fakeDeps({
         emails,
+        onTotalQuery: (p) => {
+          seenTotal = p
+        },
         perTermIds: [
           ['a', 'b'],
           ['b', 'c'],
         ],
+        total: 3,
       }),
       { args: { limit: 2, query: 'alpha bravo' }, token: 'tok' }
     )
     const txt = result.content[0]?.text ?? ''
     // 'b' matched both terms and ranks first; 'c' fell past the limit.
     expect(txt).toContain('1. hit b')
-    expect(txt).toContain('hit the limit of 2')
+    expect(txt).toStartWith('2 of 3 message(s) matched — 1 more not shown.')
+    // The total counts the union of all terms, not one term's hits.
+    expect(seenTotal?.filters.text).toEqual(['alpha', 'bravo'])
+  })
+
+  // A per-term window that filled up may hide older multi-term hits, so the
+  // page counts as full even though the ranked list fits the limit.
+  test('a filled per-term window triggers the count', async () => {
+    const window = Array.from({ length: 60 }, (_, i) => `w${i}`)
+    const emails: EmailRecord[] = window
+      .slice(0, 20)
+      .map((id) => ({ id, receivedAt: '2026-06-01T00:00:00Z', subject: id }))
+    let counted = false
+    const result = await searchEmails(
+      fakeDeps({
+        emails,
+        onTotalQuery: () => {
+          counted = true
+        },
+        perTermIds: [window, []],
+        total: 75,
+      }),
+      { args: { limit: 20, query: 'alpha bravo' }, token: 'tok' }
+    )
+    expect(counted).toBe(true)
+    expect(result.content[0]?.text).toStartWith('20 of 75 message(s) matched — 55 more not shown.')
   })
 
   test('caps the fan-out at 10 terms and widens the per-term window', async () => {
@@ -402,27 +443,125 @@ describe('searchEmails', () => {
     expect(txt).toContain('2. alpha')
   })
 
-  test('flags a full page as possibly truncated', async () => {
+  test('a full page reports the total and how many more match', async () => {
     const emails: EmailRecord[] = [
       { id: 'a', receivedAt: '2026-06-01T00:00:00Z', subject: 'alpha' },
       { id: 'b', receivedAt: '2026-05-01T00:00:00Z', subject: 'bravo' },
     ]
-    const result = await searchEmails(fakeDeps({ emails, queryIds: ['a', 'b'] }), {
+    let seenTotal: EmailQueryTotalParams | undefined
+    const result = await searchEmails(
+      fakeDeps({
+        emails,
+        onTotalQuery: (p) => {
+          seenTotal = p
+        },
+        queryIds: ['a', 'b'],
+        total: 213,
+      }),
+      { args: { from: 'billing', limit: 2, query: 'invoice' }, token: 'tok' }
+    )
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toStartWith('2 of 213 message(s) matched — 211 more not shown.')
+    expect(txt).toContain('raise limit')
+    // Counted with the same filter the page used.
+    expect(seenTotal?.filters).toEqual({ from: 'billing', text: ['invoice'] })
+  })
+
+  test('a full page that holds every match reports it as complete', async () => {
+    const emails: EmailRecord[] = [
+      { id: 'a', receivedAt: '2026-06-01T00:00:00Z', subject: 'alpha' },
+      { id: 'b', receivedAt: '2026-05-01T00:00:00Z', subject: 'bravo' },
+    ]
+    const result = await searchEmails(fakeDeps({ emails, queryIds: ['a', 'b'], total: 2 }), {
       args: { limit: 2, query: 'invoice' },
       token: 'tok',
     })
     const txt = result.content[0]?.text ?? ''
-    expect(txt).toContain('hit the limit of 2')
+    expect(txt).toStartWith('2 of 2 message(s) matched:')
+    expect(txt).not.toContain('not shown')
   })
 
-  test('does not flag truncation when the result is under the limit', async () => {
+  test('a page under the limit is the total and skips the count query', async () => {
     const emails: EmailRecord[] = [{ id: 'a', receivedAt: '2026-06-01T00:00:00Z', subject: 'alpha' }]
-    const result = await searchEmails(fakeDeps({ emails, queryIds: ['a'] }), {
+    let counted = false
+    const result = await searchEmails(
+      fakeDeps({
+        emails,
+        onTotalQuery: () => {
+          counted = true
+        },
+        queryIds: ['a'],
+      }),
+      { args: { limit: 20, query: 'invoice' }, token: 'tok' }
+    )
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toStartWith('1 of 1 message(s) matched:')
+    expect(txt).not.toContain('not shown')
+    expect(counted).toBe(false)
+  })
+
+  test('a total smaller than the page never undercounts what is shown', async () => {
+    const emails: EmailRecord[] = [
+      { id: 'a', receivedAt: '2026-06-01T00:00:00Z', subject: 'alpha' },
+      { id: 'b', receivedAt: '2026-05-01T00:00:00Z', subject: 'bravo' },
+    ]
+    const result = await searchEmails(fakeDeps({ emails, queryIds: ['a', 'b'], total: 1 }), {
+      args: { limit: 2, query: 'invoice' },
+      token: 'tok',
+    })
+    expect(result.content[0]?.text).toStartWith('2 of 2 message(s) matched:')
+  })
+
+  test('does not suggest raising a limit that is already at the maximum', async () => {
+    const ids = Array.from({ length: 100 }, (_, i) => `e${i}`)
+    const emails: EmailRecord[] = ids.map((id) => ({ id, receivedAt: '2026-06-01T00:00:00Z', subject: id }))
+    const result = await searchEmails(fakeDeps({ emails, queryIds: ids, total: 150 }), {
+      args: { limit: 100, query: 'invoice' },
+      token: 'tok',
+    })
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toStartWith('100 of 150 message(s) matched — 50 more not shown.')
+    expect(txt).not.toContain('raise limit')
+  })
+
+  test('a failed count keeps the page and reports the total as a lower bound', async () => {
+    const emails: EmailRecord[] = [
+      { id: 'a', receivedAt: '2026-06-01T00:00:00Z', subject: 'alpha' },
+      { id: 'b', receivedAt: '2026-05-01T00:00:00Z', subject: 'bravo' },
+    ]
+    const result = await searchEmails(
+      { ...fakeDeps({ emails, queryIds: ['a', 'b'] }), emailQueryTotal: () => Promise.reject(new Error('timeout')) },
+      { args: { limit: 2, query: 'invoice' }, token: 'tok' }
+    )
+    const txt = result.content[0]?.text ?? ''
+    expect(result.isError).toBeFalsy()
+    expect(txt).toStartWith('2 of at least 2 message(s) matched')
+    expect(txt).toContain('1. alpha')
+  })
+
+  test('a count that misses its deadline keeps the page and reports a lower bound', async () => {
+    const emails: EmailRecord[] = [
+      { id: 'a', receivedAt: '2026-06-01T00:00:00Z', subject: 'alpha' },
+      { id: 'b', receivedAt: '2026-05-01T00:00:00Z', subject: 'bravo' },
+    ]
+    const result = await searchEmails(
+      { ...fakeDeps({ emails, queryIds: ['a', 'b'] }), emailQueryTotal: () => new Promise<number>(() => undefined) },
+      { args: { limit: 2, query: 'invoice' }, countDeadlineMs: 10, token: 'tok' }
+    )
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toStartWith('2 of at least 2 message(s) matched')
+    expect(txt).toContain('2. bravo')
+  })
+
+  test('a message gone between query and fetch on a partial page is not reported as cut off', async () => {
+    const emails: EmailRecord[] = [{ id: 'a', receivedAt: '2026-06-01T00:00:00Z', subject: 'alpha' }]
+    const result = await searchEmails(fakeDeps({ emails, queryIds: ['a', 'gone'] }), {
       args: { limit: 20, query: 'invoice' },
       token: 'tok',
     })
     const txt = result.content[0]?.text ?? ''
-    expect(txt).not.toContain('hit the limit')
+    expect(txt).toStartWith('1 of 1 message(s) matched:')
+    expect(txt).not.toContain('not shown')
   })
 
   test('rejects a query that tokenizes to zero terms instead of matching everything', async () => {
@@ -458,6 +597,7 @@ describe('searchEmails', () => {
           return Promise.resolve([])
         },
         emailQueryPerTerm: () => Promise.resolve([]),
+        emailQueryTotal: () => Promise.resolve(0),
         resolveAccountId: () => Promise.resolve('acct'),
         resolveMailbox: (_authorization, name) =>
           Promise.resolve({ available: [], id: name === 'Inbox' ? 'm1' : null }),

@@ -1,6 +1,14 @@
 import { describe, expect, mock, test } from 'bun:test'
 
-import { draftCreate, draftIdResolve, emailComposeGet, sentEmailPatch, threadMessageFind } from './drafts.ts'
+import {
+  draftCreate,
+  draftDestroy,
+  draftIdResolve,
+  draftList,
+  emailComposeGet,
+  sentEmailPatch,
+  threadMessageFind,
+} from './drafts.ts'
 import { JmapError } from './session.ts'
 
 const API = 'https://mail.example.com/jmap/'
@@ -362,6 +370,33 @@ describe('draftCreate', () => {
   })
 })
 
+describe('draftDestroy', () => {
+  test('destroys the draft outright, with no Trash copy', async () => {
+    const calls: Record<string, unknown>[] = []
+    const f = mock((_url: string, init?: RequestInit) => {
+      calls.push(JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1])
+      return Promise.resolve(jmapResponse([['Email/set', { destroyed: ['d1'] }, '0']]))
+    })
+    const result = await withFetch(f, () => draftDestroy({ ...call, id: 'd1' }))
+    expect(calls).toEqual([{ accountId: 'acct', destroy: ['d1'] }])
+    expect(result).toEqual({ destroyed: true })
+  })
+
+  test('reports the SetError type the server refused the destroy with', async () => {
+    const f = mock(() =>
+      Promise.resolve(jmapResponse([['Email/set', { notDestroyed: { d1: { type: 'notFound' } } }, '0']]))
+    )
+    const result = await withFetch(f, () => draftDestroy({ ...call, id: 'd1' }))
+    expect(result).toEqual({ notDestroyed: 'notFound' })
+  })
+
+  test('reports a destroy the server neither made nor refused as unknown', async () => {
+    const f = mock(() => Promise.resolve(jmapResponse([['Email/set', {}, '0']])))
+    const result = await withFetch(f, () => draftDestroy({ ...call, id: 'd1' }))
+    expect(result).toEqual({ notDestroyed: 'unknown' })
+  })
+})
+
 describe('emailComposeGet', () => {
   test('requests bcc and the threading headers, and fetches both body parts', async () => {
     const f = mock((_url: string, init?: RequestInit) => {
@@ -436,6 +471,76 @@ describe('draftIdResolve', () => {
   test('returns null when no message carries the keyword', async () => {
     const f = mock(() => Promise.resolve(jmapResponse([['Email/query', { ids: [] }, '0']])))
     expect(await withFetch(f, () => draftIdResolve({ ...call, draftId: 'd1' }))).toBeNull()
+  })
+})
+
+describe('draftList', () => {
+  test('queries $draft mail in Drafts newest first and reads it back in query order', async () => {
+    const f = mock((_url: string, init?: RequestInit) => {
+      const calls = JSON.parse((init?.body as string) ?? '{}').methodCalls
+      expect(calls.map(([method]: [string]) => method)).toEqual(['Email/query', 'Email/get'])
+      const query = calls[0][1]
+      expect(query.filter).toEqual({
+        conditions: [
+          { inMailbox: 'mbDrafts' },
+          { hasKeyword: '$draft' },
+          { conditions: [{ inMailbox: 'mbTrash' }], operator: 'NOT' },
+          { after: '2026-10-01T00:00:00Z' },
+          { before: '2026-10-08T00:00:00Z' },
+          {
+            conditions: [{ subject: 'invoice' }, { to: 'invoice' }, { cc: 'invoice' }, { bcc: 'invoice' }],
+            operator: 'OR',
+          },
+        ],
+        operator: 'AND',
+      })
+      expect(query.sort).toEqual([{ isAscending: false, property: 'receivedAt' }])
+      expect(query.limit).toBe(2)
+      expect(query.calculateTotal).toBe(true)
+      const get = calls[1][1]
+      expect(get['#ids']).toEqual({ name: 'Email/query', path: '/ids', resultOf: '0' })
+      // Body parts only: a listing previews, it never re-stages.
+      expect(get.fetchTextBodyValues).toBe(true)
+      expect(get.fetchAllBodyValues).toBeUndefined()
+      expect(get.maxBodyValueBytes).toBe(2000)
+      return Promise.resolve(
+        jmapResponse([
+          ['Email/query', { ids: ['d2', 'd1'], total: 5 }, '0'],
+          ['Email/get', { list: [{ id: 'd1' }, { id: 'd2' }] }, '1'],
+        ])
+      )
+    })
+    const result = await withFetch(f, () =>
+      draftList({
+        ...call,
+        after: '2026-10-01T00:00:00Z',
+        before: '2026-10-08T00:00:00Z',
+        excludeMailboxId: 'mbTrash',
+        limit: 2,
+        mailboxId: 'mbDrafts',
+        maxBodyValueBytes: 2000,
+        text: 'invoice',
+      })
+    )
+    expect(result.records.map((record) => record.id)).toEqual(['d2', 'd1'])
+    expect(result.total).toBe(5)
+  })
+
+  test('sends only the mailbox and keyword conditions when unfiltered', async () => {
+    const f = mock((_url: string, init?: RequestInit) => {
+      const filter = JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1].filter
+      expect(filter).toEqual({ conditions: [{ inMailbox: 'mbDrafts' }, { hasKeyword: '$draft' }], operator: 'AND' })
+      return Promise.resolve(
+        jmapResponse([
+          ['Email/query', { ids: [] }, '0'],
+          ['Email/get', { list: [] }, '1'],
+        ])
+      )
+    })
+    const result = await withFetch(f, () =>
+      draftList({ ...call, limit: 20, mailboxId: 'mbDrafts', maxBodyValueBytes: 2000 })
+    )
+    expect(result).toEqual({ records: [], total: 0 })
   })
 })
 

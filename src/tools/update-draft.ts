@@ -89,8 +89,8 @@ export const updateDraftInput = z.object({
     .string()
     .min(1)
     .describe(
-      'The draft id, as returned by create_draft — edits do not change it — or a message id from search_emails ' +
-        'with `mailbox: "Drafts"`. Editing a draft found that way returns the draftId to use from then on.'
+      'The draft id, as returned by create_draft or list_drafts — edits do not change it — or a message id ' +
+        'from search_emails with `mailbox: "Drafts"`. Editing a draft found that way returns the draftId to use from then on.'
     ),
   html: z
     .string()
@@ -203,7 +203,7 @@ const loadEditableDraft = async (
   })
   if (!record) {
     return {
-      error: errorResult(`Draft not found: ${args.draftId}. Find it with search_emails using mailbox "Drafts".`),
+      error: errorResult(`Draft not found: ${args.draftId}. Find it with list_drafts.`),
     }
   }
   if (!isDraft(record)) {
@@ -712,7 +712,8 @@ export const registerUpdateDraft = (
         '`text`/`html` is the new part only: the quoted original is kept below it (`quoteOriginal: false` ' +
         'drops it, `true` adds one to a bare reply). The previous version is not recoverable. If the draft has both a plain-text and an HTML body, pass ' +
         'both `text` and `html` or neither; replacing one would leave the other saying the old thing. The ' +
-        'sender and the reply threading cannot be changed here; stage a new draft with create_draft instead.',
+        'sender and the reply threading cannot be changed here; stage a new draft with create_draft instead, then retire this one ' +
+        'with delete_draft.',
       inputSchema: updateDraftInput.shape,
       title: 'Update draft',
     },

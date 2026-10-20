@@ -1,5 +1,5 @@
 // Shared plumbing for the composition tools (create_draft, get_draft,
-// update_draft, send_draft, reply_to_message).
+// list_drafts, update_draft, send_draft, delete_draft, reply_to_message).
 //
 // Three things live here because getting them wrong in one tool and right in
 // another is exactly the failure the sending surface can't afford:
@@ -23,9 +23,15 @@ import {
   type DraftAttachment,
   type DraftCreateParams,
   type DraftCreateResult,
+  type DraftDestroyParams,
+  type DraftDestroyResult,
   type DraftIdResolveParams,
+  type DraftListParams,
+  type DraftListResult,
   draftCreate,
+  draftDestroy,
   draftIdResolve,
+  draftList,
   type EmailAddress,
   type EmailComposeGetParams,
   type EmailComposeRecord,
@@ -66,8 +72,8 @@ const BODY_PREVIEW_CHARS = 500
 // The mailboxes composition needs, resolved by RFC 8621 special-use role
 // rather than name: a stock Stalwart account calls them "Drafts" and
 // "Sent Items", and a name lookup for "Sent" misses the second one. Trash is
-// here because trash_emails is how a draft is discarded, and the `$draft`
-// keyword survives the move.
+// here because trash_emails can still discard a draft (delete_draft is the
+// clean way), and the `$draft` keyword survives the move.
 export interface ComposeMailboxes {
   drafts: string | null
   sent: string | null
@@ -79,9 +85,11 @@ export interface DraftToolDeps {
   // see drafts/attachments.ts for why bytes never reach Email/set directly.
   blobUpload: (p: BlobUploadParams) => Promise<string>
   draftCreate: (p: DraftCreateParams) => Promise<DraftCreateResult>
+  draftDestroy: (p: DraftDestroyParams) => Promise<DraftDestroyResult>
   // The current revision of an edited draft, by its stable id — see
   // `loadDraft`.
   draftIdResolve: (p: DraftIdResolveParams) => Promise<string | null>
+  draftList: (p: DraftListParams) => Promise<DraftListResult>
   emailComposeGet: (p: EmailComposeGetParams) => Promise<EmailComposeRecord | null>
   emailSubmissionCreate: (p: EmailSubmissionCreateParams) => Promise<EmailSubmissionResult>
   identityGet: (p: IdentityGetParams) => Promise<IdentityRecord[]>
@@ -679,7 +687,9 @@ const attachmentLines = (attachments: DraftAttachment[], unreferencable: string[
 export const makeLiveDeps = (live: JmapLive): DraftToolDeps => ({
   blobUpload: async (p) => blobUpload({ ...p, uploadUrl: (await live.getSession(p.authorization)).uploadUrl }),
   draftCreate: async (p) => draftCreate({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
+  draftDestroy: async (p) => draftDestroy({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   draftIdResolve: async (p) => draftIdResolve({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
+  draftList: async (p) => draftList({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   emailComposeGet: async (p) => emailComposeGet({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   emailSubmissionCreate: async (p) =>
     emailSubmissionCreate({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),

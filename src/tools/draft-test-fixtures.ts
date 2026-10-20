@@ -10,6 +10,7 @@ import {
   type BlobUploadParams,
   type DraftCreateParams,
   type DraftCreateResult,
+  type DraftDestroyResult,
   type EmailComposeRecord,
   type EmailSubmissionCreateParams,
   type EmailSubmissionResult,
@@ -22,6 +23,9 @@ export const TEST_PRINCIPAL = 'user@langmail.me'
 
 const TEST_IDENTITIES: IdentityRecord[] = [{ email: TEST_PRINCIPAL, id: 'i1', name: 'Dana Okonjo' }]
 
+// What separates the words the server indexes a subject or name into.
+const NON_WORD_RE = /[^\p{L}\p{N}]+/u
+
 const TEST_MAILBOXES: ComposeMailboxes = { drafts: 'mbDrafts', sent: 'mbSent', trash: 'mbTrash' }
 
 export interface DraftDepsOptions {
@@ -32,6 +36,10 @@ export interface DraftDepsOptions {
   created?: DraftCreateResult
   // Recorded Email/set creates, newest last.
   creates?: DraftCreateParams[]
+  // What draftDestroy reports back. Defaults to destroying the record.
+  destroyResult?: DraftDestroyResult
+  // Recorded Email/set destroys, by id — empty means nothing was deleted.
+  destroys?: string[]
   identities?: IdentityRecord[]
   mailboxes?: ComposeMailboxes
   // The mailbox emailComposeGet reads from, keyed by id. A missing id reads as null.
@@ -59,6 +67,17 @@ export const draftDeps = (opts: DraftDepsOptions = {}): DraftToolDeps => {
       nextDraft += 1
       return Promise.resolve(opts.created ?? { id: `dNew${nextDraft}`, threadId: 'tNew' })
     },
+    draftDestroy: (p) => {
+      opts.destroys?.push(p.id)
+      if (opts.destroyResult) {
+        return Promise.resolve(opts.destroyResult)
+      }
+      if (!opts.records?.[p.id]) {
+        return Promise.resolve({ notDestroyed: 'notFound' })
+      }
+      delete opts.records[p.id]
+      return Promise.resolve({ destroyed: true })
+    },
     // Like the server: the newest record carrying the `$draftid:` keyword — by
     // receivedAt, and among equals the one listed last.
     draftIdResolve: (p) =>
@@ -70,6 +89,37 @@ export const draftDeps = (opts: DraftDepsOptions = {}): DraftToolDeps => {
             null
           )?.id ?? null
       ),
+    // Like the server: `$draft` mail in the given mailbox and not the excluded
+    // one, newest first, with the text matched as a whole word (or address)
+    // against the subject and every recipient.
+    draftList: (p) => {
+      const matches = Object.values(opts.records ?? {})
+        .filter((record) => record.keywords?.$draft && record.mailboxIds?.[p.mailboxId])
+        .filter((record) => !(p.excludeMailboxId && record.mailboxIds?.[p.excludeMailboxId]))
+        .filter((record) => (p.after ? (record.receivedAt ?? '') >= p.after : true))
+        .filter((record) => (p.before ? (record.receivedAt ?? '') < p.before : true))
+        .filter((record) => {
+          if (!p.text) {
+            return true
+          }
+          const needle = p.text.toLowerCase()
+          const haystack = [
+            record.subject ?? '',
+            ...[...(record.to ?? []), ...(record.cc ?? []), ...(record.bcc ?? [])].flatMap((a) => [
+              a.email,
+              a.name ?? '',
+            ]),
+          ]
+          return haystack.some((value) => {
+            const lower = value.toLowerCase()
+            // The server also matches an address's domain as one term.
+            const domain = lower.includes('@') ? [lower.slice(lower.indexOf('@') + 1)] : []
+            return [lower, ...domain, ...lower.split(NON_WORD_RE)].includes(needle)
+          })
+        })
+        .sort((a, b) => (b.receivedAt ?? '').localeCompare(a.receivedAt ?? ''))
+      return Promise.resolve({ records: matches.slice(0, p.limit), total: matches.length })
+    },
     emailComposeGet: (p) => Promise.resolve(opts.records?.[p.id] ?? null),
     emailSubmissionCreate: (p) => {
       opts.submissions?.push(p)

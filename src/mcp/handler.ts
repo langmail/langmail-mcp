@@ -39,6 +39,7 @@ import {
   registerDeleteCalendarEvent,
 } from '../tools/delete-calendar-event.ts'
 import { registerDeleteContact } from '../tools/delete-contact.ts'
+import { registerDeleteDraft } from '../tools/delete-draft.ts'
 import { registerDeleteMailRule } from '../tools/delete-mail-rule.ts'
 import { makeLiveDeps as makeDownloadAttachmentDeps, registerDownloadAttachment } from '../tools/download-attachment.ts'
 import { makeLiveDeps as makeDraftDeps } from '../tools/draft-common.ts'
@@ -51,6 +52,7 @@ import {
   registerListCalendarEvents,
 } from '../tools/list-calendar-events.ts'
 import { makeLiveDeps as makeListCalendarsDeps, registerListCalendars } from '../tools/list-calendars.ts'
+import { registerListDrafts } from '../tools/list-drafts.ts'
 import { registerListMailRules } from '../tools/list-mail-rules.ts'
 import { registerListUpcomingBirthdays } from '../tools/list-upcoming-birthdays.ts'
 import { type MailRuleToolDeps } from '../tools/mail-rule-common.ts'
@@ -191,6 +193,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
       () => ctx.principal
     )
     registerGetDraft(server, draftDeps, () => ctx.token)
+    registerListDrafts(server, draftDeps, () => ctx.token)
     registerUpdateDraft(
       server,
       draftDeps,
@@ -201,6 +204,13 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
       server,
       draftDeps,
       composeReplays,
+      sendGuard,
+      () => ctx.token,
+      () => ctx.principal
+    )
+    registerDeleteDraft(
+      server,
+      draftDeps,
       sendGuard,
       () => ctx.token,
       () => ctx.principal

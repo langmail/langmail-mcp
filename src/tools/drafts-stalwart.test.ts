@@ -1,5 +1,5 @@
 // E2E for the composition tools against a REAL Stalwart: create_draft,
-// get_draft, update_draft, send_draft, and reply_to_message driven end to end
+// get_draft, update_draft, send_draft, delete_draft, and reply_to_message driven end to end
 // over live JMAP.
 //
 // This is the test that actually proves the feature, because every interesting
@@ -35,10 +35,13 @@ import {
   blobDownload,
   blobUpload,
   draftCreate,
+  draftDestroy,
   draftIdResolve,
+  draftList,
   emailComposeGet,
   emailGetDetail,
   emailQuery,
+  emailSet,
   emailSubmissionCreate,
   identityGet,
   mailboxCreate,
@@ -50,9 +53,11 @@ import {
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
 import { createSendGuard } from '../drafts/send-guard.ts'
 import { createDraft, createDraftInput } from './create-draft.ts'
+import { deleteDraft, deleteDraftInput } from './delete-draft.ts'
 import { type DraftToolDeps } from './draft-common.ts'
 import { getDraft, getDraftInput } from './get-draft.ts'
 import { type GetEmailDeps, getEmail, getEmailInput } from './get-email.ts'
+import { listDrafts, listDraftsInput } from './list-drafts.ts'
 import { replyToMessage, replyToMessageInput } from './reply-to-message.ts'
 import { sendDraft, sendDraftInput } from './send-draft.ts'
 import { updateDraft, updateDraftInput } from './update-draft.ts'
@@ -231,7 +236,9 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
     deps = {
       blobUpload: (p) => blobUpload({ ...p, authorization, uploadUrl: session.uploadUrl }),
       draftCreate: (p) => draftCreate({ ...p, apiUrl, authorization }),
+      draftDestroy: (p) => draftDestroy({ ...p, apiUrl, authorization }),
       draftIdResolve: (p) => draftIdResolve({ ...p, apiUrl, authorization }),
+      draftList: (p) => draftList({ ...p, apiUrl, authorization }),
       emailComposeGet: (p) => emailComposeGet({ ...p, apiUrl, authorization }),
       emailSubmissionCreate: (p) => emailSubmissionCreate({ ...p, apiUrl, authorization }),
       identityGet: (p) => identityGet({ ...p, apiUrl, authorization }),
@@ -367,6 +374,51 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
     expect(body).toContain('> ')
   })
 
+  test('list_drafts finds the edited reply once, by its draftId, and narrows by recipient', async () => {
+    const list = async (args: Record<string, unknown>) =>
+      (await listDrafts(deps, { args: listDraftsInput.parse(args), token: TOKEN })).content[0]?.text ?? ''
+
+    const all = await list({})
+    // Edits replaced the revision each time, so the draftId appears once.
+    expect(all.split(`draftId: ${replyDraftId}`)).toHaveLength(2)
+    const current = await draftIdResolve({ ...ctx(), draftId: replyDraftId })
+    expect(all).toContain(`messageId: ${current}`)
+    expect(all).toContain(`reply to: message ${originalId}`)
+
+    // The nested OR over subject and recipients, and the date window, are
+    // conditions Stalwart has to evaluate — the fixture cannot prove them.
+    expect(await list({ query: CORRESPONDENT_ADDRESS })).toContain(`draftId: ${replyDraftId}`)
+    // Stalwart matches whole words — a display name, an address, a subject
+    // word — and not fragments of one, which is what the query description
+    // promises.
+    expect(await list({ query: 'Nadia' })).toContain(`draftId: ${replyDraftId}`)
+    expect(await list({ query: 'adia' })).toBe('No drafts matched.')
+    expect(await list({ query: '(final)' })).toContain(`draftId: ${replyDraftId}`)
+    expect(await list({ query: 'no-such-recipient.example' })).toBe('No drafts matched.')
+    expect(await list({ before: '2000-01-01T00:00:00Z' })).toBe('No drafts matched.')
+    expect(await list({ after: '2000-01-01T00:00:00Z' })).toContain(`draftId: ${replyDraftId}`)
+
+    // A copy another client left in Trash as well as Drafts is one the draft
+    // tools refuse as discarded, so the listing must leave it out too — the
+    // NOT filter is the server's to evaluate.
+    const trashId =
+      (await mailboxIdByRole({ ...ctx(), role: 'trash' })) ??
+      (await mailboxCreate({ ...ctx(), name: 'Trash', role: 'trash' }))
+    const withTrash: DraftToolDeps = {
+      ...deps,
+      resolveComposeMailboxes: () => Promise.resolve({ drafts: draftsId, sent: sentId, trash: trashId }),
+    }
+    const listWithTrash = async () =>
+      (await listDrafts(withTrash, { args: listDraftsInput.parse({}), token: TOKEN })).content[0]?.text ?? ''
+    expect(await listWithTrash()).toContain(`messageId: ${current}`)
+    await emailSet({ ...ctx(), changes: { mailboxIds: { [trashId]: true } }, id: current ?? '' })
+    try {
+      expect(await listWithTrash()).not.toContain(`messageId: ${current}`)
+    } finally {
+      await emailSet({ ...ctx(), changes: { mailboxIds: { [trashId]: false } }, id: current ?? '' })
+    }
+  })
+
   test('send_draft by the draftId sends the edited revision, once', async () => {
     const current = (await draftIdResolve({ ...ctx(), draftId: replyDraftId })) ?? ''
     const sent = await sendDraft(deps, replays, guard, {
@@ -476,6 +528,40 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
     const second = await sendDraft(deps, replays, guard, { ...toolCtx, args: sendDraftInput.parse({ draftId }) })
     expect(second.isError).toBe(true)
     expect(second.content[0]?.text ?? '').toContain('already been sent')
+  })
+
+  test('delete_draft removes a draft for good: get_draft and the Drafts folder no longer see it', async () => {
+    const staged = await createDraft(deps, replays, {
+      ...toolCtx,
+      args: createDraftInput.parse({ subject: 'Superseded', text: 'The longer version.', to: [address] }),
+    })
+    const draftId = DRAFT_ID_RE.exec(staged.content[0]?.text ?? '')?.[1] ?? ''
+    const emailId = (await draftIdResolve({ ...ctx(), draftId })) ?? ''
+    expect(await idsIn(draftsId)).toContain(emailId)
+
+    const result = await deleteDraft(deps, guard, { ...toolCtx, args: deleteDraftInput.parse({ draftId }) })
+    expect(result.isError).toBeUndefined()
+    expect(await idsIn(draftsId)).not.toContain(emailId)
+    const after = await getDraft(deps, { args: getDraftInput.parse({ draftId }), token: TOKEN })
+    expect(after.isError).toBe(true)
+    expect(after.content[0]?.text ?? '').toContain('Draft not found')
+  })
+
+  test('delete_draft refuses a sent message and leaves it in Sent', async () => {
+    const staged = await createDraft(deps, replays, {
+      ...toolCtx,
+      args: createDraftInput.parse({ subject: 'Keep me', text: 'Already gone out.', to: [address] }),
+    })
+    const draftId = DRAFT_ID_RE.exec(staged.content[0]?.text ?? '')?.[1] ?? ''
+    const sent = await sendDraft(deps, replays, guard, { ...toolCtx, args: sendDraftInput.parse({ draftId }) })
+    const messageId = MESSAGE_ID_RE.exec(sent.content[0]?.text ?? '')?.[1] ?? ''
+    expect(messageId).not.toBe('')
+
+    const result = await deleteDraft(deps, guard, { ...toolCtx, args: deleteDraftInput.parse({ draftId }) })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text ?? '').toContain('already been sent or received')
+    expect(result.content[0]?.text ?? '').toContain('Nothing was deleted.')
+    expect(await idsIn(sentId)).toContain(messageId)
   })
 
   test('reply_to_message sends a threaded reply in one call', async () => {

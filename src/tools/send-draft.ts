@@ -58,8 +58,8 @@ export const sendDraftInput = z.object({
     .string()
     .min(1)
     .describe(
-      'The draft id, as returned by create_draft or update_draft — edits do not change it — or a message id ' +
-        'from search_emails with `mailbox: "Drafts"`, which an edit replaces with the draftId it returns.'
+      'The draft id, as returned by create_draft, update_draft or list_drafts — edits do not change it — or a ' +
+        'message id from search_emails with `mailbox: "Drafts"`, which an edit replaces with the draftId it returns.'
     ),
   idempotencyKey: z
     .string()
@@ -195,9 +195,7 @@ const loadSendableDraft = async (
   const record = await loadDraft(deps, p)
   if (!record) {
     return {
-      error: errorResult(
-        `Draft not found: ${p.draftId}. Nothing was sent. Find it with search_emails using mailbox "Drafts".`
-      ),
+      error: errorResult(`Draft not found: ${p.draftId}. Nothing was sent. Find it with list_drafts.`),
     }
   }
   if (!isDraft(record)) {
@@ -375,7 +373,7 @@ export const registerSendDraft = (
         'Send a draft. This delivers the message to its recipients and cannot be undone. Confirm the ' +
         'recipients and the body with the user before calling it unless they have already asked for the ' +
         'message to be sent. Sends any draft in the user’s Drafts folder, not only ones you staged — find ' +
-        'an existing one with search_emails using `mailbox: "Drafts"`, and read it back with get_draft ' +
+        'an existing one with list_drafts, and read it back with get_draft ' +
         'before sending something you did not write. Use the draftId create_draft returned; editing a draft ' +
         'with update_draft keeps it. Returns the sent message’s id, which get_email can ' +
         'read back. A draft that has already been sent is refused rather than sent twice.',

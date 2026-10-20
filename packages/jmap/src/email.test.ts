@@ -6,6 +6,7 @@ import {
   emailGetDetail,
   emailQuery,
   emailQueryPerTerm,
+  emailQueryTotal,
   emailSet,
   emailSetMailboxes,
   emailState,
@@ -46,7 +47,7 @@ describe('emailQuery', () => {
       // A single condition is passed through flat (no FilterOperator wrapper).
       expect(body.methodCalls[0][1].filter.text).toBe('hello')
       expect(body.methodCalls[0][1].limit).toBe(20)
-      // We always disable totals — cheap counts on a big mailbox blow up.
+      // Page queries never ask for totals — a full FTS count is expensive.
       expect(body.methodCalls[0][1].calculateTotal).toBe(false)
       // Newest-first is explicit; mailbox order is wrong for date questions.
       expect(body.methodCalls[0][1].sort).toEqual([{ isAscending: false, property: 'receivedAt' }])
@@ -280,6 +281,41 @@ describe('emailQueryPerTerm', () => {
       })
     )
     expect(lists).toEqual([[], ['e9']])
+  })
+})
+
+describe('emailQueryTotal', () => {
+  test('asks for the total over the OR-ed terms AND-ed with the scalars, and returns it', async () => {
+    const f = mock((_u: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}')
+      expect(body.methodCalls[0][0]).toBe('Email/query')
+      expect(body.methodCalls[0][1].calculateTotal).toBe(true)
+      expect(body.methodCalls[0][1].limit).toBe(1)
+      expect(body.methodCalls[0][1].filter).toEqual({
+        conditions: [
+          { conditions: [{ text: 'alpha' }, { text: 'bravo' }], operator: 'OR' },
+          { after: '2026-04-17T00:00:00Z' },
+        ],
+        operator: 'AND',
+      })
+      return Promise.resolve(jmapResponse([['Email/query', { ids: ['e1'], total: 213 }, '0']]))
+    })
+    const total = await withFetch(f, () =>
+      emailQueryTotal({
+        accountId: 'acct',
+        apiUrl: API,
+        authorization: 'Bearer tok',
+        filters: { after: '2026-04-17T00:00:00Z', text: ['alpha', 'bravo'] },
+      })
+    )
+    expect(total).toBe(213)
+  })
+
+  test('throws when the server omits the total', async () => {
+    const f = mock(() => Promise.resolve(jmapResponse([['Email/query', { ids: [] }, '0']])))
+    await expect(
+      withFetch(f, () => emailQueryTotal({ accountId: 'acct', apiUrl: API, authorization: 'Bearer tok', filters: {} }))
+    ).rejects.toThrow('no total')
   })
 })
 
