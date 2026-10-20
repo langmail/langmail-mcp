@@ -4,9 +4,9 @@ MCP resource server. Runs on the `app` VM, fronted by nginx for TLS +
 ACME; authenticates clients against Better Auth (OAuth/OIDC) and talks to
 Stalwart over public HTTPS for JMAP + CalDAV.
 
-This README captures per-service conventions. Repo-wide guidance lives
-in `../../AGENTS.md`; the design rationale lives in
-`../../spec/03-monorepo-and-app-vm.md` and `../../spec/02-mcp.md`.
+The public endpoint is `https://mcp.langmail.me/mcp` (Streamable HTTP).
+Repo-wide guidance lives in `../../AGENTS.md`; the identity design in
+`../../docs/decisions/0003-better-auth-as-openid-provider.md`.
 
 ## Stalwart upstream issues
 CalDAV/iMIP defects this service works around → `docs/upstream/stalwart/`
@@ -27,6 +27,27 @@ install Node and never will.
 - `bun run start` — production entrypoint (`NODE_ENV=production bun
   src/index.ts`), what the container's `CMD` runs.
 - `bun run typecheck` — typecheck only.
+- `bun run spec:check` — TLC run of the send-protocol model; see
+  `spec/AGENTS.md` before touching `sendDraft` or `replyToMessage`.
+
+Point a local client at the dev server with
+`claude mcp add --transport http langmail-local http://127.0.0.1:8080/mcp`.
+
+### CalDAV integration tests
+
+`bun test` runs the unit suite. `bun run test:integration` drives the real
+CalDAV adapter against a live server and skips unless `CALDAV_BASE_URL` /
+`CALDAV_USERNAME` / `CALDAV_PASSWORD` are set. CI runs it against a throwaway
+Radicale (`.github/workflows/test-caldav.yml`); locally:
+
+```bash
+pip install radicale
+printf 'test:test\n' > /tmp/radicale-users
+radicale --auth-type htpasswd --auth-htpasswd-filename /tmp/radicale-users \
+  --auth-htpasswd-encryption plain --storage-filesystem-folder /tmp/radicale &
+CALDAV_BASE_URL=http://127.0.0.1:5232 CALDAV_USERNAME=test CALDAV_PASSWORD=test \
+  bun run test:integration
+```
 
 Do not add a `node` or `npm` script anywhere. If a dependency is
 node-only and won't run under Bun, find another or write the call
@@ -49,13 +70,14 @@ See `infra/AGENTS.md § app-VM services run as digest-pinned
 containers`. (Reconsider Nix-building Bun if nixpkgs ever ships
 `buildBunModule`.)
 
-## Adding tools (preview of phase 4)
+## Adding tools
 
-When `spec/02-mcp.md` lands, the `/mcp` route in `src/index.ts` will
-mount `StreamableHTTPServerTransport` and register tools. Conventions:
+Load the `mcp-tool-design` skill before adding or changing a tool.
 
-- One file per tool under `src/tools/`. Default-export a registration
-  function that takes the `McpServer` and adds the tool.
+- One file per tool under `src/tools/`, exporting a `register<Tool>`
+  function that `src/mcp/handler.ts` calls with the `McpServer`.
+- The public tool reference is `apps/docs/reference/mcp/<tool>.mdx`; update
+  it in the same PR that changes a tool's behaviour or schema.
 - JMAP wire shape lives in the shared `@langmail/jmap` package (typed
   `fetch` wrappers: `Email/query`, `Email/get`, `Email/set`,
   `Email/changes`, mailbox lookup). It was extracted from `src/jmap/`
@@ -67,8 +89,7 @@ mount `StreamableHTTPServerTransport` and register tools. Conventions:
   address), cached as `(token, principal)` until token `exp`. The validated
   bearer is then forwarded to **Stalwart** for JMAP/CalDAV. See
   `../../docs/reference/security/authentication.md` for the identity model and
-  `../../spec/03-monorepo-and-app-vm.md §MCP RS auth model` for why we don't
-  gate on `aud` or `scope`.
+  why we don't gate on `aud` or `scope`.
 
 ## Configuration
 

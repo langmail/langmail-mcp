@@ -6,9 +6,6 @@ from `services/mcp` to check it with TLC. You need Java 11+, and the first run
 downloads a pinned `tla2tools.jar`. CI runs the same script
 (`.github/workflows/tla.yml`).
 
-This folder is a formal model of one protocol. The repo-root `spec/`
-documents referenced from `AGENTS.md` are design rationale, not TLA+.
-
 ## What it models
 
 - **Clients.** Each request is one intention: send draft `d`, or reply to
