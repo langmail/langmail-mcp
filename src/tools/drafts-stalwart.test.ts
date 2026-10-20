@@ -510,6 +510,7 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
 
     const result = await deleteDraft(deps, guard, { ...toolCtx, args: deleteDraftInput.parse({ draftId }) })
     expect(result.isError).toBe(true)
+    expect(result.content[0]?.text ?? '').toContain('already been sent or received')
     expect(result.content[0]?.text ?? '').toContain('Nothing was deleted.')
     expect(await idsIn(sentId)).toContain(messageId)
   })

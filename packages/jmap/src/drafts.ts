@@ -261,7 +261,8 @@ export interface DraftDestroyParams extends JmapCall {
 // What became of one destroy: gone, or the RFC 8620 §5.3 SetError type the
 // server refused it with (`notFound`, `forbidden`, …). A value rather than a
 // throw, because both callers need the refusal: delete_draft reports it, the
-// second half of an edit reports a leftover draft.
+// second half of an edit reports a leftover draft. `unknown` when the server
+// named the id in neither list.
 export type DraftDestroyResult = { destroyed: true } | { notDestroyed: string }
 
 // Permanently destroy one draft — no Trash copy. The one Email/set destroy path

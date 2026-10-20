@@ -19,7 +19,7 @@ import { z } from 'zod'
 
 import { bearerAuthorization } from '@langmail/jmap'
 
-import { holdSend, type SendGuard, type SendHold } from '../drafts/send-guard.ts'
+import { holdSend, type SendGuard, type SendHold, type SendReservation } from '../drafts/send-guard.ts'
 import { ACCOUNT_DESTRUCTIVE } from './annotations.ts'
 import { type DraftToolDeps, isDraft, loadDraft, stableDraftId } from './draft-common.ts'
 import { formatAddressList } from './format.ts'
@@ -44,10 +44,26 @@ export interface DeleteDraftContext {
   token: string
 }
 
-// Why the destroy is off while a send of the draft holds the reservation.
-const sendPendingRefusal = (draftId: string): string =>
-  `A send of ${draftId} is in progress or may already have gone out, so it was not deleted. Nothing was ` +
-  "deleted. Read it back with get_email, or check the user's Sent folder, before deciding."
+// Why the destroy is off while the draft's send reservation is held. A delete
+// reserves in send_draft's key space, so `in_flight` may be another delete and
+// must not point at Sent; only a send ever leaves `unknown`.
+const reservationRefusal = (draftId: string, held: SendReservation): string =>
+  held.state === 'in_flight'
+    ? `Another call is already working on ${draftId} — a send, or a delete like this one. Nothing was ` +
+      'deleted. Wait for it to finish, then read the draft back with get_draft before retrying.'
+    : `An earlier send of ${draftId} failed without saying whether the message went out. Nothing was ` +
+      "deleted. Read it back with get_email, or check the user's Sent folder, before deciding."
+
+// Why the server's destroy did not land, by the SetError type it answered with.
+const destroyRefusal = (draftId: string, type: string): string => {
+  if (type === 'notFound') {
+    return `Draft not found: ${draftId} — it was removed before this call reached it. Nothing was deleted.`
+  }
+  if (type === 'unknown') {
+    return `The server did not say whether ${draftId} was deleted. Read it back with get_draft before retrying.`
+  }
+  return `The server refused to delete ${draftId} (${type}). Nothing was deleted.`
+}
 
 export const deleteDraft = async (
   deps: DraftToolDeps,
@@ -56,7 +72,7 @@ export const deleteDraft = async (
 ): Promise<ToolResult> => {
   const taken = holdSend(guard, ctx.principal, sendDraftSubject(ctx.args.draftId))
   if ('refused' in taken) {
-    return errorResult(sendPendingRefusal(ctx.args.draftId))
+    return errorResult(reservationRefusal(ctx.args.draftId, taken.refused))
   }
   try {
     return await deleteHeld(deps, taken.hold, ctx)
@@ -84,22 +100,22 @@ const deleteHeld = async (deps: DraftToolDeps, hold: SendHold, ctx: DeleteDraftC
   // The other id this draft answers to — a send through it must block the
   // destroy just the same.
   for (const alias of new Set([record.id, stableDraftId(record)])) {
-    if (alias !== null && alias !== draftId && hold.cover(sendDraftSubject(alias))) {
-      return errorResult(sendPendingRefusal(draftId))
+    if (alias === null || alias === draftId) {
+      continue
+    }
+    const clash = hold.cover(sendDraftSubject(alias))
+    if (clash) {
+      return errorResult(reservationRefusal(draftId, clash))
     }
   }
 
   const outcome = await deps.draftDestroy({ accountId, apiUrl: '', authorization, id: record.id })
   if ('notDestroyed' in outcome) {
-    return errorResult(
-      outcome.notDestroyed === 'notFound'
-        ? `Draft not found: ${draftId} — it was removed before this call reached it. Nothing was deleted.`
-        : `The server refused to delete ${draftId} (${outcome.notDestroyed}). Nothing was deleted.`
-    )
+    return errorResult(destroyRefusal(draftId, outcome.notDestroyed))
   }
   const recipients = formatAddressList(record.to) || 'no recipients'
   return textResult(
-    `Deleted draft ${draftId} ("${record.subject || '(no subject)'}", to ${recipients}). It cannot be recovered.`
+    `Deleted draft ${draftId} ("${record.subject || '(no subject)'}", to ${recipients}). The deleted version cannot be recovered.`
   )
 }
 
