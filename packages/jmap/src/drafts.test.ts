@@ -1,6 +1,13 @@
 import { describe, expect, mock, test } from 'bun:test'
 
-import { draftCreate, draftIdResolve, emailComposeGet, sentEmailPatch, threadMessageFind } from './drafts.ts'
+import {
+  draftCreate,
+  draftDestroy,
+  draftIdResolve,
+  emailComposeGet,
+  sentEmailPatch,
+  threadMessageFind,
+} from './drafts.ts'
 import { JmapError } from './session.ts'
 
 const API = 'https://mail.example.com/jmap/'
@@ -359,6 +366,33 @@ describe('draftCreate', () => {
         })
       ).rejects.toThrow(INVALID_PROPERTIES_RE)
     })
+  })
+})
+
+describe('draftDestroy', () => {
+  test('destroys the draft outright, with no Trash copy', async () => {
+    const calls: Record<string, unknown>[] = []
+    const f = mock((_url: string, init?: RequestInit) => {
+      calls.push(JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1])
+      return Promise.resolve(jmapResponse([['Email/set', { destroyed: ['d1'] }, '0']]))
+    })
+    const result = await withFetch(f, () => draftDestroy({ ...call, id: 'd1' }))
+    expect(calls).toEqual([{ accountId: 'acct', destroy: ['d1'] }])
+    expect(result).toEqual({ destroyed: true })
+  })
+
+  test('reports the SetError type the server refused the destroy with', async () => {
+    const f = mock(() =>
+      Promise.resolve(jmapResponse([['Email/set', { notDestroyed: { d1: { type: 'notFound' } } }, '0']]))
+    )
+    const result = await withFetch(f, () => draftDestroy({ ...call, id: 'd1' }))
+    expect(result).toEqual({ notDestroyed: 'notFound' })
+  })
+
+  test('reports a destroy the server neither made nor refused as unknown', async () => {
+    const f = mock(() => Promise.resolve(jmapResponse([['Email/set', {}, '0']])))
+    const result = await withFetch(f, () => draftDestroy({ ...call, id: 'd1' }))
+    expect(result).toEqual({ notDestroyed: 'unknown' })
   })
 })
 

@@ -712,7 +712,8 @@ export const registerUpdateDraft = (
         '`text`/`html` is the new part only: the quoted original is kept below it (`quoteOriginal: false` ' +
         'drops it, `true` adds one to a bare reply). The previous version is not recoverable. If the draft has both a plain-text and an HTML body, pass ' +
         'both `text` and `html` or neither; replacing one would leave the other saying the old thing. The ' +
-        'sender and the reply threading cannot be changed here; stage a new draft with create_draft instead.',
+        'sender and the reply threading cannot be changed here; stage a new draft with create_draft instead, then retire this one ' +
+        'with delete_draft.',
       inputSchema: updateDraftInput.shape,
       title: 'Update draft',
     },

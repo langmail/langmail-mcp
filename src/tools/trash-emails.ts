@@ -39,11 +39,11 @@ export const registerTrashEmails = (server: McpServer, deps: FileEmailsDeps, get
         'Move one or more messages to the Trash. Use this only when the user asks to delete, trash, ' +
         'or bin mail; to clear the inbox without deleting, use archive_emails, and to file into a ' +
         'folder use move_emails. Trashed messages stay recoverable in the mail client until Trash ' +
-        'is emptied; there is no permanent delete. Re-running it on the same ids is harmless. Takes ' +
-        'message ids from search_emails or get_thread. This is also how to discard a staged draft ' +
-        '(its message id is what search_emails shows in Drafts); get_draft, update_draft and ' +
-        'send_draft then refuse it. Reports how many messages were trashed and lists any id the ' +
-        'server refused.',
+        'is emptied; there is no permanent delete of mail. Re-running it on the same ids is harmless. ' +
+        'Takes message ids from search_emails or get_thread. To discard a staged draft, use ' +
+        'delete_draft instead; a draft trashed here is refused by get_draft, update_draft and ' +
+        'send_draft but stays restorable. Reports how many messages were trashed and lists any id ' +
+        'the server refused.',
       inputSchema: idsShape,
       title: 'Trash emails',
     },
