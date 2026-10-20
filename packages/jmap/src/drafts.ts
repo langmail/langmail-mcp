@@ -514,6 +514,9 @@ export const draftList = async (p: DraftListParams): Promise<DraftListResult> =>
         'Email/query',
         {
           accountId: p.accountId,
+          // Unconditional, unlike search_emails' deadlined count: Drafts is a
+          // small folder, and a count riding this batch cannot be raced or
+          // dropped, so it is paid on every call — cheaply.
           calculateTotal: true,
           filter: { conditions, operator: 'AND' },
           limit: p.limit,

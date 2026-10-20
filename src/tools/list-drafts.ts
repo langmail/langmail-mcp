@@ -74,8 +74,9 @@ export interface ListDraftsContext {
 // line and the staged message indented under it.
 const formatListedDraft = (index: number, record: EmailComposeRecord): string => {
   // Both ids, because they answer different tools: the draftId survives edits
-  // and is what the draft tools take, while trash_emails — how a draft is
-  // discarded — takes the current revision's message id.
+  // and is what the draft tools take, including delete_draft's permanent
+  // discard, while trash_emails — the recoverable discard — takes the current
+  // revision's message id.
   const lines = [`draftId: ${stableDraftId(record) ?? record.id}`, `messageId: ${record.id}`]
   if (record.receivedAt) {
     // An edit re-creates the message, so this is the last edit, not the first draft.
