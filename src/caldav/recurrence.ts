@@ -274,22 +274,25 @@ const WALL_CLOCK_MARGIN_MS = 86_400_000
 // within [from, to], as instants — list_calendar_events' agenda. Read the same
 // two ways as isSeriesOccurrence: a UTC (or all-day) series expands on
 // instants, a zoned one on its floating wall clock, each result resolved back to
-// the instant that wall clock names in `timeZone`.
+// the instant that wall clock names in `timeZone`. At most `limit` are returned.
 export const seriesOccurrences = (
   masterStart: string,
   rrule: string,
   from: Date,
   to: Date,
+  limit: number,
   timeZone?: string
 ): Date[] => {
+  // Stops the walk after `limit` occurrences rather than expanding the range.
+  const underLimit = (_at: Date, index: number): boolean => index < limit
   if (!timeZone) {
-    return rrulestr(`DTSTART:${toIcalUtc(masterStart)}\nRRULE:${rrule}`).between(from, to, true)
+    return rrulestr(`DTSTART:${toIcalUtc(masterStart)}\nRRULE:${rrule}`).between(from, to, true, underLimit)
   }
   const { rule, until } = splitUtcUntil(rrule)
   const wallFrom = new Date(Date.parse(`${toWallClockIso(from, timeZone)}Z`) - WALL_CLOCK_MARGIN_MS)
   const wallTo = new Date(Date.parse(`${toWallClockIso(to, timeZone)}Z`) + WALL_CLOCK_MARGIN_MS)
   return rrulestr(`DTSTART:${toIcalFloating(masterStart)}\nRRULE:${rule}`)
-    .between(wallFrom, wallTo, true)
+    .between(wallFrom, wallTo, true, underLimit)
     .map((wall) => new Date(parseWallClockInZone(wall.toISOString().slice(0, 19), timeZone).getTime()))
     .filter((at) => at >= from && at <= to && !(until && at > until))
 }

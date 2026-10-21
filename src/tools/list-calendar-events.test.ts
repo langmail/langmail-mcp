@@ -426,7 +426,7 @@ describe('listCalendarEvents — occurrences in a window', () => {
     expect(txt).not.toContain('when: 2026-10-26')
   })
 
-  test('a series with a non-IANA zone keeps its master next to an unreadable override', async () => {
+  test('a series with an override in a non-IANA zone is listed as stored, never twice', async () => {
     const outlook: CalendarObject = {
       data: [
         'BEGIN:VCALENDAR',
@@ -448,8 +448,12 @@ describe('listCalendarEvents — occurrences in a window', () => {
       ].join('\r\n'),
       url: `${CAL}outlook.ics`,
     }
-    const txt = await listWindow([outlook], '2026-10-19T00:00:00Z', '2026-10-20T00:00:00Z')
-    expect(txt).toContain('when: 2026-10-19T10:00:00 → 2026-10-19T11:00:00')
+    const txt = await listWindow([outlook], '2026-10-12T00:00:00Z', '2026-10-13T00:00:00Z')
+    expect(txt).toContain('when: 2026-10-12T12:00:00 → 2026-10-12T13:00:00')
+    expect(txt).not.toContain('when: 2026-10-12T10:00:00')
+    // The master stays listed, as stored and saying so, rather than vanishing.
+    expect(txt).toContain('when: 2026-10-05T10:00:00 → 2026-10-05T11:00:00')
+    expect(txt).toContain('could not be expanded')
   })
 
   test('lists a series whose rule cannot be expanded, and says so', async () => {

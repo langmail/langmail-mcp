@@ -78,7 +78,9 @@ const formatMovedFrom = (ev: ParsedEvent, movedFrom: string): string =>
   !ev.allDay && ev.startTzid ? `${movedFrom} (${ev.startTzid})` : movedFrom
 
 // Says whether the organizer is the user, so an organizer's own blank reply
-// status doesn't read as an invitation they haven't answered.
+// status doesn't read as an invitation they haven't answered. Best-effort: only
+// the principal's current address is known here, so an event organized under
+// an older alias goes unmarked.
 const formatOrganizer = (organizer: string, self: string | null): string =>
   self && organizer.toLowerCase() === self.toLowerCase() ? `${organizer} (you)` : organizer
 
@@ -170,7 +172,7 @@ export const listCalendarEvents = async (
     : `${entries.length} event(s), each series once at its first occurrence:`
   const truncated =
     entries.length > MAX_ENTRIES
-      ? `\n\nShowing the first ${MAX_ENTRIES}. ${window ? 'Narrow start/end' : 'Pass a start/end window'} to see the rest.`
+      ? `\n\nShowing the first ${MAX_ENTRIES}. ${window ? 'Narrow start/end to see the rest.' : 'Pass a start/end window to narrow this to a range.'}`
       : ''
   return textResult(`${heading}\n\n${lines.join('\n\n')}${truncated}`)
 }

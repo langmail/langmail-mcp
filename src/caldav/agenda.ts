@@ -21,6 +21,10 @@ import { isValidTimeZone, toWallClockIso } from './timezone.ts'
 
 const DAY_MS = 86_400_000
 
+// How many occurrences one series may generate for a window. Bounds the work a
+// `FREQ=MINUTELY` series over a long window costs; the tool shows fewer still.
+const MAX_GENERATED = 1000
+
 // One listed event or occurrence. `event` carries this entry's own times; for
 // an occurrence of a series it also carries the series' rule (`recurrence`) and
 // the occurrence's original start (`recurrenceId`), which is how
@@ -111,11 +115,6 @@ const instantOf = (value: string, form: TimeForm): number => {
   return form.kind === 'zoned' ? parseWallClockInZone(value, form.timeZone).getTime() : Date.parse(`${value}Z`)
 }
 
-// A stored EXDATE value as an instant. The parser already resolved TZID values
-// to UTC; DATE values read as UTC midnights, and a floating value as UTC.
-const excludedMs = (value: string): number =>
-  FLOATING_DATE_TIME_RE.test(value) ? Date.parse(`${value}Z`) : Date.parse(value)
-
 // An event's length, for occurrences generated from it. No DTEND means a
 // zero-length timed event or a one-day all-day one (RFC 5545 §3.6.1).
 const durationMs = (ev: ParsedEvent, form: TimeForm): number => {
@@ -166,7 +165,8 @@ const overrideEntry = (override: ParsedEvent, master: ParsedEvent | undefined): 
   const originalMs = event.recurrenceId ? Date.parse(event.recurrenceId) : startMs
   const entry: AgendaEntry = { event, startMs }
   if (!Number.isNaN(startMs) && originalMs !== startMs) {
-    entry.movedFrom = display(new Date(originalMs), master ? timeForm(master) : form)
+    // In the occurrence's own form, so the zone `when:` names reads right for it too.
+    entry.movedFrom = display(new Date(originalMs), form)
   }
   return entry
 }
@@ -248,10 +248,12 @@ const generatedEntries = (
   const length = durationMs(master, form)
   const from = new Date(window.start.getTime() - length - DAY_MS)
   const to = new Date(window.end.getTime() + DAY_MS)
-  const excluded = new Set((master.excludedDates ?? []).map(excludedMs))
+  // The parser already resolved TZID values to UTC; a floating one is read in
+  // the series' own zone, like its DTSTART.
+  const excluded = new Set((master.excludedDates ?? []).map((value) => instantOf(value, form)))
   const masterStart = form.kind === 'floating' ? `${master.start}Z` : master.start
   const timeZone = form.kind === 'zoned' ? form.timeZone : undefined
-  return seriesOccurrences(masterStart, rule, from, to, timeZone)
+  return seriesOccurrences(masterStart, rule, from, to, MAX_GENERATED, timeZone)
     .filter((at) => !(excluded.has(at.getTime()) || overridden.has(at.getTime())))
     .map((at): AgendaEntry => {
       const { excludedDates: _excluded, ...series } = master
@@ -272,6 +274,11 @@ const seriesInWindow = ({ master, others, overrides }: Series, window: AgendaWin
   const rule = master?.recurrence
   if (!(master && rule)) {
     return [...(master ? [plainEntry(master)] : []), ...replaced]
+  }
+  // A component in `others` replaces an occurrence we can't name, so expanding
+  // the rule would list that occurrence a second time at its old time.
+  if (others.length > 0) {
+    return [{ ...plainEntry(master), unexpanded: true }, ...replaced]
   }
   const overridden = new Set(overrides.map((o) => Date.parse(o.recurrenceId ?? '')))
   let generated: AgendaEntry[]

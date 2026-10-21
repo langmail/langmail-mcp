@@ -245,6 +245,7 @@ describe('seriesOccurrences', () => {
       'FREQ=WEEKLY;BYDAY=TU',
       new Date('2026-10-20T00:00:00Z'),
       new Date('2026-10-28T00:00:00Z'),
+      100,
       'Europe/Berlin'
     )
     expect(at.map((d) => d.toISOString())).toEqual(['2026-10-20T14:00:00.000Z', '2026-10-27T15:00:00.000Z'])
@@ -256,6 +257,7 @@ describe('seriesOccurrences', () => {
       'FREQ=DAILY;UNTIL=20261022T140000Z',
       new Date('2026-10-01T00:00:00Z'),
       new Date('2026-11-01T00:00:00Z'),
+      100,
       'Europe/Berlin'
     )
     expect(at).toHaveLength(3)
@@ -266,8 +268,20 @@ describe('seriesOccurrences', () => {
       '2026-10-01T09:00:00Z',
       'FREQ=DAILY;COUNT=3',
       new Date('2026-10-02T00:00:00Z'),
-      new Date('2026-10-10T00:00:00Z')
+      new Date('2026-10-10T00:00:00Z'),
+      100
     )
     expect(at.map((d) => d.toISOString())).toEqual(['2026-10-02T09:00:00.000Z', '2026-10-03T09:00:00.000Z'])
+  })
+
+  test('stops after the limit instead of walking the whole range', () => {
+    const at = seriesOccurrences(
+      '2026-01-01T00:00:00Z',
+      'FREQ=SECONDLY',
+      new Date('2026-01-01T00:00:00Z'),
+      new Date('2027-01-01T00:00:00Z'),
+      5
+    )
+    expect(at).toHaveLength(5)
   })
 })
