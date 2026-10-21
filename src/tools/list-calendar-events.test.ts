@@ -407,6 +407,70 @@ describe('listCalendarEvents — occurrences in a window', () => {
     expect(txt).toContain('365 event(s) between')
     expect(txt).toContain('Showing the first 200. Narrow start/end to see the rest.')
   })
+  test('a week across a DST change ends at the caller’s midnight for all-day events', async () => {
+    const holiday: CalendarObject = {
+      data: buildInvite({
+        allDay: true,
+        attendees: [],
+        end: new Date('2026-10-21T00:00:00Z'),
+        rrule: 'FREQ=DAILY',
+        start: new Date('2026-10-20T00:00:00Z'),
+        title: 'Holiday',
+        uid: 'holiday@langmail.me',
+      }),
+      url: `${CAL}holiday.ics`,
+    }
+    const txt = await listWindow([holiday], '2026-10-19T00:00:00+02:00', '2026-10-26T00:00:00+01:00')
+    expect(txt).toContain('6 event(s) between')
+    expect(txt).toContain('when: 2026-10-25 → 2026-10-26')
+    expect(txt).not.toContain('when: 2026-10-26')
+  })
+
+  test('a series with a non-IANA zone keeps its master next to an unreadable override', async () => {
+    const outlook: CalendarObject = {
+      data: [
+        'BEGIN:VCALENDAR',
+        'BEGIN:VEVENT',
+        'UID:outlook@example.com',
+        'SUMMARY:Planning',
+        'DTSTART;TZID=W. Europe Standard Time:20261005T100000',
+        'DTEND;TZID=W. Europe Standard Time:20261005T110000',
+        'RRULE:FREQ=WEEKLY',
+        'END:VEVENT',
+        'BEGIN:VEVENT',
+        'UID:outlook@example.com',
+        'RECURRENCE-ID;TZID=W. Europe Standard Time:20261012T100000',
+        'SUMMARY:Planning',
+        'DTSTART;TZID=W. Europe Standard Time:20261012T120000',
+        'DTEND;TZID=W. Europe Standard Time:20261012T130000',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n'),
+      url: `${CAL}outlook.ics`,
+    }
+    const txt = await listWindow([outlook], '2026-10-19T00:00:00Z', '2026-10-20T00:00:00Z')
+    expect(txt).toContain('when: 2026-10-19T10:00:00 → 2026-10-19T11:00:00')
+  })
+
+  test('lists a series whose rule cannot be expanded, and says so', async () => {
+    const odd: CalendarObject = {
+      data: [
+        'BEGIN:VCALENDAR',
+        'BEGIN:VEVENT',
+        'UID:odd@langmail.me',
+        'SUMMARY:Odd rule',
+        'DTSTART:20260105T100000Z',
+        'DTEND:20260105T110000Z',
+        'RRULE:FREQ=WEEKLY;BYDAY=XX',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n'),
+      url: `${CAL}odd.ics`,
+    }
+    const txt = await listWindow([odd], '2026-10-19T00:00:00Z', '2026-10-26T00:00:00Z')
+    expect(txt).toContain('1. Odd rule')
+    expect(txt).toContain('could not be expanded')
+  })
 })
 
 describe('listCalendarEvents — without a window', () => {
@@ -422,9 +486,9 @@ describe('listCalendarEvents — without a window', () => {
   test('does not mark an organizer who is someone else', async () => {
     const other = {
       ...weeklySync,
-      data: weeklySync.data.replaceAll('ORGANIZER:mailto:host@', 'ORGANIZER:mailto:boss@'),
+      data: weeklySync.data.replaceAll('ORGANIZER:mailto:host@langmail.me', 'ORGANIZER:mailto:boss@example.com'),
     }
     const txt = (await listCalendarEvents(makeDeps(account(), [other]), { args: {}, token: 'tok' })).content[0]?.text
-    expect(txt).toContain('organizer: boss@langmail.me\n')
+    expect(txt).toContain('organizer: boss@example.com\n')
   })
 })

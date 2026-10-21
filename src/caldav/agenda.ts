@@ -32,17 +32,41 @@ export interface AgendaEntry {
   movedFrom?: string
   // Sort key: the entry's start as epoch ms.
   startMs: number
+  // A series whose repeat rule could not be expanded, listed as stored so it
+  // isn't silently missing from the window.
+  unexpanded?: true
 }
 
-// The window being listed. All-day events are dates with no zone of their own,
-// so they are placed on the caller's day: `allDayOffsetMs` is the UTC offset of
-// the window's `start`, which is how a `2026-10-20T00:00:00+02:00` window
-// covers the all-day event on 2026-10-20 and not the one on 2026-10-19.
+// The window being listed, `end` exclusive. All-day events are dates with no
+// zone of their own, so they are placed on the caller's days: each bound keeps
+// the UTC offset it was written with, which is how a `2026-10-20T00:00:00+02:00`
+// window covers the all-day event on 2026-10-20 and not the one on 2026-10-19 —
+// and a week that runs across a DST change still ends at the caller's midnight.
 export interface AgendaWindow {
-  allDayOffsetMs: number
   end: Date
+  endOffsetMs: number
   start: Date
+  startOffsetMs: number
 }
+
+// The UTC offset written on an ISO 8601 date-time (`Z`, `+02:00`), in ms.
+const OFFSET_RE = /([+-])(\d{2}):(\d{2})$/u
+const offsetMs = (iso: string): number => {
+  const match = OFFSET_RE.exec(iso)
+  if (!match) {
+    return 0
+  }
+  const [, sign, hours, minutes] = match
+  return (sign === '-' ? -1 : 1) * (Number(hours) * 60 + Number(minutes)) * 60_000
+}
+
+// The window between two ISO 8601 date-times with offsets.
+export const agendaWindow = (start: string, end: string): AgendaWindow => ({
+  end: new Date(end),
+  endOffsetMs: offsetMs(end),
+  start: new Date(start),
+  startOffsetMs: offsetMs(start),
+})
 
 // How a VEVENT's times are written: as dates, as wall clock in a zone, as UTC
 // (`…Z`), or floating (no zone at all, which we read as UTC).
@@ -153,21 +177,34 @@ const plainEntry = (event: ParsedEvent): AgendaEntry => ({
 })
 
 // Groups a calendar object's VEVENTs by UID into series: the master (absent when
-// only some occurrences were shared with this calendar) and its overrides.
+// only some occurrences were shared with this calendar), its overrides, and any
+// further component without a RECURRENCE-ID the parser could read — an override
+// whose RECURRENCE-ID names a non-IANA zone (Outlook's `W. Europe Standard
+// Time`). Those are listed as they are rather than taking the master's place.
 interface Series {
   master?: ParsedEvent
+  others: ParsedEvent[]
   overrides: ParsedEvent[]
+}
+
+const addComponent = (series: Series, ev: ParsedEvent): void => {
+  if (ev.recurrenceId !== undefined) {
+    series.overrides.push(ev)
+  } else if (!series.master) {
+    series.master = ev
+  } else if (ev.recurrence && !series.master.recurrence) {
+    series.others.push(series.master)
+    series.master = ev
+  } else {
+    series.others.push(ev)
+  }
 }
 
 const groupSeries = (events: ParsedEvent[]): Series[] => {
   const byUid = new Map<string, Series>()
   for (const ev of events) {
-    const series = byUid.get(ev.uid) ?? { overrides: [] }
-    if (ev.recurrenceId === undefined) {
-      series.master = ev
-    } else {
-      series.overrides.push(ev)
-    }
+    const series = byUid.get(ev.uid) ?? { others: [], overrides: [] }
+    addComponent(series, ev)
     byUid.set(ev.uid, series)
   }
   return [...byUid.values()]
@@ -176,21 +213,22 @@ const groupSeries = (events: ParsedEvent[]): Series[] => {
 // Every stored component once: masters and one-off events as they are,
 // overrides completed from their master. The listing without a window.
 export const storedEntries = (events: ParsedEvent[]): AgendaEntry[] =>
-  groupSeries(events).flatMap(({ master, overrides }) => [
+  groupSeries(events).flatMap(({ master, others, overrides }) => [
     ...(master ? [plainEntry(master)] : []),
+    ...others.map(plainEntry),
     ...overrides.map((o) => overrideEntry(o, master)),
   ])
 
 // [start, end) overlaps the window. A zero-length event counts when it starts
 // inside it. All-day entries are compared on the caller's day (AgendaWindow).
 const overlaps = (entry: AgendaEntry, window: AgendaWindow): boolean => {
-  if (Number.isNaN(entry.startMs)) {
+  if (entry.unexpanded || Number.isNaN(entry.startMs)) {
     return true
   }
   const form = timeForm(entry.event)
-  const shift = form.kind === 'allDay' ? window.allDayOffsetMs : 0
-  const from = window.start.getTime() + shift
-  const to = window.end.getTime() + shift
+  const allDay = form.kind === 'allDay'
+  const from = window.start.getTime() + (allDay ? window.startOffsetMs : 0)
+  const to = window.end.getTime() + (allDay ? window.endOffsetMs : 0)
   const endMs = instantOf(entry.event.end, form)
   const end = Number.isNaN(endMs) ? entry.startMs + durationMs(entry.event, form) : endMs
   return entry.startMs < to && (end > from || (end === entry.startMs && entry.startMs >= from))
@@ -200,7 +238,12 @@ const overlaps = (entry: AgendaEntry, window: AgendaWindow): boolean => {
 // excluded dates and the ones an override replaces. Generated a duration early
 // (an occurrence that started before the window may still run into it) and
 // with a day's slack each way for all-day dates; `overlaps` makes the call.
-const generatedEntries = (master: ParsedEvent, rule: string, overridden: Set<number>, window: AgendaWindow) => {
+const generatedEntries = (
+  master: ParsedEvent,
+  rule: string,
+  overridden: Set<number>,
+  window: AgendaWindow
+): AgendaEntry[] => {
   const form = timeForm(master)
   const length = durationMs(master, form)
   const from = new Date(window.start.getTime() - length - DAY_MS)
@@ -224,8 +267,8 @@ const generatedEntries = (master: ParsedEvent, rule: string, overridden: Set<num
     })
 }
 
-const seriesInWindow = ({ master, overrides }: Series, window: AgendaWindow): AgendaEntry[] => {
-  const replaced = overrides.map((o) => overrideEntry(o, master))
+const seriesInWindow = ({ master, others, overrides }: Series, window: AgendaWindow): AgendaEntry[] => {
+  const replaced = [...others.map(plainEntry), ...overrides.map((o) => overrideEntry(o, master))]
   const rule = master?.recurrence
   if (!(master && rule)) {
     return [...(master ? [plainEntry(master)] : []), ...replaced]
@@ -236,7 +279,7 @@ const seriesInWindow = ({ master, overrides }: Series, window: AgendaWindow): Ag
     generated = generatedEntries(master, rule, overridden, window)
   } catch {
     // A rule rrule can't read: list the series as stored rather than drop it.
-    generated = [plainEntry(master)]
+    generated = [{ ...plainEntry(master), unexpanded: true }]
   }
   return [...generated, ...replaced]
 }

@@ -12,7 +12,7 @@ import { z } from 'zod'
 
 import { type ParsedEvent, parseEvents } from '@langmail/ical'
 
-import { type AgendaEntry, storedEntries, windowEntries } from '../caldav/agenda.ts'
+import { type AgendaEntry, agendaWindow, storedEntries, windowEntries } from '../caldav/agenda.ts'
 import { describeAlarm } from '../caldav/alarm.ts'
 import {
   type CalDavConfig,
@@ -29,7 +29,7 @@ export const listCalendarEventsInput = z.object({
   // Optional CalDAV URL from list_calendars; defaults to the principal's
   // discovered default calendar.
   calendarUrl: z.url().optional(),
-  // Optional inclusive window. Both bounds are ISO 8601 with offset and
+  // Optional window, end exclusive. Both bounds are ISO 8601 with offset and
   // must be supplied together (enforced in the handler).
   end: z.iso.datetime({ offset: true }).optional(),
   start: z.iso.datetime({ offset: true }).optional(),
@@ -94,6 +94,9 @@ const formatEvent = (idx: number, entry: AgendaEntry, self: string | null): stri
   if (ev.recurrence) {
     lines.push(`   repeats: ${ev.recurrence}`)
   }
+  if (entry.unexpanded) {
+    lines.push('   note: this repeat rule could not be expanded; the time shown is the series’ first occurrence')
+  }
   if (ev.recurrenceId) {
     lines.push(`   recurrenceId: ${formatRecurrenceId(ev, ev.recurrenceId)}`)
   }
@@ -118,17 +121,6 @@ const formatEvent = (idx: number, entry: AgendaEntry, self: string | null): stri
 // A window like a year of a daily series could list hundreds of occurrences.
 const MAX_ENTRIES = 200
 
-// The UTC offset written on an ISO 8601 date-time (`Z`, `+02:00`), in ms.
-const OFFSET_RE = /([+-])(\d{2}):(\d{2})$/u
-const offsetMs = (iso: string): number => {
-  const match = OFFSET_RE.exec(iso)
-  if (!match) {
-    return 0
-  }
-  const [, sign, hours, minutes] = match
-  return (sign === '-' ? -1 : 1) * (Number(hours) * 60 + Number(minutes)) * 60_000
-}
-
 export const listCalendarEvents = async (
   deps: ListCalendarEventsDeps,
   ctx: ListCalendarEventsContext
@@ -150,10 +142,7 @@ export const listCalendarEvents = async (
     )
   }
 
-  const window =
-    args.start && args.end
-      ? { allDayOffsetMs: offsetMs(args.start), end: new Date(args.end), start: new Date(args.start) }
-      : undefined
+  const window = args.start && args.end ? agendaWindow(args.start, args.end) : undefined
   const objects = await deps.fetchEvents({
     calendarUrl: resolved.url,
     token,
@@ -162,7 +151,7 @@ export const listCalendarEvents = async (
 
   // An all-day entry starts at the caller's midnight, not UTC's.
   const sortKey = (entry: AgendaEntry): number =>
-    entry.startMs - (entry.event.allDay ? (window?.allDayOffsetMs ?? 0) : 0)
+    entry.startMs - (entry.event.allDay ? (window?.startOffsetMs ?? 0) : 0)
   // Series are expanded per calendar object: a master and its overrides share one.
   const entries = objects
     .flatMap((o) => {
@@ -180,7 +169,9 @@ export const listCalendarEvents = async (
     ? `${entries.length} event(s) between ${args.start} and ${args.end}, each occurrence of a series at its own time:`
     : `${entries.length} event(s), each series once at its first occurrence:`
   const truncated =
-    entries.length > MAX_ENTRIES ? `\n\nShowing the first ${MAX_ENTRIES}. Narrow start/end to see the rest.` : ''
+    entries.length > MAX_ENTRIES
+      ? `\n\nShowing the first ${MAX_ENTRIES}. ${window ? 'Narrow start/end' : 'Pass a start/end window'} to see the rest.`
+      : ''
   return textResult(`${heading}\n\n${lines.join('\n\n')}${truncated}`)
 }
 
@@ -205,13 +196,15 @@ export const registerListCalendarEvents = (
       annotations: READ_ONLY,
       description:
         'Read the user’s calendar, agenda or schedule — what’s on their calendar, what meetings they ' +
-        'have, when they are busy or free. With a start/end window (ISO 8601 with offset, both or neither), ' +
+        'have, when they are busy or free. With a start/end window (ISO 8601 with offset, both or neither; end ' +
+        'exclusive, so a day runs to the next midnight), ' +
         'lists every event and every occurrence of a repeating series that falls inside it, each at its ' +
         'actual date and time; a moved occurrence says when it originally was. Without a window it lists ' +
         'each stored event once, a series at its first occurrence with its repeat rule — use a window to ' +
         'answer "what is on day X". Each entry has its title, time (dates only for all-day events), ' +
         'location, reminders, organizer (marked "(you)" when it is the user), attendees with their ' +
-        'response status for that occurrence, uid, and for an occurrence its recurrenceId. Pass the uid ' +
+        'response status for that occurrence, uid, and for an occurrence its recurrenceId and the rule of the ' +
+        'series it belongs to (repeats). Pass the uid ' +
         '(and recurrenceId, to touch one occurrence only) to update_calendar_event or ' +
         'delete_calendar_event; the returned attendee list is the current membership those tools edit, ' +
         'so read it here before removing or adding attendees rather than guessing. Defaults to the ' +
