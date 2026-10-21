@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { isSeriesOccurrence, recurrenceSchema, startContradictsRule, toRRule } from './recurrence.ts'
+import { isSeriesOccurrence, recurrenceSchema, seriesOccurrences, startContradictsRule, toRRule } from './recurrence.ts'
 
 describe('recurrenceSchema', () => {
   test('accepts a raw RRULE string', () => {
@@ -235,5 +235,39 @@ describe('startContradictsRule', () => {
     const crossesMidnight = new Date('2026-06-16T02:00:00Z')
     expect(startContradictsRule('FREQ=WEEKLY;BYDAY=MO', crossesMidnight, 'Pacific/Honolulu')).toBe(false)
     expect(startContradictsRule('FREQ=WEEKLY;BYDAY=TU', crossesMidnight, 'Pacific/Honolulu')).toBe(true)
+  })
+})
+
+describe('seriesOccurrences', () => {
+  test('expands a zoned series on its wall clock across a DST change', () => {
+    const at = seriesOccurrences(
+      '2026-10-20T16:00:00',
+      'FREQ=WEEKLY;BYDAY=TU',
+      new Date('2026-10-20T00:00:00Z'),
+      new Date('2026-10-28T00:00:00Z'),
+      'Europe/Berlin'
+    )
+    expect(at.map((d) => d.toISOString())).toEqual(['2026-10-20T14:00:00.000Z', '2026-10-27T15:00:00.000Z'])
+  })
+
+  test('keeps the last occurrence of a zoned series up to its UTC UNTIL', () => {
+    const at = seriesOccurrences(
+      '2026-10-20T16:00:00',
+      'FREQ=DAILY;UNTIL=20261022T140000Z',
+      new Date('2026-10-01T00:00:00Z'),
+      new Date('2026-11-01T00:00:00Z'),
+      'Europe/Berlin'
+    )
+    expect(at).toHaveLength(3)
+  })
+
+  test('expands a UTC series on instants', () => {
+    const at = seriesOccurrences(
+      '2026-10-01T09:00:00Z',
+      'FREQ=DAILY;COUNT=3',
+      new Date('2026-10-02T00:00:00Z'),
+      new Date('2026-10-10T00:00:00Z')
+    )
+    expect(at.map((d) => d.toISOString())).toEqual(['2026-10-02T09:00:00.000Z', '2026-10-03T09:00:00.000Z'])
   })
 })

@@ -256,3 +256,175 @@ describe('listCalendarEvents — all-day events and reminders', () => {
     expect(await list([absolute])).toContain('reminder: at 2026-10-02T09:00:00Z')
   })
 })
+
+// A weekly Tuesday 16:00 Berlin series from 2026-09-29: the occurrence of
+// 2026-10-20 moved to Thursday 2026-10-22, and the one of 2026-10-27 answered
+// by the attendee alone — an override with no SUMMARY or DTSTART of its own.
+const weeklySync: CalendarObject = {
+  data: [
+    'BEGIN:VCALENDAR',
+    'BEGIN:VEVENT',
+    'UID:weekly@langmail.me',
+    'SUMMARY:Weekly sync',
+    'DTSTART;TZID=Europe/Berlin:20260929T160000',
+    'DTEND;TZID=Europe/Berlin:20260929T164500',
+    'RRULE:FREQ=WEEKLY;BYDAY=TU',
+    'EXDATE;TZID=Europe/Berlin:20261013T160000',
+    'ORGANIZER:mailto:host@langmail.me',
+    'ATTENDEE;PARTSTAT=ACCEPTED:mailto:host@langmail.me',
+    'ATTENDEE:mailto:robin@example.com',
+    'END:VEVENT',
+    'BEGIN:VEVENT',
+    'UID:weekly@langmail.me',
+    'RECURRENCE-ID;TZID=Europe/Berlin:20261020T160000',
+    'SUMMARY:Weekly sync',
+    'DTSTART;TZID=Europe/Berlin:20261022T160000',
+    'DTEND;TZID=Europe/Berlin:20261022T164500',
+    'ORGANIZER:mailto:host@langmail.me',
+    'ATTENDEE:mailto:host@langmail.me',
+    'ATTENDEE;PARTSTAT=ACCEPTED:mailto:robin@example.com',
+    'END:VEVENT',
+    'BEGIN:VEVENT',
+    'UID:weekly@langmail.me',
+    'RECURRENCE-ID;TZID=Europe/Berlin:20261027T160000',
+    'ATTENDEE;PARTSTAT=DECLINED:mailto:robin@example.com',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n'),
+  url: `${CAL}weekly.ics`,
+}
+
+const listWindow = async (objects: CalendarObject[], start: string, end: string): Promise<string> =>
+  (await listCalendarEvents(makeDeps(account(), objects), { args: { end, start }, token: 'tok' })).content[0]?.text ??
+  ''
+
+describe('listCalendarEvents — occurrences in a window', () => {
+  test('lists a series’ occurrence on the requested day at its own time, not the series start', async () => {
+    const txt = await listWindow([weeklySync], '2026-10-06T00:00:00+02:00', '2026-10-07T00:00:00+02:00')
+    expect(txt).toContain('1 event(s) between')
+    expect(txt).toContain('when: 2026-10-06T16:00:00 → 2026-10-06T16:45:00 (Europe/Berlin)')
+    expect(txt).toContain('repeats: FREQ=WEEKLY;BYDAY=TU')
+    expect(txt).toContain('recurrenceId: 2026-10-06T14:00:00Z')
+    expect(txt).not.toContain('2026-09-29')
+  })
+
+  test('a moved occurrence is listed on its new day with its original start, and not on the old one', async () => {
+    const tuesday = await listWindow([weeklySync], '2026-10-20T00:00:00+02:00', '2026-10-21T00:00:00+02:00')
+    expect(tuesday).toContain('No events between')
+
+    const thursday = await listWindow([weeklySync], '2026-10-22T00:00:00+02:00', '2026-10-23T00:00:00+02:00')
+    expect(thursday).toContain('when: 2026-10-22T16:00:00 → 2026-10-22T16:45:00 (Europe/Berlin)')
+    expect(thursday).toContain('moved from: 2026-10-20T16:00:00 (Europe/Berlin)')
+    expect(thursday).toContain('recurrenceId: 2026-10-20T14:00:00Z')
+    expect(thursday).toContain('attendees: host@langmail.me, robin@example.com (accepted)')
+  })
+
+  test('names the organizer and marks the user', async () => {
+    const txt = await listWindow([weeklySync], '2026-10-22T00:00:00+02:00', '2026-10-23T00:00:00+02:00')
+    expect(txt).toContain('organizer: host@langmail.me (you)')
+  })
+
+  test('an attendee-only override reads its title, time and organizer from the series', async () => {
+    const txt = await listWindow([weeklySync], '2026-10-27T00:00:00+01:00', '2026-10-28T00:00:00+01:00')
+    expect(txt).toContain('1. Weekly sync')
+    // 2026-10-27 is after the DST change: 16:00 Berlin is 15:00 UTC.
+    expect(txt).toContain('when: 2026-10-27T16:00:00 → 2026-10-27T16:45:00 (Europe/Berlin)')
+    expect(txt).toContain('recurrenceId: 2026-10-27T15:00:00Z')
+    expect(txt).toContain('organizer: host@langmail.me (you)')
+    expect(txt).toContain('attendees: robin@example.com (declined)')
+    expect(txt).not.toContain('moved from')
+    expect(txt).not.toContain('(no title)')
+  })
+
+  test('skips an excluded occurrence', async () => {
+    const txt = await listWindow([weeklySync], '2026-10-13T00:00:00+02:00', '2026-10-14T00:00:00+02:00')
+    expect(txt).toContain('No events between')
+  })
+
+  test('a week lists each occurrence once, sorted, and leaves out the rest of the series', async () => {
+    const lunch = event('lunch@langmail.me', 'Lunch', '2026-10-19T10:00:00Z', '2026-10-19T11:00:00Z')
+    const outside = event('outside@langmail.me', 'Outside', '2026-10-30T10:00:00Z', '2026-10-30T11:00:00Z')
+    const txt = await listWindow([weeklySync, outside, lunch], '2026-10-19T00:00:00+02:00', '2026-10-26T00:00:00+01:00')
+    expect(txt).toContain('2 event(s) between')
+    expect(txt.indexOf('Lunch')).toBeLessThan(txt.indexOf('Weekly sync'))
+    expect(txt).not.toContain('Outside')
+  })
+
+  test('an occurrence that started before the window but runs into it is listed', async () => {
+    const txt = await listWindow([weeklySync], '2026-10-06T16:30:00+02:00', '2026-10-06T18:00:00+02:00')
+    expect(txt).toContain('when: 2026-10-06T16:00:00 → 2026-10-06T16:45:00 (Europe/Berlin)')
+  })
+
+  test('expands a UTC series and an all-day series', async () => {
+    const standup: CalendarObject = {
+      data: buildInvite({
+        attendees: [],
+        end: new Date('2026-10-01T09:15:00Z'),
+        rrule: 'FREQ=DAILY',
+        start: new Date('2026-10-01T09:00:00Z'),
+        timeZone: 'UTC',
+        title: 'Standup',
+        uid: 'standup@langmail.me',
+      }),
+      url: `${CAL}standup.ics`,
+    }
+    const gym: CalendarObject = {
+      data: buildInvite({
+        allDay: true,
+        attendees: [],
+        end: new Date('2026-10-02T00:00:00Z'),
+        rrule: 'FREQ=WEEKLY',
+        start: new Date('2026-10-01T00:00:00Z'),
+        title: 'Gym day',
+        uid: 'gym@langmail.me',
+      }),
+      url: `${CAL}gym.ics`,
+    }
+    const txt = await listWindow([standup, gym], '2026-10-22T00:00:00+02:00', '2026-10-23T00:00:00+02:00')
+    expect(txt).toContain('when: 2026-10-22T09:00:00Z → 2026-10-22T09:15:00Z')
+    expect(txt).toContain('recurrenceId: 2026-10-22T09:00:00Z')
+    expect(txt).toContain('when: 2026-10-22 → 2026-10-23 (all day; end date exclusive)')
+    expect(txt).toContain('recurrenceId: 2026-10-22\n')
+    expect(txt).not.toContain('2026-10-21')
+    // The all-day entry sorts first: it starts at the caller's midnight.
+    expect(txt.indexOf('Gym day')).toBeLessThan(txt.indexOf('Standup'))
+  })
+
+  test('caps a long listing and says how to narrow it', async () => {
+    const standup: CalendarObject = {
+      data: buildInvite({
+        attendees: [],
+        end: new Date('2026-01-01T09:15:00Z'),
+        rrule: 'FREQ=DAILY',
+        start: new Date('2026-01-01T09:00:00Z'),
+        timeZone: 'UTC',
+        title: 'Standup',
+        uid: 'standup@langmail.me',
+      }),
+      url: `${CAL}standup.ics`,
+    }
+    const txt = await listWindow([standup], '2026-01-01T00:00:00Z', '2027-01-01T00:00:00Z')
+    expect(txt).toContain('365 event(s) between')
+    expect(txt).toContain('Showing the first 200. Narrow start/end to see the rest.')
+  })
+})
+
+describe('listCalendarEvents — without a window', () => {
+  test('lists the series once and each override completed from it, with its original start', async () => {
+    const txt = (await listCalendarEvents(makeDeps(account(), [weeklySync]), { args: {}, token: 'tok' })).content[0]
+      ?.text
+    expect(txt).toContain('3 event(s), each series once at its first occurrence')
+    expect(txt).toContain('when: 2026-09-29T16:00:00 → 2026-09-29T16:45:00 (Europe/Berlin)')
+    expect(txt).toContain('moved from: 2026-10-20T16:00:00 (Europe/Berlin)')
+    expect(txt).not.toContain('(no title)')
+  })
+
+  test('does not mark an organizer who is someone else', async () => {
+    const other = {
+      ...weeklySync,
+      data: weeklySync.data.replaceAll('ORGANIZER:mailto:host@', 'ORGANIZER:mailto:boss@'),
+    }
+    const txt = (await listCalendarEvents(makeDeps(account(), [other]), { args: {}, token: 'tok' })).content[0]?.text
+    expect(txt).toContain('organizer: boss@langmail.me\n')
+  })
+})

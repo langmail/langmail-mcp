@@ -265,6 +265,35 @@ export const isSeriesOccurrence = (
   return rrulestr(`DTSTART:${toIcalFloating(masterStart)}\nRRULE:${rule}`).between(at, at, true).length > 0
 }
 
+// A day either side of the wall-clock bounds a zoned expansion reads: more than
+// any zone's offset change, so a DST shift can't push an occurrence out of the
+// expanded range before the instant filter decides on it.
+const WALL_CLOCK_MARGIN_MS = 86_400_000
+
+// The original starts of the occurrences `rrule` generates from `masterStart`
+// within [from, to], as instants — list_calendar_events' agenda. Read the same
+// two ways as isSeriesOccurrence: a UTC (or all-day) series expands on
+// instants, a zoned one on its floating wall clock, each result resolved back to
+// the instant that wall clock names in `timeZone`.
+export const seriesOccurrences = (
+  masterStart: string,
+  rrule: string,
+  from: Date,
+  to: Date,
+  timeZone?: string
+): Date[] => {
+  if (!timeZone) {
+    return rrulestr(`DTSTART:${toIcalUtc(masterStart)}\nRRULE:${rrule}`).between(from, to, true)
+  }
+  const { rule, until } = splitUtcUntil(rrule)
+  const wallFrom = new Date(Date.parse(`${toWallClockIso(from, timeZone)}Z`) - WALL_CLOCK_MARGIN_MS)
+  const wallTo = new Date(Date.parse(`${toWallClockIso(to, timeZone)}Z`) + WALL_CLOCK_MARGIN_MS)
+  return rrulestr(`DTSTART:${toIcalFloating(masterStart)}\nRRULE:${rule}`)
+    .between(wallFrom, wallTo, true)
+    .map((wall) => new Date(parseWallClockInZone(wall.toISOString().slice(0, 19), timeZone).getTime()))
+    .filter((at) => at >= from && at <= to && !(until && at > until))
+}
+
 // The occurrence a caller's `recurrenceId` names, as an ISO instant, for the
 // series `master` heads. An all-day series' occurrences start at a date, so it
 // takes the date (`2026-06-23`), resolved to its UTC midnight — the instant the
