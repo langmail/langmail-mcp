@@ -522,7 +522,28 @@ describe('listCalendarEvents — occurrence ids', () => {
     }
     const txt = await listWindow([object], '2026-10-19T00:00:00Z', '2026-10-20T00:00:00Z')
     expect(txt).toContain('when: 2026-10-19T09:00:00Z → 2026-10-19T10:00:00Z')
+    expect(txt).toContain('moved from: 2026-10-19\n')
     expect(txt).toContain('recurrenceId: 2026-10-19\n')
+  })
+
+  test('a minutely series is listed as stored rather than walked', async () => {
+    const object: CalendarObject = {
+      data: [
+        'BEGIN:VCALENDAR',
+        'BEGIN:VEVENT',
+        'UID:ping@langmail.me',
+        'SUMMARY:Ping',
+        'DTSTART:20200101T000000Z',
+        'DTEND:20200101T000100Z',
+        'RRULE:FREQ=MINUTELY',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n'),
+      url: `${CAL}ping.ics`,
+    }
+    const txt = await listWindow([object], '2026-10-19T00:00:00Z', '2026-10-20T00:00:00Z')
+    expect(txt).toContain('1 event(s) between')
+    expect(txt).toContain('could not be expanded')
   })
 
   test('a series in a non-IANA zone is not expanded into ids update/delete would refuse', async () => {

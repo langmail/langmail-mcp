@@ -25,6 +25,12 @@ const DAY_MS = 86_400_000
 // `FREQ=MINUTELY` series over a long window costs; the tool shows fewer still.
 const MAX_GENERATED = 1000
 
+// rrule walks every occurrence from DTSTART to the window one by one (the
+// `between` iterator only sees those inside it), so a seconds- or minutes-long
+// rule that started long ago would block the event loop. Such a series is
+// listed as stored instead.
+const SUB_DAILY_RE = /(?:^|;)FREQ=(?:SECONDLY|MINUTELY)(?:;|$)/iu
+
 // One listed event or occurrence. `event` carries this entry's own times; for
 // an occurrence of a series it also carries the series' rule (`recurrence`) and
 // the occurrence's original start (`recurrenceId`), which is how
@@ -39,8 +45,8 @@ export interface AgendaEntry {
   seriesAllDay?: true
   // Sort key: the entry's start as epoch ms.
   startMs: number
-  // A series whose repeat rule could not be expanded, listed as stored so it
-  // isn't silently missing from the window.
+  // A series that could not be expanded into its occurrences, listed as stored
+  // so it isn't silently missing from the window.
   unexpanded?: true
 }
 
@@ -168,8 +174,9 @@ const overrideEntry = (override: ParsedEvent, master: ParsedEvent | undefined): 
   const originalMs = event.recurrenceId ? Date.parse(event.recurrenceId) : startMs
   const entry: AgendaEntry = { event, startMs, ...((master ?? override).allDay ? { seriesAllDay: true } : {}) }
   if (!Number.isNaN(startMs) && originalMs !== startMs) {
-    // In the occurrence's own form, so the zone `when:` names reads right for it too.
-    entry.movedFrom = display(new Date(originalMs), form)
+    // In the occurrence's own form, so the zone `when:` names reads right for it
+    // too — except on an all-day series, whose original slot is a date.
+    entry.movedFrom = display(new Date(originalMs), entry.seriesAllDay ? { kind: 'allDay' } : form)
   }
   return entry
 }
@@ -282,8 +289,9 @@ const seriesInWindow = ({ master, others, overrides }: Series, window: AgendaWin
   // A component in `others` replaces an occurrence we can't name, so expanding
   // the rule would list that occurrence a second time at its old time. A zone
   // that isn't IANA can't be expanded honestly either: its occurrences would get
-  // recurrenceIds that update/delete_calendar_event refuse (seriesTimeZone).
-  if (others.length > 0 || (master.startTzid && !isValidTimeZone(master.startTzid))) {
+  // recurrenceIds that update/delete_calendar_event refuse (seriesTimeZone). A
+  // sub-daily rule is too costly to walk (SUB_DAILY_RE).
+  if (others.length > 0 || SUB_DAILY_RE.test(rule) || (master.startTzid && !isValidTimeZone(master.startTzid))) {
     return [{ ...plainEntry(master), unexpanded: true }, ...replaced]
   }
   const overridden = new Set(overrides.map((o) => Date.parse(o.recurrenceId ?? '')))

@@ -97,7 +97,11 @@ const formatEvent = (idx: number, entry: AgendaEntry, self: string | null): stri
     lines.push(`   repeats: ${ev.recurrence}`)
   }
   if (entry.unexpanded) {
-    lines.push('   note: this repeat rule could not be expanded; the time shown is the series’ first occurrence')
+    lines.push(
+      '   note: this series could not be expanded into its occurrences (its rule, time zone or a changed ' +
+        'occurrence could not be read), so it is shown as stored at its first occurrence; whether it occurs ' +
+        'inside the window is unknown'
+    )
   }
   if (ev.recurrenceId) {
     lines.push(`   recurrenceId: ${formatRecurrenceId(entry, ev.recurrenceId)}`)
@@ -169,7 +173,7 @@ export const listCalendarEvents = async (
   const lines = shown.map((entry, i) => formatEvent(i + 1, entry, account.organizer))
   const heading = window
     ? `${entries.length} event(s) between ${args.start} and ${args.end}, each occurrence of a series at its own time:`
-    : `${entries.length} event(s) as stored: each series once at its first occurrence, followed by its changed occurrences (same uid, with a recurrenceId):`
+    : `${entries.length} event(s) as stored: each series once at its first occurrence, plus one entry per changed occurrence (same uid, with a recurrenceId):`
   const truncated =
     entries.length > MAX_ENTRIES
       ? `\n\nShowing the first ${MAX_ENTRIES}. ${window ? 'Narrow start/end to see the rest.' : 'Pass a start/end window to narrow this to a range.'}`

@@ -274,11 +274,11 @@ describe('seriesOccurrences', () => {
     expect(at.map((d) => d.toISOString())).toEqual(['2026-10-02T09:00:00.000Z', '2026-10-03T09:00:00.000Z'])
   })
 
-  test('stops after the limit instead of walking the whole range', () => {
+  test('returns at most `limit` occurrences from the range', () => {
     const at = seriesOccurrences(
       '2026-01-01T00:00:00Z',
-      'FREQ=SECONDLY',
-      new Date('2026-01-01T00:00:00Z'),
+      'FREQ=DAILY',
+      new Date('2026-06-01T00:00:00Z'),
       new Date('2027-01-01T00:00:00Z'),
       5
     )
