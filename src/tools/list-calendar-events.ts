@@ -70,8 +70,8 @@ const formatWhen = (ev: ParsedEvent): string => {
 // `2026-10-20T14:00:00.000Z` → `2026-10-20T14:00:00Z`, or the date for an
 // all-day series: the form update_calendar_event and delete_calendar_event take.
 const MILLIS_RE = /\.000Z$/u
-const formatRecurrenceId = (ev: ParsedEvent, recurrenceId: string): string =>
-  ev.allDay ? recurrenceId.slice(0, 10) : recurrenceId.replace(MILLIS_RE, 'Z')
+const formatRecurrenceId = (entry: AgendaEntry, recurrenceId: string): string =>
+  entry.seriesAllDay ? recurrenceId.slice(0, 10) : recurrenceId.replace(MILLIS_RE, 'Z')
 
 // The original start a moved occurrence left, in the same form as `when:`.
 const formatMovedFrom = (ev: ParsedEvent, movedFrom: string): string =>
@@ -100,7 +100,7 @@ const formatEvent = (idx: number, entry: AgendaEntry, self: string | null): stri
     lines.push('   note: this repeat rule could not be expanded; the time shown is the series’ first occurrence')
   }
   if (ev.recurrenceId) {
-    lines.push(`   recurrenceId: ${formatRecurrenceId(ev, ev.recurrenceId)}`)
+    lines.push(`   recurrenceId: ${formatRecurrenceId(entry, ev.recurrenceId)}`)
   }
   const alarms = ev.alarms ?? []
   if (alarms.length > 0) {
@@ -169,7 +169,7 @@ export const listCalendarEvents = async (
   const lines = shown.map((entry, i) => formatEvent(i + 1, entry, account.organizer))
   const heading = window
     ? `${entries.length} event(s) between ${args.start} and ${args.end}, each occurrence of a series at its own time:`
-    : `${entries.length} event(s), each series once at its first occurrence:`
+    : `${entries.length} event(s) as stored: each series once at its first occurrence, followed by its changed occurrences (same uid, with a recurrenceId):`
   const truncated =
     entries.length > MAX_ENTRIES
       ? `\n\nShowing the first ${MAX_ENTRIES}. ${window ? 'Narrow start/end to see the rest.' : 'Pass a start/end window to narrow this to a range.'}`

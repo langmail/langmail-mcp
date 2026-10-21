@@ -34,6 +34,9 @@ export interface AgendaEntry {
   // The occurrence's original start, in the event's own form, when it was moved
   // away from it.
   movedFrom?: string
+  // True when the series is all-day, so the occurrence is addressed by its date
+  // even after an override moved it to a clock time (or the other way round).
+  seriesAllDay?: true
   // Sort key: the entry's start as epoch ms.
   startMs: number
   // A series whose repeat rule could not be expanded, listed as stored so it
@@ -163,7 +166,7 @@ const overrideEntry = (override: ParsedEvent, master: ParsedEvent | undefined): 
   const form = timeForm(event)
   const startMs = instantOf(event.start, form)
   const originalMs = event.recurrenceId ? Date.parse(event.recurrenceId) : startMs
-  const entry: AgendaEntry = { event, startMs }
+  const entry: AgendaEntry = { event, startMs, ...((master ?? override).allDay ? { seriesAllDay: true } : {}) }
   if (!Number.isNaN(startMs) && originalMs !== startMs) {
     // In the occurrence's own form, so the zone `when:` names reads right for it too.
     entry.movedFrom = display(new Date(originalMs), form)
@@ -265,6 +268,7 @@ const generatedEntries = (
           start: display(at, form),
         },
         startMs: at.getTime(),
+        ...(master.allDay ? { seriesAllDay: true as const } : {}),
       }
     })
 }
@@ -276,8 +280,10 @@ const seriesInWindow = ({ master, others, overrides }: Series, window: AgendaWin
     return [...(master ? [plainEntry(master)] : []), ...replaced]
   }
   // A component in `others` replaces an occurrence we can't name, so expanding
-  // the rule would list that occurrence a second time at its old time.
-  if (others.length > 0) {
+  // the rule would list that occurrence a second time at its old time. A zone
+  // that isn't IANA can't be expanded honestly either: its occurrences would get
+  // recurrenceIds that update/delete_calendar_event refuse (seriesTimeZone).
+  if (others.length > 0 || (master.startTzid && !isValidTimeZone(master.startTzid))) {
     return [{ ...plainEntry(master), unexpanded: true }, ...replaced]
   }
   const overridden = new Set(overrides.map((o) => Date.parse(o.recurrenceId ?? '')))

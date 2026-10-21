@@ -481,7 +481,7 @@ describe('listCalendarEvents — without a window', () => {
   test('lists the series once and each override completed from it, with its original start', async () => {
     const txt = (await listCalendarEvents(makeDeps(account(), [weeklySync]), { args: {}, token: 'tok' })).content[0]
       ?.text
-    expect(txt).toContain('3 event(s), each series once at its first occurrence')
+    expect(txt).toContain('3 event(s) as stored: each series once at its first occurrence')
     expect(txt).toContain('when: 2026-09-29T16:00:00 → 2026-09-29T16:45:00 (Europe/Berlin)')
     expect(txt).toContain('moved from: 2026-10-20T16:00:00 (Europe/Berlin)')
     expect(txt).not.toContain('(no title)')
@@ -494,5 +494,54 @@ describe('listCalendarEvents — without a window', () => {
     }
     const txt = (await listCalendarEvents(makeDeps(account(), [other]), { args: {}, token: 'tok' })).content[0]?.text
     expect(txt).toContain('organizer: boss@example.com\n')
+  })
+})
+
+describe('listCalendarEvents — occurrence ids', () => {
+  test('an all-day series’ occurrence moved to a clock time keeps a date recurrenceId', async () => {
+    const object: CalendarObject = {
+      data: [
+        'BEGIN:VCALENDAR',
+        'BEGIN:VEVENT',
+        'UID:review@langmail.me',
+        'SUMMARY:Review day',
+        'DTSTART;VALUE=DATE:20261005',
+        'DTEND;VALUE=DATE:20261006',
+        'RRULE:FREQ=WEEKLY',
+        'END:VEVENT',
+        'BEGIN:VEVENT',
+        'UID:review@langmail.me',
+        'RECURRENCE-ID;VALUE=DATE:20261019',
+        'SUMMARY:Review day',
+        'DTSTART:20261019T090000Z',
+        'DTEND:20261019T100000Z',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n'),
+      url: `${CAL}review.ics`,
+    }
+    const txt = await listWindow([object], '2026-10-19T00:00:00Z', '2026-10-20T00:00:00Z')
+    expect(txt).toContain('when: 2026-10-19T09:00:00Z → 2026-10-19T10:00:00Z')
+    expect(txt).toContain('recurrenceId: 2026-10-19\n')
+  })
+
+  test('a series in a non-IANA zone is not expanded into ids update/delete would refuse', async () => {
+    const object: CalendarObject = {
+      data: [
+        'BEGIN:VCALENDAR',
+        'BEGIN:VEVENT',
+        'UID:vendor@example.com',
+        'SUMMARY:Vendor sync',
+        'DTSTART;TZID=W. Europe Standard Time:20261005T100000',
+        'DTEND;TZID=W. Europe Standard Time:20261005T110000',
+        'RRULE:FREQ=WEEKLY',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n'),
+      url: `${CAL}vendor.ics`,
+    }
+    const txt = await listWindow([object], '2026-10-19T00:00:00Z', '2026-10-20T00:00:00Z')
+    expect(txt).toContain('could not be expanded')
+    expect(txt).not.toContain('recurrenceId:')
   })
 })
