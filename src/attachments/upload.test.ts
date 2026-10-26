@@ -81,6 +81,41 @@ describe('attachment upload', () => {
     expect(JSON.stringify(body)).not.toContain('stalwart-tok')
   })
 
+  test('a body sent in several chunks is stored byte for byte', async () => {
+    const { token, upload } = setup()
+    const chunks = [new Uint8Array([1, 2, 3]), new Uint8Array([4, 5]), new Uint8Array([6, 7, 8, 9])]
+    const stream = new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        for (const chunk of chunks) {
+          controller.enqueue(chunk)
+        }
+        controller.close()
+      },
+    })
+    const f = stalwartAccepts()
+    const res = await withFetch(f, () => upload(token, put(stream)))
+    expect(res.status).toBe(200)
+    expect(new Uint8Array(f.mock.calls[0]?.[1]?.body as Uint8Array)).toEqual(
+      new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9])
+    )
+  })
+
+  test('a client that drops mid-upload gets a 400, not a server error', async () => {
+    const { token, upload } = setup()
+    const stream = new ReadableStream<Uint8Array>({
+      pull: (controller) => {
+        controller.error(new Error('connection reset'))
+      },
+    })
+    const f = stalwartAccepts()
+    const res = await withFetch(f, () => upload(token, put(stream)))
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { error: string; message: string }
+    expect(body.error).toBe('incomplete')
+    expect(body.message).toContain('now used')
+    expect(f).not.toHaveBeenCalled()
+  })
+
   test('a URL is single use', async () => {
     const { token, upload } = setup()
     const f = stalwartAccepts()
@@ -95,7 +130,7 @@ describe('attachment upload', () => {
     const f = stalwartAccepts()
     const res = await withFetch(f, () => upload('garbage', put('a')))
     expect(res.status).toBe(404)
-    expect(((await res.json()) as { message: string }).message).toContain('request_attachment_upload')
+    expect(((await res.json()) as { message: string }).message).toContain('upload_attachment')
     expect(f).not.toHaveBeenCalled()
   })
 

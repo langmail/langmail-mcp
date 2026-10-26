@@ -26,7 +26,7 @@ export interface HandlerConfig {
   // model as a presigned URL. Absent → the route 404s.
   attachmentDownload?: AttachmentDownload
   // Redeems a minted upload ticket (PUT /attachments/uploads/:token) — the
-  // request_attachment_upload direction. Same credential model; single-use.
+  // upload_attachment direction. Same credential model; single-use.
   // Absent → the route 404s.
   attachmentUpload?: AttachmentUpload
   // Better Auth OIDC issuer, e.g. https://auth.langmail.me/api/auth. The MCP

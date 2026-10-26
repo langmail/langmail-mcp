@@ -51,6 +51,8 @@ import {
   threadMessageFind,
 } from '@langmail/jmap'
 
+import { createAttachmentUpload } from '../attachments/upload.ts'
+import { createUploadTicketStore } from '../attachments/upload-tickets.ts'
 import { MAX_ATTACHMENT_BYTES } from '../drafts/attachments.ts'
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
 import { createSendGuard } from '../drafts/send-guard.ts'
@@ -410,6 +412,58 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
     // The forwarded part is the file that arrived, byte for byte, having made
     // no round trip through this process.
     expect(attachment.bytes).toEqual(contractBytes)
+  })
+
+  // --- a local file, uploaded through the capability URL (issue #850) -------
+
+  test('a file PUT to an upload URL attaches by the blobId the upload returns', async () => {
+    // The route as production wires it, with the Basic credential pinned on
+    // the ticket where a Bearer would be.
+    const uploadTickets = createUploadTicketStore()
+    const upload = createAttachmentUpload(
+      {
+        getSession: () => Promise.resolve({ apiUrl, downloadUrl, primaryAccounts: {}, uploadUrl }),
+        resolveAccountId: () => Promise.resolve(accountId),
+      },
+      uploadTickets
+    )
+    const { token } = uploadTickets.mint({
+      accountId,
+      authorization,
+      filename: 'Bescheid-2025.pdf',
+      type: 'application/pdf',
+    })
+
+    // Streamed in uneven chunks, the way curl -T sends a file from disk.
+    const third = Math.ceil(invoiceBytes.byteLength / 3)
+    const body = new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        for (let offset = 0; offset < invoiceBytes.byteLength; offset += third) {
+          controller.enqueue(invoiceBytes.slice(offset, offset + third))
+        }
+        controller.close()
+      },
+    })
+    const res = await upload(token, new Request('http://mcp.test/attachments/uploads/t', { body, method: 'PUT' }))
+    expect(res.status).toBe(200)
+    const uploaded = (await res.json()) as { blobId: string; size: number }
+    expect(uploaded.size).toBe(invoiceBytes.byteLength)
+
+    const { draftId, emailId } = await stage({
+      attachments: [{ blobId: uploaded.blobId, filename: 'Bescheid-2025.pdf' }],
+      subject: 'Steuerbescheide',
+      text: 'The notice is attached.',
+      to: [CORRESPONDENT],
+    })
+
+    // The person reviewing the draft sees the file before it is sent…
+    const read = await getDraft(deps, { args: getDraftInput.parse({ draftId }), token: TOKEN })
+    expect(read.content[0]?.text).toContain('Bescheid-2025.pdf — application/pdf')
+    // …and it is the file that left the disk, byte for byte.
+    const attachment = await soleAttachment(emailId)
+    expect(attachment.name).toBe('Bescheid-2025.pdf')
+    expect(attachment.type).toBe('application/pdf')
+    expect(attachment.bytes).toEqual(invoiceBytes)
   })
 
   // --- acceptance criterion: get_draft shows what is attached ---------------

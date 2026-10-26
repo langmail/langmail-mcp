@@ -33,13 +33,13 @@ const json = (body: Record<string, unknown>, status: number): Response =>
     status,
   })
 
-const USED_NOW = 'This URL is now used; call request_attachment_upload for a new one.'
+const USED_NOW = 'This URL is now used; call upload_attachment for a new one.'
 
 const notFound = (): Response =>
   json(
     {
       error: 'not_found',
-      message: 'This upload URL is unknown, expired, or already used. Call request_attachment_upload for a new one.',
+      message: 'This upload URL is unknown, expired, or already used. Call upload_attachment for a new one.',
     },
     404
   )
@@ -88,7 +88,22 @@ export const createAttachmentUpload = (live: JmapLive, tickets: UploadTicketStor
     if (!ticket) {
       return notFound()
     }
-    const bytes = req.body ? await readCapped(req.body, MAX_ATTACHMENT_BYTES) : new Uint8Array()
+    let bytes: Uint8Array | null
+    try {
+      bytes = req.body ? await readCapped(req.body, MAX_ATTACHMENT_BYTES) : new Uint8Array()
+    } catch {
+      // The client went away mid-PUT (reset, curl killed). Routine on a flaky
+      // network, so a warn and a plain answer rather than the server's
+      // error-level handler and an error-tracking alert.
+      logger.warn({ status: 400 }, 'attachment upload body incomplete')
+      return json(
+        {
+          error: 'incomplete',
+          message: `The upload was cut off before it finished, so nothing was stored. ${USED_NOW}`,
+        },
+        400
+      )
+    }
     if (!bytes) {
       return tooLarge(true)
     }
@@ -122,7 +137,7 @@ export const createAttachmentUpload = (live: JmapLive, tickets: UploadTicketStor
         {
           error: 'upstream_error',
           message:
-            'The mail server did not accept the file, so nothing was stored. Call request_attachment_upload ' +
+            'The mail server did not accept the file, so nothing was stored. Call upload_attachment ' +
             'for a new URL and try again.',
         },
         502
