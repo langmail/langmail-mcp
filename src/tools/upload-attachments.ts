@@ -87,13 +87,11 @@ export const uploadAttachments = async (
   const isOversized = (f: { sizeBytes?: number | undefined }): boolean =>
     f.sizeBytes !== undefined && f.sizeBytes > MAX_ATTACHMENT_BYTES
   const fitting = args.files.filter((f) => !isOversized(f))
+  const oversized = args.files.filter(isOversized)
   const refusedLine = (): string => {
-    const named = args.files
-      .filter(isOversized)
-      .map((f) => `${f.filename} (${formatSize(f.sizeBytes ?? 0)})`)
-      .join(', ')
+    const named = oversized.map((f) => `${f.filename} (${formatSize(f.sizeBytes ?? 0)})`).join(', ')
     return (
-      `Not uploadable (${args.files.length - fitting.length}): ${named} — over the ${MAX_MB} MB an attachment ` +
+      `Not uploadable (${oversized.length}): ${named} — over the ${MAX_MB} MB an attachment ` +
       'can be. Send it smaller, split it, or link to it instead.'
     )
   }
@@ -113,10 +111,13 @@ export const uploadAttachments = async (
       `  then attach: ${attachEntry('<blobId>', file.filename, type)}`
     )
   })
-  const refused = fitting.length < args.files.length ? `\n\n${refusedLine()}` : ''
+  const refused = oversized.length > 0 ? `\n\n${refusedLine()}` : ''
 
   return textResult(
-    `Upload URL(s), one per file, each single use, up to ${MAX_MB} MB, valid ${UPLOAD_TICKET_TTL_MINUTES} minutes:\n\n` +
+    // The count leads, so a batch with a refused file reads differently from
+    // a clean one before the reader reaches the blocks.
+    `Upload URLs for ${fitting.length} of ${args.files.length} file(s), each single use, up to ${MAX_MB} MB, ` +
+      `valid ${UPLOAD_TICKET_TTL_MINUTES} minutes:\n\n` +
       `${blocks.join('\n\n')}${refused}\n\n` +
       'PUT each file straight from disk with its command. Each response is JSON with that file’s `blobId`. ' +
       'Then pass each file’s `then attach` entry, with its `blobId` filled in, in the `attachments` of ' +

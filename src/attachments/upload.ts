@@ -10,7 +10,7 @@
 // Logging carries only status/size — never tokens or filenames (REVIEW.md: no
 // PII in logs).
 
-import { blobUpload, JmapError, type JmapLive } from '@langmail/jmap'
+import { blobUpload, type JmapLive } from '@langmail/jmap'
 import { logger } from '@langmail/logger'
 
 import { MAX_ATTACHMENT_BYTES } from '../drafts/attachments.ts'
@@ -139,8 +139,10 @@ export const createAttachmentUpload = (live: JmapLive, tickets: UploadTicketStor
       })
     } catch (err) {
       // E.g. the bound bearer expired, or Stalwart's upload quota is spent.
-      const status = err instanceof JmapError ? err.status : 502
-      logger.warn({ ...describeError(err), status }, 'attachment blob upload failed')
+      // `status` is what we answered, as on every other line here; Stalwart's
+      // own status, when it gave one, is `upstreamStatus`.
+      const detail = describeError(err)
+      logger.warn({ ...detail, status: 502, upstreamStatus: detail.status }, 'attachment blob upload failed')
       return json(
         {
           error: 'upstream_error',

@@ -88,6 +88,7 @@ describe('uploadAttachments', () => {
     const txt = result.content[0]?.text ?? ''
     expect(result.isError).toBeUndefined()
     expect(minted.map((m) => m.filename)).toEqual(['small.pdf'])
+    expect(txt.startsWith('Upload URLs for 1 of 2 file(s)')).toBe(true)
     expect(txt).toContain("'<path to small.pdf>'")
     expect(txt).toContain('Not uploadable (1): huge.zip (30.0 MB) — over the 25 MB')
   })

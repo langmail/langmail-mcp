@@ -430,7 +430,9 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
     const { token } = uploadTickets.mint({
       accountId,
       authorization,
-      filename: 'Bescheid-2025.pdf',
+      // No extension to guess from: the media type survives only if the
+      // entry the upload hands back carries it.
+      filename: 'Bescheid-2025',
       type: 'application/pdf',
     })
 
@@ -446,11 +448,12 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
     })
     const res = await upload(token, new Request('http://mcp.test/attachments/uploads/t', { body, method: 'PUT' }))
     expect(res.status).toBe(200)
-    const uploaded = (await res.json()) as { blobId: string; size: number }
+    const uploaded = (await res.json()) as { blobId: string; filename: string; mimeType: string; size: number }
     expect(uploaded.size).toBe(invoiceBytes.byteLength)
 
+    // Attached with exactly the entry the upload response describes.
     const { draftId, emailId } = await stage({
-      attachments: [{ blobId: uploaded.blobId, filename: 'Bescheid-2025.pdf' }],
+      attachments: [{ blobId: uploaded.blobId, filename: uploaded.filename, mimeType: uploaded.mimeType }],
       subject: 'Steuerbescheide',
       text: 'The notice is attached.',
       to: [CORRESPONDENT],
@@ -458,10 +461,10 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
 
     // The person reviewing the draft sees the file before it is sent…
     const read = await getDraft(deps, { args: getDraftInput.parse({ draftId }), token: TOKEN })
-    expect(read.content[0]?.text).toContain('Bescheid-2025.pdf — application/pdf')
+    expect(read.content[0]?.text).toContain('Bescheid-2025 — application/pdf')
     // …and it is the file that left the disk, byte for byte.
     const attachment = await soleAttachment(emailId)
-    expect(attachment.name).toBe('Bescheid-2025.pdf')
+    expect(attachment.name).toBe('Bescheid-2025')
     expect(attachment.type).toBe('application/pdf')
     expect(attachment.bytes).toEqual(invoiceBytes)
   })
