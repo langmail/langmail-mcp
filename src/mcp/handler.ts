@@ -79,7 +79,7 @@ import {
 import { registerUpdateContact } from '../tools/update-contact.ts'
 import { registerUpdateDraft } from '../tools/update-draft.ts'
 import { registerUpdateMailRule } from '../tools/update-mail-rule.ts'
-import { makeLiveDeps as makeUploadAttachmentDeps, registerUploadAttachment } from '../tools/upload-attachment.ts'
+import { makeLiveDeps as makeUploadAttachmentsDeps, registerUploadAttachments } from '../tools/upload-attachments.ts'
 import { instrumentToolLogging } from './tool-logging.ts'
 
 export interface McpHandlerConfig {
@@ -94,7 +94,7 @@ export interface McpHandlerConfig {
   stalwartUrl: string
   // Shared with the /attachments/:token route: the tool mints, the route redeems.
   tickets: TicketStore
-  // Shared with the /attachments/uploads/:token route: upload_attachment
+  // Shared with the /attachments/uploads/:token route: upload_attachments
   // mints, the route redeems.
   uploadTickets: UploadTicketStore
 }
@@ -108,7 +108,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   // JMAP session cache.
   const fileEmailsDeps = makeFileEmailsDeps(jmapLive)
   const downloadAttachmentDeps = makeDownloadAttachmentDeps(jmapLive, cfg.tickets, cfg.publicUrl)
-  const uploadAttachmentDeps = makeUploadAttachmentDeps(jmapLive, cfg.uploadTickets, cfg.publicUrl)
+  const uploadAttachmentsDeps = makeUploadAttachmentsDeps(jmapLive, cfg.uploadTickets, cfg.publicUrl)
   const previewEmailDeps = makePreviewEmailDeps(jmapLive, cfg.tickets, cfg.imageTokens, cfg.publicUrl)
   // CalDAV tools discover against the same Stalwart base; tsdav follows
   // /.well-known/caldav to /dav/cal.
@@ -170,7 +170,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     registerTrashEmails(server, fileEmailsDeps, () => ctx.token)
     registerMarkEmails(server, fileEmailsDeps, () => ctx.token)
     registerDownloadAttachment(server, downloadAttachmentDeps, () => ctx.token)
-    registerUploadAttachment(server, uploadAttachmentDeps, () => ctx.token)
+    registerUploadAttachments(server, uploadAttachmentsDeps, () => ctx.token)
     registerPreviewMailRule(server, mailRuleDeps, () => ctx.token)
     registerCreateMailRule(server, mailRuleDeps, () => ctx.token)
     registerListMailRules(server, mailRuleDeps, () => ctx.token)

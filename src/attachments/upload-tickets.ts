@@ -1,7 +1,7 @@
 // In-memory store of short-lived attachment *upload* tickets — the mirror of
 // tickets.ts for the other direction.
 //
-// upload_attachment mints a ticket binding an unguessable token to
+// upload_attachments mints a ticket binding an unguessable token to
 // (bearer, accountId, filename, type); PUT /attachments/uploads/:token
 // redeems it by streaming the request body into the account's JMAP blob store.
 // As with downloads, the token is the credential and the bearer never reaches

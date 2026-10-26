@@ -14,6 +14,7 @@ import { blobUpload, JmapError, type JmapLive } from '@langmail/jmap'
 import { logger } from '@langmail/logger'
 
 import { MAX_ATTACHMENT_BYTES } from '../drafts/attachments.ts'
+import { describeError } from '../observability/errors.ts'
 import { type UploadTicketStore } from './upload-tickets.ts'
 
 export type AttachmentUpload = (token: string, req: Request) => Promise<Response>
@@ -27,19 +28,26 @@ export const UNREFERENCED_BLOB_TTL_MINUTES = 60
 
 const MAX_MB = MAX_ATTACHMENT_BYTES / (1024 * 1024)
 
+// The `attachments` entry create_draft needs for an uploaded file. `mimeType`
+// rides along because create_draft derives a part's type from the entry, not
+// from the blob: without it, a `scan` uploaded as image/tiff would arrive as
+// application/octet-stream.
+export const attachEntry = (blobId: string, filename: string, mimeType: string): string =>
+  JSON.stringify({ blobId, filename, mimeType })
+
 const json = (body: Record<string, unknown>, status: number): Response =>
   new Response(`${JSON.stringify(body)}\n`, {
     headers: { 'cache-control': 'no-store', 'content-type': 'application/json' },
     status,
   })
 
-const USED_NOW = 'This URL is now used; call upload_attachment for a new one.'
+const USED_NOW = 'This URL is now used; call upload_attachments for a new one.'
 
 const notFound = (): Response =>
   json(
     {
       error: 'not_found',
-      message: 'This upload URL is unknown, expired, or already used. Call upload_attachment for a new one.',
+      message: 'This upload URL is unknown, expired, or already used. Call upload_attachments for a new one.',
     },
     404
   )
@@ -91,11 +99,11 @@ export const createAttachmentUpload = (live: JmapLive, tickets: UploadTicketStor
     let bytes: Uint8Array | null
     try {
       bytes = req.body ? await readCapped(req.body, MAX_ATTACHMENT_BYTES) : new Uint8Array()
-    } catch {
+    } catch (err) {
       // The client went away mid-PUT (reset, curl killed). Routine on a flaky
       // network, so a warn and a plain answer rather than the server's
       // error-level handler and an error-tracking alert.
-      logger.warn({ status: 400 }, 'attachment upload body incomplete')
+      logger.warn({ ...describeError(err), status: 400 }, 'attachment upload body incomplete')
       return json(
         {
           error: 'incomplete',
@@ -132,12 +140,12 @@ export const createAttachmentUpload = (live: JmapLive, tickets: UploadTicketStor
     } catch (err) {
       // E.g. the bound bearer expired, or Stalwart's upload quota is spent.
       const status = err instanceof JmapError ? err.status : 502
-      logger.warn({ status }, 'attachment blob upload failed')
+      logger.warn({ ...describeError(err), status }, 'attachment blob upload failed')
       return json(
         {
           error: 'upstream_error',
           message:
-            'The mail server did not accept the file, so nothing was stored. Call upload_attachment ' +
+            'The mail server did not accept the file, so nothing was stored. Call upload_attachments ' +
             'for a new URL and try again.',
         },
         502
@@ -152,7 +160,7 @@ export const createAttachmentUpload = (live: JmapLive, tickets: UploadTicketStor
         mimeType: ticket.type,
         next:
           `Attach it within ${UNREFERENCED_BLOB_TTL_MINUTES} minutes by passing ` +
-          `{"blobId": "${blobId}", "filename": ${JSON.stringify(ticket.filename)}} in the \`attachments\` of ` +
+          `${attachEntry(blobId, ticket.filename, ticket.type)} in the \`attachments\` of ` +
           'create_draft or update_draft. An upload no draft references by then is discarded.',
         size: bytes.byteLength,
       },

@@ -41,7 +41,7 @@ const AUTH_ISSUER = `${AUTH_URL}/api/auth`
 // One JMAP session cache + one ticket store shared between the MCP tool
 // surface (download_attachment mints) and the plain-HTTP download route
 // (GET /attachments/:token redeems); the upload ticket store does the same
-// for upload_attachment and PUT /attachments/uploads/:token. The
+// for upload_attachments and PUT /attachments/uploads/:token. The
 // image-proxy store follows the same mint/redeem split for preview_email's
 // remote images.
 const jmapLive = makeJmapLive(STALWART_URL)

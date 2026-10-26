@@ -75,7 +75,7 @@ describe('attachment upload', () => {
       mimeType: 'application/pdf',
       size: pdf.byteLength,
     })
-    expect(body.next).toContain('{"blobId": "Gblob1", "filename": "Bescheid 2025.pdf"}')
+    expect(body.next).toContain('{"blobId":"Gblob1","filename":"Bescheid 2025.pdf","mimeType":"application/pdf"}')
     expect(body.next).toContain('60 minutes')
     // Never the bearer.
     expect(JSON.stringify(body)).not.toContain('stalwart-tok')
@@ -130,7 +130,7 @@ describe('attachment upload', () => {
     const f = stalwartAccepts()
     const res = await withFetch(f, () => upload('garbage', put('a')))
     expect(res.status).toBe(404)
-    expect(((await res.json()) as { message: string }).message).toContain('upload_attachment')
+    expect(((await res.json()) as { message: string }).message).toContain('upload_attachments')
     expect(f).not.toHaveBeenCalled()
   })
 

@@ -1,4 +1,4 @@
-// upload_attachment tool — mint short-lived, single-use URLs the agent PUTs
+// upload_attachments tool — mint short-lived, single-use URLs the agent PUTs
 // local files to. The mirror of download_attachment: the bytes go the agent's
 // disk → MCP server → Stalwart's blob store via PUT /attachments/uploads/:token,
 // never through the model context, and each PUT answers with the blobId
@@ -16,7 +16,7 @@ import { z } from 'zod'
 
 import { bearerAuthorization, type JmapLive } from '@langmail/jmap'
 
-import { UNREFERENCED_BLOB_TTL_MINUTES } from '../attachments/upload.ts'
+import { attachEntry, UNREFERENCED_BLOB_TTL_MINUTES } from '../attachments/upload.ts'
 import {
   UPLOAD_TICKET_TTL_MINUTES,
   type UploadTicketInput,
@@ -53,7 +53,7 @@ const fileSchema = z.object({
     .describe(`The file's size in bytes, if you know it — a file over ${MAX_MB} MB is refused before you upload.`),
 })
 
-const uploadAttachmentShape = {
+const uploadAttachmentsShape = {
   files: z
     .array(fileSchema)
     .min(1)
@@ -61,54 +61,65 @@ const uploadAttachmentShape = {
     .describe(`The local files to upload, at most ${MAX_ATTACHMENTS} per call. Each gets its own URL.`),
 }
 
-export const uploadAttachmentInput = z.object(uploadAttachmentShape)
+export const uploadAttachmentsInput = z.object(uploadAttachmentsShape)
 
-export type UploadAttachmentArgs = z.infer<typeof uploadAttachmentInput>
+export type UploadAttachmentsArgs = z.infer<typeof uploadAttachmentsInput>
 
-export interface UploadAttachmentDeps {
+export interface UploadAttachmentsDeps {
   mintUploadTicket: (input: UploadTicketInput) => { expiresAt: number; token: string }
   // Base URL minted links live under, e.g. https://mcp.langmail.me.
   publicUrl: string
   resolveAccountId: (authorization: string) => Promise<string>
 }
 
-export interface UploadAttachmentContext {
-  args: UploadAttachmentArgs
+export interface UploadAttachmentsContext {
+  args: UploadAttachmentsArgs
   token: string
 }
 
-export const uploadAttachment = async (
-  deps: UploadAttachmentDeps,
-  ctx: UploadAttachmentContext
+export const uploadAttachments = async (
+  deps: UploadAttachmentsDeps,
+  ctx: UploadAttachmentsContext
 ): Promise<ToolResult> => {
   const { args, token } = ctx
-  // All or nothing, so the agent never holds URLs for half of what it asked for.
-  const oversized = args.files.filter((f) => f.sizeBytes !== undefined && f.sizeBytes > MAX_ATTACHMENT_BYTES)
-  if (oversized.length > 0) {
-    const named = oversized.map((f) => `${f.filename} (${formatSize(f.sizeBytes ?? 0)})`).join(', ')
-    return errorResult(
-      `Over the ${MAX_MB} MB an attachment can be: ${named}. No upload URL was issued. Send smaller files, ` +
-        'split them, or link to the large one instead.'
+  // Per file, like the other batch tools: an oversized file is named and
+  // skipped, the rest still get URLs. Only a batch where nothing fits is an error.
+  const isOversized = (f: { sizeBytes?: number | undefined }): boolean =>
+    f.sizeBytes !== undefined && f.sizeBytes > MAX_ATTACHMENT_BYTES
+  const fitting = args.files.filter((f) => !isOversized(f))
+  const refusedLine = (): string => {
+    const named = args.files
+      .filter(isOversized)
+      .map((f) => `${f.filename} (${formatSize(f.sizeBytes ?? 0)})`)
+      .join(', ')
+    return (
+      `Not uploadable (${args.files.length - fitting.length}): ${named} — over the ${MAX_MB} MB an attachment ` +
+      'can be. Send it smaller, split it, or link to it instead.'
     )
+  }
+  if (fitting.length === 0) {
+    return errorResult(`${refusedLine()} No upload URL was issued.`)
   }
   const authorization = bearerAuthorization(token)
   const accountId = await deps.resolveAccountId(authorization)
 
-  const blocks = args.files.map((file) => {
+  const blocks = fitting.map((file) => {
     const type = mimeTypeFor({ filename: file.filename, ...(file.mimeType ? { mimeType: file.mimeType } : {}) })
     const minted = deps.mintUploadTicket({ accountId, authorization, filename: file.filename, type })
     const url = `${deps.publicUrl}/attachments/uploads/${minted.token}`
     return (
       `${file.filename} (${type}), expires ${new Date(minted.expiresAt).toISOString()}:\n` +
-      `  curl -sS -T '<path to ${file.filename.replaceAll("'", '')}>' '${url}'`
+      `  curl -sS -T '<path to ${file.filename.replaceAll("'", '')}>' '${url}'\n` +
+      `  then attach: ${attachEntry('<blobId>', file.filename, type)}`
     )
   })
+  const refused = fitting.length < args.files.length ? `\n\n${refusedLine()}` : ''
 
   return textResult(
     `Upload URL(s), one per file, each single use, up to ${MAX_MB} MB, valid ${UPLOAD_TICKET_TTL_MINUTES} minutes:\n\n` +
-      `${blocks.join('\n\n')}\n\n` +
+      `${blocks.join('\n\n')}${refused}\n\n` +
       'PUT each file straight from disk with its command. Each response is JSON with that file’s `blobId`. ' +
-      'Then pass `{"blobId": "<blobId>", "filename": "<filename>"}` for each in the `attachments` of ' +
+      'Then pass each file’s `then attach` entry, with its `blobId` filled in, in the `attachments` of ' +
       `create_draft or update_draft within ${UNREFERENCED_BLOB_TTL_MINUTES} minutes of uploading.\n` +
       'The URLs are credentials: do not show them to the user or paste them anywhere else.'
   )
@@ -120,7 +131,7 @@ export const makeLiveDeps = (
   live: JmapLive,
   uploadTickets: UploadTicketStore,
   publicUrl: string
-): UploadAttachmentDeps => ({
+): UploadAttachmentsDeps => ({
   mintUploadTicket: uploadTickets.mint,
   publicUrl,
   resolveAccountId: live.resolveAccountId,
@@ -128,13 +139,13 @@ export const makeLiveDeps = (
 
 // --- MCP registration ----------------------------------------------------
 
-export const registerUploadAttachment = (
+export const registerUploadAttachments = (
   server: McpServer,
-  deps: UploadAttachmentDeps,
+  deps: UploadAttachmentsDeps,
   getToken: () => string
 ): void => {
   server.registerTool(
-    'upload_attachment',
+    'upload_attachments',
     {
       annotations: ACCOUNT_WRITE,
       description:
@@ -143,16 +154,17 @@ export const registerUploadAttachment = (
         'spreadsheet — instead of reading it as base64 into create_draft’s `content`; use `blobId` ' +
         'straight away instead when the file is already in the mailbox. The result is one URL and curl ' +
         "command per file: PUT the file to it (`curl -sS -T '<file>' '<url>'`), and the response is JSON " +
-        'with a `blobId`. Pass that `blobId` with the `filename` in the `attachments` of create_draft or ' +
-        `update_draft within ${UNREFERENCED_BLOB_TTL_MINUTES} minutes. Up to ${MAX_ATTACHMENTS} files per ` +
-        `call; each URL takes one file of at most ${MAX_MB} MB and expires after ` +
+        'with a `blobId`. Pass that `blobId` with the `filename` and `mimeType` the result lists in the ' +
+        `\`attachments\` of create_draft or update_draft within ${UNREFERENCED_BLOB_TTL_MINUTES} minutes. Up to ` +
+        `${MAX_ATTACHMENTS} files per call; a file over ${MAX_MB} MB is named and skipped while the rest get ` +
+        'URLs. Each URL takes one file and expires after ' +
         `${UPLOAD_TICKET_TTL_MINUTES} minutes. The URLs are credentials: never echo them to the user.`,
-      inputSchema: uploadAttachmentShape,
-      title: 'Upload attachment',
+      inputSchema: uploadAttachmentsShape,
+      title: 'Upload attachments',
     },
     (args) => {
-      const parsed = uploadAttachmentInput.parse(args)
-      return uploadAttachment(deps, { args: parsed, token: getToken() })
+      const parsed = uploadAttachmentsInput.parse(args)
+      return uploadAttachments(deps, { args: parsed, token: getToken() })
     }
   )
 }
