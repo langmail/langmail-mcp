@@ -7,6 +7,7 @@
 import { logger } from '@langmail/logger'
 
 import { type AttachmentDownload } from './attachments/download.ts'
+import { type AttachmentUpload } from './attachments/upload.ts'
 import { type AuthContext, type AuthMiddleware, createAuthMiddleware } from './auth/middleware.ts'
 import { TokenCache } from './auth/token-cache.ts'
 import { type ImageProxy } from './email-render/image-proxy.ts'
@@ -24,6 +25,10 @@ export interface HandlerConfig {
   // required on that route — the unguessable token is the credential, same
   // model as a presigned URL. Absent → the route 404s.
   attachmentDownload?: AttachmentDownload
+  // Redeems a minted upload ticket (PUT /attachments/uploads/:token) — the
+  // request_attachment_upload direction. Same credential model; single-use.
+  // Absent → the route 404s.
+  attachmentUpload?: AttachmentUpload
   // Better Auth OIDC issuer, e.g. https://auth.langmail.me/api/auth. The MCP
   // server advertises Better Auth's oauth2 endpoints (derived from this) as
   // its authorization server and validates every bearer at its userinfo.
@@ -52,9 +57,27 @@ export interface Routes {
   fetch: (req: Request) => Promise<Response>
 }
 
-// Anything but a clean GET of a single token segment is a plain 404 —
-// indistinguishable from an unknown/expired token, on purpose.
-const attachmentsRoute = (req: Request, pathname: string, download?: AttachmentDownload): Promise<Response> => {
+const UPLOADS_PREFIX = '/attachments/uploads/'
+
+// Anything but a clean GET (download) or PUT (upload) of a single token
+// segment is a plain 404 — indistinguishable from an unknown/expired token,
+// on purpose.
+const attachmentsRoute = (
+  req: Request,
+  pathname: string,
+  download?: AttachmentDownload,
+  upload?: AttachmentUpload
+): Promise<Response> => {
+  // Under /attachments/ so nginx's access-log-off block covers the token here
+  // too. A download token is base64url and so never contains a slash, which
+  // keeps the two shapes apart.
+  if (pathname.startsWith(UPLOADS_PREFIX)) {
+    const uploadToken = pathname.slice(UPLOADS_PREFIX.length)
+    if (req.method === 'PUT' && upload && uploadToken && !uploadToken.includes('/')) {
+      return upload(uploadToken, req)
+    }
+    return Promise.resolve(new Response('not found\n', { status: 404 }))
+  }
   const token = pathname.slice('/attachments/'.length)
   if (req.method === 'GET' && download && token && !token.includes('/')) {
     return download(token)
@@ -174,7 +197,7 @@ export const createRoutes = (cfg: HandlerConfig): Routes => {
     }
 
     if (url.pathname.startsWith('/attachments/')) {
-      return attachmentsRoute(req, url.pathname, cfg.attachmentDownload)
+      return attachmentsRoute(req, url.pathname, cfg.attachmentDownload, cfg.attachmentUpload)
     }
 
     if (url.pathname.startsWith('/image-proxy/')) {

@@ -13,13 +13,16 @@
 //     do pass through the model's context, which is why the cap is small and
 //     the tool descriptions say to prefer `blobId`.
 //
+// A file on the agent's own disk reaches the first form too: request_attachment_upload
+// hands out a URL the agent PUTs the file to, and the upload answers with a
+// blobId (attachments/upload.ts), so a 10 MB PDF never passes through the model.
+//
 // There is deliberately no `path`. The MCP server is a remote HTTP service
 // (services/mcp/src/index.ts — there is no stdio transport), so the agent's
 // filesystem and the server's are different machines and a path would either
 // name nothing or, worse, name one of the server's own files. `unnamedEntry`
-// says so in as many words rather than letting the call fail as a shrug: the
-// remedy — read the file, pass the bytes as `content` — is one the agent can
-// act on in the same turn.
+// says so in as many words rather than letting the call fail as a shrug, and
+// names the upload tool as the remedy.
 //
 // Inline parts (`cid`) are not exposed here yet. @langmail/jmap models them
 // (`DraftAttachment.cid`), so an HTML body referencing a generated chart is a
@@ -90,17 +93,18 @@ const attachmentEntrySchema = z.object({
     .min(1)
     .optional()
     .describe(
-      'Re-attach a file that is already in the mailbox, by the blobId search_emails, get_thread, ' +
-        'get_email, or get_draft listed for it. Nothing is transferred — this is how you forward an ' +
-        'attachment you have not downloaded. Prefer this over `content` whenever the file is already here.'
+      'Attach a file already on the server, by the blobId search_emails, get_thread, get_email, or ' +
+        'get_draft listed for it, or the one an upload from request_attachment_upload returned. Nothing ' +
+        'passes through the conversation — this is how you forward an attachment and how you attach a ' +
+        'file from your disk. Prefer this over `content` whenever you can.'
     ),
   content: z
     .string()
     .min(1)
     .optional()
     .describe(
-      'Base64-encoded bytes of a file you generated. Only for files that are not already in the mailbox: ' +
-        'the bytes pass through the conversation, so keep them small and use `blobId` when you can.'
+      'Base64-encoded bytes of a small file you generated. The bytes pass through the conversation, so ' +
+        'for a file on disk use request_attachment_upload and pass the `blobId` it returns instead.'
     ),
   filename: z
     .string()
@@ -109,7 +113,8 @@ const attachmentEntrySchema = z.object({
     .optional()
     .describe(
       'Name the recipient sees, e.g. "invoice-2026-006.pdf". Required with `blobId` — pass the filename ' +
-        'listed beside it, or the forwarded file arrives unnamed. Always worth setting with `content` too.'
+        'listed beside it (or the one you uploaded it as), or the file arrives unnamed. Always worth ' +
+        'setting with `content` too.'
     ),
   mimeType: z
     .string()
@@ -126,9 +131,10 @@ export const attachmentsSchema = z
   .max(MAX_ATTACHMENTS)
   .describe(
     `Files to attach, at most ${MAX_ATTACHMENTS}. Each entry names its file either by \`blobId\` (already in ` +
-      'the mailbox — free, and the way to forward one) or by base64 `content` (a file you just generated); ' +
-      `the \`content\` entries may come to at most ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB between them. ` +
-      'A file path cannot be used: this server runs elsewhere and cannot read your disk.'
+      'the mailbox, or uploaded with request_attachment_upload — nothing passes through the conversation) ' +
+      'or by base64 `content` (a small file you just generated); the `content` entries may come to at most ' +
+      `${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB between them. A file path cannot be used: this server runs ` +
+      'elsewhere and cannot read your disk — upload a local file with request_attachment_upload instead.'
   )
 
 export interface AttachmentUploadDeps {
@@ -158,7 +164,7 @@ const unnamedEntry = (index: number): string =>
   `Attachment ${index + 1} names no file. Give it either \`blobId\` (for a file already in the mailbox — ` +
   'the blobId that search_emails or get_email listed) or `content` (base64 bytes). A file path is not ' +
   'accepted: this MCP server runs on a different machine from you and cannot read your filesystem, so ' +
-  'read the file yourself and pass its bytes as `content`.'
+  'upload the file with request_attachment_upload and pass the `blobId` it returns.'
 
 // Decode one base64 payload, or say why it isn't one. Whitespace is stripped
 // first because a wrapped payload is the normal case, not a malformed one.

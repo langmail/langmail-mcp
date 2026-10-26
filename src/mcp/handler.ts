@@ -15,6 +15,7 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { type JmapLive } from '@langmail/jmap'
 
 import { type TicketStore } from '../attachments/tickets.ts'
+import { type UploadTicketStore } from '../attachments/upload-tickets.ts'
 import { type AuthContext } from '../auth/middleware.ts'
 import { makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
@@ -65,6 +66,10 @@ import { registerMoveEmails } from '../tools/move-emails.ts'
 import { makeLiveDeps as makePreviewEmailDeps, registerPreviewEmail } from '../tools/preview-email.ts'
 import { registerPreviewMailRule } from '../tools/preview-mail-rule.ts'
 import { registerReplyToMessage } from '../tools/reply-to-message.ts'
+import {
+  makeLiveDeps as makeRequestAttachmentUploadDeps,
+  registerRequestAttachmentUpload,
+} from '../tools/request-attachment-upload.ts'
 import { makeLiveDeps as makeRespondToEventDeps, registerRespondToEvent } from '../tools/respond-to-event.ts'
 import { makeLiveDeps as makeSearchContactsDeps, registerSearchContacts } from '../tools/search-contacts.ts'
 import { makeLiveDeps as makeSearchEmailsDeps, registerSearchEmails } from '../tools/search-emails.ts'
@@ -92,6 +97,9 @@ export interface McpHandlerConfig {
   stalwartUrl: string
   // Shared with the /attachments/:token route: the tool mints, the route redeems.
   tickets: TicketStore
+  // Shared with the /attachments/uploads/:token route: request_attachment_upload
+  // mints, the route redeems.
+  uploadTickets: UploadTicketStore
 }
 
 export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: AuthContext) => Promise<Response>) => {
@@ -103,6 +111,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   // JMAP session cache.
   const fileEmailsDeps = makeFileEmailsDeps(jmapLive)
   const downloadAttachmentDeps = makeDownloadAttachmentDeps(jmapLive, cfg.tickets, cfg.publicUrl)
+  const requestAttachmentUploadDeps = makeRequestAttachmentUploadDeps(jmapLive, cfg.uploadTickets, cfg.publicUrl)
   const previewEmailDeps = makePreviewEmailDeps(jmapLive, cfg.tickets, cfg.imageTokens, cfg.publicUrl)
   // CalDAV tools discover against the same Stalwart base; tsdav follows
   // /.well-known/caldav to /dav/cal.
@@ -164,6 +173,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     registerTrashEmails(server, fileEmailsDeps, () => ctx.token)
     registerMarkEmails(server, fileEmailsDeps, () => ctx.token)
     registerDownloadAttachment(server, downloadAttachmentDeps, () => ctx.token)
+    registerRequestAttachmentUpload(server, requestAttachmentUploadDeps, () => ctx.token)
     registerPreviewMailRule(server, mailRuleDeps, () => ctx.token)
     registerCreateMailRule(server, mailRuleDeps, () => ctx.token)
     registerListMailRules(server, mailRuleDeps, () => ctx.token)

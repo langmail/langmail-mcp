@@ -34,7 +34,7 @@ export interface TicketStore {
   mint: (input: TicketInput) => string
 }
 
-const mintToken = (): string => {
+export const mintToken = (): string => {
   const bytes = new Uint8Array(32)
   crypto.getRandomValues(bytes)
   // base64url, unpadded — URL-safe without further encoding.

@@ -4,6 +4,8 @@ import { type JmapLive } from '@langmail/jmap'
 
 import { createAttachmentDownload } from './attachments/download.ts'
 import { createTicketStore } from './attachments/tickets.ts'
+import { createAttachmentUpload } from './attachments/upload.ts'
+import { createUploadTicketStore } from './attachments/upload-tickets.ts'
 import { TokenCache } from './auth/token-cache.ts'
 import { createRoutes } from './handler.ts'
 
@@ -292,5 +294,73 @@ describe('GET /attachments/:token', () => {
     const res = await withFetch(f, () => routes.fetch(new Request(`${PUBLIC}/attachments/${token}`)))
     expect(res.status).toBe(502)
     expect(await res.text()).not.toContain('expired')
+  })
+})
+
+describe('PUT /attachments/uploads/:token', () => {
+  const live: JmapLive = {
+    getSession: () =>
+      Promise.resolve({
+        apiUrl: `${STALWART}/jmap/`,
+        downloadUrl: `${STALWART}/jmap/download/{accountId}/{blobId}/{name}?accept={type}`,
+        primaryAccounts: { 'urn:ietf:params:jmap:mail': 'acct' },
+        uploadUrl: `${STALWART}/jmap/upload/{accountId}/`,
+      }),
+    resolveAccountId: () => Promise.resolve('acct'),
+  }
+
+  const makeUploadRoutes = () => {
+    const tickets = createTicketStore()
+    const uploadTickets = createUploadTicketStore()
+    const routes = createRoutes({
+      attachmentDownload: createAttachmentDownload(live, tickets),
+      attachmentUpload: createAttachmentUpload(live, uploadTickets),
+      authIssuer: AUTH,
+      publicUrl: PUBLIC,
+      stalwartUrl: STALWART,
+    })
+    const { token } = uploadTickets.mint({
+      accountId: 'acct',
+      authorization: 'Bearer stalwart-tok',
+      filename: 'scan.pdf',
+      type: 'application/pdf',
+    })
+    return { routes, token }
+  }
+
+  test('a PUT reaches the upload, no bearer required', async () => {
+    const { routes, token } = makeUploadRoutes()
+    const f = mock(() => Promise.resolve(new Response(JSON.stringify({ blobId: 'Gb' }), { status: 200 })))
+    const res = await withFetch(f, () =>
+      routes.fetch(new Request(`${PUBLIC}/attachments/uploads/${token}`, { body: 'pdf', method: 'PUT' }))
+    )
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { blobId: string }).blobId).toBe('Gb')
+  })
+
+  test('other methods, nested paths and the bare prefix are 404 and never spend the ticket', async () => {
+    const { routes, token } = makeUploadRoutes()
+    const f = mock(() => Promise.resolve(new Response(JSON.stringify({ blobId: 'Gb' }), { status: 200 })))
+    await withFetch(f, async () => {
+      expect((await routes.fetch(new Request(`${PUBLIC}/attachments/uploads/${token}`))).status).toBe(404)
+      expect(
+        (await routes.fetch(new Request(`${PUBLIC}/attachments/uploads/${token}`, { body: 'x', method: 'POST' })))
+          .status
+      ).toBe(404)
+      expect(
+        (await routes.fetch(new Request(`${PUBLIC}/attachments/uploads/${token}/x`, { body: 'x', method: 'PUT' })))
+          .status
+      ).toBe(404)
+      expect(
+        (await routes.fetch(new Request(`${PUBLIC}/attachments/uploads/`, { body: 'x', method: 'PUT' }))).status
+      ).toBe(404)
+      // An upload token is not a download token.
+      expect((await routes.fetch(new Request(`${PUBLIC}/attachments/${token}`))).status).toBe(404)
+      const res = await routes.fetch(
+        new Request(`${PUBLIC}/attachments/uploads/${token}`, { body: 'x', method: 'PUT' })
+      )
+      expect(res.status).toBe(200)
+    })
+    expect(f).toHaveBeenCalledTimes(1)
   })
 })
