@@ -130,7 +130,7 @@ export interface ThreadRecord {
 
 // `role` is the RFC 8621 special-use role (`inbox`, `archive`, `sent`, …);
 // null/absent for user-created mailboxes. It's the stable way to locate the
-// inbox for auto-archive, independent of the localized display name.
+// inbox, independent of the localized display name.
 export interface MailboxRecord {
   id: string
   name: string

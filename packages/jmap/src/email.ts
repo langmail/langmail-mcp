@@ -687,7 +687,7 @@ export interface MailboxIdByRoleParams extends JmapCall {
 }
 
 // Resolve a mailbox by its special-use role — the stable way to find the
-// inbox for auto-archive, independent of the localized display name.
+// inbox, independent of the localized display name.
 export const mailboxIdByRole = async (p: MailboxIdByRoleParams): Promise<string | null> => {
   const wanted = p.role.toLowerCase()
   const hit = (await fetchMailboxes(p)).find((m) => m.role?.toLowerCase() === wanted)
@@ -778,10 +778,7 @@ export interface MailboxCreateParams extends JmapCall {
   role?: string
 }
 
-// Create a mailbox and return its id. The agent uses this to ensure an
-// Archive mailbox exists before an auto-archive move — RFC 8621 requires
-// every email to stay in at least one mailbox, so archiving is add-Archive +
-// remove-Inbox rather than a bare removal.
+// Create a mailbox (optionally with a special-use role) and return its id.
 export const mailboxCreate = async (p: MailboxCreateParams): Promise<string> => {
   const resp = await call(p, {
     methodCalls: [
