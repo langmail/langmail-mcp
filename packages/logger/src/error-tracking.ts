@@ -15,7 +15,7 @@ export function initErrorTracking(serviceName: string): void {
 
   init({
     dsn: dsn || '',
-    sendDefaultPii: false,
+    dataCollection: { userInfo: false, cookies: false, httpHeaders: false },
     environment: environment || 'development',
     enabled: environment === 'production',
     integrations: [
