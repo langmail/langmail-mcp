@@ -137,8 +137,9 @@ describe('initErrorTracking', () => {
   })
 
   test('never sends default PII', () => {
-    expect(initWithEnv({ nodeEnv: 'production' }).sendDefaultPii).toBe(false)
-    expect(initWithEnv({ nodeEnv: 'development' }).sendDefaultPii).toBe(false)
+    const expected = { userInfo: false, cookies: false, httpHeaders: false }
+    expect(initWithEnv({ nodeEnv: 'production' }).dataCollection).toEqual(expected)
+    expect(initWithEnv({ nodeEnv: 'development' }).dataCollection).toEqual(expected)
   })
 
   test('wires node context, context lines and pino integrations', () => {
