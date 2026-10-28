@@ -265,6 +265,19 @@ const acceptExistingInstance = async (p: Principal, uid: string, recurrenceId: s
   return putRaw(p, obj, obj.body.replace(override, `${withPartstat(override, p.addr, 'ACCEPTED')}\r\n`))
 }
 
+// Polls until the organizer's override reaches the attendee's copy. Its own
+// failure tells a slow iTIP delivery apart from an override that arrived and
+// was later lost, which `acceptExistingInstance` would report the same way.
+const attendeeUntilOverride = async (p: Principal, uid: string, recurrenceId: string): Promise<void> => {
+  for (let i = 0; i < 30; i += 1) {
+    if (instanceOf((await loadObject(p, uid)).body, recurrenceId)) {
+      return
+    }
+    await sleep(1000)
+  }
+  throw new Error(`${p.addr} never received the organizer's override for ${recurrenceId}`)
+}
+
 // Polls the organizer's object until `done` holds, or gives up and returns the
 // last state — the defect leaves the second reply unmerged forever.
 const organizerUntil = async (org: Principal, uid: string, done: (ical: string) => boolean): Promise<string> => {
@@ -373,9 +386,7 @@ live('iTIP REPLY for one instance of a recurring series (upstream regression gua
 
     // Wait for the override to reach both attendees' copies.
     for (const att of [attA, attB]) {
-      for (let i = 0; i < 15 && !instanceOf((await loadObject(att, uid)).body, recurrenceId); i += 1) {
-        await sleep(1000)
-      }
+      await attendeeUntilOverride(att, uid, recurrenceId)
     }
 
     expect(await acceptExistingInstance(attA, uid, recurrenceId)).toBe(204)
