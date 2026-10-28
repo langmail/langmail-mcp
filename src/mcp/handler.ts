@@ -80,6 +80,7 @@ import { registerUpdateContact } from '../tools/update-contact.ts'
 import { registerUpdateDraft } from '../tools/update-draft.ts'
 import { registerUpdateMailRule } from '../tools/update-mail-rule.ts'
 import { makeLiveDeps as makeUploadAttachmentsDeps, registerUploadAttachments } from '../tools/upload-attachments.ts'
+import { SERVER_INSTRUCTIONS } from './instructions.ts'
 import { instrumentToolLogging } from './tool-logging.ts'
 
 export interface McpHandlerConfig {
@@ -152,10 +153,13 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   const sendGuard = createSendGuard()
 
   return async (req, ctx) => {
-    const server = new McpServer({
-      name: 'langmail-mcp',
-      version: '0.1.0',
-    })
+    const server = new McpServer(
+      {
+        name: 'langmail-mcp',
+        version: '0.1.0',
+      },
+      { instructions: SERVER_INSTRUCTIONS }
+    )
     // Before any registerTool call — the wrapper only covers later registrations.
     instrumentToolLogging(server)
     registerSearchEmails(server, searchEmailsDeps, () => ctx.token)
