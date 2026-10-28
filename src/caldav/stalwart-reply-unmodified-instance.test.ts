@@ -265,6 +265,46 @@ const acceptExistingInstance = async (p: Principal, uid: string, recurrenceId: s
   return putRaw(p, obj, obj.body.replace(override, `${withPartstat(override, p.addr, 'ACCEPTED')}\r\n`))
 }
 
+interface JmapSession {
+  apiUrl: string
+  primaryAccounts: Record<string, string>
+}
+
+// What a missing iTIP delivery leaves behind. Stalwart 1.0 sends a local
+// attendee the organizer's change as iMIP mail through its queue, and skips
+// iTIP processing for mail it files as spam. So: the attendee's latest mail
+// with its folder and spam verdict, and what the queue still holds.
+const deliveryReport = async (p: Principal): Promise<string> => {
+  const sessionRes = await fetch(`${ADMIN_URL}/jmap/session`, { headers: { authorization: p.basic } })
+  const session = (await sessionRes.json()) as JmapSession
+  const accountId = session.primaryAccounts['urn:ietf:params:jmap:mail']
+  const mailRes = await fetch(session.apiUrl, {
+    body: JSON.stringify({
+      methodCalls: [
+        ['Mailbox/get', { accountId, properties: ['name', 'role'] }, 'm'],
+        ['Email/query', { accountId, limit: 20, sort: [{ isAscending: false, property: 'receivedAt' }] }, 'q'],
+        [
+          'Email/get',
+          {
+            '#ids': { name: 'Email/query', path: '/ids', resultOf: 'q' },
+            accountId,
+            properties: ['subject', 'mailboxIds', 'receivedAt', 'header:X-Spam-Status:asText'],
+          },
+          'g',
+        ],
+      ],
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+    }),
+    headers: { authorization: p.basic, 'content-type': 'application/json' },
+    method: 'POST',
+  })
+  const mail = (await mailRes.json()) as { methodResponses?: unknown[] }
+  const queue = await adminCall('x:QueuedMessage/query', {})
+  const queued = (queue.ids as string[] | undefined) ?? []
+  const held = queued.length ? await adminCall('x:QueuedMessage/get', { ids: queued.slice(0, 10) }) : {}
+  return JSON.stringify({ mail: mail.methodResponses, queue: { held, total: queued.length } })
+}
+
 // Polls until the organizer's override reaches the attendee's copy. Its own
 // failure tells a slow iTIP delivery apart from an override that arrived and
 // was later lost, which `acceptExistingInstance` would report the same way.
@@ -275,7 +315,7 @@ const attendeeUntilOverride = async (p: Principal, uid: string, recurrenceId: st
     }
     await sleep(1000)
   }
-  throw new Error(`${p.addr} never received the organizer's override for ${recurrenceId}`)
+  throw new Error(`${p.addr} never received the organizer's override for ${recurrenceId}: ${await deliveryReport(p)}`)
 }
 
 // Polls the organizer's object until `done` holds, or gives up and returns the
