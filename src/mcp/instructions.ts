@@ -17,7 +17,7 @@ export const SERVER_INSTRUCTIONS = [
   '- Mail: search_emails finds messages; read one with get_email or a whole conversation with get_thread. preview_email shows one to the user as a rendered document (tickets, invoices).',
   '- Calendar: list_calendar_events for what is on the calendar; list_calendars for the calendars themselves.',
   '- Contacts: search_contacts finds people and their addresses; list_upcoming_birthdays for birthdays.',
-  '- Mail rules: list_mail_rules for what is set up; preview_mail_rule before create_mail_rule to check what a rule would match.',
+  '- Mail rules: list_mail_rules for what is set up; preview_mail_rule before create_mail_rule to check what a rule would match. A rule with a forward action redirects future mail to another address, so confirm that address with the user.',
   '',
   'Writing and sending mail:',
   '- create_draft only stages a draft in the Drafts folder; nothing is delivered until send_draft. To stage a reply for the user to review, use create_draft with inReplyTo.',

@@ -6,6 +6,7 @@ import { createTicketStore } from '../attachments/tickets.ts'
 import { createUploadTicketStore } from '../attachments/upload-tickets.ts'
 import { createImageProxyStore } from '../email-render/image-proxy.ts'
 import { createMcpHandler } from './handler.ts'
+import { SERVER_INSTRUCTIONS } from './instructions.ts'
 
 // Claude Code's default cap on upfront server instructions
 // (CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH); anything longer is cut off.
@@ -40,7 +41,13 @@ const rpc = async (method: string, params: Record<string, unknown>): Promise<Rec
   if (!data) {
     throw new Error(`No JSON-RPC response in: ${text}`)
   }
-  const message = JSON.parse(data.slice('data: '.length)) as { result: Record<string, unknown> }
+  const message = JSON.parse(data.slice('data: '.length)) as {
+    error?: { message: string }
+    result?: Record<string, unknown>
+  }
+  if (!message.result) {
+    throw new Error(`${method} failed: ${message.error?.message ?? data}`)
+  }
   return message.result
 }
 
@@ -62,25 +69,31 @@ const registeredTools = async (): Promise<Set<string>> => {
 }
 
 describe('server instructions', () => {
-  test('initialize sends non-empty instructions', async () => {
-    expect((await sentInstructions()).trim().length).toBeGreaterThan(0)
+  // The one round-trip that proves handler.ts ships the constant; the content
+  // checks below then read it directly.
+  test('initialize sends them verbatim', async () => {
+    expect(await sentInstructions()).toBe(SERVER_INSTRUCTIONS)
   })
 
-  test('fit within Claude Code’s upfront cap', async () => {
-    expect((await sentInstructions()).length).toBeLessThanOrEqual(MAX_INSTRUCTIONS_LENGTH)
+  test('are non-empty', () => {
+    expect(SERVER_INSTRUCTIONS.trim().length).toBeGreaterThan(0)
+  })
+
+  test('fit within Claude Code’s upfront cap', () => {
+    expect(SERVER_INSTRUCTIONS.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS_LENGTH)
   })
 
   test('name only registered tools', async () => {
     const tools = await registeredTools()
     // Every tool name is snake_case with at least one underscore; plain prose
     // words are not.
-    const mentioned = new Set((await sentInstructions()).match(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g) ?? [])
+    const mentioned = new Set(SERVER_INSTRUCTIONS.match(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g) ?? [])
 
     expect(mentioned.size).toBeGreaterThan(0)
     expect([...mentioned].filter((name) => !tools.has(name))).toEqual([])
   })
 
-  test('carry the message-content safety line', async () => {
-    expect(await sentInstructions()).toContain(SAFETY_LINE)
+  test('carry the message-content safety line', () => {
+    expect(SERVER_INSTRUCTIONS).toContain(SAFETY_LINE)
   })
 })
