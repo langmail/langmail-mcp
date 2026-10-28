@@ -451,12 +451,16 @@ export const moveEvent = async (cfg: CalDavConfig, p: MoveEventParams): Promise<
   if (status === 201 || status === 204) {
     return { kind: 'moved' }
   }
+  // The UID precondition carries its element in the body; a name collision
+  // answers with an empty one. Stalwart 1.0 sends the UID precondition with
+  // 403 (RFC 4791 §5.3.2.1), 0.16 sent it with 412. davRequest hands back the
+  // raw text for any non-2xx reply, so `raw` is a string here.
+  const body = typeof res?.raw === 'string' ? res.raw : ''
+  if ((status === 403 || status === 412) && NO_UID_CONFLICT_RE.test(body)) {
+    return { kind: 'uidConflict' }
+  }
   if (status === 412) {
-    // The UID precondition carries its element in the body; a name collision
-    // answers with an empty one. davRequest hands back the raw text for any
-    // non-2xx reply, so `raw` is a string here.
-    const body = typeof res?.raw === 'string' ? res.raw : ''
-    return NO_UID_CONFLICT_RE.test(body) ? { kind: 'uidConflict' } : { kind: 'nameConflict' }
+    return { kind: 'nameConflict' }
   }
   if (status === 403) {
     return { kind: 'forbidden' }

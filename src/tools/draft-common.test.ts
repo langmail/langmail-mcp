@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type EmailComposeRecord, type IdentityRecord } from '@langmail/jmap'
+import { type EmailComposeRecord, type EmailDraft, type IdentityRecord, JmapError } from '@langmail/jmap'
 
 import {
   draftFromRecord,
+  draftRefusalReason,
   formatDraft,
   isDraft,
   parseAddress,
@@ -320,5 +321,29 @@ describe('formatDraft', () => {
       'body (html): <p>hi</p>'
     )
     expect(formatDraft({ from: [{ email: 'user@langmail.me' }], text: 'hi' })).toContain('to: (none)')
+  })
+})
+
+describe('draftRefusalReason', () => {
+  const withAttachment: EmailDraft = {
+    attachments: [{ blobId: 'Gstale', name: 'invoice.pdf', type: 'application/pdf' }],
+    from: [{ email: 'nadia@example.org' }],
+  }
+  const refusal = (errorType: string) => new JmapError(200, 'Email/set did not create draft', errorType)
+
+  // Stalwart 1.0 names the cause (blobNotFound); 0.16 answered invalidProperties.
+  test.each(['blobNotFound', 'invalidProperties'])('points a %s refusal of an attachment at the blobId', (type) => {
+    const reason = draftRefusalReason(refusal(type), withAttachment)
+    expect(reason).toContain(`(${type})`)
+    expect(reason).toContain('blobId')
+  })
+
+  test('adds no attachment hint when the draft has no attachments', () => {
+    const reason = draftRefusalReason(refusal('invalidProperties'), { from: withAttachment.from })
+    expect(reason).toBe('The server refused this draft (invalidProperties).')
+  })
+
+  test('is null when the server did not refuse', () => {
+    expect(draftRefusalReason(new Error('socket closed'), withAttachment)).toBeNull()
   })
 })
