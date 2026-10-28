@@ -403,6 +403,12 @@ live('iTIP REPLY for one instance of a recurring series (upstream regression gua
     const day = tuesday(3)
     const recurrenceId = `${day}${START}`
     await putEvent(org.cfg, { calendarUrl: org.defaultUrl, ical: series(uid, org, [attA, attB]), token: TOKEN })
+    // Stalwart queues each iTIP message on its own, so an update sent right
+    // after the invite can arrive first, and the invite then drops it
+    // (docs/upstream/stalwart/itip-invite-after-update-drops-override.md).
+    for (const att of [attA, attB]) {
+      await loadObject(att, uid)
+    }
 
     // The organizer moves the instance two hours later — a full override.
     const orgObj = await loadObject(org, uid)
