@@ -53,6 +53,21 @@ const live = ADMIN_URL ? describe : describe.skip
 
 // Minimal admin JMAP call (x:-prefixed management methods; see
 // services/auth/src/stalwart/admin-client.ts for the full contract).
+// Stalwart 1.0 indexes for search asynchronously: a card turns up in an
+// `email` or text query a moment after it is written. The merge into a
+// personal-book card reads through that index, so the steps that depend on an
+// earlier write wait for it rather than race it.
+const untilIndexed = async <T>(read: () => Promise<T>, settled: (value: T) => boolean): Promise<T> => {
+  for (let i = 0; i < 50; i += 1) {
+    const value = await read()
+    if (settled(value)) {
+      return value
+    }
+    await Bun.sleep(100)
+  }
+  return read()
+}
+
 const adminCall = async (method: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
   const res = await fetch(`${ADMIN_URL}/jmap/`, {
     body: JSON.stringify({
@@ -270,7 +285,10 @@ live('search_contacts against live Stalwart — collect from mail + calendar, th
   test('collection provisioned the Collected book and exactly one card for Robin', async () => {
     const books = await addressBookList(ctx)
     expect(books.map((b) => b.name)).toContain(COLLECTED_BOOK_NAME)
-    const ids = await contactCardQuery({ ...ctx, filter: { email: 'robin@northwind.example' } })
+    const ids = await untilIndexed(
+      () => contactCardQuery({ ...ctx, filter: { email: 'robin@northwind.example' } }),
+      (found) => found.length > 0
+    )
     expect(ids).toHaveLength(1)
     const [card] = await contactCardGet({ ...ctx, ids })
     expect(card?.name?.full).toBe('Robin Fairweather')
@@ -300,6 +318,10 @@ live('search_contacts against live Stalwart — collect from mail + calendar, th
         version: '1.0',
       },
     })
+    await untilIndexed(
+      () => contactCardQuery({ ...ctx, filter: { email: 'plain@example.com' } }),
+      (found) => found.includes(cardId)
+    )
     await collectContacts(
       liveCollectionDeps,
       ctx,

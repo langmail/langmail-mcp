@@ -95,7 +95,7 @@ live('update_calendar_event against live Stalwart — stored ORGANIZER survives 
       create: {
         a1: {
           '@type': 'User',
-          aliases: { 0: { description: 'previous address', domainId, enabled: true, name: aliasPart } },
+          aliases: { 0: { description: 'previous address', domainId, enable: true, name: aliasPart } },
           domainId,
           name: localPart,
           roles: { '@type': 'User' },

@@ -313,9 +313,13 @@ live('filing tools against live Stalwart', () => {
       receivedAt: new Date(run),
       subject: 'Documents for the annual return',
     })
+    // Stalwart 1.0 sets $hasattachment / $hasnoattachment on every message
+    // itself (read-only); they are not ours to assert on.
     const keywordsOf = async (): Promise<Record<string, boolean>> => {
       const [rec] = await emailGet({ accountId, apiUrl, authorization, ids: [id] })
-      return rec?.keywords ?? {}
+      return Object.fromEntries(
+        Object.entries(rec?.keywords ?? {}).filter(([k]) => k !== '$hasattachment' && k !== '$hasnoattachment')
+      )
     }
     await markEmails(deps, { args: { ids: [id], starred: true, todo: true }, token: TOKEN })
     expect(await keywordsOf()).toEqual({ $flagged: true, '$label:todo': true, $seen: true })

@@ -11,13 +11,13 @@
 //      the master, no override, RRULE intact) — i.e. Stalwart's scheduler ACCEPTS
 //      the EXDATE + bumped-SEQUENCE object rather than rejecting it;
 //   2. the attendee actually receives the scheduling message. NB (this is the
-//      verification spike for the design's SEQUENCE question): Stalwart 0.16
-//      delivers a single-occurrence cancellation as an *updated-series
-//      METHOD:REQUEST carrying the new EXDATE*, NOT a per-instance METHOD:CANCEL.
-//      The attendee client applies the updated series and drops just that
-//      occurrence; the RRULE (and every other occurrence) survives. The bumped
-//      master SEQUENCE is what makes the client treat the update as newer
-//      (RFC 5546) — hence we keep it.
+//      verification spike for the design's SEQUENCE question): Stalwart 1.0
+//      delivers a single-occurrence cancellation as a *per-instance
+//      METHOD:CANCEL* whose RECURRENCE-ID names the excluded instant (RFC 5546
+//      §3.2.5); the attendee client drops just that occurrence and keeps the
+//      series. 0.16 sent an updated-series METHOD:REQUEST carrying the EXDATE
+//      instead. The bumped master SEQUENCE is what makes the client treat the
+//      message as newer than the invitation (RFC 5546) — hence we keep it.
 //
 // Skips unless STALWART_ADMIN_URL is set, so a normal `bun test` run stays
 // hermetic. Run locally against the shared dev compose
@@ -250,13 +250,13 @@ live('delete_calendar_event single occurrence against live Stalwart', () => {
     expect(events).toHaveLength(1)
     expect(events[0]?.recurrence).toBeDefined()
 
-    // Fan-out: the attendee receives the exclusion as an updated-series REQUEST
-    // carrying the new EXDATE — the series (RRULE) survives, so it is NOT a
+    // Fan-out: the attendee receives a CANCEL for that one instance — it names
+    // the instant in RECURRENCE-ID and carries no RRULE, so it is NOT a
     // whole-series cancellation.
-    const delivered = await waitForCalendarWith(attBasic, attMailAccount, `EXDATE:${exdate}`)
+    const delivered = await waitForCalendarWith(attBasic, attMailAccount, `RECURRENCE-ID:${exdate}`)
     expect(delivered).not.toBeNull()
-    expect(delivered).toContain('METHOD:REQUEST')
-    expect(delivered).not.toContain('METHOD:CANCEL')
-    expect(delivered).toContain('RRULE:FREQ=WEEKLY;BYDAY=TU')
+    expect(delivered).toContain('METHOD:CANCEL')
+    expect(delivered).toContain('STATUS:CANCELLED')
+    expect(delivered).not.toContain('RRULE:')
   }, 60_000)
 })

@@ -387,7 +387,21 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
 
     // The nested OR over subject and recipients, and the date window, are
     // conditions Stalwart has to evaluate — the fixture cannot prove them.
-    expect(await list({ query: CORRESPONDENT_ADDRESS })).toContain(`draftId: ${replyDraftId}`)
+    // Stalwart 1.0 indexes for search asynchronously, so the revision
+    // update_draft just wrote turns up in a text query a moment later: poll.
+    const listUntil = async (args: Record<string, unknown>, needle: string): Promise<string> => {
+      for (let attempt = 0; attempt < 50; attempt++) {
+        const text = await list(args)
+        if (text.includes(needle)) {
+          return text
+        }
+        await Bun.sleep(100)
+      }
+      return list(args)
+    }
+    expect(await listUntil({ query: CORRESPONDENT_ADDRESS }, `draftId: ${replyDraftId}`)).toContain(
+      `draftId: ${replyDraftId}`
+    )
     // Stalwart matches whole words — a display name, an address, a subject
     // word — and not fragments of one, which is what the query description
     // promises.
