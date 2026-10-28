@@ -331,11 +331,17 @@ describe('draftRefusalReason', () => {
   }
   const refusal = (errorType: string) => new JmapError(200, 'Email/set did not create draft', errorType)
 
-  // Stalwart 1.0 names the cause (blobNotFound); 0.16 answered invalidProperties.
-  test.each(['blobNotFound', 'invalidProperties'])('points a %s refusal of an attachment at the blobId', (type) => {
-    const reason = draftRefusalReason(refusal(type), withAttachment)
-    expect(reason).toContain(`(${type})`)
+  test('points a blobNotFound refusal of an attachment at the blobId', () => {
+    const reason = draftRefusalReason(refusal('blobNotFound'), withAttachment)
+    expect(reason).toContain('(blobNotFound)')
     expect(reason).toContain('blobId')
+  })
+
+  // Stalwart 1.0 names an unknown blobId; an invalidProperties on a draft with
+  // attachments has another cause (an address, a header), so no blobId hint.
+  test('adds no attachment hint to an invalidProperties refusal', () => {
+    const reason = draftRefusalReason(refusal('invalidProperties'), withAttachment)
+    expect(reason).toBe('The server refused this draft (invalidProperties).')
   })
 
   test('adds no attachment hint when the draft has no attachments', () => {

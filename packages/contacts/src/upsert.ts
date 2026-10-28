@@ -83,7 +83,12 @@ export const collectContacts = async (
   // Stalwart 1.0 answers `uid` from the store but `email` and `name` from
   // its asynchronous index, so a card created a moment ago, or any card
   // during the post-migration reindex, would otherwise be created again and
-  // rejected for its duplicate uid.
+  // rejected for its duplicate uid. The uid is minted from the card's first
+  // address only. An address the merge gate added later, or one on a
+  // personal-book card, is still found through the index alone, so in that
+  // lag it can be collected onto a second card. Accepted: the lag is about
+  // 100 ms in steady state, and the migration plan's Phase 5 sweeps the
+  // reindex window's duplicates.
   const conditions: ContactCardFilter[] = []
   for (const address of new Set(extracted.observations.map((o) => o.address))) {
     conditions.push({ email: address }, { uid: collectedUid(address) })

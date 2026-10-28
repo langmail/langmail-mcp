@@ -565,18 +565,17 @@ export const loadDraft = async (
 // the caller rethrows rather than reporting a refusal that never happened.
 //
 // The attachment hint is the reason this exists. Stalwart answers an
-// unresolvable `attachments` blobId with `blobNotFound` (1.0) or a bare
-// `invalidProperties` (0.16), and neither tells the agent what to do next —
-// while "re-read the blobId" is very often the right move, because a blobId is
-// per-account and does not outlive the message it was read from.
-const BLOB_REFUSALS = new Set(['blobNotFound', 'invalidProperties'])
+// unresolvable `attachments` blobId with `blobNotFound`, which does not tell
+// the agent what to do next — while "re-read the blobId" is very often the
+// right move, because a blobId is per-account and does not outlive the message
+// it was read from.
 
 export const draftRefusalReason = (error: unknown, draft: EmailDraft): string | null => {
   if (!(error instanceof JmapError) || error.errorType === undefined) {
     return null
   }
   const hint =
-    (draft.attachments ?? []).length > 0 && BLOB_REFUSALS.has(error.errorType)
+    (draft.attachments ?? []).length > 0 && error.errorType === 'blobNotFound'
       ? ' The likeliest cause is an attachment blobId the server does not recognise: blobIds belong to one ' +
         'account and do not outlive the message they were read from, so re-read it with get_email or ' +
         'get_draft and use the blobId it reports now — or pass the file as base64 `content` instead.'
