@@ -4,15 +4,17 @@
 // that reads through the index after an earlier write waits for it here rather
 // than racing it.
 //
-// It throws once the 5 s budget is spent, naming what it waited for, so a
+// It throws once its ~3 s budget is spent, naming what it waited for, so a
 // suite fails on the wait that never settled rather than on a later assertion
 // that only shows its symptom — or not at all, when the caller asserts nothing.
+// The budget stays inside bun's 5 s hook and test timeout, or bun's generic
+// timeout would fire first and hide this message.
 export const untilIndexed = async <T>(
   read: () => Promise<T>,
   settled: (value: T) => boolean,
   waitingFor: string
 ): Promise<T> => {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
     const value = await read()
     if (settled(value)) {
       return value
