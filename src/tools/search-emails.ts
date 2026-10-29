@@ -1,7 +1,8 @@
 // search_emails tool — structured search over the authenticated user's
 // mailbox. Supports free-text search plus optional date-range, sender,
-// keyword (classified email type), and mailbox filters, returning a token-frugal
-// hit list (id/subject/sender/date/tags/snippet/attachments) headed by how
+// keyword (classified email type), read/starred, and mailbox filters, returning
+// a token-frugal hit list (id/subject/sender/date/tags/flags/snippet/attachments)
+// headed by how
 // many of the total matches it shows. Multi-term queries rank messages
 // matching more terms first; everything else is newest-first. Full bodies
 // are fetched separately via get_email.
@@ -31,7 +32,13 @@ import { logger } from '@langmail/logger'
 import { READ_ONLY } from './annotations.ts'
 import { errorDetail } from './error-detail.ts'
 import { formatEmailLine, orderById } from './format.ts'
-import { KEYWORD_VALUES, KEYWORDS_DESCRIPTION, keywordToJmapKeyword } from './keywords.ts'
+import {
+  FLAGGED_KEYWORD,
+  KEYWORD_VALUES,
+  KEYWORDS_DESCRIPTION,
+  keywordToJmapKeyword,
+  SEEN_KEYWORD,
+} from './keywords.ts'
 import { lookupMailbox, type MailboxLookup } from './mailbox-lookup.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
@@ -74,6 +81,16 @@ const searchEmailsShape = {
     .describe(
       "Free-text search over subject, body, and addresses. Terms are OR'd — a message matches if it contains ANY term, and messages matching more terms rank first (each hit shows matched: X/N terms). Wrap a phrase in double quotes to require all its words in the same field. Narrow with from/keywords/after/before, not by adding terms; only the first 10 terms are used."
     ),
+  read: z
+    .boolean()
+    .optional()
+    .describe(
+      'false finds only unread messages, true only read ones. Leave out to match both. Without mailbox it covers every folder, so { read: false } alone is "everything not read yet", Archive included.'
+    ),
+  starred: z
+    .boolean()
+    .optional()
+    .describe('true finds only starred messages, false only unstarred ones. Leave out to match both.'),
 }
 
 const hasAnyFilter = (v: {
@@ -83,11 +100,17 @@ const hasAnyFilter = (v: {
   keywords?: string[]
   mailbox?: string
   query?: string
-}): boolean => Boolean(v.query ?? v.after ?? v.before ?? v.from ?? v.mailbox ?? (v.keywords && v.keywords.length > 0))
+  read?: boolean
+  starred?: boolean
+}): boolean =>
+  Boolean(v.query ?? v.after ?? v.before ?? v.from ?? v.mailbox ?? (v.keywords && v.keywords.length > 0)) ||
+  v.read !== undefined ||
+  v.starred !== undefined
 
-export const searchEmailsInput = z.object(searchEmailsShape).refine(hasAnyFilter, {
-  message: 'Provide at least one filter: query, after, before, from, keywords, or mailbox.',
-})
+const NO_FILTER_MESSAGE =
+  'Provide at least one filter: query, after, before, from, keywords, mailbox, read, or starred.'
+
+export const searchEmailsInput = z.object(searchEmailsShape).refine(hasAnyFilter, { message: NO_FILTER_MESSAGE })
 
 export type SearchEmailsArgs = z.infer<typeof searchEmailsInput>
 
@@ -220,6 +243,16 @@ const resolveMailboxFilter = async (
   return { error: errorResult(`Mailbox not found: ${name}.${available}`) }
 }
 
+// The read/starred filters as required keyword states, or nothing when
+// neither is set.
+const flagStates = (args: SearchEmailsArgs): Record<string, boolean> | undefined => {
+  const states = {
+    ...(args.read === undefined ? {} : { [SEEN_KEYWORD]: args.read }),
+    ...(args.starred === undefined ? {} : { [FLAGGED_KEYWORD]: args.starred }),
+  }
+  return Object.keys(states).length > 0 ? states : undefined
+}
+
 export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsContext): Promise<ToolResult> => {
   const { token, args } = ctx
   // Purely local check first — a query of only whitespace/quotes would
@@ -244,12 +277,14 @@ export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsCont
     mailboxId = resolved.id
   }
 
+  const keywordStates = flagStates(args)
   const filters = {
     ...(args.after ? { after: args.after } : {}),
     ...(args.before ? { before: args.before } : {}),
     ...(args.from ? { from: args.from } : {}),
     ...(args.keywords && args.keywords.length > 0 ? { keywords: args.keywords.map(keywordToJmapKeyword) } : {}),
     ...(mailboxId ? { mailboxId } : {}),
+    ...(keywordStates ? { keywordStates } : {}),
   }
 
   // The whole query as one filter: text terms OR'd, AND'd with the scalars.
@@ -342,15 +377,19 @@ export const registerSearchEmails = (
         "Search the authenticated user's mailbox. Combine free-text (query — " +
         'any-term match, quoted phrases supported) with optional filters: date ' +
         'range (after/before), sender (from), classified email type ' +
-        '(keywords), and mailbox. At least one filter is required. Returns ' +
+        '(keywords), read state (read), starred, and mailbox. At least one filter is required. ' +
+        'For "what have I not read yet" use read: false without mailbox — new mail is not only in the ' +
+        'Inbox, and a date window misses older unhandled mail. Returns ' +
         'matching messages, headed by how many of the total matches are shown (e.g. ' +
         '"20 of 213") — multi-term queries rank messages matching more terms ' +
-        'first, otherwise newest-first — with id, subject, sender, date, tags, a ' +
+        'first, otherwise newest-first — with id, subject, sender, date, tags, flags (unread, ' +
+        'starred; a hit without "unread" has been read), a ' +
         'body snippet, and attachment metadata including blobId. Use get_email ' +
         'for full bodies and recipients; call download_attachment directly from ' +
         'a hit when the attachment blobId is present. For staged drafts use list_drafts, which returns the ' +
         'draftIds the draft tools take. Searching never marks anything read; use ' +
-        'mark_emails for that. ' +
+        "mark_emails for that. Read and starred state are Langmail's own: marking a message in " +
+        'Langmail does not change it in a linked Gmail account. ' +
         'Filter first, search second: use query for words the sender actually ' +
         'wrote, and reach for keywords + a date window when the request names a ' +
         'kind of mail rather than its content — transactional mail is titled ' +
@@ -365,7 +404,7 @@ export const registerSearchEmails = (
       // Surface it as a clean tool error rather than a raw ZodError blob.
       const parsed = searchEmailsInput.safeParse(args)
       if (!parsed.success) {
-        return errorResult('Provide at least one filter: query, after, before, from, keywords, or mailbox.')
+        return errorResult(NO_FILTER_MESSAGE)
       }
       return searchEmails(deps, { args: parsed.data, token: getToken() })
     }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { emailTags, formatEmailLine, formatSize } from './format.ts'
+import { emailFlags, emailTags, formatEmailLine, formatSize } from './format.ts'
 
 describe('emailTags', () => {
   test('renders $label: and $type: keywords, ignoring system flags', () => {
@@ -23,7 +23,20 @@ describe('emailTags', () => {
   })
 })
 
+describe('emailFlags', () => {
+  test('names unread and starred, and nothing for a read, unstarred message', () => {
+    expect(emailFlags({ id: 'e1', keywords: { $flagged: true } })).toEqual(['unread', 'starred'])
+    expect(emailFlags({ id: 'e1' })).toEqual(['unread'])
+    expect(emailFlags({ id: 'e1', keywords: { $seen: true } })).toEqual([])
+  })
+})
+
 describe('formatEmailLine', () => {
+  test('shows the flags line only when a flag is set', () => {
+    expect(formatEmailLine(1, { id: 'e1', keywords: { $flagged: true, $seen: true } })).toContain('   flags: starred')
+    expect(formatEmailLine(1, { id: 'e1', keywords: { $seen: true } })).not.toContain('flags:')
+  })
+
   test('renders a whitespace-normalized snippet when preview is present', () => {
     const line = formatEmailLine(1, {
       id: 'e1',

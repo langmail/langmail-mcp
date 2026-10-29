@@ -14,7 +14,7 @@ export const SERVER_INSTRUCTIONS = [
   'Langmail is the user’s own email, calendar and contacts account, plus the mail rules that file their incoming mail. Every tool acts on that one account.',
   '',
   'Where to start:',
-  '- Mail: search_emails finds messages; read one with get_email or a whole conversation with get_thread. preview_email shows one to the user as a rendered document (tickets, invoices).',
+  '- Mail: search_emails finds messages (read: false finds everything not read yet, in every folder); read one with get_email or a whole conversation with get_thread. preview_email shows one to the user as a rendered document (tickets, invoices).',
   '- Calendar: list_calendar_events for what is on the calendar; list_calendars for the calendars themselves.',
   '- Contacts: search_contacts finds people and their addresses; list_upcoming_birthdays for birthdays.',
   '- Mail rules: list_mail_rules for what is set up; preview_mail_rule before create_mail_rule to check what a rule would match. A forward action (in create_mail_rule or update_mail_rule) sends a copy of every matching future message to another address, so confirm that address with the user.',

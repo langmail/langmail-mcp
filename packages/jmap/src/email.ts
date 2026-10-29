@@ -77,6 +77,9 @@ export interface EmailQueryFilters {
   after?: string
   before?: string
   from?: string
+  // Full JMAP keyword strings mapped to whether a message must carry them,
+  // e.g. { $seen: false } for unread. AND'd with everything else.
+  keywordStates?: Record<string, boolean>
   // Full JMAP keyword strings, e.g. "$label:receipt". OR'd among themselves.
   keywords?: string[]
   mailboxId?: string
@@ -101,7 +104,7 @@ const orNode = (conds: Record<string, unknown>[]): Record<string, unknown> | und
 
 // Compose the JMAP filter: text terms OR'd among themselves, keyword
 // conditions OR'd among themselves, then both AND'd with the scalar
-// conditions (date/from/mailbox). A single overall condition is passed
+// conditions (date/from/mailbox/keyword states). A single overall condition is passed
 // through flat, like the OR nodes.
 const buildFilter = (f: EmailQueryFilters): Record<string, unknown> => {
   const conditions: Record<string, unknown>[] = []
@@ -128,6 +131,9 @@ const buildFilter = (f: EmailQueryFilters): Record<string, unknown> => {
     if (node) {
       conditions.push(node)
     }
+  }
+  for (const [keyword, present] of Object.entries(f.keywordStates ?? {})) {
+    conditions.push(present ? { hasKeyword: keyword } : { notKeyword: keyword })
   }
   const [only] = conditions
   if (conditions.length === 1 && only) {

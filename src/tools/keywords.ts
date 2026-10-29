@@ -9,6 +9,13 @@
 import { EMAIL_TYPE_VALUES, EMAIL_TYPES } from '@langmail/agents'
 import { toLabelKeyword, toTypeKeyword } from '@langmail/jmap'
 
+// RFC 8621 §4.1.1 system keywords: "has been read" and "flagged for urgent or
+// special attention" — the keyword Gmail's STARRED and the mail-rule flag
+// action already map to. mark_emails sets them, search_emails filters on and
+// shows them.
+export const SEEN_KEYWORD = '$seen'
+export const FLAGGED_KEYWORD = '$flagged'
+
 // The one value that is not an email type: a flag orthogonal to the taxonomy
 // (a message of any type can be a to-do), so it keeps mapping onto the agent
 // label the email-agent writes.

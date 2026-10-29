@@ -69,6 +69,11 @@ describe('searchEmailsInput schema', () => {
     expect(r.success).toBe(false)
   })
 
+  test('accepts a read-state-only search, read: false included', () => {
+    expect(searchEmailsInput.safeParse({ read: false }).success).toBe(true)
+    expect(searchEmailsInput.safeParse({ starred: true }).success).toBe(true)
+  })
+
   test('accepts a keyword-only search (no free-text query)', () => {
     const r = searchEmailsInput.safeParse({ keywords: ['receipt'] })
     expect(r.success).toBe(true)
@@ -200,6 +205,30 @@ describe('searchEmails', () => {
     expect(txt).toContain('tags: receipt, order')
     // System flags are not surfaced as tags.
     expect(txt).not.toContain('$seen')
+  })
+
+  test('maps read and starred onto required $seen / $flagged states', async () => {
+    let seen: EmailQueryParams | undefined
+    await searchEmails(
+      fakeDeps({
+        onQuery: (p) => {
+          seen = p
+        },
+      }),
+      { args: { limit: 20, read: false, starred: true }, token: 'tok' }
+    )
+    expect(seen?.filters).toEqual({ keywordStates: { $flagged: true, $seen: false } })
+  })
+
+  test('shows unread and starred flags on a hit', async () => {
+    const result = await searchEmails(
+      fakeDeps({
+        emails: [{ id: 'e1', keywords: { $flagged: true }, subject: 'Message from a recruiter' }],
+        queryIds: ['e1'],
+      }),
+      { args: { limit: 20, read: false }, token: 'tok' }
+    )
+    expect(result.content[0]?.text ?? '').toContain('flags: unread, starred')
   })
 
   test('maps type values to $type: filters and todo to $label:, no stray text', async () => {
