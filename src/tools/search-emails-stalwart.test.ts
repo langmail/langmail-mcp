@@ -13,6 +13,10 @@
 // two namespaces are really distinct on the wire rather than just in our
 // string helpers.
 //
+// The read/starred filters are pinned the same way: `read: false` is the only
+// caller of JMAP `notKeyword`, and only a live Email/query proves Stalwart
+// accepts it inside an AND node rather than answering `unsupportedFilter`.
+//
 // The MCP tools wrap their OAuth token as `Bearer …`, but a dev-Stalwart
 // throwaway account authenticates with a Basic app password — the deps pin
 // the Basic credential while everything downstream is the live path.
@@ -255,6 +259,23 @@ live('search_emails email-type filter against live Stalwart', () => {
       subject: 'Please confirm your new contract',
     })
 
+    // Untyped, so the type-filter totals above stay as they are: one message
+    // nobody has read yet, and one read message the user starred.
+    seeded.unread = await importEmail({
+      body: 'You have a new message waiting.',
+      from: 'Network <messages@network.example>',
+      keywords: {},
+      receivedAt: bookingReceivedAt,
+      subject: 'New message from a recruiter',
+    })
+    seeded.starred = await importEmail({
+      body: 'Keep this for the tax return.',
+      from: 'Bank <statements@bank.example>',
+      keywords: { $flagged: true, $seen: true },
+      receivedAt: bookingReceivedAt,
+      subject: 'Annual statement',
+    })
+
     deps = {
       emailGet: (p) => emailGet({ ...p, apiUrl, authorization }),
       emailQuery: (p) => emailQuery({ ...p, apiUrl, authorization }),
@@ -369,6 +390,37 @@ live('search_emails email-type filter against live Stalwart', () => {
     const result = await search({ keywords: ['security_alert'], limit: 20 })
 
     expect(result.isError).toBeFalsy()
+    expect(result.content[0]?.text).toBe('No messages matched.')
+  })
+
+  test('read: false finds only the unread message, through notKeyword', async () => {
+    const result = await search({ limit: 20, read: false })
+    const text = result.content[0]?.text ?? ''
+
+    expect(result.isError).toBeFalsy()
+    expect(text).toStartWith('1 of 1 message(s) matched:')
+    expect(text).toContain(seeded.unread as string)
+    expect(text).toContain('flags: unread')
+  })
+
+  test('read: true leaves the unread message out', async () => {
+    const text = await textOf({ limit: 20, read: true })
+
+    expect(text).toContain(seeded.booking as string)
+    expect(text).not.toContain(seeded.unread as string)
+  })
+
+  test('starred: true finds only the starred message and shows its flag', async () => {
+    const text = await textOf({ limit: 20, starred: true })
+
+    expect(text).toStartWith('1 of 1 message(s) matched:')
+    expect(text).toContain(seeded.starred as string)
+    expect(text).toContain('flags: starred')
+  })
+
+  test('read composes with the other filters', async () => {
+    const result = await search({ keywords: ['ticket'], limit: 20, read: false })
+
     expect(result.content[0]?.text).toBe('No messages matched.')
   })
 })
