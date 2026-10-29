@@ -43,6 +43,7 @@ import {
   makeJmapLive,
 } from '@langmail/jmap'
 
+import { untilIndexed } from '../search-index-test-wait.ts'
 import { type ContactWriteDeps } from './contact-common.ts'
 import { createContact, createContactInput } from './create-contact.ts'
 import { deleteContact, deleteContactInput } from './delete-contact.ts'
@@ -64,21 +65,6 @@ const CONTACT_ID = /contact_id: (\S+)/u
 
 // Minimal admin JMAP call (x:-prefixed management methods; see
 // services/auth/src/stalwart/admin-client.ts for the full contract).
-// Stalwart 1.0 indexes for search asynchronously: a write turns up in (or
-// drops out of) an `email` or text query a moment after it returns. The
-// collection merge and search_contacts read through that index, so steps that
-// depend on an earlier write wait for it rather than race it.
-const untilIndexed = async <T>(read: () => Promise<T>, settled: (value: T) => boolean): Promise<T> => {
-  for (let i = 0; i < 50; i += 1) {
-    const value = await read()
-    if (settled(value)) {
-      return value
-    }
-    await Bun.sleep(100)
-  }
-  return read()
-}
-
 const adminCall = async (method: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
   const res = await fetch(`${ADMIN_URL}/jmap/`, {
     body: JSON.stringify({
@@ -275,7 +261,8 @@ live('contact write tools against live Stalwart — author, read back, correct, 
   test('a later derivation adds to the authored card without relabelling or overwriting it', async () => {
     await untilIndexed(
       () => contactCardQuery({ ...ctx, filter: { email: 'robin@northwind.example' } }),
-      (found) => found.includes(contactId)
+      (found) => found.includes(contactId),
+      'the created contact by email'
     )
     // The same collection call the email-agent hook makes for a poll batch,
     // naming the person differently than the user typed.
@@ -371,7 +358,8 @@ live('contact write tools against live Stalwart — author, read back, correct, 
 
     const search = await untilIndexed(
       () => searchContacts(searchDeps, { args: searchContactsInput.parse({ query: 'Fairweather' }), token: TOKEN }),
-      (r) => (r.content[0]?.text ?? '').includes('No contact matched')
+      (r) => (r.content[0]?.text ?? '').includes('No contact matched'),
+      'the deleted contact dropping out of search'
     )
     expect(search.content[0]?.text).toContain('No contact matched')
   })
