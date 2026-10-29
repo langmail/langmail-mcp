@@ -3,6 +3,7 @@ import { describe, expect, mock, test } from 'bun:test'
 import {
   addressBookCreate,
   addressBookList,
+  ContactUidTakenError,
   contactCardCreate,
   contactCardDestroy,
   contactCardGet,
@@ -203,6 +204,60 @@ describe('contactCardCreate', () => {
       }).catch((error) => error)
       expect(err).toBeInstanceOf(JmapError)
       expect((err as JmapError).message).toContain('invalidProperties')
+    })
+  })
+  // Stalwart 1.0 (assert_is_unique_uid): a uid already held in the target
+  // address book is invalidProperties on `uid`, not a type of its own.
+  test('throws ContactUidTakenError when the uid is already held in the book', async () => {
+    const f = mock(() =>
+      Promise.resolve(
+        jmapResponse([
+          [
+            'ContactCard/set',
+            {
+              notCreated: {
+                c0: {
+                  description: 'Contact with UID x already exists with id b.',
+                  properties: ['uid'],
+                  type: 'invalidProperties',
+                },
+              },
+            },
+            '0',
+          ],
+        ])
+      )
+    )
+    await withFetch(f, async () => {
+      const err = await contactCardCreate({
+        accountId: 'acct',
+        apiUrl: API,
+        authorization: 'Bearer tok',
+        card: { addressBookIds: { ab1: true }, uid: 'x' },
+      }).catch((error) => error)
+      expect(err).toBeInstanceOf(ContactUidTakenError)
+      expect(err).toBeInstanceOf(JmapError)
+      expect((err as JmapError).message).not.toContain('already exists')
+    })
+  })
+
+  test('keeps a plain JmapError for invalidProperties on other properties', async () => {
+    const f = mock(() =>
+      Promise.resolve(
+        jmapResponse([
+          ['ContactCard/set', { notCreated: { c0: { properties: ['emails'], type: 'invalidProperties' } } }, '0'],
+        ])
+      )
+    )
+    await withFetch(f, async () => {
+      const err = await contactCardCreate({
+        accountId: 'acct',
+        apiUrl: API,
+        authorization: 'Bearer tok',
+        card: { addressBookIds: { ab1: true } },
+      }).catch((error) => error)
+      expect(err).toBeInstanceOf(JmapError)
+      expect(err).not.toBeInstanceOf(ContactUidTakenError)
     })
   })
 })
