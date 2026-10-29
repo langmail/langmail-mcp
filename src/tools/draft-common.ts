@@ -569,7 +569,6 @@ export const loadDraft = async (
 // the agent what to do next — while "re-read the blobId" is very often the
 // right move, because a blobId is per-account and does not outlive the message
 // it was read from.
-
 export const draftRefusalReason = (error: unknown, draft: EmailDraft): string | null => {
   if (!(error instanceof JmapError) || error.errorType === undefined) {
     return null

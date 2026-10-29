@@ -9,6 +9,7 @@ import {
   addressBookCreate,
   addressBookList,
   type ContactCardFilter,
+  ContactUidTakenError,
   contactCardCreate,
   contactCardGet,
   contactCardQuery,
@@ -87,8 +88,7 @@ export const collectContacts = async (
   // address only. An address the merge gate added later, or one on a
   // personal-book card, is still found through the index alone, so in that
   // lag it can be collected onto a second card. Accepted: the lag is about
-  // 100 ms in steady state, and the migration plan's Phase 5 sweeps the
-  // reindex window's duplicates.
+  // 100 ms in steady state.
   const conditions: ContactCardFilter[] = []
   for (const address of new Set(extracted.observations.map((o) => o.address))) {
     conditions.push({ email: address }, { uid: collectedUid(address) })
@@ -113,7 +113,17 @@ export const collectContacts = async (
 
   const { creates, updates } = foldObservations({ cards, collectedBookId }, extracted.observations, extracted.relays)
   for (const card of creates) {
-    await deps.contactCardCreate({ ...ctx, card })
+    try {
+      await deps.contactCardCreate({ ...ctx, card })
+    } catch (error) {
+      // A concurrent writer created this person's collected card between our
+      // read and this create, so the person is collected already. Its
+      // observations from this batch are dropped, the same volume-signal
+      // drift as the race above; the rest of the batch still applies.
+      if (!(error instanceof ContactUidTakenError)) {
+        throw error
+      }
+    }
   }
   for (const update of updates) {
     await deps.contactCardUpdate({ ...ctx, cardId: update.cardId, patch: update.patch })

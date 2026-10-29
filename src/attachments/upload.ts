@@ -20,7 +20,7 @@ import { type UploadTicketStore } from './upload-tickets.ts'
 export type AttachmentUpload = (token: string, req: Request) => Promise<Response>
 
 // How long Stalwart keeps a blob no message references yet: its JMAP
-// `uploadTtl`, which we leave at the 0.16 default of one hour
+// `uploadTtl`, which we leave at its default of one hour
 // (crates/registry/src/schema/structs_impl.rs, `Duration::from_millis(3600000)`).
 // Past that the blobId names nothing and create_draft is refused, so the
 // response states the window.

@@ -52,6 +52,7 @@ import {
 
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
 import { createSendGuard } from '../drafts/send-guard.ts'
+import { untilIndexed } from '../search-index-test-wait.ts'
 import { createDraft, createDraftInput } from './create-draft.ts'
 import { deleteDraft, deleteDraftInput } from './delete-draft.ts'
 import { type DraftToolDeps } from './draft-common.ts'
@@ -389,16 +390,12 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
     // conditions Stalwart has to evaluate — the fixture cannot prove them.
     // Stalwart 1.0 indexes for search asynchronously, so the revision
     // update_draft just wrote turns up in a text query a moment later: poll.
-    const listUntil = async (args: Record<string, unknown>, needle: string): Promise<string> => {
-      for (let attempt = 0; attempt < 50; attempt++) {
-        const text = await list(args)
-        if (text.includes(needle)) {
-          return text
-        }
-        await Bun.sleep(100)
-      }
-      return list(args)
-    }
+    const listUntil = (args: Record<string, unknown>, needle: string): Promise<string> =>
+      untilIndexed(
+        () => list(args),
+        (text) => text.includes(needle),
+        needle
+      )
     expect(await listUntil({ query: CORRESPONDENT_ADDRESS }, `draftId: ${replyDraftId}`)).toContain(
       `draftId: ${replyDraftId}`
     )

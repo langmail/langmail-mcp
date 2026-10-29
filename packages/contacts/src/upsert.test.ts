@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type ContactCard, type ContactCardDraft } from '@langmail/jmap'
+import { type ContactCard, type ContactCardDraft, ContactUidTakenError } from '@langmail/jmap'
 
 import { COLLECTED_BOOK_NAME, COLLECTED_PATCH_PATH } from './constants.ts'
 import { type CollectionDeps, collectContacts } from './upsert.ts'
@@ -120,6 +120,35 @@ describe('collectContacts', () => {
       { limit: pageSize, position: pageSize },
     ])
     expect(fetched[0]).toHaveLength(pageSize + 3)
+  })
+
+  // Two writers (the poller's batch and a calendar write-through) both miss a
+  // new person and both create the collected card; Stalwart rejects the
+  // second for its uid. That person is collected already, so the rest of the
+  // batch goes on.
+  test('skips a card whose uid a concurrent writer took, and collects the rest', async () => {
+    const captured: Captured = { bookCreates: [], cardCreates: [], cardUpdates: [], queries: [] }
+    const deps = makeDeps(captured)
+    deps.contactCardCreate = (p) => {
+      captured.cardCreates.push(p.card)
+      return captured.cardCreates.length === 1
+        ? Promise.reject(new ContactUidTakenError())
+        : Promise.resolve(`card-${captured.cardCreates.length}`)
+    }
+    await collectContacts(deps, CTX, {
+      observations: [observation, { ...observation, address: 'sam@northwind.example', name: 'Sam Lowe' }],
+      relays: [],
+    })
+    expect(captured.cardCreates).toHaveLength(2)
+  })
+
+  test('still fails the batch on any other create error', async () => {
+    const captured: Captured = { bookCreates: [], cardCreates: [], cardUpdates: [], queries: [] }
+    const deps = makeDeps(captured)
+    deps.contactCardCreate = () => Promise.reject(new Error('socket closed'))
+    await expect(collectContacts(deps, CTX, { observations: [observation], relays: [] })).rejects.toThrow(
+      'socket closed'
+    )
   })
 
   test('does nothing without observations', async () => {

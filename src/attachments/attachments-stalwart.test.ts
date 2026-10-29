@@ -37,6 +37,7 @@ import {
 } from '@langmail/jmap'
 
 import { createRoutes, type Routes } from '../handler.ts'
+import { untilIndexed } from '../search-index-test-wait.ts'
 import { type DownloadAttachmentDeps, downloadAttachment } from '../tools/download-attachment.ts'
 import { type GetEmailDeps, getEmail } from '../tools/get-email.ts'
 import { type SearchEmailsDeps, searchEmails } from '../tools/search-emails.ts'
@@ -70,20 +71,6 @@ describe('attachment metadata line matchers', () => {
 
 // Minimal admin JMAP call (x:-prefixed management methods; see
 // services/auth/src/stalwart/admin-client.ts for the full contract).
-// Stalwart 1.0 indexes for search asynchronously: an imported message turns
-// up in a text query a moment after Email/import returns, not at once. Seeds
-// that tests search for are awaited here rather than raced.
-const untilIndexed = async (query: () => Promise<string[]>, ids: string[]): Promise<void> => {
-  for (let i = 0; i < 50; i += 1) {
-    const found = await query()
-    if (ids.every((id) => found.includes(id))) {
-      return
-    }
-    await Bun.sleep(100)
-  }
-  throw new Error(`search index never caught up with ${ids.join(', ')}`)
-}
-
 const adminCall = async (method: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
   const res = await fetch(`${ADMIN_URL}/jmap/`, {
     body: JSON.stringify({
@@ -261,9 +248,11 @@ live('attachments against live Stalwart — metadata, capability URL, blob strea
       invoiceMime(base64Lines(pngBytes), base64Lines(pdfBytes))
     )
     plainId = await importEmail(session.uploadUrl, inboxId, plainMime())
+    // The seeds the search tests look for are awaited, not raced.
     await untilIndexed(
       () => emailQuery({ ...ctx, filters: { text: ['Invoice', 'text'] }, limit: 10 }),
-      [withAttachmentsId, plainId]
+      (found) => [withAttachmentsId, plainId].every((id) => found.includes(id)),
+      'the two seeded invoices'
     )
 
     // Live deps with the Basic credential pinned at the deps seam (see header).

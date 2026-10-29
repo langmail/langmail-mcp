@@ -12,6 +12,7 @@ const USING = ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:contacts']
 
 interface SetError {
   description?: string
+  properties?: string[]
   type?: string
 }
 
@@ -143,6 +144,17 @@ export interface ContactCardCreateParams extends JmapCall {
   card: ContactCardDraft
 }
 
+// The card's `uid` is already held in its address book. Stalwart 1.0 answers
+// that as `invalidProperties` on `uid` (assert_is_unique_uid in
+// crates/jmap/src/contact/mod.rs), not with a type of its own, so this is the
+// one shape callers can tell apart from a malformed card.
+export class ContactUidTakenError extends JmapError {
+  constructor() {
+    super(200, 'ContactCard/set did not create card: uid already in the address book', 'invalidProperties')
+    this.name = 'ContactUidTakenError'
+  }
+}
+
 export const contactCardCreate = async (p: ContactCardCreateParams): Promise<string> => {
   const resp = await jmapCall(p, {
     methodCalls: [['ContactCard/set', { accountId: p.accountId, create: { c0: p.card } }, '0']],
@@ -156,6 +168,9 @@ export const contactCardCreate = async (p: ContactCardCreateParams): Promise<str
   const id = out.created?.c0?.id
   if (!id) {
     const reason = out.notCreated?.c0
+    if (reason?.type === 'invalidProperties' && reason.properties?.includes('uid')) {
+      throw new ContactUidTakenError()
+    }
     throw new JmapError(200, `ContactCard/set did not create card: ${setErrorType(reason)}`, reason?.type)
   }
   return id

@@ -12,6 +12,7 @@ export {
   type ContactCardGetParams,
   type ContactCardQueryParams,
   type ContactCardUpdateParams,
+  ContactUidTakenError,
   contactCardCreate,
   contactCardDestroy,
   contactCardGet,

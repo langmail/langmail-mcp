@@ -32,6 +32,7 @@ import {
   sieveScriptList,
 } from '@langmail/jmap'
 
+import { untilIndexed } from '../search-index-test-wait.ts'
 import { createMailRule, createMailRuleInput } from '../tools/create-mail-rule.ts'
 import { deleteMailRule } from '../tools/delete-mail-rule.ts'
 import { listMailRules } from '../tools/list-mail-rules.ts'
@@ -75,20 +76,6 @@ const adminCall = async (method: string, args: Record<string, unknown>): Promise
     throw new Error(`${method} failed: ${JSON.stringify(body)}`)
   }
   return payload
-}
-
-// Stalwart 1.0 indexes for search asynchronously: an imported message turns
-// up in a `from` query a moment after Email/import returns, not at once. The
-// preview and the backfill both query the index, so the seed is awaited.
-const untilIndexed = async (query: () => Promise<string[]>, ids: string[]): Promise<void> => {
-  for (let i = 0; i < 50; i += 1) {
-    const found = await query()
-    if (ids.every((id) => found.includes(id))) {
-      return
-    }
-    await Bun.sleep(100)
-  }
-  throw new Error(`search index never caught up with ${ids.join(', ')}`)
 }
 
 live('mail rules against live Stalwart — preview/create/list/update/delete', () => {
@@ -210,9 +197,11 @@ live('mail rules against live Stalwart — preview/create/list/update/delete', (
       await importEmail(session.uploadUrl, message('PR #2 opened', 'notifications@github.com', 2)),
     ]
     otherId = await importEmail(session.uploadUrl, message('Lunch on Friday?', 'friend@example.com', 3))
+    // The preview and the backfill both query the index, so the seed is awaited.
     await untilIndexed(
       () => emailQueryFilter({ ...ctx, filter: { from: 'notifications@github.com' }, limit: 10 }),
-      githubIds
+      (found) => githubIds.every((id) => found.includes(id)),
+      'the seeded GitHub notifications'
     )
 
     // Live deps with the Basic credential pinned at the authorize seam.

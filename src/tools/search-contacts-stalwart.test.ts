@@ -2,7 +2,7 @@
 // (observation extraction → fold → ContactCard/set over JMAP for Contacts)
 // seeds the collected address book exactly as the email-agent hook and the
 // calendar write-through do, and the tool is then driven through live JMAP +
-// CalDAV deps — proving Stalwart 0.16.x answers AddressBook/ContactCard
+// CalDAV deps — proving Stalwart answers AddressBook/ContactCard
 // methods with no extra configuration (the plan's infra check) and that the
 // stored record ids hydrate back into human-readable interaction lines.
 //
@@ -38,6 +38,7 @@ import {
 
 import { type CalDavConfig, discoverAccount, fetchEvents, putEvent } from '../caldav/client.ts'
 import { buildInvite } from '../caldav/ical.ts'
+import { untilIndexed } from '../search-index-test-wait.ts'
 import { type SearchContactsDeps, searchContacts, searchContactsInput } from './search-contacts.ts'
 
 const ADMIN_URL = process.env.STALWART_ADMIN_URL
@@ -53,21 +54,6 @@ const live = ADMIN_URL ? describe : describe.skip
 
 // Minimal admin JMAP call (x:-prefixed management methods; see
 // services/auth/src/stalwart/admin-client.ts for the full contract).
-// Stalwart 1.0 indexes for search asynchronously: a card turns up in an
-// `email` or text query a moment after it is written. The merge into a
-// personal-book card reads through that index, so the steps that depend on an
-// earlier write wait for it rather than race it.
-const untilIndexed = async <T>(read: () => Promise<T>, settled: (value: T) => boolean): Promise<T> => {
-  for (let i = 0; i < 50; i += 1) {
-    const value = await read()
-    if (settled(value)) {
-      return value
-    }
-    await Bun.sleep(100)
-  }
-  return read()
-}
-
 const adminCall = async (method: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
   const res = await fetch(`${ADMIN_URL}/jmap/`, {
     body: JSON.stringify({
@@ -287,7 +273,8 @@ live('search_contacts against live Stalwart — collect from mail + calendar, th
     expect(books.map((b) => b.name)).toContain(COLLECTED_BOOK_NAME)
     const ids = await untilIndexed(
       () => contactCardQuery({ ...ctx, filter: { email: 'robin@northwind.example' } }),
-      (found) => found.length > 0
+      (found) => found.length > 0,
+      'the collected card by email'
     )
     expect(ids).toHaveLength(1)
     const [card] = await contactCardGet({ ...ctx, ids })
@@ -320,7 +307,8 @@ live('search_contacts against live Stalwart — collect from mail + calendar, th
     })
     await untilIndexed(
       () => contactCardQuery({ ...ctx, filter: { email: 'plain@example.com' } }),
-      (found) => found.includes(cardId)
+      (found) => found.includes(cardId),
+      'the personal-book card by email'
     )
     await collectContacts(
       liveCollectionDeps,
