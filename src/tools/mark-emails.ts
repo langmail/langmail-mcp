@@ -12,14 +12,9 @@ import { z } from 'zod'
 
 import { ACCOUNT_WRITE } from './annotations.ts'
 import { dedupedIds, type FileEmailsDeps, formatBatchResult, idsShape } from './file-emails-common.ts'
-import { keywordToJmapKeyword } from './keywords.ts'
+import { FLAGGED_KEYWORD, keywordToJmapKeyword, SEEN_KEYWORD } from './keywords.ts'
 import { errorResult, type ToolResult } from './result.ts'
 
-// RFC 8621 §4.1.1 system keywords: "has been read" and "flagged for urgent or
-// special attention" — the keyword Gmail's STARRED and the mail-rule flag
-// action already map to.
-const SEEN_KEYWORD = '$seen'
-const FLAGGED_KEYWORD = '$flagged'
 // The same `$label:todo` keyword search_emails filters on with keywords: ["todo"].
 const TODO_KEYWORD = keywordToJmapKeyword('todo')
 

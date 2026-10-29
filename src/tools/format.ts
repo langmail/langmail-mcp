@@ -9,6 +9,8 @@ import {
   TYPE_KEYWORD_PREFIX,
 } from '@langmail/jmap'
 
+import { FLAGGED_KEYWORD, SEEN_KEYWORD } from './keywords.ts'
+
 const LIST_ATTACHMENT_LIMIT = 5
 
 // The two keyword namespaces a reader cares about: agent labels and the
@@ -33,6 +35,14 @@ export const emailTags = (e: EmailRecord): string[] => {
     }
   }
   return [...tags]
+}
+
+// The user-facing flags mark_emails sets and search_emails filters on, other
+// than to-do (already a tag). Only the states worth noticing are named: a
+// message without "unread" has been read.
+export const emailFlags = (e: EmailRecord): string[] => {
+  const keywords = e.keywords ?? {}
+  return [...(keywords[SEEN_KEYWORD] ? [] : ['unread']), ...(keywords[FLAGGED_KEYWORD] ? ['starred'] : [])]
 }
 
 // Email/get doesn't guarantee list order; reorder fetched records to match a
@@ -94,6 +104,10 @@ export const formatEmailLine = (idx: number, e: EmailRecord, opts: EmailLineOpti
   const tags = emailTags(e)
   if (tags.length > 0) {
     lines.push(`   tags: ${tags.join(', ')}`)
+  }
+  const flags = emailFlags(e)
+  if (flags.length > 0) {
+    lines.push(`   flags: ${flags.join(', ')}`)
   }
   const snippet = normalizedSnippet(e.preview)
   if (snippet) {

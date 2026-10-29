@@ -72,7 +72,7 @@ export const registerGetThread = (server: McpServer, deps: GetThreadDeps, getTok
       annotations: READ_ONLY,
       description:
         'List every message in the same thread as a given message id, oldest-first ' +
-        'with id, subject, sender, date, tags, a body snippet, and attachment ' +
+        'with id, subject, sender, date, tags, flags (unread, starred; a message without "unread" has been read), a body snippet, and attachment ' +
         'metadata including blobId. Use get_email for full bodies and recipients; ' +
         'call download_attachment directly from a hit when the attachment blobId is present. ' +
         'Listing a thread does not mark its messages read; use mark_emails for that. ' +

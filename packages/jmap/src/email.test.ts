@@ -127,6 +127,31 @@ describe('emailQuery', () => {
     expect(f).toHaveBeenCalled()
   })
 
+  test('keyword states map to hasKeyword / notKeyword, AND-ed with the keyword OR', async () => {
+    const f = mock((_u: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}')
+      expect(body.methodCalls[0][1].filter).toEqual({
+        conditions: [
+          { conditions: [{ hasKeyword: '$type:direct' }, { hasKeyword: '$label:todo' }], operator: 'OR' },
+          { notKeyword: '$seen' },
+          { hasKeyword: '$flagged' },
+        ],
+        operator: 'AND',
+      })
+      return Promise.resolve(jmapResponse([['Email/query', { ids: [] }, '0']]))
+    })
+    await withFetch(f, () =>
+      emailQuery({
+        accountId: 'acct',
+        apiUrl: API,
+        filters: { keywordStates: { $seen: false, $flagged: true }, keywords: ['$type:direct', '$label:todo'] },
+        limit: 5,
+        authorization: 'Bearer tok',
+      })
+    )
+    expect(f).toHaveBeenCalled()
+  })
+
   test('multiple keywords with no other filter yield a bare top-level OR node', async () => {
     const f = mock((_u: string, init?: RequestInit) => {
       const body = JSON.parse((init?.body as string) ?? '{}')
