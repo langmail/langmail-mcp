@@ -84,7 +84,7 @@ const searchEmailsShape = {
     .boolean()
     .optional()
     .describe(
-      'false finds only unread messages, true only read ones. Leave out to match both. Without mailbox it covers every folder, so { read: false } alone is "everything not read yet", Archive included.'
+      'false finds only unread messages, true only read ones. Leave out to match both. Without mailbox it covers every folder, so { read: false } alone is "everything not read yet", Archive, Junk and Trash included.'
     ),
   starred: z
     .boolean()
