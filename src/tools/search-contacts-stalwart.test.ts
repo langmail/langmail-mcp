@@ -2,7 +2,7 @@
 // (observation extraction → fold → ContactCard/set over JMAP for Contacts)
 // seeds the collected address book exactly as the email-agent hook and the
 // calendar write-through do, and the tool is then driven through live JMAP +
-// CalDAV deps — proving Stalwart 0.16.x answers AddressBook/ContactCard
+// CalDAV deps — proving Stalwart answers AddressBook/ContactCard
 // methods with no extra configuration (the plan's infra check) and that the
 // stored record ids hydrate back into human-readable interaction lines.
 //
