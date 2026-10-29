@@ -72,7 +72,9 @@ containers`. (Reconsider Nix-building Bun if nixpkgs ever ships
 
 ## Adding tools
 
-Load the `mcp-tool-design` skill before adding or changing a tool.
+Load the `mcp-tool-design` skill before adding or changing a tool. This
+server's own conventions, which win where they differ from the skill, are in
+`src/tools/AGENTS.md`.
 
 - One file per tool under `src/tools/`, exporting a `register<Tool>`
   function that `src/mcp/handler.ts` calls with the `McpServer`.
