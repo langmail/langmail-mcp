@@ -1352,8 +1352,8 @@ describe('updateCalendarEvent — notify', () => {
   })
 })
 
-// The handover line is the outbound-scheduling audit trail (see the
-// 2026-07-28-single-occurrence-imip proposal): it must appear exactly once per
+// The handover line is the outbound-scheduling audit trail (see
+// docs/observability/stalwart-telemetry.md): it must appear exactly once per
 // accepted PUT, never for a rejected one, and never carry a raw address.
 describe('scheduling handover audit log', () => {
   test('logs one handover line, with hashed identifiers, after a successful occurrence PUT', async () => {
