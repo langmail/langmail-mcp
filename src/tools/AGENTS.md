@@ -23,7 +23,8 @@ happen.
 - **Filters.** Search filters are structured parameters, never a query-string
   DSL like Gmail's `from:… newer_than:7d`. A mistyped query string is still
   valid and returns zero hits, which reads exactly like "no such mail"; a bad
-  field value fails the schema the client validates, and the model sees why.
+  field value fails `inputSchema`, which the SDK checks on the server before
+  the handler runs, and the error names the field.
 - **Handler.** Most handlers take `(deps, { args, token })`. The draft tools
   take more: `send_draft`, `delete_draft`, and `reply_to_message` the send
   guard; `create_draft`, `send_draft`, and `reply_to_message` the
