@@ -1,24 +1,14 @@
-// Regression guard for docs/upstream/stalwart/reply-for-unmodified-instance-creates-stub-override.md,
-// against a REAL Stalwart: how the organizer's server merges an iTIP REPLY
-// scoped to ONE instance of a recurring series.
+// Regression guard for the iTIP REPLY merge of ONE instance of a recurring
+// series, against a REAL Stalwart.
 //
-// When a REPLY names an instance (RECURRENCE-ID) that has no override VEVENT in
-// the organizer's stored object yet, Stalwart's `handle_reply`
-// (crates/groupware/src/scheduling/inbound.rs, "Add component" branch) appends
-// a stub VEVENT built from the REPLY alone: ORGANIZER, the replying ATTENDEE,
-// UID, DTSTAMP, SEQUENCE, RECURRENCE-ID — no DTSTART, no SUMMARY, and none of
-// the other attendees. A second attendee's REPLY for the same instance then
-// matches that stub, does not find its sender in it, and is rejected with
-// `Sender "<email>" is not a participant` — the response is dropped. When the
-// instance already carries a full organizer-written override, both REPLYs
-// land, which is the control here.
-//
-// Like stalwart-duplicate-uid-itip.test.ts, the defect test asserts the
-// CURRENT (defective) behaviour, so it turns red — and the upstream entry can
-// be retired — when a release builds a proper override from the master or
-// accepts the second reply. `test.failing` is deliberately not used: it would
-// also stay green on an unrelated breakage (no REPLY delivered at all), while
-// pinning the exact stub shape tells us which of the two happened.
+// Through 0.16, when a REPLY named an instance (RECURRENCE-ID) with no override
+// VEVENT in the organizer's stored object yet, Stalwart appended a stub built
+// from the REPLY alone — no DTSTART, no SUMMARY, none of the other attendees —
+// and then rejected every further attendee's REPLY for that instance with
+// `Sender "<email>" is not a participant`. Stalwart 1.0 builds the override
+// from the master and merges each REPLY into it. The first test pins that
+// fixed behaviour, so a regression turns it red; the control covers an
+// instance the organizer had already overridden, which worked on both.
 //
 // It provisions three throwaway accounts on the dev Stalwart (raw admin JMAP —
 // the same x:-method contract services/auth uses): an organizer and two LOCAL
@@ -275,6 +265,59 @@ const acceptExistingInstance = async (p: Principal, uid: string, recurrenceId: s
   return putRaw(p, obj, obj.body.replace(override, `${withPartstat(override, p.addr, 'ACCEPTED')}\r\n`))
 }
 
+interface JmapSession {
+  apiUrl: string
+  primaryAccounts: Record<string, string>
+}
+
+// What a missing iTIP delivery leaves behind. Stalwart 1.0 sends a local
+// attendee the organizer's change as iMIP mail through its queue, and skips
+// iTIP processing for mail it files as spam. So: the attendee's latest mail
+// with its folder and spam verdict, and what the queue still holds.
+const deliveryReport = async (p: Principal): Promise<string> => {
+  const sessionRes = await fetch(`${ADMIN_URL}/jmap/session`, { headers: { authorization: p.basic } })
+  const session = (await sessionRes.json()) as JmapSession
+  const accountId = session.primaryAccounts['urn:ietf:params:jmap:mail']
+  const mailRes = await fetch(session.apiUrl, {
+    body: JSON.stringify({
+      methodCalls: [
+        ['Mailbox/get', { accountId, properties: ['name', 'role'] }, 'm'],
+        ['Email/query', { accountId, limit: 20, sort: [{ isAscending: false, property: 'receivedAt' }] }, 'q'],
+        [
+          'Email/get',
+          {
+            '#ids': { name: 'Email/query', path: '/ids', resultOf: 'q' },
+            accountId,
+            properties: ['subject', 'mailboxIds', 'receivedAt', 'header:X-Spam-Status:asText'],
+          },
+          'g',
+        ],
+      ],
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+    }),
+    headers: { authorization: p.basic, 'content-type': 'application/json' },
+    method: 'POST',
+  })
+  const mail = (await mailRes.json()) as { methodResponses?: unknown[] }
+  const queue = await adminCall('x:QueuedMessage/query', {})
+  const queued = (queue.ids as string[] | undefined) ?? []
+  const held = queued.length ? await adminCall('x:QueuedMessage/get', { ids: queued.slice(0, 10) }) : {}
+  return JSON.stringify({ mail: mail.methodResponses, queue: { held, total: queued.length } })
+}
+
+// Polls until the organizer's override reaches the attendee's copy. Its own
+// failure tells a slow iTIP delivery apart from an override that arrived and
+// was later lost, which `acceptExistingInstance` would report the same way.
+const attendeeUntilOverride = async (p: Principal, uid: string, recurrenceId: string): Promise<void> => {
+  for (let i = 0; i < 30; i += 1) {
+    if (instanceOf((await loadObject(p, uid)).body, recurrenceId)) {
+      return
+    }
+    await sleep(1000)
+  }
+  throw new Error(`${p.addr} never received the organizer's override for ${recurrenceId}: ${await deliveryReport(p)}`)
+}
+
 // Polls the organizer's object until `done` holds, or gives up and returns the
 // last state — the defect leaves the second reply unmerged forever.
 const organizerUntil = async (org: Principal, uid: string, done: (ical: string) => boolean): Promise<string> => {
@@ -323,7 +366,7 @@ live('iTIP REPLY for one instance of a recurring series (upstream regression gua
     }
   })
 
-  test('a REPLY for a never-modified instance leaves a stub that drops the second attendee', async () => {
+  test('a REPLY for a never-modified instance builds the override from the master, and a second REPLY lands', async () => {
     const uid = `reply-unmodified-${run}@mcp-e2e`
     const day = tuesday(2)
     const recurrenceId = `${day}${START}`
@@ -334,27 +377,25 @@ live('iTIP REPLY for one instance of a recurring series (upstream regression gua
     const afterA = await organizerUntil(org, uid, (ical) => accepted(instanceOf(ical, recurrenceId), attA.addr))
     log('organizer after A replies', afterA)
 
-    // The defect, part 1: the instance is a stub carrying only the REPLY's
-    // identity properties and the replying attendee.
-    // NB: the stub keeps the REPLY's TZID form of RECURRENCE-ID; a release that
-    // normalises it to UTC also reads as red here, not only one that fixes it.
-    const stub = shapeOf(instanceOf(afterA, recurrenceId) ?? '')
-    expect(stub.props).toContain('RECURRENCE-ID')
-    expect(stub.props).not.toContain('DTSTART')
-    expect(stub.props).not.toContain('SUMMARY')
-    expect(stub.attendees).toEqual([`${attA.addr.toLowerCase()} PARTSTAT=ACCEPTED`])
+    // Fixed in 1.0, part 1: the new instance is a full override built from the
+    // master — its time, its summary and every attendee — not a stub of the
+    // REPLY's identity properties.
+    const override = shapeOf(instanceOf(afterA, recurrenceId) ?? '')
+    expect(override.props).toContain('RECURRENCE-ID')
+    expect(override.props).toContain('DTSTART')
+    expect(override.props).toContain('SUMMARY')
+    expect(override.attendees).toEqual([
+      `${attA.addr.toLowerCase()} PARTSTAT=ACCEPTED`,
+      `${attB.addr.toLowerCase()} PARTSTAT=NEEDS-ACTION`,
+    ])
 
     expect(await acceptNewInstance(attB, uid, day)).toBe(204)
     const afterB = await organizerUntil(org, uid, (ical) => accepted(instanceOf(ical, recurrenceId), attB.addr))
     log('organizer after B replies', afterB)
 
-    // The defect, part 2: B's REPLY is rejected ("is not a participant") — the
-    // stub never learns B's answer, and the master still lists B as pending.
-    expect(accepted(instanceOf(afterB, recurrenceId), attB.addr)).toBe(false)
-    expect(shapeOf(instanceOf(afterB, recurrenceId) ?? '').attendees).toEqual([
-      `${attA.addr.toLowerCase()} PARTSTAT=ACCEPTED`,
-    ])
-    expect(shapeOf(masterOf(afterB)).attendees).toContain(`${attB.addr.toLowerCase()} PARTSTAT=NEEDS-ACTION`)
+    // Fixed in 1.0, part 2: B's REPLY for the same instance is merged.
+    expect(accepted(instanceOf(afterB, recurrenceId), attB.addr)).toBe(true)
+    expect(accepted(instanceOf(afterB, recurrenceId), attA.addr)).toBe(true)
   }, 120_000)
 
   test('control: REPLYs for an instance the organizer already overrode both land', async () => {
@@ -362,6 +403,12 @@ live('iTIP REPLY for one instance of a recurring series (upstream regression gua
     const day = tuesday(3)
     const recurrenceId = `${day}${START}`
     await putEvent(org.cfg, { calendarUrl: org.defaultUrl, ical: series(uid, org, [attA, attB]), token: TOKEN })
+    // Stalwart queues each iTIP message on its own, so an update sent right
+    // after the invite can arrive first, and the invite then drops it
+    // (docs/upstream/stalwart/itip-invite-after-update-drops-override.md).
+    for (const att of [attA, attB]) {
+      await loadObject(att, uid)
+    }
 
     // The organizer moves the instance two hours later — a full override.
     const orgObj = await loadObject(org, uid)
@@ -385,9 +432,7 @@ live('iTIP REPLY for one instance of a recurring series (upstream regression gua
 
     // Wait for the override to reach both attendees' copies.
     for (const att of [attA, attB]) {
-      for (let i = 0; i < 15 && !instanceOf((await loadObject(att, uid)).body, recurrenceId); i += 1) {
-        await sleep(1000)
-      }
+      await attendeeUntilOverride(att, uid, recurrenceId)
     }
 
     expect(await acceptExistingInstance(attA, uid, recurrenceId)).toBe(204)

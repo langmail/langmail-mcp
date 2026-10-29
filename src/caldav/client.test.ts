@@ -401,6 +401,12 @@ describe('moveEvent', () => {
     expect((await withServer({ body: '', status: 412 })).outcome).toEqual({ kind: 'nameConflict' })
   })
 
+  // Stalwart 1.0 answers the UID precondition with 403, the status RFC 4791
+  // §5.3.2.1 names for it; 0.16 used 412.
+  test('maps a 403 carrying no-uid-conflict to uidConflict', async () => {
+    expect((await withServer({ body: NO_UID_CONFLICT, status: 403 })).outcome).toEqual({ kind: 'uidConflict' })
+  })
+
   test('maps 403 to forbidden and anything else to failed with its status', async () => {
     expect((await withServer({ body: '', status: 403 })).outcome).toEqual({ kind: 'forbidden' })
     expect((await withServer({ body: '', status: 409 })).outcome).toEqual({ kind: 'failed', status: 409 })

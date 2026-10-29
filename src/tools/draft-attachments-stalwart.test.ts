@@ -626,9 +626,9 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
         to: [CORRESPONDENT],
       }),
     })
-    // Stalwart answers `invalidProperties` and names nothing further, so the
-    // tool has to supply the diagnosis the agent can act on — a bare
-    // "invalidProperties" would leave it with no next move.
+    // Stalwart answers `blobNotFound` and names nothing further, so the tool
+    // has to supply the diagnosis the agent can act on — a bare error code
+    // would leave it with no next move.
     expect(result.isError).toBe(true)
     const text = result.content[0]?.text ?? ''
     expect(text).toContain('blobId')

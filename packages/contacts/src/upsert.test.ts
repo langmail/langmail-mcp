@@ -57,7 +57,7 @@ describe('collectContacts', () => {
     expect(captured.cardCreates[0]?.addressBookIds).toEqual({ 'book-new': true })
   })
 
-  test('reuses an existing collected book and queries by address and name', async () => {
+  test('reuses an existing collected book and queries by address, collected uid and name', async () => {
     const captured: Captured = { bookCreates: [], cardCreates: [], cardUpdates: [], queries: [] }
     await collectContacts(makeDeps(captured, { books: [{ id: 'book-c', name: COLLECTED_BOOK_NAME }] }), CTX, {
       observations: [observation],
@@ -66,7 +66,11 @@ describe('collectContacts', () => {
     expect(captured.bookCreates).toEqual([])
     expect(captured.queries).toEqual([
       {
-        conditions: [{ email: 'robin@northwind.example' }, { name: 'Robin Fairweather' }],
+        conditions: [
+          { email: 'robin@northwind.example' },
+          { uid: 'urn:langmail:collected:robin@northwind.example' },
+          { name: 'Robin Fairweather' },
+        ],
         operator: 'OR',
       },
     ])

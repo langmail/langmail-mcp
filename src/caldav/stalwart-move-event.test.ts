@@ -432,7 +432,8 @@ live('CalDAV MOVE between calendars against live Stalwart', () => {
     console.log('[spike 3c] MOVE with UID already in target', moved.status, JSON.stringify(moved.body.slice(0, 300)))
     // Uniqueness is per calendar, not per account: the duplicate PUT succeeds.
     expect(dupPut).toBe('ok')
-    expect(moved.status).toBe(412)
+    // 1.0 sends the precondition with 403 (RFC 4791 §5.3.2.1); 0.16 sent 412.
+    expect(moved.status).toBe(403)
     expect(moved.body).toContain('no-uid-conflict')
     expect((await get(org, src)).status).toBe(200)
   }, 60_000)
@@ -469,8 +470,8 @@ live('CalDAV MOVE between calendars against live Stalwart', () => {
   }, 60_000)
 
   // docs/upstream/stalwart/caldav-resource-name-encoding-asymmetric.md: the
-  // resource segment is emitted verbatim and never decoded, so the spelling of
-  // a foreign client's resource name in Destination matters.
+  // resource segment is emitted verbatim. Since 1.0 the server decodes it on
+  // the way in, so both spellings reach the same resource.
   test('4. resource names with @ and percent-encoded bytes move under the spelling the listing reports', async () => {
     // fetch() percent-encodes any non-ASCII in a URL, so a raw UTF-8 name
     // cannot be put on the wire from here; the second case is the
@@ -502,42 +503,35 @@ live('CalDAV MOVE between calendars against live Stalwart', () => {
       expect(readBack?.status).toBe(200)
     }
 
-    // The hazard the verbatim rule guards against: `@` and `%40` name two
-    // distinct resources, so a normalized source href misses the event.
+    // The hazard docs/upstream/stalwart/caldav-resource-name-encoding-asymmetric.md
+    // records. On 0.16 `@` and `%40` named two distinct resources, so a
+    // normalized href addressed the wrong event. Stalwart 1.0 decodes the
+    // request URI's resource segment: the second spelling finds the first
+    // resource (If-None-Match: * fails) and a normalized href moves it.
     const uidAt = `move-name-hazard-at-${run}@mcp-e2e`
-    const uidPct = `move-name-hazard-pct-${run}@mcp-e2e`
     const atName = `hazard-${run}@example.com.ics`
     const pctName = `hazard-${run}%40example.com.ics`
-    for (const [uid, name] of [
-      [uidAt, atName],
-      [uidPct, pctName],
-    ] as const) {
-      const put = await fetch(`${org.defaultUrl}${name}`, {
+    const putAs = (uid: string, name: string) =>
+      fetch(`${org.defaultUrl}${name}`, {
         body: plainEvent(uid, 'Hazard'),
         headers: { authorization: org.basic, 'content-type': 'text/calendar; charset=utf-8', 'if-none-match': '*' },
         method: 'PUT',
       })
-      expect(put.status).toBe(201)
-    }
-    // Both names coexist, each listed under its own spelling.
+    expect((await putAs(uidAt, atName)).status).toBe(201)
+    expect((await putAs(`move-name-hazard-pct-${run}@mcp-e2e`, pctName)).status).toBe(412)
+    // The listing still spells the resource segment with a raw `@`.
     expect(resourceName(await objectUrl(org, org.defaultUrl, uidAt))).toBe(atName)
-    expect(resourceName(await objectUrl(org, org.defaultUrl, uidPct))).toBe(pctName)
 
-    // Normalizing the raw-@ href addresses the %40 resource instead: the MOVE
-    // succeeds, but it carries the wrong event.
     const normalized = await move(org, `${org.defaultUrl}${encodeURIComponent(atName)}`, `${orgPrivate}${pctName}`)
     const inPrivate = (await uidsIn(org, orgPrivate)).map((e) => e.uid)
     console.log(
       '[spike 4 hazard] MOVE of normalized @ href',
       normalized.status,
-      '| %40 event moved',
-      inPrivate.includes(uidPct),
       '| @ event moved',
       inPrivate.includes(uidAt)
     )
     expect(normalized.status).toBe(201)
-    expect(inPrivate).toContain(uidPct)
-    expect(inPrivate).not.toContain(uidAt)
+    expect(inPrivate).toContain(uidAt)
   }, 60_000)
 
   test('5a. a local attendee reply reaches an organized event after it moved', async () => {

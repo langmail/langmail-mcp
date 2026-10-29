@@ -13,12 +13,13 @@
 //     instead of DELETEing we exclude the instant on the master with an EXDATE
 //     (see caldav/occurrence.ts) and PUT the object back. Stalwart then diffs
 //     the scheduling object (RFC 6638) and fans out an iMIP update to the
-//     attendees. NB (verified against Stalwart 0.16 — see
-//     stalwart-cancel-occurrence.test.ts): the fan-out is an *updated-series
-//     REQUEST* carrying the new EXDATE, not a per-instance CANCEL — the attendee
-//     client applies the updated series and drops just that occurrence. The
-//     bumped master SEQUENCE is what makes clients treat the update as newer and
-//     re-apply it (RFC 5546). Either way we build no scheduling message
+//     attendees. NB (verified against Stalwart 1.0 — see
+//     stalwart-cancel-occurrence.test.ts): the fan-out is a per-instance
+//     METHOD:CANCEL whose RECURRENCE-ID names the excluded instant (RFC 5546
+//     §3.2.5), so the attendee client drops just that occurrence and keeps the
+//     series. Stalwart 0.16 sent an updated-series REQUEST carrying the EXDATE
+//     instead. The bumped master SEQUENCE keeps either form newer than the
+//     invitation (RFC 5546). Either way we build no scheduling message
 //     ourselves — same philosophy as the whole-series path.
 //
 // Logic sits behind a `Deps` interface (discover + fetchEvent + deleteEvent +

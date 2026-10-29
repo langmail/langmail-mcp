@@ -93,11 +93,15 @@ export const contactCardGet = async (p: ContactCardGetParams): Promise<ContactCa
 // RFC 9610 §5.5 filter conditions, narrowed to what search_contacts and the
 // collection upsert actually filter on. `email` and `name` match the
 // respective properties; `text` matches across all textual properties.
+// `uid` is an exact match that Stalwart 1.0 answers from the store, while
+// `email`, `name` and `text` go through its asynchronous search index and
+// miss a card for a moment after it is written.
 export interface ContactCardFilterCondition {
   email?: string
   inAddressBook?: string
   name?: string
   text?: string
+  uid?: string
 }
 
 export type ContactCardFilter =
