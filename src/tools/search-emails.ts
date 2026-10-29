@@ -2,10 +2,9 @@
 // mailbox. Supports free-text search plus optional date-range, sender,
 // keyword (classified email type), read/starred, and mailbox filters, returning
 // a token-frugal hit list (id/subject/sender/date/tags/flags/snippet/attachments)
-// headed by how
-// many of the total matches it shows. Multi-term queries rank messages
-// matching more terms first; everything else is newest-first. Full bodies
-// are fetched separately via get_email.
+// headed by how many of the total matches it shows. Multi-term queries rank
+// messages matching more terms first; everything else is newest-first. Full
+// bodies are fetched separately via get_email.
 //
 // The tool logic lives behind a `Deps` interface so it can be unit-tested
 // without spinning up Stalwart. `makeLiveDeps` wires the live JMAP deps.
@@ -79,7 +78,7 @@ const searchEmailsShape = {
     .max(500)
     .optional()
     .describe(
-      "Free-text search over subject, body, and addresses. Terms are OR'd — a message matches if it contains ANY term, and messages matching more terms rank first (each hit shows matched: X/N terms). Wrap a phrase in double quotes to require all its words in the same field. Narrow with from/keywords/after/before, not by adding terms; only the first 10 terms are used."
+      "Free-text search over subject, body, and addresses. Terms are OR'd — a message matches if it contains ANY term, and messages matching more terms rank first (each hit shows matched: X/N terms). Wrap a phrase in double quotes to require all its words in the same field. Narrow with from/keywords/after/before/read/starred, not by adding terms; only the first 10 terms are used."
     ),
   read: z
     .boolean()

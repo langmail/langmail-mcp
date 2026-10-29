@@ -304,12 +304,12 @@ describe('searchEmails', () => {
         },
       }),
       {
-        args: { after: '2026-04-17T00:00:00Z', limit: 20, query: 'Supabase invoice receipt' },
+        args: { after: '2026-04-17T00:00:00Z', limit: 20, query: 'Supabase invoice receipt', read: false },
         token: 'tok',
       }
     )
     expect(seen?.terms).toEqual(['Supabase', 'invoice', 'receipt'])
-    expect(seen?.filters).toEqual({ after: '2026-04-17T00:00:00Z' })
+    expect(seen?.filters).toEqual({ after: '2026-04-17T00:00:00Z', keywordStates: { $seen: false } })
   })
 
   test('keeps a double-quoted phrase as a single term in the per-term fan-out', async () => {
@@ -384,7 +384,7 @@ describe('searchEmails', () => {
         ],
         total: 3,
       }),
-      { args: { limit: 2, query: 'alpha bravo' }, token: 'tok' }
+      { args: { limit: 2, query: 'alpha bravo', starred: true }, token: 'tok' }
     )
     const txt = result.content[0]?.text ?? ''
     // 'b' matched both terms and ranks first; 'c' fell past the limit.
@@ -392,6 +392,7 @@ describe('searchEmails', () => {
     expect(txt).toStartWith('2 of 3 message(s) matched — 1 more not shown.')
     // The total counts the union of all terms, not one term's hits.
     expect(seenTotal?.filters.text).toEqual(['alpha', 'bravo'])
+    expect(seenTotal?.filters.keywordStates).toEqual({ $flagged: true })
   })
 
   // A per-term window that filled up may hide older multi-term hits, so the
