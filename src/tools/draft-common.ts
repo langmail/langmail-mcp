@@ -248,11 +248,9 @@ export interface IdentityResolution {
 // from the rest of their Sent folder is the tell that an agent wrote it.
 //
 // On Stalwart that name is the account's `description`, falling back to its
-// `name` — and Langmail's provisioning (services/auth `createAccount`) sets no
-// description, so today it resolves to the mailbox local part rather than a
-// human name. That's a provisioning gap, not one to paper over here: the
-// Identity is the account's one record of its sender name, so the fix belongs
-// where the account is created, not in each tool that sends.
+// `name` (the local part). Provisioning (services/auth `createIndividual`) sets
+// the description to the user's display name, so the Identity is the account's
+// one record of its sender name and no tool that sends has to patch it up.
 const identityAddress = (identity: IdentityRecord, requestedName?: string): EmailAddress => {
   const name = identity.name?.trim() || requestedName
   return name ? { email: identity.email, name } : { email: identity.email }
