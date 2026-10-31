@@ -254,9 +254,10 @@ describe('resolveEventTimes on an unparseable date-time', () => {
     // hasExplicitOffset routes the same clock digits to two different parsers:
     // `new Date` takes minute precision, parseWallClockInZone does not. So this
     // value resolves or throws depending on the offset and on explicitTimeZone.
-    // Only the throwing forms are reachable through a tool, because the schema
-    // rejects minute precision *with* an offset — the gap is in the routing,
-    // not in what callers can send.
+    // Only the throwing form in the *previous* test is reachable through a
+    // tool: the schema takes minute precision without an offset but rejects it
+    // with one, so neither call here can come from a caller — the gap this test
+    // pins is in the routing, not in what callers can send.
     expect(eventTimeSchema.safeParse('2026-10-03T10:00Z').success).toBe(false)
     const resolvedPair = resolveEventTimes('2026-10-03T10:00Z', '2026-10-03T11:00Z', 'UTC', false)
     expect(resolved(resolvedPair).start.toISOString()).toBe('2026-10-03T10:00:00.000Z')
