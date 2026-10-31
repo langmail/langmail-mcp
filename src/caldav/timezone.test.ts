@@ -351,6 +351,11 @@ describe('resolveInputDateTime', () => {
     // 02:30 is skipped in Berlin on 2026-03-29: the clock jumps 02:00 -> 03:00.
     // Which instant comes back is @date-fns/tz's choice, not ours, so this is
     // pinned to catch a dependency regression rather than to bless an answer.
+    // Unlike the ambiguous case below, this direction was the same under every
+    // host zone checked (UTC, Europe/Berlin, Asia/Kolkata, America/Anchorage,
+    // Australia/Lord_Howe), so an exact instant is safe to assert. If it ever
+    // fails on one runner and not another, the host zone is the thing to look
+    // at first: docs/upstream/date-fns-tz/ambiguous-wall-clock-depends-on-system-zone.md
     const at = resolveInputDateTime('2026-03-29T02:30:00', 'Europe/Berlin', false)
     expect(at.getTime()).toBe(new Date('2026-03-29T01:30:00Z').getTime())
   })
