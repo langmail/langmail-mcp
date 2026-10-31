@@ -182,9 +182,17 @@ describe('resolveEventTimes on a timed event', () => {
     expect(times.end.getTime()).toBe(new Date('2026-07-01T11:00:00Z').getTime())
   })
 
-  test('honours an offset in the string when no time zone was passed', () => {
-    const result = resolveEventTimes('2026-07-01T12:00:00+05:00', '2026-07-01T13:00:00+05:00', 'Europe/Berlin', false)
-    expect(resolved(result).start.toISOString()).toBe('2026-07-01T07:00:00.000Z')
+  test('honours an offset in the string when the zone was not explicit', () => {
+    // 'Europe/Berlin' is passed and deliberately ignored: it is the
+    // explicitTimeZone flag, not the absence of a zone, that hands the string
+    // to `new Date`. That branch returns a plain Date rather than a TZDate, so
+    // toISOString is safe to assert on here, unlike the wall-clock cases above.
+    const times = resolved(
+      resolveEventTimes('2026-07-01T12:00:00+05:00', '2026-07-01T13:00:00+05:00', 'Europe/Berlin', false)
+    )
+    expect(times.allDay).toBe(false)
+    expect(times.start.toISOString()).toBe('2026-07-01T07:00:00.000Z')
+    expect(times.end.toISOString()).toBe('2026-07-01T08:00:00.000Z')
   })
 
   test('an explicit time zone overrides an offset in the string', () => {
@@ -218,8 +226,12 @@ describe('resolveEventTimes on a mismatched pair', () => {
       ok: false,
     })
   })
+})
 
-  test('throws on a date-time that is not a date-time at all', () => {
+// Both ends are date-times here, so these are *matched* pairs that reach the
+// timed branch — the pair-shape check above has already passed.
+describe('resolveEventTimes on an unparseable date-time', () => {
+  test('throws on a value that is not a date-time at all', () => {
     expect(() => resolveEventTimes('not-a-time', 'also-not', 'UTC', false)).toThrow('invalid date-time: not-a-time')
   })
 
@@ -235,6 +247,21 @@ describe('resolveEventTimes on a mismatched pair', () => {
     expect(eventTimeSchema.safeParse('2026-10-03T10:00:00.1234').success).toBe(true)
     expect(() => resolveEventTimes('2026-10-03T10:00:00.1234', '2026-10-03T11:00:00', 'UTC', false)).toThrow(
       'invalid date-time: 2026-10-03T10:00:00.1234'
+    )
+  })
+
+  test('reads minute precision only on the offset branch', () => {
+    // hasExplicitOffset routes the same clock digits to two different parsers:
+    // `new Date` takes minute precision, parseWallClockInZone does not. So this
+    // value resolves or throws depending on the offset and on explicitTimeZone.
+    // Only the throwing forms are reachable through a tool, because the schema
+    // rejects minute precision *with* an offset — the gap is in the routing,
+    // not in what callers can send.
+    expect(eventTimeSchema.safeParse('2026-10-03T10:00Z').success).toBe(false)
+    const resolvedPair = resolveEventTimes('2026-10-03T10:00Z', '2026-10-03T11:00Z', 'UTC', false)
+    expect(resolved(resolvedPair).start.toISOString()).toBe('2026-10-03T10:00:00.000Z')
+    expect(() => resolveEventTimes('2026-10-03T10:00Z', '2026-10-03T11:00Z', 'UTC', true)).toThrow(
+      'invalid date-time: 2026-10-03T10:00Z'
     )
   })
 })
@@ -317,6 +344,27 @@ describe('resolveInputDateTime', () => {
     // An explicit `timeZone` argument wins: the clock digits are re-read there.
     expect(resolveInputDateTime('2026-07-01T12:00:00Z', 'Europe/Berlin', true).getTime()).toBe(SUMMER.getTime())
     expect(resolveInputDateTime('2026-07-01T12:00:00+05:00', 'Europe/Berlin', true).getTime()).toBe(SUMMER.getTime())
+  })
+
+  test('resolves a wall clock that does not exist in the zone', () => {
+    // 02:30 is skipped in Berlin on 2026-03-29: the clock jumps 02:00 -> 03:00.
+    // Which instant comes back is @date-fns/tz's choice, not ours, so this is
+    // pinned to catch a dependency regression rather than to bless an answer.
+    const at = resolveInputDateTime('2026-03-29T02:30:00', 'Europe/Berlin', false)
+    expect(at.getTime()).toBe(new Date('2026-03-29T01:30:00Z').getTime())
+  })
+
+  test('resolves a wall clock that happens twice to one of its two instants', () => {
+    // 02:30 occurs twice in Berlin on 2026-10-25, once at +02:00 and once at
+    // +01:00. Which one @date-fns/tz returns depends on the *host* process's
+    // local zone — +01:00 under TZ=UTC, +02:00 under TZ=Asia/Kolkata — so only
+    // the weaker claim is stable enough to assert. Pinned this way on purpose:
+    // asserting either instant would make the suite fail on a non-UTC runner.
+    // See docs/upstream/date-fns-tz/ambiguous-wall-clock-depends-on-system-zone.md
+    const at = resolveInputDateTime('2026-10-25T02:30:00', 'Europe/Berlin', false)
+    expect([new Date('2026-10-25T00:30:00Z').getTime(), new Date('2026-10-25T01:30:00Z').getTime()]).toContain(
+      at.getTime()
+    )
   })
 
   test('keeps milliseconds on a wall-clock string', () => {
