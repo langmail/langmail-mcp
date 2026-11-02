@@ -11,6 +11,8 @@ const PUBLIC = 'https://mcp.example.com'
 
 const EMAIL: EmailDetailRecord = {
   blobId: 'Mraw42',
+  // A body the tool must never echo: only metadata belongs in the result.
+  bodyValues: { '1': { isEncodingProblem: false, isTruncated: true, value: 'BODY-SENTINEL' } },
   id: 'e1',
   size: 2_457_600,
   subject: 'Your invoice for June',
@@ -71,6 +73,7 @@ describe('downloadEmail', () => {
     // Only metadata is read; the body cap keeps the source out of the call.
     expect(fetched[0]?.maxBodyValueBytes).toBe(16)
     expect(txt).not.toContain('secret')
+    expect(txt).not.toContain('BODY-SENTINEL')
   })
 
   test('errors on an unknown message id and mints nothing', async () => {
@@ -112,6 +115,12 @@ describe('downloadEmail', () => {
     // The cleaned name is the one shown too, so no newline from the subject
     // reaches the metadata line.
     expect(txt.startsWith(`${name} (message/rfc822`)).toBe(true)
+  })
+
+  test('format characters and leading spaces cannot disguise or hide the file name', async () => {
+    const { deps, minted } = makeDeps({ acct: [{ ...EMAIL, subject: '  ..env\u202Etxt\u200B' }] })
+    await downloadEmail(deps, { args: { emailId: 'e1' }, token: 'tok' })
+    expect(minted[0]?.name).toBe('env_txt_.eml')
   })
 
   test('caps a very long subject', async () => {

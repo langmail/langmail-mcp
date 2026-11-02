@@ -1,6 +1,6 @@
 // In-memory store of short-lived attachment download tickets.
 //
-// download_attachment mints a ticket binding an unguessable token to
+// download_attachment (and download_email, for a whole message) mints a ticket binding an unguessable token to
 // (bearer, accountId, blobId, name, type); GET /attachments/:token redeems
 // it — the token *is* the credential, same model as a presigned URL. The
 // bearer therefore never reaches the model or the wire. Single-process
