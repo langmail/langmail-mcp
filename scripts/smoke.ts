@@ -210,6 +210,7 @@ const main = async () => {
     'get_email',
     'get_thread',
     'download_attachment',
+    'download_email',
     'preview_mail_rule',
     'create_mail_rule',
     'list_mail_rules',

@@ -43,6 +43,7 @@ import { registerDeleteContact } from '../tools/delete-contact.ts'
 import { registerDeleteDraft } from '../tools/delete-draft.ts'
 import { registerDeleteMailRule } from '../tools/delete-mail-rule.ts'
 import { makeLiveDeps as makeDownloadAttachmentDeps, registerDownloadAttachment } from '../tools/download-attachment.ts'
+import { makeLiveDeps as makeDownloadEmailDeps, registerDownloadEmail } from '../tools/download-email.ts'
 import { makeLiveDeps as makeDraftDeps } from '../tools/draft-common.ts'
 import { makeLiveDeps as makeFileEmailsDeps } from '../tools/file-emails-common.ts'
 import { registerGetDraft } from '../tools/get-draft.ts'
@@ -109,6 +110,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   // JMAP session cache.
   const fileEmailsDeps = makeFileEmailsDeps(jmapLive)
   const downloadAttachmentDeps = makeDownloadAttachmentDeps(jmapLive, cfg.tickets, cfg.publicUrl)
+  const downloadEmailDeps = makeDownloadEmailDeps(jmapLive, cfg.tickets, cfg.publicUrl)
   const uploadAttachmentsDeps = makeUploadAttachmentsDeps(jmapLive, cfg.uploadTickets, cfg.publicUrl)
   const previewEmailDeps = makePreviewEmailDeps(jmapLive, cfg.tickets, cfg.imageTokens, cfg.publicUrl)
   // CalDAV tools discover against the same Stalwart base; tsdav follows
@@ -174,6 +176,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     registerTrashEmails(server, fileEmailsDeps, () => ctx.token)
     registerMarkEmails(server, fileEmailsDeps, () => ctx.token)
     registerDownloadAttachment(server, downloadAttachmentDeps, () => ctx.token)
+    registerDownloadEmail(server, downloadEmailDeps, () => ctx.token)
     registerUploadAttachments(server, uploadAttachmentsDeps, () => ctx.token)
     registerPreviewMailRule(server, mailRuleDeps, () => ctx.token)
     registerCreateMailRule(server, mailRuleDeps, () => ctx.token)

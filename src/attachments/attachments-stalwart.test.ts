@@ -39,6 +39,7 @@ import {
 import { createRoutes, type Routes } from '../handler.ts'
 import { untilIndexed } from '../search-index-test-wait.ts'
 import { type DownloadAttachmentDeps, downloadAttachment } from '../tools/download-attachment.ts'
+import { downloadEmail } from '../tools/download-email.ts'
 import { type GetEmailDeps, getEmail } from '../tools/get-email.ts'
 import { type SearchEmailsDeps, searchEmails } from '../tools/search-emails.ts'
 import { createAttachmentDownload } from './download.ts'
@@ -369,6 +370,21 @@ live('attachments against live Stalwart — metadata, capability URL, blob strea
     expect(res.headers.get('content-disposition')).toContain('filename="invoice.pdf"')
     const body = new Uint8Array(await res.arrayBuffer())
     expect(body).toEqual(pdfBytes)
+  })
+
+  test('download_email mints a URL whose GET streams back the exact raw message as message/rfc822', async () => {
+    const result = await downloadEmail(dlDeps, { args: { emailId: plainId }, token: TOKEN })
+    expect(result.isError).toBeUndefined()
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toContain('No files here.eml (message/rfc822,')
+    const url = txt.match(DOWNLOAD_URL_RE)?.[1]
+    expect(url).toBeDefined()
+
+    const res = await routes.fetch(new Request(url as string))
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('message/rfc822')
+    expect(res.headers.get('content-disposition')).toContain('filename="No files here.eml"')
+    expect(await res.text()).toBe(plainMime())
   })
 
   test('a tampered token is a plain 404', async () => {
