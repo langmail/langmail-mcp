@@ -54,7 +54,7 @@ export const createAttachmentDownload = (live: JmapLive, tickets: TicketStore): 
       })
     } catch (err) {
       // E.g. the bound bearer expired before the ticket did — the agent
-      // re-calls download_attachment for a fresh URL.
+      // re-calls download_attachment or download_email for a fresh URL.
       const status = err instanceof JmapError ? err.status : 502
       logger.warn({ status }, 'attachment blob fetch failed')
       return new Response('upstream error\n', { status: 502 })

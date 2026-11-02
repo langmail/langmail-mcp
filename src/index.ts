@@ -39,7 +39,7 @@ const AUTH_URL = (process.env.AUTH_PUBLIC_URL ?? 'https://auth.langmail.me').rep
 const AUTH_ISSUER = `${AUTH_URL}/api/auth`
 
 // One JMAP session cache + one ticket store shared between the MCP tool
-// surface (download_attachment mints) and the plain-HTTP download route
+// surface (download_attachment and download_email mint) and the plain-HTTP download route
 // (GET /attachments/:token redeems); the upload ticket store does the same
 // for upload_attachments and PUT /attachments/uploads/:token. The
 // image-proxy store follows the same mint/redeem split for preview_email's
