@@ -26,7 +26,25 @@ import { errorResult, type ToolResult, textResult } from './result.ts'
 const METADATA_BODY_VALUE_BYTES = 16
 
 // A subject can run to hundreds of characters; keep the filename usable.
-const MAX_FILENAME_STEM_CHARS = 100
+// Capped in UTF-8 bytes, not characters: filesystems limit a name to 255
+// bytes, and 100 CJK characters alone are 300.
+const MAX_FILENAME_STEM_BYTES = 200
+
+const utf8 = new TextEncoder()
+
+// Whole code points only, so a multi-byte character is never cut in half.
+const capUtf8 = (text: string, maxBytes: number): string => {
+  let out = ''
+  let bytes = 0
+  for (const ch of text) {
+    bytes += utf8.encode(ch).length
+    if (bytes > maxBytes) {
+      break
+    }
+    out += ch
+  }
+  return out
+}
 
 const EML_TYPE = 'message/rfc822'
 
@@ -35,7 +53,7 @@ const EML_TYPE = 'message/rfc822'
 // the curl example and in the route's content-disposition.
 const emlFilename = (email: EmailDetailRecord): string => {
   const stem = shellSafeFilename(email.subject ?? '', '')
-  const capped = [...stem].slice(0, MAX_FILENAME_STEM_CHARS).join('').trim()
+  const capped = capUtf8(stem, MAX_FILENAME_STEM_BYTES).trim()
   return `${capped || shellSafeFilename(email.id, 'message')}.eml`
 }
 

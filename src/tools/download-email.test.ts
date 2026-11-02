@@ -126,7 +126,16 @@ describe('downloadEmail', () => {
   test('caps a very long subject', async () => {
     const { deps, minted } = makeDeps({ acct: [{ ...EMAIL, subject: 'a'.repeat(500) }] })
     await downloadEmail(deps, { args: { emailId: 'e1' }, token: 'tok' })
-    expect(minted[0]?.name).toBe(`${'a'.repeat(100)}.eml`)
+    expect(minted[0]?.name).toBe(`${'a'.repeat(200)}.eml`)
+  })
+
+  test('caps a long non-ASCII subject in UTF-8 bytes, on a character boundary', async () => {
+    const { deps, minted } = makeDeps({ acct: [{ ...EMAIL, subject: '請求書'.repeat(100) }] })
+    await downloadEmail(deps, { args: { emailId: 'e1' }, token: 'tok' })
+    const name = minted[0]?.name ?? ''
+    // 66 three-byte characters fit in 200 bytes; the name stays under 255.
+    expect(name).toBe(`${'請求書'.repeat(22)}.eml`)
+    expect(new TextEncoder().encode(name).length).toBeLessThanOrEqual(255)
   })
 })
 
