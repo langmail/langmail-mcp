@@ -130,7 +130,7 @@ describe('postOneClick', () => {
     ])
   })
 
-  test('a redirect to http is refused', async () => {
+  test('a redirect to http is not followed, and the sender already has the request', async () => {
     const { hop } = scripted({
       'https://a.example.com/u': { body: '', location: 'http://a.example.com/u', status: 301 },
     })
@@ -141,7 +141,7 @@ describe('postOneClick', () => {
     })
   })
 
-  test('a redirect into an internal address is refused by the guard', async () => {
+  test('a redirect into an internal address is not followed, and the sender already has the request', async () => {
     const { hop } = scripted({
       'https://a.example.com/u': { body: '', location: 'https://internal.example.com/x', status: 307 },
       'https://internal.example.com/x': new BlockedAddressError('internal.example.com'),
@@ -177,7 +177,7 @@ describe('postOneClick', () => {
     expect(calls).toEqual([])
   })
 
-  test('a redirect to an internal IP literal is refused', async () => {
+  test('a redirect to an internal IP literal is not followed', async () => {
     const { calls, hop } = scripted({
       'https://a.example.com/u': { body: '', location: 'https://10.0.0.5/x', status: 307 },
     })

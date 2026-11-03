@@ -217,12 +217,13 @@ export const unsubscribeFromList = async (deps: UnsubscribeDeps, ctx: Unsubscrib
   }
 
   const outcome = await postOneClick(url, deps.sendHop)
-  if (outcome.kind === 'failed') {
-    // The only tool that dials out: keep failures visible in error tracking.
-    // The host only — the path and query carry the subscriber's token.
+  if (outcome.kind !== 'response') {
+    // The only tool that dials out: keep failures and refusals (a link into
+    // private space is the security signal) visible in error tracking. The
+    // host only — the path and query carry the subscriber's token.
     logger.warn(
-      { host: new URL(url).host, reason: outcome.reason, tool: 'unsubscribe_from_list' },
-      'one-click unsubscribe failed'
+      { host: new URL(url).host, kind: outcome.kind, reason: outcome.reason, tool: 'unsubscribe_from_list' },
+      'one-click unsubscribe did not complete'
     )
   }
   const lines = [...outcomeLines(url, outcome), ...scopeLines(url), ...delivered]

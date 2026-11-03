@@ -231,7 +231,7 @@ const runHop = async (
   try {
     target = new URL(current)
   } catch {
-    return { kind: 'refused', reason: `the link is not a valid URL (${current})` }
+    return { kind: 'refused', reason: 'the link is not a valid URL' }
   }
   if (target.protocol !== 'https:') {
     return {
