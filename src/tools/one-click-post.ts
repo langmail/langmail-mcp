@@ -32,7 +32,10 @@ for (const [net, prefix] of [
   BLOCKED.addSubnet(net, prefix, 'ipv4')
 }
 for (const [net, prefix] of [
-  ['::', 128],
+  ['::', 96],
+  ['::ffff:0:0:0', 96],
+  ['2001::', 32],
+  ['64:ff9b:1::', 48],
   ['::1', 128],
   ['64:ff9b::', 96],
   ['100::', 64],
@@ -46,6 +49,7 @@ for (const [net, prefix] of [
   BLOCKED.addSubnet(net, prefix, 'ipv6')
 }
 
+const BRACKETS_RE = /^\[|\]$/gu
 const IPV4_MAPPED_RE = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/iu
 
 export const isBlockedAddress = (address: string): boolean => {
@@ -110,8 +114,11 @@ const TIMEOUT_MS = 10_000
 const MAX_BODY_BYTES = 16_384
 const ONE_CLICK_BODY = 'List-Unsubscribe=One-Click'
 
-// One request, nothing followed. The body is read up to a cap; a sender's
-// endpoint has no business sending more than a confirmation page.
+// One request, nothing followed. The whole hop — connect, TLS, headers and
+// body — has one hard deadline (the socket `timeout` alone only fires on an
+// idle socket, so a trickling sender could hold the call forever), and the
+// body is cut off at a cap: a sender's endpoint has no business sending more
+// than a confirmation page.
 export const makeSendHop =
   (resolve: Resolve = systemResolve): SendHop =>
   (url, method) =>
@@ -127,43 +134,73 @@ export const makeSendHop =
           },
           lookup: guardedLookup(resolve) as unknown as https.RequestOptions['lookup'],
           method,
-          timeout: TIMEOUT_MS,
         },
         (res) => {
           const chunks: Buffer[] = []
           let size = 0
-          res.on('data', (chunk: Buffer) => {
-            if (size < MAX_BODY_BYTES) {
-              chunks.push(chunk)
-              size += chunk.length
-            }
-          })
-          res.on('end', () =>
+          const finish = () => {
+            clearTimeout(deadline)
             resolvePromise({
               body: Buffer.concat(chunks).subarray(0, MAX_BODY_BYTES).toString('utf8'),
               location: typeof res.headers.location === 'string' ? res.headers.location : null,
               status: res.statusCode ?? 0,
             })
-          )
+          }
+          res.on('data', (chunk: Buffer) => {
+            chunks.push(chunk)
+            size += chunk.length
+            if (size >= MAX_BODY_BYTES) {
+              finish()
+              res.destroy()
+            }
+          })
+          res.on('end', finish)
           res.on('error', reject)
         }
       )
-      req.on('timeout', () => req.destroy(new Error(`no answer within ${TIMEOUT_MS / 1000} seconds`)))
-      req.on('error', reject)
+      const deadline = setTimeout(() => req.destroy(new HopTimeoutError()), TIMEOUT_MS)
+      req.on('error', (err) => {
+        clearTimeout(deadline)
+        reject(err)
+      })
       req.end(method === 'POST' ? ONE_CLICK_BODY : undefined)
     })
 
+class HopTimeoutError extends Error {
+  constructor() {
+    super(`no answer within ${TIMEOUT_MS / 1000} seconds`)
+    this.name = 'HopTimeoutError'
+  }
+}
+
+// A short, generic reason for a failed request. The raw message can carry the
+// address and port that was dialled, which the sender must not learn back
+// through the agent.
+const failureReason = (err: unknown): string => {
+  if (err instanceof HopTimeoutError) {
+    return err.message
+  }
+  const code = (err as { code?: unknown } | null)?.code
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
+    return 'the host name does not resolve'
+  }
+  if (code === 'ECONNREFUSED' || code === 'ECONNRESET' || code === 'EHOSTUNREACH' || code === 'ENETUNREACH') {
+    return 'the connection failed'
+  }
+  if (typeof code === 'string' && (code.includes('CERT') || code.startsWith('ERR_TLS') || code.includes('SSL'))) {
+    return 'the TLS handshake failed'
+  }
+  return 'the request failed'
+}
+
 export type OneClickOutcome =
-  | { body: string; host: string; kind: 'response'; status: number }
+  | { body: string; host: string; kind: 'response'; redirected: boolean; status: number }
   | { kind: 'refused'; reason: string }
   | { kind: 'failed'; reason: string }
 
 const MAX_REDIRECTS = 3
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
 
-// POST `List-Unsubscribe=One-Click` to the URL, following at most three
-// redirects. 307/308 repeat the POST (the RFC 7231 rule); 301/302/303 turn
-// into a GET, as browsers do. Every hop must be https and pass the guard.
 const isBlockedError = (err: unknown): err is Error =>
   err instanceof BlockedAddressError || (err instanceof Error && err.name === 'BlockedAddressError')
 
@@ -187,13 +224,19 @@ const runHop = async (
       reason: hop === 0 ? 'the link is not https' : `the sender redirected to a non-https address (${target.protocol})`,
     }
   }
+  // An IP literal never goes through `lookup` (Node and Bun skip DNS for
+  // it), so the guard has to check it here.
+  const literal = target.hostname.replace(BRACKETS_RE, '')
+  if (isIP(literal) !== 0 && isBlockedAddress(literal)) {
+    return { kind: 'refused', reason: new BlockedAddressError(target.hostname).message }
+  }
   try {
     return { res: await sendHop(target.href, method), target }
   } catch (err) {
     if (isBlockedError(err)) {
       return { kind: 'refused', reason: err.message }
     }
-    return { kind: 'failed', reason: err instanceof Error ? err.message : String(err) }
+    return { kind: 'failed', reason: failureReason(err) }
   }
 }
 
@@ -210,9 +253,13 @@ export const postOneClick = async (url: string, sendHop: SendHop): Promise<OneCl
     }
     const { res, target } = step
     if (!(REDIRECT_STATUSES.has(res.status) && res.location)) {
-      return { body: res.body, host: target.host, kind: 'response', status: res.status }
+      return { body: res.body, host: target.host, kind: 'response', redirected: hop > 0, status: res.status }
     }
-    current = new URL(res.location, target).href
+    try {
+      current = new URL(res.location, target).href
+    } catch {
+      return { kind: 'failed', reason: 'the sender redirected to an invalid address' }
+    }
     if (res.status !== 307 && res.status !== 308) {
       method = 'GET'
     }

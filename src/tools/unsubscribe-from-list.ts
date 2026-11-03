@@ -125,7 +125,7 @@ const outcomeLines = (url: string, outcome: OneClickOutcome): string[] => {
       const accepted = outcome.status >= 200 && outcome.status < 300
       return [
         accepted
-          ? `Unsubscribe request accepted by ${outcome.host} (HTTP ${outcome.status}).`
+          ? `Unsubscribe request accepted by ${outcome.host} (HTTP ${outcome.status}${outcome.redirected ? ', after a redirect' : ''}).`
           : `Unsubscribe request not accepted: ${outcome.host} answered HTTP ${outcome.status}.`,
         `Response: ${excerpt(outcome.body)}`,
         ...(accepted
@@ -195,7 +195,10 @@ export const unsubscribeFromList = async (deps: UnsubscribeDeps, ctx: Unsubscrib
     return textResult([why, ...manual, ...delivered].join('\n'))
   }
 
-  const [url] = parsed.https as [string]
+  const [url] = parsed.https
+  if (!url) {
+    return errorResult('The one-click link is missing. Nothing was sent.')
+  }
 
   if (emailTags(record).includes(NOTIFICATION_TAG) && args.confirmNotification !== true) {
     return errorResult(
@@ -214,7 +217,8 @@ export const unsubscribeFromList = async (deps: UnsubscribeDeps, ctx: Unsubscrib
     lines.push(...manualOptions(parsed, url))
   }
   const text = lines.join('\n')
-  return outcome.kind === 'response' ? textResult(text) : errorResult(text)
+  const accepted = outcome.kind === 'response' && outcome.status >= 200 && outcome.status < 300
+  return accepted ? textResult(text) : errorResult(text)
 }
 
 // --- live-deps wiring ----------------------------------------------------

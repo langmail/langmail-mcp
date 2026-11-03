@@ -26,6 +26,10 @@ describe('isBlockedAddress', () => {
     '::ffff:127.0.0.1',
     '::ffff:10.0.0.1',
     '64:ff9b::a00:1',
+    '64:ff9b:1::1',
+    '::7f00:1',
+    '::ffff:7f00:1',
+    '2001:0:4136::1',
     '2002:a00:1::1',
     'not-an-ip',
   ])('blocks %s', (address) => {
@@ -95,6 +99,7 @@ describe('postOneClick', () => {
       body: 'ok',
       host: 'news.example.com',
       kind: 'response',
+      redirected: false,
       status: 202,
     })
     expect(calls).toEqual([['https://news.example.com/u', 'POST']])
@@ -116,7 +121,7 @@ describe('postOneClick', () => {
       'https://b.example.com/done': { body: 'Bye', location: null, status: 200 },
     })
     const out = await postOneClick('https://a.example.com/u', hop)
-    expect(out).toMatchObject({ host: 'b.example.com', kind: 'response', status: 200 })
+    expect(out).toMatchObject({ host: 'b.example.com', kind: 'response', redirected: true, status: 200 })
     expect(calls).toEqual([
       ['https://a.example.com/u', 'POST'],
       ['https://b.example.com/u', 'POST'],
@@ -146,10 +151,43 @@ describe('postOneClick', () => {
   })
 
   test('a network error is reported as failed', async () => {
-    const { hop } = scripted({ 'https://a.example.com/u': new Error('connect ECONNREFUSED') })
+    const err = Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:6379'), { code: 'ECONNREFUSED' })
+    const { hop } = scripted({ 'https://a.example.com/u': err })
+    // The dialled address and port stay out of the result.
     expect(await postOneClick('https://a.example.com/u', hop)).toEqual({
       kind: 'failed',
-      reason: 'connect ECONNREFUSED',
+      reason: 'the connection failed',
+    })
+  })
+
+  test.each([
+    'https://127.0.0.1/u',
+    'https://169.254.169.254/latest',
+    'https://[::1]/u',
+    'https://[::ffff:127.0.0.1]/u',
+    'https://2130706433/u',
+  ])('refuses the IP literal %s without calling it', async (url) => {
+    const { calls, hop } = scripted({})
+    const out = await postOneClick(url, hop)
+    expect(out.kind).toBe('refused')
+    expect(calls).toEqual([])
+  })
+
+  test('a redirect to an internal IP literal is refused', async () => {
+    const { calls, hop } = scripted({
+      'https://a.example.com/u': { body: '', location: 'https://10.0.0.5/x', status: 307 },
+    })
+    expect((await postOneClick('https://a.example.com/u', hop)).kind).toBe('refused')
+    expect(calls).toHaveLength(1)
+  })
+
+  test('a malformed Location is a failure, not a throw', async () => {
+    const { hop } = scripted({
+      'https://a.example.com/u': { body: '', location: 'https://[bad', status: 302 },
+    })
+    expect(await postOneClick('https://a.example.com/u', hop)).toEqual({
+      kind: 'failed',
+      reason: 'the sender redirected to an invalid address',
     })
   })
 

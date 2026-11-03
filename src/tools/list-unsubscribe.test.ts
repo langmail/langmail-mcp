@@ -66,6 +66,18 @@ describe('parseListUnsubscribe', () => {
     })
   })
 
+  test('mailto keeps a literal + and folds sender line breaks into one line', () => {
+    const parsed = parseListUnsubscribe(' <mailto:off@shop.example?subject=unsubscribe+list42%0AForged%20line>', null)
+    expect(parsed.mailto).toEqual([{ address: 'off@shop.example', subject: 'unsubscribe+list42 Forged line' }])
+  })
+
+  test('a malformed mailto escape is skipped, the https entry kept', () => {
+    const parsed = parseListUnsubscribe(' <mailto:%E0%A4@x.example>, <https://x.example/u>', ONE_CLICK)
+    expect(parsed.mailto).toEqual([])
+    expect(parsed.https).toEqual(['https://x.example/u'])
+    expect(parsed.oneClick).toBe(true)
+  })
+
   test('no header yields nothing', () => {
     expect(parseListUnsubscribe(null, null)).toEqual({ http: [], https: [], mailto: [], oneClick: false })
     expect(parseListUnsubscribe(undefined, ONE_CLICK).oneClick).toBe(false)
@@ -127,8 +139,11 @@ describe('deliveredTo', () => {
     expect(deliveredTo(rec)).toBe('jo@langmail.example')
   })
 
-  test('falls back to the To recipients', () => {
+  test('falls back to a single To recipient, never a list of them', () => {
     expect(deliveredTo(record({ to: [{ email: 'jo@langmail.example' }] }))).toBe('jo@langmail.example')
+    expect(
+      deliveredTo(record({ to: [{ email: 'jo@langmail.example' }, { email: 'kim@langmail.example' }] }))
+    ).toBeNull()
     expect(deliveredTo(record({}))).toBeNull()
   })
 })

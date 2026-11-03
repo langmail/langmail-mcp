@@ -84,17 +84,20 @@ describe('unsubscribeFromList', () => {
     const { deps } = makeDeps(newsletter(), { body: 'Gone', location: null, status: 410 })
     const result = await call(deps)
     const txt = textOf(result)
-    expect(result.isError).toBeUndefined()
+    expect(result.isError).toBe(true)
     expect(txt).toContain('Unsubscribe request not accepted: news.example.com answered HTTP 410.')
     expect(txt).toContain('To: leave@news.example.com')
     expect(txt).not.toMatch(AFFIRMATIVE_RE)
   })
 
   test('a network error is an error result that offers the mailto', async () => {
-    const { deps } = makeDeps(newsletter(), new Error('connect ETIMEDOUT'))
+    const { deps } = makeDeps(
+      newsletter(),
+      Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:443'), { code: 'ECONNREFUSED' })
+    )
     const result = await call(deps)
     expect(result.isError).toBe(true)
-    expect(textOf(result)).toContain('failed: connect ETIMEDOUT')
+    expect(textOf(result)).toContain('failed: the connection failed')
     expect(textOf(result)).toContain('To: leave@news.example.com')
   })
 

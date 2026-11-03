@@ -30,20 +30,39 @@ const WHITESPACE_RE = /\s+/gu
 
 export const unfoldHeader = (raw: string): string => raw.replaceAll(FOLD_RE, '')
 
+// Sender text that ends up in the tool result: one line, so a `%0A` in a
+// mailto subject cannot forge a line of the result.
+const oneLine = (text: string): string => text.replaceAll(WHITESPACE_RE, ' ').trim()
+
+// RFC 6068: `+` in a mailto query is a literal plus, not a space, so the
+// pairs are percent-decoded by hand rather than through URLSearchParams.
+const mailtoField = (query: string, name: string): string | undefined => {
+  for (const pair of query.split('&')) {
+    const eq = pair.indexOf('=')
+    if (eq > 0 && pair.slice(0, eq).toLowerCase() === name) {
+      const value = oneLine(decodeURIComponent(pair.slice(eq + 1)))
+      return value || undefined
+    }
+  }
+  return undefined
+}
+
 const parseMailto = (uri: string): MailtoTarget | null => {
-  let url: URL
   try {
-    url = new URL(uri)
+    const rest = uri.slice('mailto:'.length)
+    const q = rest.indexOf('?')
+    const address = oneLine(decodeURIComponent(q === -1 ? rest : rest.slice(0, q)))
+    if (!address) {
+      return null
+    }
+    const query = q === -1 ? '' : rest.slice(q + 1)
+    const subject = mailtoField(query, 'subject')
+    const body = mailtoField(query, 'body')
+    return { address, ...(subject ? { subject } : {}), ...(body ? { body } : {}) }
   } catch {
+    // A malformed percent-escape: skip this entry, keep the others.
     return null
   }
-  const address = decodeURIComponent(url.pathname).trim()
-  if (!address) {
-    return null
-  }
-  const subject = url.searchParams.get('subject') ?? undefined
-  const body = url.searchParams.get('body') ?? undefined
-  return { address, ...(subject ? { subject } : {}), ...(body ? { body } : {}) }
 }
 
 // RFC 2369 §2: the value is a comma-separated list of `<uri>` entries; a
@@ -142,8 +161,10 @@ export const deliveredTo = (record: EmailUnsubscribeRecord): string | null => {
   if (first) {
     return first.trim()
   }
+  // Without the header, a single To recipient is the best guess; a list of
+  // them would name other people's addresses as the user's.
   const to = (record.to ?? []).map((a) => a.email).filter(Boolean)
-  return to.length > 0 ? to.join(', ') : null
+  return to.length === 1 ? (to[0] ?? null) : null
 }
 
 export const formatMailto = (m: MailtoTarget): string =>
