@@ -72,6 +72,7 @@ import { makeLiveDeps as makeSearchContactsDeps, registerSearchContacts } from '
 import { makeLiveDeps as makeSearchEmailsDeps, registerSearchEmails } from '../tools/search-emails.ts'
 import { registerSendDraft } from '../tools/send-draft.ts'
 import { registerTrashEmails } from '../tools/trash-emails.ts'
+import { makeLiveDeps as makeUnsubscribeDeps, registerUnsubscribeFromList } from '../tools/unsubscribe-from-list.ts'
 import { makeLiveDeps as makeUpdateCalendarDeps, registerUpdateCalendar } from '../tools/update-calendar.ts'
 import {
   makeLiveDeps as makeUpdateCalendarEventDeps,
@@ -112,6 +113,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   const downloadAttachmentDeps = makeDownloadAttachmentDeps(jmapLive, cfg.tickets, cfg.publicUrl)
   const downloadEmailDeps = makeDownloadEmailDeps(jmapLive, cfg.tickets, cfg.publicUrl)
   const uploadAttachmentsDeps = makeUploadAttachmentsDeps(jmapLive, cfg.uploadTickets, cfg.publicUrl)
+  const unsubscribeDeps = makeUnsubscribeDeps(jmapLive)
   const previewEmailDeps = makePreviewEmailDeps(jmapLive, cfg.tickets, cfg.imageTokens, cfg.publicUrl)
   // CalDAV tools discover against the same Stalwart base; tsdav follows
   // /.well-known/caldav to /dav/cal.
@@ -175,6 +177,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     registerMoveEmails(server, fileEmailsDeps, () => ctx.token)
     registerTrashEmails(server, fileEmailsDeps, () => ctx.token)
     registerMarkEmails(server, fileEmailsDeps, () => ctx.token)
+    registerUnsubscribeFromList(server, unsubscribeDeps, () => ctx.token)
     registerDownloadAttachment(server, downloadAttachmentDeps, () => ctx.token)
     registerDownloadEmail(server, downloadEmailDeps, () => ctx.token)
     registerUploadAttachments(server, uploadAttachmentsDeps, () => ctx.token)

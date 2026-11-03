@@ -4,6 +4,7 @@ import {
   emailChanges,
   emailGet,
   emailGetDetail,
+  emailGetUnsubscribe,
   emailQuery,
   emailQueryPerTerm,
   emailQueryTotal,
@@ -1062,5 +1063,48 @@ describe('emailSetMailboxes', () => {
     )
     expect(result).toEqual({ notUpdated: [], updated: [] })
     expect(f).not.toHaveBeenCalled()
+  })
+})
+
+describe('emailGetUnsubscribe', () => {
+  test('asks for the list headers in Raw / asText form and returns the one record', async () => {
+    const f = mock((_u: string, init?: RequestInit) => {
+      const args = JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1]
+      expect(args.ids).toEqual(['e1'])
+      expect(args.properties).toContain('header:List-Unsubscribe')
+      expect(args.properties).toContain('header:List-Unsubscribe-Post:asText')
+      expect(args.properties).toContain('header:Delivered-To:asText:all')
+      expect(args.fetchTextBodyValues).toBe(true)
+      expect(args.maxBodyValueBytes).toBe(1000)
+      return Promise.resolve(
+        jmapResponse([
+          ['Email/get', { list: [{ 'header:List-Unsubscribe': ' <https://x.example/u>', id: 'e1' }] }, '0'],
+        ])
+      )
+    })
+    const rec = await withFetch(f, () =>
+      emailGetUnsubscribe({
+        accountId: 'acct',
+        apiUrl: API,
+        authorization: 'Bearer t',
+        id: 'e1',
+        maxBodyValueBytes: 1000,
+      })
+    )
+    expect(rec?.['header:List-Unsubscribe']).toBe(' <https://x.example/u>')
+  })
+
+  test('returns null for an unknown id', async () => {
+    const f = mock(() => Promise.resolve(jmapResponse([['Email/get', { list: [], notFound: ['nope'] }, '0']])))
+    const rec = await withFetch(f, () =>
+      emailGetUnsubscribe({
+        accountId: 'acct',
+        apiUrl: API,
+        authorization: 'Bearer t',
+        id: 'nope',
+        maxBodyValueBytes: 1000,
+      })
+    )
+    expect(rec).toBeNull()
   })
 })

@@ -10,6 +10,7 @@ import {
   type EmailChangesResult,
   type EmailDetailRecord,
   type EmailRecord,
+  type EmailUnsubscribeRecord,
   type MailboxRecord,
   type ThreadRecord,
 } from './types.ts'
@@ -383,6 +384,52 @@ export const emailGetDetail = async (p: EmailGetDetailParams): Promise<EmailDeta
   })
   const out = methodResponse<{ list?: EmailDetailRecord[] }>(resp, 'Email/get', '0')
   return out.list ?? []
+}
+
+// --- Email/get (unsubscribe headers) -------------------------------------
+
+// The list headers in the forms RFC 8621 §4.1.2 defines: List-Unsubscribe
+// Raw (folding kept, the caller parses `<uri>` entries itself), the Post and
+// Delivered-To headers as unfolded text. The text body is fetched so a
+// message without the header can still point at its footer link.
+const EMAIL_UNSUBSCRIBE_PROPERTIES = [
+  'id',
+  'mailboxIds',
+  'keywords',
+  'to',
+  'textBody',
+  'bodyValues',
+  'header:List-Unsubscribe',
+  'header:List-Unsubscribe-Post:asText',
+  'header:Delivered-To:asText:all',
+] as const
+
+export interface EmailGetUnsubscribeParams extends JmapCall {
+  accountId: string
+  id: string
+  maxBodyValueBytes: number
+}
+
+export const emailGetUnsubscribe = async (p: EmailGetUnsubscribeParams): Promise<EmailUnsubscribeRecord | null> => {
+  const resp = await call(p, {
+    methodCalls: [
+      [
+        'Email/get',
+        {
+          accountId: p.accountId,
+          bodyProperties: ['partId', 'type'],
+          fetchTextBodyValues: true,
+          ids: [p.id],
+          maxBodyValueBytes: p.maxBodyValueBytes,
+          properties: [...EMAIL_UNSUBSCRIBE_PROPERTIES],
+        },
+        '0',
+      ],
+    ],
+    using: USING,
+  })
+  const out = methodResponse<{ list?: EmailUnsubscribeRecord[] }>(resp, 'Email/get', '0')
+  return out.list?.[0] ?? null
 }
 
 // --- Email/set (patch) ---------------------------------------------------

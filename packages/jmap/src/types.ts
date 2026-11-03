@@ -88,6 +88,17 @@ export interface EmailDetailRecord extends EmailRecord {
   to?: EmailAddress[] | null
 }
 
+// What unsubscribe_from_list reads off one message: the RFC 2369 / RFC 8058
+// headers, where it sits (Junk), how it was classified (keywords), whom this
+// copy was delivered to, and the text body for the footer-link fallback.
+// `header:List-Unsubscribe` is RFC 8621's Raw form — the value exactly as
+// written, folding included — so the caller does its own unfolding.
+export interface EmailUnsubscribeRecord extends EmailDetailRecord {
+  'header:Delivered-To:asText:all'?: string[] | null
+  'header:List-Unsubscribe'?: string | null
+  'header:List-Unsubscribe-Post:asText'?: string | null
+}
+
 // What a staged draft has to round-trip: the detail shape plus the recipient
 // and threading properties only composition cares about. `bcc` never appears
 // on a received message, and `inReplyTo`/`references` are the RFC 5322
