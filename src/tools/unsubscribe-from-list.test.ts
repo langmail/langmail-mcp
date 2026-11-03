@@ -101,6 +101,29 @@ describe('unsubscribeFromList', () => {
     expect(textOf(result)).toContain('To: leave@news.example.com')
   })
 
+  test('a failed one-click request still offers the full https link for the browser', async () => {
+    const { deps } = makeDeps(
+      newsletter({ 'header:List-Unsubscribe': ` <${LINK}>` }),
+      Object.assign(new Error('reset'), { code: 'ECONNRESET' })
+    )
+    expect(textOf(await call(deps))).toContain(`  ${LINK}`)
+  })
+
+  test('a redirect refused after the POST went out does not claim nothing was sent', async () => {
+    const rec = newsletter()
+    const hops: string[] = []
+    const { deps } = makeDeps(rec)
+    deps.sendHop = (url) => {
+      hops.push(url)
+      return Promise.resolve({ body: '', location: 'http://news.example.com/done', status: 302 })
+    }
+    const txt = textOf(await call(deps))
+    expect(hops).toHaveLength(1)
+    expect(txt).toContain('reached news.example.com/unsubscribe, but did not finish')
+    expect(txt).toContain('Whether the sender acted on it is unknown')
+    expect(txt).not.toContain('Nothing was sent')
+  })
+
   test('an internal address is refused and says nothing was sent', async () => {
     const { deps } = makeDeps(newsletter(), new BlockedAddressError('news.example.com'))
     const result = await call(deps)

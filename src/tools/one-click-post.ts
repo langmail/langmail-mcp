@@ -196,7 +196,9 @@ const failureReason = (err: unknown): string => {
 export type OneClickOutcome =
   | { body: string; host: string; kind: 'response'; redirected: boolean; status: number }
   | { kind: 'refused'; reason: string }
-  | { kind: 'failed'; reason: string }
+  // `reachedSender`: an earlier hop was sent, so the sender has the request
+  // even though the chain did not finish.
+  | { kind: 'failed'; reachedSender: boolean; reason: string }
 
 const MAX_REDIRECTS = 3
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
@@ -236,7 +238,7 @@ const runHop = async (
     if (isBlockedError(err)) {
       return { kind: 'refused', reason: err.message }
     }
-    return { kind: 'failed', reason: failureReason(err) }
+    return { kind: 'failed', reachedSender: false, reason: failureReason(err) }
   }
 }
 
@@ -249,6 +251,12 @@ export const postOneClick = async (url: string, sendHop: SendHop): Promise<OneCl
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     const step = await runHop(current, hop, method, sendHop)
     if ('kind' in step) {
+      // Past the first hop the POST already reached the sender: a refused or
+      // failed redirect does not mean nothing was sent.
+      if (hop > 0 && step.kind !== 'response') {
+        const reason = step.kind === 'refused' ? `${step.reason}, so Langmail did not follow it` : step.reason
+        return { kind: 'failed', reachedSender: true, reason }
+      }
       return step
     }
     const { res, target } = step
@@ -258,11 +266,11 @@ export const postOneClick = async (url: string, sendHop: SendHop): Promise<OneCl
     try {
       current = new URL(res.location, target).href
     } catch {
-      return { kind: 'failed', reason: 'the sender redirected to an invalid address' }
+      return { kind: 'failed', reachedSender: true, reason: 'the sender redirected to an invalid address' }
     }
     if (res.status !== 307 && res.status !== 308) {
       method = 'GET'
     }
   }
-  return { kind: 'failed', reason: `the sender redirected more than ${MAX_REDIRECTS} times` }
+  return { kind: 'failed', reachedSender: true, reason: `the sender redirected more than ${MAX_REDIRECTS} times` }
 }

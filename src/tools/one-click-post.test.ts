@@ -134,8 +134,9 @@ describe('postOneClick', () => {
       'https://a.example.com/u': { body: '', location: 'http://a.example.com/u', status: 301 },
     })
     expect(await postOneClick('https://a.example.com/u', hop)).toEqual({
-      kind: 'refused',
-      reason: 'the sender redirected to a non-https address (http:)',
+      kind: 'failed',
+      reachedSender: true,
+      reason: 'the sender redirected to a non-https address (http:), so Langmail did not follow it',
     })
   })
 
@@ -145,8 +146,9 @@ describe('postOneClick', () => {
       'https://internal.example.com/x': new BlockedAddressError('internal.example.com'),
     })
     expect(await postOneClick('https://a.example.com/u', hop)).toEqual({
-      kind: 'refused',
-      reason: 'internal.example.com resolves to a private or internal address',
+      kind: 'failed',
+      reachedSender: true,
+      reason: 'internal.example.com resolves to a private or internal address, so Langmail did not follow it',
     })
   })
 
@@ -156,6 +158,7 @@ describe('postOneClick', () => {
     // The dialled address and port stay out of the result.
     expect(await postOneClick('https://a.example.com/u', hop)).toEqual({
       kind: 'failed',
+      reachedSender: false,
       reason: 'the connection failed',
     })
   })
@@ -177,7 +180,7 @@ describe('postOneClick', () => {
     const { calls, hop } = scripted({
       'https://a.example.com/u': { body: '', location: 'https://10.0.0.5/x', status: 307 },
     })
-    expect((await postOneClick('https://a.example.com/u', hop)).kind).toBe('refused')
+    expect(await postOneClick('https://a.example.com/u', hop)).toMatchObject({ kind: 'failed', reachedSender: true })
     expect(calls).toHaveLength(1)
   })
 
@@ -187,6 +190,7 @@ describe('postOneClick', () => {
     })
     expect(await postOneClick('https://a.example.com/u', hop)).toEqual({
       kind: 'failed',
+      reachedSender: true,
       reason: 'the sender redirected to an invalid address',
     })
   })
@@ -200,6 +204,7 @@ describe('postOneClick', () => {
     })
     expect(await postOneClick('https://a.example.com/1', hop)).toEqual({
       kind: 'failed',
+      reachedSender: true,
       reason: 'the sender redirected more than 3 times',
     })
   })

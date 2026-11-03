@@ -100,9 +100,9 @@ const scopeLines = (url: string): string[] => {
 }
 
 // What the user can still do by hand when nothing was sent automatically.
-const manualOptions = (parsed: ListUnsubscribe, exclude?: string): string[] => {
+const manualOptions = (parsed: ListUnsubscribe): string[] => {
   const lines: string[] = []
-  const links = [...parsed.https, ...parsed.http].filter((u) => u !== exclude)
+  const links = [...parsed.https, ...parsed.http]
   if (links.length > 0) {
     lines.push('Unsubscribe link the user can open in a browser:', ...links.map((u) => `  ${u}`))
   }
@@ -120,7 +120,11 @@ const outcomeLines = (url: string, outcome: OneClickOutcome): string[] => {
     case 'refused':
       return [`Nothing was sent: ${outcome.reason}.`]
     case 'failed':
-      return [`The unsubscribe request to ${describeUrl(url)} failed: ${outcome.reason}. It may not have arrived.`]
+      return outcome.reachedSender
+        ? [
+            `The unsubscribe request reached ${describeUrl(url)}, but did not finish: ${outcome.reason}. Whether the sender acted on it is unknown.`,
+          ]
+        : [`The unsubscribe request to ${describeUrl(url)} failed: ${outcome.reason}. It may not have arrived.`]
     default: {
       const accepted = outcome.status >= 200 && outcome.status < 300
       return [
@@ -214,7 +218,7 @@ export const unsubscribeFromList = async (deps: UnsubscribeDeps, ctx: Unsubscrib
   const outcome = await postOneClick(url, deps.sendHop)
   const lines = [...outcomeLines(url, outcome), ...scopeLines(url), ...delivered]
   if (outcome.kind !== 'response' || outcome.status < 200 || outcome.status >= 300) {
-    lines.push(...manualOptions(parsed, url))
+    lines.push(...manualOptions(parsed))
   }
   const text = lines.join('\n')
   const accepted = outcome.kind === 'response' && outcome.status >= 200 && outcome.status < 300
