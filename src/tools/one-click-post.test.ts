@@ -29,6 +29,7 @@ describe('isBlockedAddress', () => {
     '64:ff9b:1::1',
     '::7f00:1',
     '::ffff:7f00:1',
+    '::ffff:a9fe:a9fe',
     '2001:0:4136::1',
     '2002:a00:1::1',
     'not-an-ip',

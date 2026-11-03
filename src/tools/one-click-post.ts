@@ -33,6 +33,11 @@ for (const [net, prefix] of [
 }
 for (const [net, prefix] of [
   ['::', 96],
+  // IPv4-mapped (::ffff:0:0/96) is deliberately absent: BlockList checks
+  // every IPv4 address against it too, which would block them all. Mapped
+  // addresses are checked against the IPv4 rules instead (isBlockedAddress,
+  // and BlockList's own folding for the hex form). This entry is SIIT
+  // (RFC 2765 IPv4-translated), a different prefix.
   ['::ffff:0:0:0', 96],
   ['2001::', 32],
   ['64:ff9b:1::', 48],
@@ -122,7 +127,18 @@ const ONE_CLICK_BODY = 'List-Unsubscribe=One-Click'
 export const makeSendHop =
   (resolve: Resolve = systemResolve): SendHop =>
   (url, method) =>
-    new Promise((resolvePromise, reject) => {
+    new Promise((resolvePromise, rejectPromise) => {
+      // Settle once: the body cap destroys the response, which can still emit
+      // `end` or `error` afterwards, and the deadline must not outlive the hop.
+      let settled = false
+      const settle = (fn: () => void) => {
+        if (!settled) {
+          settled = true
+          clearTimeout(deadline)
+          fn()
+        }
+      }
+      const reject = (err: Error) => settle(() => rejectPromise(err))
       const req = https.request(
         url,
         {
@@ -138,14 +154,14 @@ export const makeSendHop =
         (res) => {
           const chunks: Buffer[] = []
           let size = 0
-          const finish = () => {
-            clearTimeout(deadline)
-            resolvePromise({
-              body: Buffer.concat(chunks).subarray(0, MAX_BODY_BYTES).toString('utf8'),
-              location: typeof res.headers.location === 'string' ? res.headers.location : null,
-              status: res.statusCode ?? 0,
-            })
-          }
+          const finish = () =>
+            settle(() =>
+              resolvePromise({
+                body: Buffer.concat(chunks).subarray(0, MAX_BODY_BYTES).toString('utf8'),
+                location: typeof res.headers.location === 'string' ? res.headers.location : null,
+                status: res.statusCode ?? 0,
+              })
+            )
           res.on('data', (chunk: Buffer) => {
             chunks.push(chunk)
             size += chunk.length
@@ -159,10 +175,7 @@ export const makeSendHop =
         }
       )
       const deadline = setTimeout(() => req.destroy(new HopTimeoutError()), TIMEOUT_MS)
-      req.on('error', (err) => {
-        clearTimeout(deadline)
-        reject(err)
-      })
+      req.on('error', reject)
       req.end(method === 'POST' ? ONE_CLICK_BODY : undefined)
     })
 
