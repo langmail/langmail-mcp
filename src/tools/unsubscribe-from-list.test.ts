@@ -126,6 +126,17 @@ describe('unsubscribeFromList', () => {
     expect(txt).not.toContain('Nothing was sent')
   })
 
+  test('a malformed https link is refused without throwing, and the mailto is offered', async () => {
+    const { deps, hops } = makeDeps(
+      newsletter({ 'header:List-Unsubscribe': ' <https://[bad>, <mailto:leave@news.example.com>' })
+    )
+    const result = await call(deps)
+    expect(hops).toEqual([])
+    expect(result.isError).toBe(true)
+    expect(textOf(result)).toContain('Nothing was sent: the link is not a valid URL.')
+    expect(textOf(result)).toContain('To: leave@news.example.com')
+  })
+
   test('an internal address is refused and says nothing was sent', async () => {
     const { deps } = makeDeps(newsletter(), new BlockedAddressError('news.example.com'))
     const result = await call(deps)
