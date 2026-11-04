@@ -8,6 +8,14 @@ The public endpoint is `https://mcp.langmail.me/mcp` (Streamable HTTP).
 Repo-wide guidance lives in `../../AGENTS.md`; the identity design in
 `../../docs/adr/0003-better-auth-as-openid-provider.md`.
 
+## Tech Stack
+- **MCP TypeScript SDK v2**: `@modelcontextprotocol/server` (the
+  per-request `McpServer` and the web-standard Streamable HTTP transport) and
+  `@modelcontextprotocol/client` (`scripts/smoke.ts`).
+- **MCP Apps** (`@modelcontextprotocol/ext-apps`): the email viewer resource.
+- **Zod 4**: tool input and output schemas.
+- **langmail**: email preprocessing (see the root `AGENTS.md`).
+
 ## Stalwart upstream issues
 CalDAV/iMIP defects this service works around → `docs/upstream/stalwart/`
 (scheduling behaviour that is by design → `docs/reference/stalwart/observed-behaviour.md`).
