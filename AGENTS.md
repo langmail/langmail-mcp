@@ -6,7 +6,7 @@ Stalwart over public HTTPS for JMAP + CalDAV.
 
 The public endpoint is `https://mcp.langmail.me/mcp` (Streamable HTTP).
 Repo-wide guidance lives in `../../AGENTS.md`; the identity design in
-`../../docs/decisions/0003-better-auth-as-openid-provider.md`.
+`../../docs/adr/0003-better-auth-as-openid-provider.md`.
 
 ## Stalwart upstream issues
 CalDAV/iMIP defects this service works around → `docs/upstream/stalwart/`
