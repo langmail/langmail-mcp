@@ -10,7 +10,7 @@
 // Logic sits behind a `Deps` interface (discover + fetchEvent + updateEvent)
 // so it unit-tests without live Stalwart; `makeLiveDeps` wires tsdav in.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { parseEvents } from '@langmail/ical'
@@ -154,7 +154,7 @@ export const registerRespondToEvent = (
         'organizer is notified automatically. Use this to reply to an invitation you ' +
         'received; it does not change the event itself. Defaults to the user’s default ' +
         'calendar; pass calendarUrl if the event lives in another calendar.',
-      inputSchema: respondToEventInput.shape,
+      inputSchema: respondToEventInput,
       title: 'Respond to calendar event',
     },
     (args) => {

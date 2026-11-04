@@ -3,7 +3,8 @@
 // message that also lives in Sent (your own reply in a thread) stays there;
 // this is the same patch the rules engine's `archive` action builds.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
+import { z } from 'zod'
 
 import { ACCOUNT_WRITE } from './annotations.ts'
 import { type FileEmailsDeps, formatBatchResult, type IdsArgs, idsInput, idsShape } from './file-emails-common.ts'
@@ -47,7 +48,7 @@ export const registerArchiveEmails = (server: McpServer, deps: FileEmailsDeps, g
         "from search_emails or get_thread; pass all of a thread's ids to archive the conversation. " +
         'To file into a specific folder use move_emails; to delete use trash_emails. Reports how ' +
         'many messages were archived and lists any id the server refused.',
-      inputSchema: idsShape,
+      inputSchema: z.object(idsShape),
       title: 'Archive emails',
     },
     (args) => archiveEmails(deps, { args: idsInput.parse(args), token: getToken() })

@@ -13,7 +13,7 @@
 // through `updatedPostalAddresses`, addressed by the handle search_contacts
 // prints in square brackets.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import {
@@ -337,7 +337,7 @@ export const registerUpdateContact = (server: McpServer, deps: ContactWriteDeps,
         'addresses, phone numbers and postal addresses with the `added…`/`removed…` lists; ' +
         'correct one component of a stored postal address with `updatedPostalAddresses`. ' +
         'Find the contact_id and the `[a0]`-style handles with search_contacts.',
-      inputSchema: updateContactShape,
+      inputSchema: z.object(updateContactShape),
       title: 'Update contact',
     },
     (args) => {

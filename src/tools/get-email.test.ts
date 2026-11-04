@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test'
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 
 import { type EmailDetailRecord, JmapError, type JmapLive, type JmapSession } from '@langmail/jmap'
 import { logger } from '@langmail/logger'

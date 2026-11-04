@@ -10,7 +10,7 @@
 // (a block list) that this surface does not have yet, and calling that out
 // in the result is more useful than refusing the call.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { sourceOf } from '@langmail/contacts'
@@ -71,7 +71,7 @@ export const registerDeleteContact = (server: McpServer, deps: ContactWriteDeps,
         'the address book. A contact derived from mail headers or calendar attendees is only ' +
         'removed until the next message from that person recreates it — to drop one field ' +
         'instead of the whole record, use update_contact. Find the id with search_contacts.',
-      inputSchema: deleteContactShape,
+      inputSchema: z.object(deleteContactShape),
       title: 'Delete contact',
     },
     (args) => deleteContact(deps, { args: deleteContactInput.parse(args), token: getToken() })

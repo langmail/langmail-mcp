@@ -9,7 +9,7 @@
 // client must only reach for this tool when the user expresses *future*
 // behavior, and must clarify ambiguous requests instead of guessing.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { LARGE_APPLY_THRESHOLD } from '../rules/apply.ts'
@@ -122,7 +122,7 @@ export const registerCreateMailRule = (server: McpServer, deps: MailRuleToolDeps
         'they mean first. Rules run server-side on arrival; every rule whose conditions match runs. Existing ' +
         'mail is untouched unless you pass existingMail (preview_mail_rule first — large backfills need ' +
         'explicit confirmation). Returns the created rule with its id.',
-      inputSchema: createMailRuleShape,
+      inputSchema: z.object(createMailRuleShape),
       title: 'Create mail rule',
     },
     (args) => {

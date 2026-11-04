@@ -23,7 +23,7 @@
 // Logic sits behind a `Deps` interface (discover + fetchEvent + updateEvent)
 // so it unit-tests without live Stalwart; `makeLiveDeps` wires tsdav in.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { type ParsedAttendee, type ParsedEvent, parseEvents } from '@langmail/ical'
@@ -1187,7 +1187,7 @@ export const registerUpdateCalendarEvent = (
         'of a repeating series instead of the whole series, pass `recurrenceId`. To rename or recolor ' +
         'a calendar itself, use update_calendar. To put an event on a different calendar, use ' +
         'move_calendar_events.',
-      inputSchema: updateCalendarEventInput.shape,
+      inputSchema: updateCalendarEventInput,
       title: 'Update calendar event',
     },
     (args) => {

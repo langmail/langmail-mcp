@@ -13,7 +13,7 @@
 // back in a deterministic order. Like the other CalDAV tools, the logic sits
 // behind a `Deps` interface so it unit-tests without live Stalwart.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { parseEvents } from '@langmail/ical'
@@ -437,7 +437,7 @@ export const registerMoveCalendarEvents = (
         'occurrence of a recurring series, and attendees are not notified. Returns how many events ' +
         'moved and names each one that did not, with the reason; the destination calendar must ' +
         'already exist (create one with create_calendar). Safe to re-run.',
-      inputSchema: moveCalendarEventsShape,
+      inputSchema: z.object(moveCalendarEventsShape),
       title: 'Move calendar events',
     },
     (args) => moveCalendarEvents(deps, { args: moveCalendarEventsInput.parse(args), token: getToken() })

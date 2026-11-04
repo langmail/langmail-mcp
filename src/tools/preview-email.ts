@@ -13,7 +13,7 @@
 // agent can set expectations honestly.
 
 import { registerAppTool } from '@modelcontextprotocol/ext-apps/server'
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import {
@@ -223,8 +223,8 @@ export const registerPreviewEmail = (server: McpServer, deps: PreviewEmailDeps, 
         'not need the pixels. The result gives the model only compact metadata; ' +
         'the rendered body is shown to the user by the client and is not in ' +
         'your context — do not claim to have read it from this call.',
-      inputSchema: previewEmailShape,
-      outputSchema: previewEmailOutputShape,
+      inputSchema: z.object(previewEmailShape),
+      outputSchema: z.object(previewEmailOutputShape),
       title: 'Preview email',
     },
     (args) => {

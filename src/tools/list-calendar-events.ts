@@ -7,7 +7,7 @@
 // Logic sits behind a `Deps` interface (discover + fetchEvents) so it
 // unit-tests without live Stalwart; `makeLiveDeps` wires tsdav in.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { type ParsedEvent, parseEvents } from '@langmail/ical'
@@ -216,7 +216,7 @@ export const registerListCalendarEvents = (
         'so read it here before removing or adding attendees rather than guessing. Defaults to the ' +
         'user’s default calendar. Birthdays are not calendar events here; for upcoming birthdays use ' +
         'list_upcoming_birthdays.',
-      inputSchema: listCalendarEventsInput.shape,
+      inputSchema: listCalendarEventsInput,
       title: 'List calendar events',
     },
     (args) => {

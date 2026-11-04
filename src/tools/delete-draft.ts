@@ -14,7 +14,7 @@
 // only fences sends through this process: a send from another client landing
 // between the check and the destroy is not, and is accepted as unlikely.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { bearerAuthorization } from '@langmail/jmap'
@@ -151,7 +151,7 @@ export const registerDeleteDraft = (
         'be recovered; to change a draft rather than remove it, use update_draft. Sent or received mail is ' +
         'refused (use trash_emails for that), as is a draft whose send is in progress. Returns the deleted ' +
         "draft's subject and recipients.",
-      inputSchema: deleteDraftInput.shape,
+      inputSchema: deleteDraftInput,
       title: 'Delete draft',
     },
     (args) => {

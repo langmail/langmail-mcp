@@ -2,7 +2,7 @@
 // script is regenerated from the remaining rules, so the deleted rule stops
 // applying immediately. Mail the rule already processed is not touched.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { ACCOUNT_DESTRUCTIVE } from './annotations.ts'
@@ -53,7 +53,7 @@ export const registerDeleteMailRule = (server: McpServer, deps: MailRuleToolDeps
         'Messages the rule already acted on are not reverted. To pause a rule instead of ' +
         'removing it, use update_mail_rule with enabled: false. Find the id with ' +
         'list_mail_rules.',
-      inputSchema: deleteMailRuleShape,
+      inputSchema: z.object(deleteMailRuleShape),
       title: 'Delete mail rule',
     },
     (args) => deleteMailRule(deps, { args: deleteMailRuleInput.parse(args), token: getToken() })

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 
 import { ACCOUNT_WRITE } from './annotations.ts'
 import { type FakeFileEmailsDeps, fakeDeps } from './file-emails-test-fixtures.ts'
@@ -155,7 +155,7 @@ describe('markEmailsInput', () => {
 interface RegisteredConfig {
   annotations?: unknown
   description?: string
-  inputSchema?: Record<string, unknown>
+  inputSchema?: { shape: Record<string, unknown> }
   title?: string
 }
 
@@ -198,7 +198,7 @@ describe('registerMarkEmails', () => {
     const { configs, server } = makeServer()
     registerMarkEmails(server, fakeDeps(), () => 'tok')
 
-    const schema = configs.get('mark_emails')?.inputSchema ?? {}
+    const schema = configs.get('mark_emails')?.inputSchema?.shape ?? {}
     expect(Object.keys(schema).sort()).toEqual(['ids', 'read', 'starred', 'todo'])
   })
 

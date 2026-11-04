@@ -27,16 +27,18 @@
 // The result text itself never appears in either line: tool results quote
 // event content and mailbox addresses, and these lines ship off-box.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer, type RegisteredTool } from '@modelcontextprotocol/server'
 
 import { logger } from '@langmail/logger'
 
 import { describeError } from '../observability/errors.ts'
 
-// The SDK's ToolCallback is a conditional type over the tool's input shape, so
-// it cannot be wrapped generically — the wrapper is opaque in the arguments it
-// forwards and is cast back to the callback type registerTool expects.
+// `registerTool` is overloaded (schema objects, and a deprecated raw-shape
+// form) and its ToolCallback is a conditional type over the tool's input
+// schema, so it cannot be wrapped generically. The wrapper is opaque in the
+// config and the arguments it forwards, and is cast back to the SDK's type.
 type OpaqueToolCallback = (...args: unknown[]) => unknown
+type OpaqueRegisterTool = (name: string, config: unknown, cb: OpaqueToolCallback) => RegisteredTool
 
 const isErrorResult = (result: unknown): boolean =>
   typeof result === 'object' && result !== null && (result as { isError?: unknown }).isError === true
@@ -44,10 +46,9 @@ const isErrorResult = (result: unknown): boolean =>
 // Registers tool call logging on a server instance. Call before the tools are
 // registered — it patches `registerTool`, so only later registrations are wrapped.
 export const instrumentToolLogging = (server: McpServer): void => {
-  const register = server.registerTool.bind(server)
+  const register = server.registerTool.bind(server) as unknown as OpaqueRegisterTool
 
-  const instrumented: typeof server.registerTool = (name, config, cb) => {
-    const call = cb as unknown as OpaqueToolCallback
+  const instrumented: OpaqueRegisterTool = (name, config, call) => {
     const wrapped = async (...args: unknown[]): Promise<unknown> => {
       const startedAt = performance.now()
       try {
@@ -65,8 +66,8 @@ export const instrumentToolLogging = (server: McpServer): void => {
         throw error
       }
     }
-    return register(name, config, wrapped as unknown as typeof cb)
+    return register(name, config, wrapped)
   }
 
-  server.registerTool = instrumented
+  server.registerTool = instrumented as unknown as typeof server.registerTool
 }

@@ -5,7 +5,8 @@
 // a destination move_emails accepts. Permanent deletion (Email/set destroy)
 // is deliberately not exposed.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
+import { z } from 'zod'
 
 import { ACCOUNT_DESTRUCTIVE } from './annotations.ts'
 import { type FileEmailsDeps, formatBatchResult, type IdsArgs, idsInput, idsShape } from './file-emails-common.ts'
@@ -45,7 +46,7 @@ export const registerTrashEmails = (server: McpServer, deps: FileEmailsDeps, get
         'send_draft then refuse it, and it stays restorable. Only when the user wants a draft gone ' +
         'for good, use delete_draft. Reports how many messages were trashed and lists any id ' +
         'the server refused.',
-      inputSchema: idsShape,
+      inputSchema: z.object(idsShape),
       title: 'Trash emails',
     },
     (args) => trashEmails(deps, { args: idsInput.parse(args), token: getToken() })

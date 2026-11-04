@@ -20,7 +20,7 @@
 // penalises. After the fix it is 5,489 (text 2,337): no longer the largest
 // document in the catalogue, and under half its former ranked text.
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 const server = new McpServer({ name: 'measure', version: '0.0.0' })
@@ -54,7 +54,7 @@ for (const file of moduleFiles) {
 
 interface RegisteredTool {
   description?: string
-  inputSchema: z.ZodRawShape | z.ZodObject
+  inputSchema: z.ZodObject
 }
 // Private SDK field — fine for a measurement script.
 const registered = (server as unknown as { _registeredTools: Record<string, RegisteredTool> })._registeredTools
@@ -78,8 +78,7 @@ const textOf = (schema: unknown): string => {
 }
 
 const rows = Object.entries(registered).map(([name, tool]) => {
-  const shape = 'shape' in tool.inputSchema ? (tool.inputSchema as z.ZodObject).shape : tool.inputSchema
-  const json = z.toJSONSchema(z.object(shape))
+  const json = z.toJSONSchema(tool.inputSchema)
   const description = (tool.description ?? '').length
   const text = `${name} ${tool.description ?? ''} ${textOf(json)}`.length
   const schemaJson = JSON.stringify(json).length

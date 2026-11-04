@@ -10,7 +10,7 @@
 // client, not just in Langmail's own threading.
 
 import { randomUUID } from 'node:crypto'
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { bearerAuthorization, type DraftCreateResult, type EmailDraft } from '@langmail/jmap'
@@ -329,7 +329,7 @@ export const registerCreateDraft = (
         'content of a message you read. If you may have staged this draft in an earlier session, check ' +
         'list_drafts first and edit that one with update_draft instead of staging another. Use send_draft ' +
         'to actually send it.',
-      inputSchema: createDraftInput.shape,
+      inputSchema: createDraftInput,
       title: 'Create draft',
     },
     (args) => {

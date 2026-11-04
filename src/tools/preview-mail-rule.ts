@@ -4,7 +4,7 @@
 // affected" before committing, and the prerequisite for confirming a large
 // backfill on create/update.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { skippedActionTypes } from '../rules/apply.ts'
@@ -105,7 +105,7 @@ export const registerPreviewMailRule = (server: McpServer, deps: MailRuleToolDep
         'Use this before create_mail_rule when the user should see the blast radius first, and ' +
         'always before applying a rule to existing mail (large backfills require the count to ' +
         'be confirmed). This tool never modifies mail and never installs a rule.',
-      inputSchema: previewMailRuleShape,
+      inputSchema: z.object(previewMailRuleShape),
       title: 'Preview mail rule',
     },
     (args) => previewMailRule(deps, { args: previewMailRuleInput.parse(args), token: getToken() })

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 
 import { fakeDeps, githubRule } from './mail-rule-test-fixtures.ts'
 import { type ToolResult } from './result.ts'

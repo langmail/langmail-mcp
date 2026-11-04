@@ -7,7 +7,7 @@
 // role-less folder called "Trash" cannot either — so this tool can stay a
 // non-destructive write; trash_emails carries that annotation.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { roleForPlaceName } from '@langmail/jmap'
@@ -72,7 +72,7 @@ export const registerMoveEmails = (server: McpServer, deps: FileEmailsDeps, getT
         'starred) are untouched; use mark_emails to change them. Re-running it on the same ' +
         'ids is harmless. To archive use archive_emails; to delete use trash_emails — this tool ' +
         'refuses Trash. Reports how many messages moved and lists any id the server refused.',
-      inputSchema: moveEmailsShape,
+      inputSchema: z.object(moveEmailsShape),
       title: 'Move emails',
     },
     (args) => moveEmails(deps, { args: moveEmailsInput.parse(args), token: getToken() })

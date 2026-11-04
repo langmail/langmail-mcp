@@ -3,7 +3,8 @@
 // what runs against their inbox and the client can pick an id for
 // update_mail_rule / delete_mail_rule.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
+import { z } from 'zod'
 
 import { READ_ONLY } from './annotations.ts'
 import { type MailRuleToolDeps } from './mail-rule-common.ts'
@@ -35,7 +36,7 @@ export const registerListMailRules = (server: McpServer, deps: MailRuleToolDeps,
         'actions, and creation/modification times. Use this to answer "what rules do I ' +
         'have?", before updating or deleting a rule, or to check whether a similar rule ' +
         'already exists before creating a new one.',
-      inputSchema: {},
+      inputSchema: z.object({}),
       title: 'List mail rules',
     },
     () => listMailRules(deps, getToken())

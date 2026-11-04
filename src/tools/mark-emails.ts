@@ -7,7 +7,7 @@
 // System flags ($answered, $draft) and classification types are deliberately
 // not fields: an agent must not fake what happened to a message.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { ACCOUNT_WRITE } from './annotations.ts'
@@ -97,7 +97,7 @@ export const registerMarkEmails = (server: McpServer, deps: FileEmailsDeps, getT
         'get_thread; folders are untouched, and re-running it on the same ids is harmless. To get a ' +
         'message out of the inbox use archive_emails or move_emails instead; to mark something as spam, ' +
         'use move_emails with Junk. Reports how many messages were marked and lists any id the server refused.',
-      inputSchema: markEmailsShape,
+      inputSchema: z.object(markEmailsShape),
       title: 'Mark emails read, to-do or starred',
     },
     (args) => markEmails(deps, { args: markEmailsInput.parse(args), token: getToken() })

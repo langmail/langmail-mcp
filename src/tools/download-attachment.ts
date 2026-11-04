@@ -5,7 +5,7 @@
 // verify the blob actually belongs to a message the caller can read and
 // recover the canonical filename/type server-side.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import {
@@ -116,7 +116,7 @@ export const registerDownloadAttachment = (
         'the URL into the conversation, the file may be large. The URL ' +
         `expires after ${TICKET_TTL_HOURS} hours — re-call this tool for a fresh one. ` +
         'For the whole message as an .eml file use download_email instead.',
-      inputSchema: downloadAttachmentShape,
+      inputSchema: z.object(downloadAttachmentShape),
       title: 'Download attachment',
     },
     (args) => {

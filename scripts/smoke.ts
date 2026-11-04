@@ -19,8 +19,7 @@
 // Run via `bun run smoke` from services/mcp/, or as part of
 // `just smoke-test-mcp`.
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 
 const TRAILING_SLASHES_RE = /\/+$/u
 const SINGLE_MATCH_RE = /^1 of 1 message\(s\) matched/mu

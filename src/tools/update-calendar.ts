@@ -6,7 +6,7 @@
 // Like the other CalDAV tools, the logic sits behind a `Deps` interface so it
 // unit-tests without live Stalwart; `makeLiveDeps` wires tsdav in.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import {
@@ -132,7 +132,7 @@ export const registerUpdateCalendar = (
         'URL; when no calendar matches, the error lists every calendar with its URL, and nothing is ' +
         'changed. To change an event, use update_calendar_event; to add a new calendar, use ' +
         'create_calendar. Safe to re-run.',
-      inputSchema: updateCalendarShape,
+      inputSchema: z.object(updateCalendarShape),
       title: 'Update calendar',
     },
     (args) => {

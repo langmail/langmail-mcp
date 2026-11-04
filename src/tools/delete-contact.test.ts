@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 
 import { COLLECTED_NOTE_KEY, collectedNoteEntry } from '@langmail/contacts'
 

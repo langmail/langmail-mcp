@@ -11,7 +11,7 @@
 // Batched, because "attach these three scans" is the normal request: one call
 // mints a URL per file, up to the number of attachments a draft can carry.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { bearerAuthorization, type JmapLive } from '@langmail/jmap'
@@ -160,7 +160,7 @@ export const registerUploadAttachments = (
         `${MAX_ATTACHMENTS} files per call; a file over ${MAX_MB} MB is named and skipped while the rest get ` +
         'URLs. Each URL takes one file and expires after ' +
         `${UPLOAD_TICKET_TTL_MINUTES} minutes. The URLs are credentials: never echo them to the user.`,
-      inputSchema: uploadAttachmentsShape,
+      inputSchema: z.object(uploadAttachmentsShape),
       title: 'Upload attachments',
     },
     (args) => {

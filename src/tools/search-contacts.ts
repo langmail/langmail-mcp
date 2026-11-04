@@ -6,7 +6,7 @@
 // what the caller gets raw is the concrete recent-interaction list, hydrated
 // from the content-free record ids stored on the card.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import {
@@ -394,7 +394,7 @@ export const registerSearchContacts = (
         'required, and for "whose birthday is coming up" use ' +
         'list_upcoming_birthdays instead. If several plausible people match, ' +
         'present the candidates to the user rather than guessing.',
-      inputSchema: searchContactsShape,
+      inputSchema: z.object(searchContactsShape),
       title: 'Search contacts',
     },
     (args) => searchContacts(deps, { args: searchContactsInput.parse(args), token: getToken() })

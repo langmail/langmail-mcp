@@ -12,7 +12,7 @@
 // relabel it, and the collection fold only ever fills blanks on standard
 // properties — so nothing typed here is overwritten by what we later infer.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import {
@@ -179,7 +179,7 @@ export const registerCreateContact = (server: McpServer, deps: ContactWriteDeps,
         'addresses, an organization, a birthday, and a note. Search with search_contacts first: if the ' +
         'person is already known, use update_contact instead so their history stays on one ' +
         'record. The contact syncs to the user’s devices over CardDAV.',
-      inputSchema: createContactShape,
+      inputSchema: z.object(createContactShape),
       title: 'Create contact',
     },
     (args) => {

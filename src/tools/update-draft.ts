@@ -19,7 +19,7 @@
 // so stage it with create_draft.
 
 import { randomUUID } from 'node:crypto'
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import {
@@ -714,7 +714,7 @@ export const registerUpdateDraft = (
         'both `text` and `html` or neither; replacing one would leave the other saying the old thing. The ' +
         'sender and the reply threading cannot be changed here; stage a new draft with create_draft instead, then retire this one ' +
         'with delete_draft.',
-      inputSchema: updateDraftInput.shape,
+      inputSchema: updateDraftInput,
       title: 'Update draft',
     },
     (args) => {

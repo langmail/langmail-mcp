@@ -1,11 +1,11 @@
 import { describe, expect, spyOn, test } from 'bun:test'
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 
 import { logger } from '@langmail/logger'
 
 import { instrumentToolLogging } from './tool-logging.ts'
 
-type Registered = (args: unknown, extra: unknown) => Promise<unknown>
+type Registered = (args: unknown, ctx: unknown) => Promise<unknown>
 
 // A stand-in for the one method the wrapper patches, so the test drives a tool
 // callback directly instead of through a transport.
@@ -22,7 +22,7 @@ const makeServer = (): { registered: Map<string, Registered>; server: McpServer 
 }
 
 const register = (server: McpServer, name: string, cb: () => unknown): void => {
-  // The real McpServer.registerTool is generic over the tool's input shape; the
+  // The real McpServer.registerTool is overloaded and generic over the tool's input schema; the
   // fake above is not, so the call is made through the loose shape.
   ;(server.registerTool as unknown as (n: string, c: unknown, f: () => unknown) => unknown)(name, {}, cb)
 }

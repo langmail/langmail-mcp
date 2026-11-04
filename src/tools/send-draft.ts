@@ -20,7 +20,7 @@
 // different ids exclude each other rather than replay: when both are in flight
 // at once, both may refuse, and neither sends.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { bearerAuthorization, type EmailComposeRecord, type EmailDraft, JmapError } from '@langmail/jmap'
@@ -377,7 +377,7 @@ export const registerSendDraft = (
         'before sending something you did not write. Use the draftId create_draft returned; editing a draft ' +
         'with update_draft keeps it. Returns the sent message’s id, which get_email can ' +
         'read back. A draft that has already been sent is refused rather than sent twice.',
-      inputSchema: sendDraftInput.shape,
+      inputSchema: sendDraftInput,
       title: 'Send draft',
     },
     (args) => {

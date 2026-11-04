@@ -4,7 +4,7 @@
 // condition fields would be ambiguous about clearing). Optionally applies
 // the updated actions to existing matching mail, same policy as create.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { LARGE_APPLY_THRESHOLD } from '../rules/apply.ts'
@@ -117,7 +117,7 @@ export const registerUpdateMailRule = (server: McpServer, deps: MailRuleToolDeps
         'ones wholesale when given. Optionally applies the updated rule to existing mail via ' +
         'existingMail (same confirmation policy as create_mail_rule). Find the id with ' +
         'list_mail_rules.',
-      inputSchema: updateMailRuleShape,
+      inputSchema: z.object(updateMailRuleShape),
       title: 'Update mail rule',
     },
     (args) => {

@@ -10,7 +10,7 @@
 
 import { type McpUiResourceMeta } from '@modelcontextprotocol/ext-apps'
 import { RESOURCE_MIME_TYPE, registerAppResource } from '@modelcontextprotocol/ext-apps/server'
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 
 import { EMAIL_VIEWER_RESOURCE_URI } from './meta.ts'
 

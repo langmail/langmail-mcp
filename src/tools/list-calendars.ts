@@ -4,7 +4,7 @@
 // Like search-emails.ts, the logic sits behind a `Deps` interface so it
 // unit-tests without live Stalwart; `makeLiveDeps` wires tsdav in.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { type CalDavConfig, fetchCalendarList } from '../caldav/client.ts'
@@ -60,7 +60,7 @@ export const registerListCalendars = (
         'one; the URL is what create_calendar_event, update_calendar and move_calendar_events take. ' +
         'For the events on a calendar use list_calendar_events; to rename or recolor one use ' +
         'update_calendar; to move events onto one use move_calendar_events.',
-      inputSchema: listCalendarsInput.shape,
+      inputSchema: listCalendarsInput,
       title: 'List calendars',
     },
     () => listCalendars(deps, { token: getToken() })

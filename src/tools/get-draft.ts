@@ -6,7 +6,7 @@
 // literal staged fields — blind-copied recipients included — or the agent can't
 // report what it actually staged and update_draft can't merge onto it.
 
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { bearerAuthorization } from '@langmail/jmap'
@@ -84,7 +84,7 @@ export const registerGetDraft = (server: McpServer, deps: DraftToolDeps, getToke
         'its blobId. Use this to confirm what was staged before sending — especially for a draft you did ' +
         'not write yourself — and to get the blobIds update_draft needs to keep those files when it ' +
         'replaces the attachment list. For messages that have already been sent or received, use get_email.',
-      inputSchema: getDraftInput.shape,
+      inputSchema: getDraftInput,
       title: 'Get draft',
     },
     (args) => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { type McpServer } from '@modelcontextprotocol/server'
 
 import { ACCOUNT_WRITE } from './annotations.ts'
 import { type FakeFileEmailsDeps, fakeDeps } from './file-emails-test-fixtures.ts'
@@ -185,7 +185,7 @@ describe('moveEmailsInput bounds', () => {
 interface RegisteredConfig {
   annotations?: unknown
   description?: string
-  inputSchema?: Record<string, unknown>
+  inputSchema?: { shape: Record<string, unknown> }
   title?: string
 }
 
@@ -221,7 +221,7 @@ describe('registerMoveEmails', () => {
     expect(config?.annotations).toEqual(ACCOUNT_WRITE)
     expect(config?.title).toBe('Move emails')
     expect(config?.description).toContain('trash_emails')
-    expect(Object.keys(config?.inputSchema ?? {}).sort()).toEqual(['ids', 'mailbox'])
+    expect(Object.keys(config?.inputSchema?.shape ?? {}).sort()).toEqual(['ids', 'mailbox'])
   })
 
   test('parses the raw args, collapsing duplicates, and moves them', async () => {

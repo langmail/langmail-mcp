@@ -9,8 +9,7 @@
 // revocation — a 401 from /auth/userinfo is the only thing that gates
 // access, and it runs before we get here.
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
+import { McpServer, WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server'
 
 import { type JmapLive } from '@langmail/jmap'
 
