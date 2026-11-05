@@ -7,9 +7,17 @@
 //
 // Requires:
 //   - `claude` CLI on PATH
-//   - `.mcp.json` at the repo root
 //   - MCP_ACCESS_TOKEN, STALWART_PUBLIC_URL
-//     (source <(./infra/scripts/obtain-mcp-tokens.sh))
+//     (deployed: source <(./infra/scripts/obtain-mcp-tokens.sh);
+//      local dev account: services/auth `bun run dev:eval-token`)
+//   - AGENT_EVAL_MCP_URL to drive a local MCP server (e.g.
+//     http://127.0.0.1:8090/mcp); unset, the agent uses `.mcp.json` at the repo
+//     root, i.e. the deployed server. See docs/guides/local-development.md
+//     § Agent trajectory evals.
+
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const JMAP_USING = ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail']
 
@@ -44,6 +52,27 @@ const TRAILING_SLASHES_RE = /\/+$/u
 // env should die before it seeds anything.
 const stalwart = requireEnv('STALWART_PUBLIC_URL').replace(TRAILING_SLASHES_RE, '')
 const token = requireEnv('MCP_ACCESS_TOKEN')
+
+const LOCAL_HOST_RE = /^(127\.0\.0\.1|localhost|\[::1\]|[a-z0-9-]+\.langmail\.test)$/u
+const isLocal = (url: string): boolean => {
+  try {
+    return LOCAL_HOST_RE.test(new URL(url).hostname)
+  } catch {
+    return false
+  }
+}
+
+// A local MCP must come with a local Stalwart: a stale deployed
+// STALWART_PUBLIC_URL would seed and delete fixtures in a real mailbox while
+// the agent talks to the local server. Checked here, before anything is seeded.
+const evalMcpUrl = process.env.AGENT_EVAL_MCP_URL
+if (evalMcpUrl && !(isLocal(evalMcpUrl) && isLocal(stalwart))) {
+  process.stderr.write(
+    '✗ with AGENT_EVAL_MCP_URL set, it and STALWART_PUBLIC_URL must be loopback or *.langmail.test ' +
+      `(got ${evalMcpUrl}, ${stalwart})\n`
+  )
+  process.exit(2)
+}
 
 // --- JMAP plumbing (test ingress: blob upload + Email/import) ---------------
 
@@ -248,27 +277,69 @@ const parseTrajectory = (stdout: string): Trajectory => {
   return trajectory
 }
 
-export const runAgent = (prompt: string): Trajectory => {
-  const proc = Bun.spawnSync(
-    [
-      'claude',
-      '-p',
-      prompt,
-      '--mcp-config',
-      '.mcp.json',
-      '--allowedTools',
-      'mcp__langmail__*',
-      '--output-format',
-      'stream-json',
-      '--verbose',
-    ],
-    { cwd: new URL('../../..', import.meta.url).pathname, stderr: 'inherit' }
-  )
-  if (proc.exitCode !== 0) {
-    throw new Error(`claude exited ${proc.exitCode}`)
+// Langmail tool calls of the last runAgent, for runEval's verdict line: two
+// runs (main vs a branch) compare on right-or-wrong AND on how many calls it
+// took. Harness calls such as ToolSearch are not counted.
+let lastToolCalls: number | null = null
+const LANGMAIL_TOOL = 'mcp__langmail__'
+
+// The MCP config for `claude -p`. With AGENT_EVAL_MCP_URL a temporary config
+// names that server `langmail` (so the tools stay `mcp__langmail__*`) and sends
+// the eval's own bearer; otherwise the repo's `.mcp.json` (deployed server).
+const mcpConfig = (): { cleanup: () => void; path: string } => {
+  const url = evalMcpUrl
+  if (!url) {
+    return { cleanup: () => undefined, path: '.mcp.json' }
   }
-  return parseTrajectory(proc.stdout.toString())
+  const dir = mkdtempSync(join(tmpdir(), 'agent-eval-mcp-'))
+  const path = join(dir, 'mcp.json')
+  const servers = { langmail: { headers: { Authorization: `Bearer ${token}` }, type: 'http', url } }
+  writeFileSync(path, JSON.stringify({ mcpServers: servers }), { mode: 0o600 })
+  return { cleanup: () => rmSync(dir, { force: true, recursive: true }), path }
 }
+
+export const runAgent = (prompt: string): Trajectory => {
+  const config = mcpConfig()
+  try {
+    const proc = Bun.spawnSync(
+      [
+        'claude',
+        '-p',
+        prompt,
+        '--mcp-config',
+        config.path,
+        // Only the servers in that config: a claude.ai Langmail connector in
+        // the operator's session would otherwise reach their real mailbox.
+        '--strict-mcp-config',
+        '--allowedTools',
+        'mcp__langmail__*',
+        '--output-format',
+        'stream-json',
+        '--verbose',
+      ],
+      {
+        cwd: new URL('../../..', import.meta.url).pathname,
+        // Belt and braces with --strict-mcp-config: no claude.ai connectors.
+        env: { ...process.env, ENABLE_CLAUDEAI_MCP_SERVERS: 'false' },
+        stderr: 'inherit',
+      }
+    )
+    if (proc.exitCode !== 0) {
+      throw new Error(`claude exited ${proc.exitCode}`)
+    }
+    const trajectory = parseTrajectory(proc.stdout.toString())
+    const foreign = trajectory.toolUses.filter((t) => t.name.startsWith('mcp__') && !t.name.startsWith(LANGMAIL_TOOL))
+    if (foreign.length > 0) {
+      throw new Error(`the agent reached an MCP server other than the eval's: ${foreign.map((t) => t.name).join(', ')}`)
+    }
+    lastToolCalls = trajectory.toolUses.filter((t) => t.name.startsWith(LANGMAIL_TOOL)).length
+    return trajectory
+  } finally {
+    config.cleanup()
+  }
+}
+
+const verdictSuffix = (): string => (lastToolCalls === null ? '' : ` · tool calls: ${lastToolCalls}`)
 
 // Uniform exit handling: a failed expectation is the eval's own verdict and
 // reads better as one line; anything else is a genuine crash and keeps its
@@ -277,11 +348,14 @@ export const runAgent = (prompt: string): Trajectory => {
 export const runEval = async (main: () => Promise<void>): Promise<void> => {
   try {
     await main()
+    process.stdout.write(`result: pass${verdictSuffix()}\n`)
   } catch (error) {
     if (error instanceof EvalFailure) {
       process.stderr.write(`✗ ${error.message}\n`)
+      process.stdout.write(`result: fail${verdictSuffix()}\n`)
     } else {
       process.stderr.write(`✗ ${error instanceof Error ? error.stack : String(error)}\n`)
+      process.stdout.write(`result: error${verdictSuffix()}\n`)
     }
     process.exit(1)
   }
