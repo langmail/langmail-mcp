@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { type McpServer } from '@modelcontextprotocol/server'
 
-import { COLLECTED_NOTE_KEY, collectedNoteEntry } from '@langmail/contacts'
+import { COLLECTED_BOOK_NAME, COLLECTED_NOTE_KEY, collectedNoteEntry } from '@langmail/contacts'
 
 import { ACCOUNT_DESTRUCTIVE } from './annotations.ts'
 import { derivedCard, fakeBook } from './contact-test-fixtures.ts'
@@ -48,13 +48,19 @@ describe('deleteContact', () => {
   })
 
   test('a card with no collection marker counts as imported and says it stays gone', async () => {
-    // No COLLECTED_NOTE_KEY note at all: the card predates Langmail's own
-    // writes, so `sourceOf` falls back to `imported`.
-    const book = fakeBook([derivedCard({ notes: {} })])
+    // No COLLECTED_NOTE_KEY note, no collected uid, and in a personal book:
+    // the card came in from outside, so `sourceOf` falls back to `imported`.
+    const book = fakeBook([derivedCard({ addressBookIds: { 'ab-default': true }, notes: {} })])
     const result = await deleteContact(book.deps, { args, token: 'tok' })
     expect(result.isError).toBeUndefined()
     expect(result.content[0]?.text).toContain('will not come back on its own')
     expect(book.cards.size).toBe(0)
+  })
+
+  test('an unmarked card in the Collected book counts as derived', async () => {
+    const book = fakeBook([derivedCard({ notes: {} })], [{ id: 'collected', name: COLLECTED_BOOK_NAME }])
+    const result = await deleteContact(book.deps, { args, token: 'tok' })
+    expect(result.content[0]?.text).toContain('will collect them again')
   })
 
   test('labels a nameless card by its first email address', async () => {

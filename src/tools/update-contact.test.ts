@@ -62,7 +62,7 @@ describe('updateContact — scalars', () => {
     await updateContact(book.deps, { args: args({ note: 'Met at the port authority.' }), token: 'tok' })
     // A scoped patch path, not a wholesale `notes` replacement.
     expect(book.patches[0]).toEqual({ 'notes/langmail-note': { note: 'Met at the port authority.' } })
-    expect(sourceOf(stored(book))).toBe('derived')
+    expect(sourceOf(stored(book), undefined)).toBe('derived')
   })
 
   test('a card with no notes at all takes a full top-level set (RFC 8620 rejects the scoped path)', async () => {
@@ -298,10 +298,10 @@ describe('updateContact — ownership and preservation', () => {
     await updateContact(book.deps, { args: args({ note: 'Prefers letters.' }), token: 'tok' })
     expect(readNote(stored(book))).toBe('Prefers letters.')
     // The machine-owned payload is still there.
-    expect(sourceOf(stored(book))).toBe('imported')
+    expect(sourceOf(stored(book), undefined)).toBe('imported')
 
     await updateContact(book.deps, { args: args({ note: '' }), token: 'tok' })
     expect(readNote(stored(book))).toBeUndefined()
-    expect(sourceOf(stored(book))).toBe('imported')
+    expect(sourceOf(stored(book), undefined)).toBe('imported')
   })
 })

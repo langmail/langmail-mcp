@@ -8,15 +8,18 @@
 import {
   addressBookCreate,
   addressBookList,
+  type ContactCard,
   type ContactCardFilter,
   ContactUidTakenError,
   contactCardCreate,
+  contactCardDestroy,
   contactCardGet,
   contactCardQuery,
   contactCardUpdate,
 } from '@langmail/jmap'
 
-import { collectedUid } from './card.ts'
+import { normalizeAddress } from './address-class.ts'
+import { cardAddresses, collectedUid } from './card.ts'
 import { COLLECTED_BOOK_NAME } from './constants.ts'
 import { foldObservations } from './fold.ts'
 import { type ExtractedObservations } from './types.ts'
@@ -31,6 +34,7 @@ export interface CollectionDeps {
   addressBookCreate: typeof addressBookCreate
   addressBookList: typeof addressBookList
   contactCardCreate: typeof contactCardCreate
+  contactCardDestroy: typeof contactCardDestroy
   contactCardGet: typeof contactCardGet
   contactCardQuery: typeof contactCardQuery
   contactCardUpdate: typeof contactCardUpdate
@@ -40,6 +44,7 @@ export const liveCollectionDeps: CollectionDeps = {
   addressBookCreate,
   addressBookList,
   contactCardCreate,
+  contactCardDestroy,
   contactCardGet,
   contactCardQuery,
   contactCardUpdate,
@@ -50,6 +55,28 @@ export const liveCollectionDeps: CollectionDeps = {
 // existing cards and re-create people, and a 200-message backfill page can
 // legitimately reference more than one page of candidates.
 const CANDIDATE_PAGE_SIZE = 100
+
+// Every card matching any of the conditions, paged until exhausted.
+const candidates = async (
+  deps: CollectionDeps,
+  ctx: CollectionCtx,
+  conditions: ContactCardFilter[]
+): Promise<ContactCard[]> => {
+  const ids: string[] = []
+  for (let position = 0; ; position += CANDIDATE_PAGE_SIZE) {
+    const page = await deps.contactCardQuery({
+      ...ctx,
+      filter: { conditions, operator: 'OR' },
+      limit: CANDIDATE_PAGE_SIZE,
+      position,
+    })
+    ids.push(...page)
+    if (page.length < CANDIDATE_PAGE_SIZE) {
+      break
+    }
+  }
+  return deps.contactCardGet({ ...ctx, ids })
+}
 
 // Collect one batch of observations into the user's address book. Callers
 // wrap this in their own failure policy: a collection write must never
@@ -87,8 +114,11 @@ export const collectContacts = async (
   // rejected for its duplicate uid. The uid is minted from the card's first
   // address only. An address the merge gate added later, or one on a
   // personal-book card, is still found through the index alone, so in that
-  // lag it can be collected onto a second card. Accepted: the lag is about
-  // 100 ms in steady state.
+  // lag it can be collected onto a second card. The same holds for an
+  // address a merge moved from a destroyed Collected card onto a personal
+  // card: until the personal card is reindexed, a sighting of that address
+  // can mint a fresh Collected card, which the next batch merges again.
+  // Accepted: the lag is about 100 ms in steady state.
   const conditions: ContactCardFilter[] = []
   for (const address of new Set(extracted.observations.map((o) => o.address))) {
     conditions.push({ email: address }, { uid: collectedUid(address) })
@@ -96,20 +126,28 @@ export const collectContacts = async (
   for (const name of new Set(extracted.observations.flatMap((o) => (o.name ? [o.name] : [])))) {
     conditions.push({ name })
   }
-  const ids: string[] = []
-  for (let position = 0; ; position += CANDIDATE_PAGE_SIZE) {
-    const page = await deps.contactCardQuery({
-      ...ctx,
-      filter: { conditions, operator: 'OR' },
-      limit: CANDIDATE_PAGE_SIZE,
-      position,
-    })
-    ids.push(...page)
-    if (page.length < CANDIDATE_PAGE_SIZE) {
-      break
-    }
+  const cards = await candidates(deps, ctx, conditions)
+
+  // A Collected card about to be merged into a personal card may hold more
+  // addresses than this batch observed. Their owners are fetched too, so the
+  // fold never copies an address onto a personal card while another card
+  // already holds it.
+  const observed = new Set(extracted.observations.map((o) => normalizeAddress(o.address)))
+  const extra = new Set(
+    cards
+      .filter((c) => c.addressBookIds[collectedBookId] && cardAddresses(c).some((a) => observed.has(a)))
+      .flatMap(cardAddresses)
+      .filter((a) => !observed.has(a))
+  )
+  if (extra.size > 0) {
+    const known = new Set(cards.map((c) => c.id))
+    const owners = await candidates(
+      deps,
+      ctx,
+      [...extra].map((email) => ({ email }))
+    )
+    cards.push(...owners.filter((c) => !known.has(c.id)))
   }
-  const cards = await deps.contactCardGet({ ...ctx, ids })
 
   const { creates, updates } = foldObservations({ cards, collectedBookId }, extracted.observations, extracted.relays)
   for (const card of creates) {
@@ -127,5 +165,13 @@ export const collectContacts = async (
   }
   for (const update of updates) {
     await deps.contactCardUpdate({ ...ctx, cardId: update.cardId, patch: update.patch })
+    // A Collected card goes only once its history is safely on the personal
+    // card. If this update fails, both cards stay and the next batch merges
+    // again. A failed destroy is swallowed: the personal card's `absorbed`
+    // list makes the next merge retry it without summing the history twice,
+    // so it must not cost the rest of the batch its updates.
+    for (const cardId of update.absorbs) {
+      await deps.contactCardDestroy({ ...ctx, cardId }).catch(() => undefined)
+    }
   }
 }

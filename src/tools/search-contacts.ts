@@ -13,6 +13,7 @@ import {
   type AddressCandidate,
   addressCandidates,
   bestAddress,
+  COLLECTED_BOOK_NAME,
   type CollectedExtension,
   type InteractionTuple,
   rankCards,
@@ -25,7 +26,9 @@ import {
 } from '@langmail/contacts'
 import { parseEvents } from '@langmail/ical'
 import {
+  type AddressBookRecord,
   accountIdForContacts,
+  addressBookList,
   bearerAuthorization,
   type ContactCard,
   type ContactCardFilter,
@@ -79,6 +82,9 @@ export const searchContactsInput = z.object(searchContactsShape)
 export type SearchContactsArgs = z.infer<typeof searchContactsInput>
 
 export interface SearchContactsDeps {
+  // The Collected book's id tells an old Collected card without a source
+  // marker apart from an imported one.
+  addressBookList: (p: { accountId: string; apiUrl: string; authorization: string }) => Promise<AddressBookRecord[]>
   contactCardGet: (p: ContactCardGetParams) => Promise<ContactCard[]>
   contactCardQuery: (p: ContactCardQueryParams) => Promise<string[]>
   emailGet: (p: EmailGetParams) => Promise<EmailRecord[]>
@@ -231,7 +237,8 @@ const detailedPerson = (
   args: SearchContactsArgs,
   hydrated: Hydrated,
   now: Date,
-  index: number
+  index: number,
+  collectedBookId: string | undefined
 ): string => {
   const parts = [concisePerson(card, ext, args, hydrated, now, index)]
   const candidates = addressCandidates(card)
@@ -250,7 +257,7 @@ const detailedPerson = (
   // Provenance, because `confidence` means different things across sources:
   // on a derived address it is an inference from headers, on an authored one
   // it is the user's own assertion.
-  parts.push(`   source: ${sourceOf(card)}`)
+  parts.push(`   source: ${sourceOf(card, collectedBookId)}`)
   const withIds = ext.interactions.map(
     (t) =>
       `   - ${interactionLine(t, hydrated.subjects, hydrated.eventTitles, now)} [${
@@ -292,10 +299,15 @@ export const searchContacts = async (deps: SearchContactsDeps, ctx: SearchContac
   const ids = async (filter: ContactCardFilter | undefined, limit: number): Promise<string[]> =>
     deps.contactCardQuery({ accountId, apiUrl: '', authorization, ...(filter ? { filter } : {}), limit })
 
-  const [filteredIds, sweptIds] = await Promise.all([
+  // Only the detailed format prints `source`, which needs the Collected
+  // book's id.
+  const detailed = args.response_format === 'detailed'
+  const [filteredIds, sweptIds, books] = await Promise.all([
     ids({ conditions: [{ text: query }, { email: query }, { name: query }], operator: 'OR' }, QUERY_WINDOW),
     ids(undefined, SWEEP_WINDOW),
+    detailed ? deps.addressBookList({ accountId, apiUrl: '', authorization }) : Promise.resolve([]),
   ])
+  const collectedBookId = books.find((b) => b.name === COLLECTED_BOOK_NAME)?.id
   const candidateIds = [...new Set([...filteredIds, ...sweptIds])]
   const cards = await deps.contactCardGet({ accountId, apiUrl: '', authorization, ids: candidateIds })
   const matched = cards.filter((c) => matchesQuery(c, query))
@@ -316,8 +328,11 @@ export const searchContacts = async (deps: SearchContactsDeps, ctx: SearchContac
   })
   const hydrated = await hydrate(deps, { authorization, token }, tuples)
 
-  const render = args.response_format === 'detailed' ? detailedPerson : concisePerson
-  const sections = page.map((card, i) => render(card, readCollected(card), args, hydrated, now, i))
+  const sections = page.map((card, i) =>
+    detailed
+      ? detailedPerson(card, readCollected(card), args, hydrated, now, i, collectedBookId)
+      : concisePerson(card, readCollected(card), args, hydrated, now, i)
+  )
 
   // The candidate window caps what we can count, so say "at least" when the
   // window was full rather than understating a very ambiguous query.
@@ -335,6 +350,7 @@ export const searchContacts = async (deps: SearchContactsDeps, ctx: SearchContac
 // --- live-deps wiring ----------------------------------------------------
 
 export const makeLiveDeps = (live: JmapLive, caldav: CalDavConfig): SearchContactsDeps => ({
+  addressBookList: async (p) => addressBookList({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   contactCardGet: async (p) => contactCardGet({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   contactCardQuery: async (p) => contactCardQuery({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   emailGet: async (p) => emailGet({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),

@@ -142,6 +142,7 @@ live('contact write tools against live Stalwart — author, read back, correct, 
       resolveAccountId: () => Promise.resolve(accountId),
     }
     searchDeps = {
+      addressBookList: (p) => addressBookList(pin(p)),
       contactCardGet: (p) => contactCardGet(pin(p)),
       contactCardQuery: (p) => contactCardQuery(pin(p)),
       emailGet: (p) => emailGet(pin(p)),
@@ -193,7 +194,7 @@ live('contact write tools against live Stalwart — author, read back, correct, 
         street: 'Beispielweg 1',
       },
     ])
-    expect(sourceOf(card as NonNullable<typeof card>)).toBe('authored')
+    expect(sourceOf(card as NonNullable<typeof card>, undefined)).toBe('authored')
   })
 
   test('the contact landed in the default address book, so it syncs over CardDAV', async () => {
@@ -286,7 +287,7 @@ live('contact write tools against live Stalwart — author, read back, correct, 
     const [card] = await contactCardGet({ ...ctx, ids: [contactId] })
     const stored = card as NonNullable<typeof card>
     expect(stored.name?.full).toBe(PERSON)
-    expect(sourceOf(stored)).toBe('authored')
+    expect(sourceOf(stored, undefined)).toBe('authored')
     // And the authored fields the fold never touches are still there.
     expect(readPostalAddresses(stored)).toHaveLength(1)
   })

@@ -5,7 +5,7 @@
 
 import { z } from 'zod'
 
-import { normalizeAddress } from '@langmail/contacts'
+import { COLLECTED_BOOK_NAME, normalizeAddress } from '@langmail/contacts'
 import {
   type AddressBookRecord,
   accountIdForContacts,
@@ -74,6 +74,11 @@ export const ownerOfAddress = async (
   const cards = await deps.contactCardGet({ ...ctx, ids })
   return cards.find((c) => Object.values(c.emails ?? {}).some((e) => normalizeAddress(e.address) === wanted))?.id
 }
+
+// The Collected book's id, which `sourceOf` needs to tell an old Collected
+// card without a source marker apart from an imported one.
+export const collectedBookIdOf = async (deps: ContactWriteDeps, ctx: ContactCtx): Promise<string | undefined> =>
+  (await deps.addressBookList(ctx)).find((b) => b.name === COLLECTED_BOOK_NAME)?.id
 
 // --- shared input shapes ---------------------------------------------------
 

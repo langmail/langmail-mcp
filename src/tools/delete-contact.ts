@@ -16,7 +16,7 @@ import { z } from 'zod'
 import { sourceOf } from '@langmail/contacts'
 
 import { ACCOUNT_DESTRUCTIVE } from './annotations.ts'
-import { type ContactWriteDeps, contactCtx, contactIdSchema } from './contact-common.ts'
+import { type ContactWriteDeps, collectedBookIdOf, contactCtx, contactIdSchema } from './contact-common.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 const deleteContactShape = {
@@ -49,7 +49,7 @@ export const deleteContact = async (
     )
   }
   const label = card.name?.full ?? Object.values(card.emails ?? {})[0]?.address ?? cx.args.contactId
-  const source = sourceOf(card)
+  const source = sourceOf(card, await collectedBookIdOf(deps, ctx))
 
   await deps.contactCardDestroy({ ...ctx, cardId: cx.args.contactId })
 

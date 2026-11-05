@@ -40,7 +40,7 @@ describe('createContact', () => {
     const book = fakeBook()
     const result = await createContact(book.deps, { args: args(), token: 'tok' })
     const [card] = [...book.cards.values()]
-    expect(sourceOf(card as NonNullable<typeof card>)).toBe('authored')
+    expect(sourceOf(card as NonNullable<typeof card>, undefined)).toBe('authored')
     expect(result.content[0]?.text).toContain('source: authored')
   })
 

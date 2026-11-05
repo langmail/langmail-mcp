@@ -157,7 +157,9 @@ export const createContact = async (
 
   const cardId = await deps.contactCardCreate({ ...ctx, card })
   const stored = await readBack(deps, ctx, cardId)
-  const body = stored ? renderContact(stored) : `${name}\n   contact_id: ${cardId}`
+  // A card this tool writes carries the `authored` marker, so its source
+  // never depends on the Collected book.
+  const body = stored ? renderContact(stored, undefined) : `${name}\n   contact_id: ${cardId}`
   return textResult(
     `Created contact:\n\n${body}\n\n` +
       'It is in the account address book, so it syncs to every device connected over CardDAV. ' +

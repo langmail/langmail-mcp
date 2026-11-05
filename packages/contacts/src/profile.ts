@@ -23,7 +23,7 @@ import {
 } from '@langmail/jmap'
 
 import { daysInMonth } from './birthdays.ts'
-import { readCollected } from './card.ts'
+import { COLLECTED_UID_PREFIX, readCollected } from './card.ts'
 import { BIRTHDAY_KEY, COLLECTED_NOTE_KEY, USER_NOTE_KEY } from './constants.ts'
 import {
   type Birthday,
@@ -381,6 +381,17 @@ export const userNoteKey = (card: ContactCard): string => {
 
 export const userNoteEntry = (note: string): ContactCardNote => ({ note })
 
-// Absent marker means the card predates Langmail's own writes — it came in
-// through an address book we sync rather than from collection or the tools.
-export const sourceOf = (card: ContactCard): ContactSource => readCollected(card).source ?? 'imported'
+// A card without a marker either predates the marker or came in through an
+// address book we sync. Collection's own cards are recognisable without it,
+// by the uid it mints or by membership in the Collected book (when the
+// caller knows that book's id); anything else is imported.
+export const sourceOf = (card: ContactCard, collectedBookId: string | undefined): ContactSource => {
+  const marked = readCollected(card).source
+  if (marked) {
+    return marked
+  }
+  const collected =
+    card.uid?.startsWith(COLLECTED_UID_PREFIX) === true ||
+    (collectedBookId !== undefined && card.addressBookIds[collectedBookId] === true)
+  return collected ? 'derived' : 'imported'
+}

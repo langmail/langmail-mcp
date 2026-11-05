@@ -25,6 +25,7 @@ import {
   observationsFromEmail,
   observationsFromEvent,
   readCollected,
+  toCardPhone,
 } from '@langmail/contacts'
 import { parseEvents } from '@langmail/ical'
 import {
@@ -237,6 +238,7 @@ live('search_contacts against live Stalwart — collect from mail + calendar, th
     )
 
     searchDeps = {
+      addressBookList: (p) => addressBookList({ ...p, apiUrl, authorization }),
       contactCardGet: (p) => contactCardGet({ ...p, apiUrl, authorization }),
       contactCardQuery: (p) => contactCardQuery({ ...p, apiUrl, authorization }),
       emailGet: (p) => emailGet({ ...p, apiUrl, authorization }),
@@ -366,6 +368,67 @@ live('search_contacts against live Stalwart — collect from mail + calendar, th
     expect(text).toContain(`[email id: ${emailId}]`)
     expect(text).toContain('excluded_relays: messaging-digest-noreply@linkedin.com')
   })
+
+  test('a personal card duplicating a Collected one absorbs it on the next sighting', async () => {
+    const sam = 'sam.twin@example.com'
+    const fromSam = (id: string) =>
+      collectContacts(
+        liveCollectionDeps,
+        ctx,
+        observationsFromEmail(
+          { from: [{ email: sam, name: 'Sam Twin' }], id, receivedAt, to: [{ email: address }] },
+          { selfAddresses }
+        )
+      )
+    await fromSam(`m-sam-1-${run}`)
+    const [collectedId] = await untilIndexed(
+      () => contactCardQuery({ ...ctx, filter: { email: sam } }),
+      (found) => found.length === 1,
+      'the Collected card for Sam'
+    )
+    // The import: a personal-book card for the same address, with a phone.
+    const books = await addressBookList(ctx)
+    const bookId = books.find((b) => b.name !== COLLECTED_BOOK_NAME)?.id
+    if (!bookId) {
+      throw new Error('no personal address book on the throwaway account')
+    }
+    const personalId = await contactCardCreate({
+      ...ctx,
+      card: {
+        addressBookIds: { [bookId]: true },
+        emails: { e0: { address: sam } },
+        name: { full: 'Sam Twin' },
+        phones: { p0: toCardPhone({ label: 'mobile', number: '+49 151 9876543' }) },
+        uid: `sam-twin-${run}`,
+        version: '1.0',
+      },
+    })
+    await untilIndexed(
+      () => contactCardQuery({ ...ctx, filter: { email: sam } }),
+      (found) => found.includes(personalId) && found.length === 2,
+      'both cards for Sam'
+    )
+
+    await fromSam(`m-sam-2-${run}`)
+
+    expect(await contactCardGet({ ...ctx, ids: [collectedId as string] })).toEqual([])
+    const [personal] = await contactCardGet({ ...ctx, ids: [personalId] })
+    expect(readCollected(personal as NonNullable<typeof personal>).addresses[sam]?.count).toBe(2)
+    await untilIndexed(
+      () => contactCardQuery({ ...ctx, filter: { email: sam } }),
+      (found) => found.length === 1 && found[0] === personalId,
+      'the Collected card dropping out of the index'
+    )
+    const result = await searchContacts(searchDeps, {
+      args: searchContactsInput.parse({ query: 'Twin', response_format: 'detailed' }),
+      token: TOKEN,
+    })
+    const text = result.content[0]?.text ?? ''
+    expect(text).toContain('1 person(s) matched')
+    expect(text).toContain('+49 151 9876543')
+    expect(text).toContain(`[email id: m-sam-1-${run}]`)
+    // Three index waits of up to 3 s each, beyond bun's default 5 s.
+  }, 15_000)
 
   test('an unknown name gets the instructive empty result', async () => {
     const result = await searchContacts(searchDeps, {

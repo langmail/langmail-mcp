@@ -295,11 +295,26 @@ describe('organization and note', () => {
 describe('sourceOf', () => {
   test('reads the stamped marker', () => {
     const notes = { [COLLECTED_NOTE_KEY]: collectedNoteEntry({ addresses: {}, interactions: [], source: 'authored' }) }
-    expect(sourceOf(card({ notes }))).toBe('authored')
+    expect(sourceOf(card({ notes }), undefined)).toBe('authored')
   })
 
   test('an unstamped card came in through an address book we sync', () => {
-    expect(sourceOf(card())).toBe('imported')
+    expect(sourceOf(card(), undefined)).toBe('imported')
+  })
+
+  // Collected cards written before the marker existed carry none.
+  test('an unstamped card with a collected uid is derived', () => {
+    expect(sourceOf(card({ uid: 'urn:langmail:collected:robin@northwind.example' }), undefined)).toBe('derived')
+  })
+
+  test('an unstamped card in the Collected book is derived', () => {
+    expect(sourceOf(card({ addressBookIds: { 'book-collected': true } }), 'book-collected')).toBe('derived')
+    expect(sourceOf(card({ addressBookIds: { 'book-personal': true } }), 'book-collected')).toBe('imported')
+  })
+
+  test('the marker wins over the uid', () => {
+    const notes = { [COLLECTED_NOTE_KEY]: collectedNoteEntry({ addresses: {}, interactions: [], source: 'authored' }) }
+    expect(sourceOf(card({ notes, uid: 'urn:langmail:collected:robin@northwind.example' }), undefined)).toBe('authored')
   })
 })
 

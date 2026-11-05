@@ -23,9 +23,10 @@ export type AddressContext = 'private' | 'work'
 
 // Where a card came from. `derived`: built by the collection fold from mail
 // headers and calendar attendees. `authored`: written through the MCP
-// contact tools. `imported`: already in an address book Langmail syncs — a
-// CardDAV client, a vCard import — and never observed here. The marker
-// matters because `confidence` means different things across them:
+// contact tools. `imported`: came in from outside Langmail — a CardDAV
+// client, a vCard import. An imported card can still carry collected
+// history, once collection updated it or merged a Collected card into it.
+// The marker matters because `confidence` means different things across them:
 // confidence in a derived address is an inference, confidence in an authored
 // one is the user's assertion.
 export type ContactSource = 'authored' | 'derived' | 'imported'
@@ -96,8 +97,11 @@ export interface CollectedAddress {
 // so output can surface them as excluded rather than silently dropped.
 // `source` records where the card itself came from (see profile.ts) and
 // survives every fold, so a later derivation can never relabel a card the
-// user authored.
+// user authored. `absorbed` lists the ids of Collected cards whose history
+// was merged into this card, so a merge whose destroy never landed is not
+// summed a second time.
 export interface CollectedExtension {
+  absorbed?: string[]
   addresses: Record<string, CollectedAddress>
   interactions: InteractionTuple[]
   relays?: string[]

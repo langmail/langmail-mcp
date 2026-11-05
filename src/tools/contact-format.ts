@@ -58,7 +58,7 @@ export const profileLines = (card: ContactCard, shown: { birthday: boolean } = {
 
 // The whole card as prose — what create_contact and update_contact echo back
 // so the caller never has to re-read to see the result of its own write.
-export const renderContact = (card: ContactCard): string => {
+export const renderContact = (card: ContactCard, collectedBookId: string | undefined): string => {
   const organization = readOrganization(card)
   const emails = Object.values(card.emails ?? {}).map((e) => e.address)
   return [
@@ -67,6 +67,6 @@ export const renderContact = (card: ContactCard): string => {
     ...(organization ? [`   organization: ${organization}`] : []),
     ...(emails.length > 0 ? ['   emails:', ...emails.map((a) => `   - ${a}`)] : []),
     ...profileLines(card),
-    `   source: ${sourceOf(card)}`,
+    `   source: ${sourceOf(card, collectedBookId)}`,
   ].join('\n')
 }

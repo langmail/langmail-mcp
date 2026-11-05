@@ -1,8 +1,18 @@
 import { describe, expect, test } from 'bun:test'
 
-import { COLLECTED_NOTE_KEY, collectedNoteEntry, toCardAddress, toCardPhone, USER_NOTE_KEY } from '@langmail/contacts'
+import {
+  birthAnniversary,
+  COLLECTED_BOOK_NAME,
+  COLLECTED_NOTE_KEY,
+  collectContacts,
+  collectedNoteEntry,
+  toCardAddress,
+  toCardPhone,
+  USER_NOTE_KEY,
+} from '@langmail/contacts'
 import { type ContactCard } from '@langmail/jmap'
 
+import { fakeBook } from './contact-test-fixtures.ts'
 import { type SearchContactsDeps, searchContacts, searchContactsInput } from './search-contacts.ts'
 
 const DAY_MS = 86_400_000
@@ -40,6 +50,7 @@ const robinCard = (over: Partial<ContactCard> = {}): ContactCard =>
   }) as ContactCard
 
 const makeDeps = (cards: ContactCard[], over: Partial<SearchContactsDeps> = {}): SearchContactsDeps => ({
+  addressBookList: () => Promise.resolve([{ id: 'book-collected', name: COLLECTED_BOOK_NAME }]),
   // Honours `ids` — the tool unions two query results, so a seam that
   // returned every card regardless would hide which read found whom.
   contactCardGet: (p) => Promise.resolve(cards.filter((c) => p.ids.includes(c.id))),
@@ -99,6 +110,72 @@ describe('searchContacts — concise', () => {
     const text = result.content[0]?.text ?? ''
     expect(text).toContain('3 person(s) matched')
     expect(text).toContain('Showing the top 3 of 7 matches')
+  })
+
+  test('a personal card duplicating a Collected one is one entry after the next sighting', async () => {
+    // The pair a contact import leaves: the personal card holds the details,
+    // the Collected card the history. Collection merges them.
+    const personal: ContactCard = {
+      addressBookIds: { 'ab-personal': true },
+      addresses: { a0: toCardAddress({ city: 'München', label: 'home', street: 'Beispielweg 1' }) },
+      anniversaries: { b0: birthAnniversary({ day: 14, month: 3 }) },
+      emails: { e0: { address: 'robin@northwind.example' } },
+      id: 'card-personal',
+      name: { full: 'Robin Fairweather' },
+      phones: { p0: toCardPhone({ label: 'mobile', number: '+49 151 2345678' }) },
+    }
+    const collected = robinCard({ addressBookIds: { 'book-collected': true } })
+    const book = fakeBook(
+      [collected, personal],
+      [
+        { id: 'book-collected', name: COLLECTED_BOOK_NAME },
+        { id: 'ab-personal', name: 'Contacts' },
+      ]
+    )
+    await collectContacts(
+      book.deps,
+      { accountId: 'acct', apiUrl: '', authorization: 'Bearer tok' },
+      {
+        observations: [
+          {
+            address: 'robin@northwind.example',
+            channel: 'email',
+            confidence: 'strong',
+            date: daysAgo(1),
+            direction: 'incoming',
+            name: 'Robin Fairweather',
+            recordId: 'mail-3',
+          },
+        ],
+        relays: [],
+      }
+    )
+    expect([...book.cards.keys()]).toEqual(['card-personal'])
+
+    const result = await searchContacts(makeDeps([...book.cards.values()]), {
+      args: args({ response_format: 'detailed' }),
+      token: 'tok',
+    })
+    const text = result.content[0]?.text ?? ''
+    expect(text).toContain('1 person(s) matched')
+    expect(text).toContain('+49 151 2345678')
+    expect(text).toContain('Beispielweg 1')
+    expect(text).toContain('birthday: --03-14')
+    expect(text).toContain('source: imported')
+    // The collected history, now on the personal card.
+    expect(text).toContain('mail-1')
+    expect(text).toContain('mail-3')
+    expect(text).toContain('robin.private@gmail.com')
+  })
+
+  test('an old Collected card without a marker prints source: derived', async () => {
+    // robinCard carries no source marker and no collected uid; only its book
+    // says collection wrote it.
+    const result = await searchContacts(makeDeps([robinCard({ addressBookIds: { 'book-collected': true } })]), {
+      args: args({ response_format: 'detailed' }),
+      token: 'tok',
+    })
+    expect(result.content[0]?.text).toContain('source: derived')
   })
 
   test('same-name people stay separate entries, ranked by relationship then recency', async () => {

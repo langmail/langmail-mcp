@@ -250,3 +250,215 @@ describe('foldObservations — provenance', () => {
     expect(updates[0]?.patch.name).toBeUndefined()
   })
 })
+
+describe('foldObservations — a personal card duplicating a Collected one', () => {
+  // The pair a contact import leaves behind: a personal card with the
+  // details and no history, and the older Collected card with all of it.
+  const collectedTwin = (over: Partial<ContactCard> = {}): ContactCard =>
+    existingCard({
+      addressBookIds: { [BOOK]: true },
+      emails: {
+        e0: { address: 'robin@northwind.example', contexts: { work: true } },
+        e1: { address: 'robin@fairweather.example', contexts: { private: true } },
+      },
+      id: 'card-collected',
+      notes: {
+        [COLLECTED_NOTE_KEY]: collectedNoteEntry({
+          addresses: {
+            'robin@fairweather.example': {
+              confidence: 'weak',
+              count: 2,
+              firstSeen: '2026-02-01T09:00:00Z',
+              lastSeen: '2026-03-01T09:00:00Z',
+            },
+            'robin@northwind.example': {
+              confidence: 'confirmed',
+              count: 5,
+              firstSeen: '2026-01-10T09:00:00Z',
+              lastSeen: '2026-05-01T09:00:00Z',
+            },
+          },
+          interactions: [
+            { channel: 'email', date: '2026-05-01T09:00:00Z', direction: 'incoming', recordId: 'c1' },
+            { channel: 'calendar', date: '2026-04-01T09:00:00Z', direction: 'outgoing', recordId: 'c2' },
+          ],
+          relays: ['messaging-digest-noreply@linkedin.com'],
+          source: 'derived',
+        }),
+      },
+      uid: 'urn:langmail:collected:robin@northwind.example',
+      ...over,
+    })
+
+  const personalTwin = (over: Partial<ContactCard> = {}): ContactCard =>
+    existingCard({
+      id: 'card-personal',
+      notes: {
+        [COLLECTED_NOTE_KEY]: collectedNoteEntry({
+          addresses: {
+            'robin@northwind.example': {
+              confidence: 'strong',
+              count: 3,
+              firstSeen: '2026-03-01T09:00:00Z',
+              lastSeen: '2026-06-01T09:00:00Z',
+            },
+          },
+          interactions: [
+            { channel: 'email', date: '2026-06-01T09:00:00Z', direction: 'outgoing', recordId: 'p1' },
+            // Logged on both cards: the log keeps it once. Counts carry no
+            // record ids, so they are summed as stored.
+            { channel: 'email', date: '2026-05-01T09:00:00Z', direction: 'incoming', recordId: 'c1' },
+          ],
+          relays: ['notifications@relay.example'],
+        }),
+      },
+      phones: { p0: { contexts: { private: true }, number: '+49 30 1234567' } },
+      ...over,
+    })
+
+  const fold = (cards: ContactCard[], observations: Observation[] = [obs({ date: '2026-07-20T12:00:00Z' })]) =>
+    foldObservations({ cards, collectedBookId: BOOK }, observations, [])
+
+  test('applies the observation to the personal card and destroys the Collected card', () => {
+    // Collected card first, as the older card sorts in the candidate query.
+    const { creates, updates } = fold([collectedTwin(), personalTwin()])
+    expect(creates).toEqual([])
+    expect(updates.map((u) => [u.cardId, u.absorbs])).toEqual([['card-personal', ['card-collected']]])
+  })
+
+  test('merges each rule: counts summed, earliest first-seen, latest last-seen, highest confidence', () => {
+    const { updates } = fold([collectedTwin(), personalTwin()])
+    const ext = readExt(updates[0]?.patch ?? {})
+    expect(ext.addresses['robin@northwind.example']).toEqual({
+      confidence: 'confirmed',
+      // 3 personal + 5 collected + this batch's observation.
+      count: 9,
+      firstSeen: '2026-01-10T09:00:00Z',
+      lastSeen: '2026-07-20T12:00:00Z',
+    })
+    // An address only the Collected card had arrives as it was.
+    expect(ext.addresses['robin@fairweather.example']).toEqual({
+      confidence: 'weak',
+      count: 2,
+      firstSeen: '2026-02-01T09:00:00Z',
+      lastSeen: '2026-03-01T09:00:00Z',
+    })
+  })
+
+  test('unions the interaction log and the relays, and keeps the personal source', () => {
+    const { updates } = fold([collectedTwin(), personalTwin()])
+    const ext = readExt(updates[0]?.patch ?? {})
+    expect(ext.interactions.map((t) => t.recordId)).toEqual(['m1', 'p1', 'c1', 'c2'])
+    expect(ext.relays).toEqual(['notifications@relay.example', 'messaging-digest-noreply@linkedin.com'])
+    // The personal card carried no marker: still imported, never derived.
+    expect(ext.source).toBeUndefined()
+  })
+
+  test('the personal card gains the addresses only the Collected card held, and keeps its own fields', () => {
+    const { updates } = fold([collectedTwin(), personalTwin()])
+    const patch = updates[0]?.patch ?? {}
+    expect(Object.values(patch.emails as Record<string, { address: string }>)).toEqual([
+      { address: 'robin@northwind.example', contexts: { work: true } },
+      // Copied as the Collected card stored it, labels included.
+      { address: 'robin@fairweather.example', contexts: { private: true } },
+    ])
+    expect(patch.phones).toBeUndefined()
+    expect(patch.name).toBeUndefined()
+  })
+
+  test('takes the name when the personal card has none', () => {
+    const { updates } = fold([collectedTwin(), personalTwin({ name: null })], [obs({ name: undefined })])
+    expect(updates[0]?.patch.name).toEqual({ full: 'Robin Fairweather' })
+  })
+
+  test('a personal card without notes receives the merged history as a full notes set', () => {
+    const { updates } = fold([collectedTwin(), personalTwin({ notes: undefined })])
+    const ext = readExt(updates[0]?.patch ?? {})
+    expect(updates[0]?.patch[COLLECTED_PATCH_PATH]).toBeUndefined()
+    expect(ext.addresses['robin@northwind.example']?.count).toBe(6)
+  })
+
+  test('two personal cards and no Collected one: nothing is destroyed', () => {
+    const { updates } = fold([personalTwin(), personalTwin({ id: 'card-other' })])
+    expect(updates.flatMap((u) => u.absorbs)).toEqual([])
+  })
+
+  test('the Collected card alone (the personal card not yet indexed): updated in place, no new card', () => {
+    const { creates, updates } = fold([collectedTwin()])
+    expect(creates).toEqual([])
+    expect(updates.map((u) => [u.cardId, u.absorbs])).toEqual([['card-collected', []]])
+  })
+
+  test('a Collected card carrying details a person added stays, so nothing is lost', () => {
+    for (const over of [
+      { phones: { p0: { number: '+49 30 7654321' } } },
+      { anniversaries: { b0: { date: { day: 1, month: 2 }, kind: 'birth' } } },
+      { notes: { ...collectedTwin().notes, 'langmail-note': { note: 'Met at the fair.' } } },
+      // Not in the typed ContactCard, but a CardDAV client can set it.
+      { nicknames: { k0: { name: 'Robbie' } } },
+    ] as Partial<ContactCard>[]) {
+      // The pair stays as it was before this change: the first holder takes
+      // the observation, and nothing is destroyed.
+      const { updates } = fold([collectedTwin(over), personalTwin()])
+      expect(updates.flatMap((u) => u.absorbs)).toEqual([])
+    }
+  })
+
+  test('a card in the Collected book and a personal book is not merged away', () => {
+    const shared = collectedTwin({ addressBookIds: { [BOOK]: true, 'book-personal': true } })
+    const { updates } = fold([shared, personalTwin()])
+    expect(updates.flatMap((u) => u.absorbs)).toEqual([])
+  })
+
+  test('a retried destroy still moves an address added to the Collected card since', () => {
+    const first = fold([collectedTwin(), personalTwin()])
+    const merged = personalTwin({
+      emails: first.updates[0]?.patch.emails as ContactCard['emails'],
+      notes: { [COLLECTED_NOTE_KEY]: collectedNoteEntry(readExt(first.updates[0]?.patch ?? {})) },
+    })
+    const edited = collectedTwin({
+      emails: { ...collectedTwin().emails, e2: { address: 'robin@later.example' } },
+    })
+    const second = fold([edited, merged], [obs({ date: '2026-07-21T12:00:00Z', recordId: 'm2' })])
+    const emails = Object.values(second.updates[0]?.patch.emails as Record<string, { address: string }>)
+    expect(emails.map((e) => e.address)).toContain('robin@later.example')
+    expect(second.updates[0]?.absorbs).toEqual(['card-collected'])
+  })
+
+  test('a merge whose destroy never landed is not summed a second time', () => {
+    // First fold: the personal card's update lands, the destroy fails.
+    const first = fold([collectedTwin(), personalTwin()])
+    const merged = personalTwin({
+      emails: first.updates[0]?.patch.emails as ContactCard['emails'],
+      notes: { [COLLECTED_NOTE_KEY]: collectedNoteEntry(readExt(first.updates[0]?.patch ?? {})) },
+    })
+    const second = fold([collectedTwin(), merged], [obs({ date: '2026-07-21T12:00:00Z', recordId: 'm2' })])
+    expect(second.updates.map((u) => [u.cardId, u.absorbs])).toEqual([['card-personal', ['card-collected']]])
+    const ext = readExt(second.updates[0]?.patch ?? {})
+    // 9 after the first merge, plus only this batch's observation.
+    expect(ext.addresses['robin@northwind.example']?.count).toBe(10)
+    expect(ext.absorbed).toEqual(['card-collected'])
+  })
+
+  test('two Collected duplicates both hand over their history', () => {
+    const second = collectedTwin({ id: 'card-collected-2', uid: 'urn:langmail:collected:robin@fairweather.example' })
+    const { updates } = fold([collectedTwin(), second, personalTwin()])
+    expect(updates.map((u) => [u.cardId, u.absorbs])).toEqual([
+      ['card-personal', ['card-collected', 'card-collected-2']],
+    ])
+    // Both cards' sightings of the second address arrive: 2 + 2.
+    expect(readExt(updates[0]?.patch ?? {}).addresses['robin@fairweather.example']?.count).toBe(4)
+  })
+
+  test('a Collected card sharing an address with another personal card stays', () => {
+    const other = personalTwin({
+      emails: { e0: { address: 'robin@fairweather.example' } },
+      id: 'card-other',
+      notes: undefined,
+    })
+    const { updates } = fold([collectedTwin(), personalTwin(), other])
+    // Its history for that address belongs to neither card alone, so the pair
+    // stays as it was before this change.
+    expect(updates.flatMap((u) => u.absorbs)).toEqual([])
+  })
+})

@@ -29,6 +29,7 @@ export const readCollected = (card: ContactCard): CollectedExtension => {
   }
   const ext = raw as Partial<CollectedExtension>
   return {
+    ...(Array.isArray(ext.absorbed) && ext.absorbed.length > 0 ? { absorbed: ext.absorbed } : {}),
     addresses: typeof ext.addresses === 'object' && ext.addresses ? ext.addresses : {},
     interactions: Array.isArray(ext.interactions) ? ext.interactions : [],
     ...(Array.isArray(ext.relays) && ext.relays.length > 0 ? { relays: ext.relays } : {}),
@@ -60,4 +61,6 @@ export const nextEmailKey = (emails: Record<string, ContactCardEmail>): string =
 
 // Deterministic uid so a crashed-and-retried create of the same person
 // resolves to the same identity instead of minting a new one.
-export const collectedUid = (address: string): string => `urn:langmail:collected:${normalizeAddress(address)}`
+export const COLLECTED_UID_PREFIX = 'urn:langmail:collected:'
+
+export const collectedUid = (address: string): string => `${COLLECTED_UID_PREFIX}${normalizeAddress(address)}`

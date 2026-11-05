@@ -1,21 +1,32 @@
 // The collection fold: observations in, card mutations out. Pure — no IO —
 // so both writers (email-agent poller, MCP calendar tools) and the backfill
 // share one exhaustively tested core, and the thin upsert helper only has
-// to apply the returned creates/updates over JMAP.
+// to apply the returned creates, updates and the destroys each update names
+// over JMAP.
 //
 // Ownership rules enforced here: standard card properties belong to the
 // user — collection fills blanks (a missing display name, a missing
 // address) but never overwrites a non-empty value; the extension property
 // is machine-owned and updated freely. Cards already holding an observed
 // address — personal-book contacts included — are updated in place, never
-// duplicated into the collected book.
+// duplicated into the collected book. When a personal-book card and a
+// Collected card both hold an observed address (an import of a person
+// collection already knew), the Collected card's history is merged into the
+// personal card and the Collected card is destroyed, so one address resolves
+// to one person.
 
 import { type ContactCard, type ContactCardDraft, type ContactCardEmail } from '@langmail/jmap'
 
 import { classifyContext, normalizeAddress } from './address-class.ts'
 import { cardAddresses, collectedNoteEntry, collectedUid, nextEmailKey, normalizeName, readCollected } from './card.ts'
 import { COLLECTED_NOTE_KEY, COLLECTED_PATCH_PATH, INTERACTION_LOG_SIZE, RELAY_LIST_SIZE } from './constants.ts'
-import { type CollectedExtension, type Confidence, type Observation, type RelaySighting } from './types.ts'
+import {
+  type CollectedAddress,
+  type CollectedExtension,
+  type Confidence,
+  type Observation,
+  type RelaySighting,
+} from './types.ts'
 
 export interface FoldContext {
   // Every existing card that might be touched: cards holding the observed
@@ -26,6 +37,9 @@ export interface FoldContext {
 }
 
 export interface FoldUpdate {
+  // Collected cards merged into this one. The caller destroys them right
+  // after this update succeeded, so a failed update leaves both cards.
+  absorbs: string[]
   cardId: string
   // Top-level property replacements for ContactCard/set update.
   patch: Record<string, unknown>
@@ -42,6 +56,8 @@ const time = (iso: string): number => new Date(iso).getTime()
 
 // One person being mutated: an existing card (id set) or a new draft.
 interface Working {
+  // Collected cards merged into this one in this fold.
+  absorbs: string[]
   addresses: Set<string>
   changedEmails: boolean
   changedName: boolean
@@ -117,6 +133,102 @@ const apply = (w: Working, obs: Observation): void => {
   w.recordIds.add(obs.recordId)
 }
 
+const earlier = (a: string, b: string): string => (time(b) < time(a) ? b : a)
+const later = (a: string, b: string): string => (time(b) > time(a) ? b : a)
+
+const mergeEntry = (ext: CollectedExtension, address: string, entry: CollectedAddress): void => {
+  const mine = ext.addresses[address]
+  ext.addresses[address] = mine
+    ? {
+        confidence:
+          CONFIDENCE_RANK[entry.confidence] > CONFIDENCE_RANK[mine.confidence] ? entry.confidence : mine.confidence,
+        count: mine.count + entry.count,
+        firstSeen: earlier(mine.firstSeen, entry.firstSeen),
+        lastSeen: later(mine.lastSeen, entry.lastSeen),
+      }
+    : { ...entry }
+}
+
+// Folds a Collected card's history into the personal card holding the same
+// person: per address, counts summed, the earliest first-seen, the latest
+// last-seen and the highest confidence; interaction log and relays unioned
+// under their caps. The personal card keeps its own `source`, so an imported
+// card never turns derived by absorbing a collected one.
+const absorbHistory = (into: Working, from: Working): void => {
+  into.ext.absorbed = [...(into.ext.absorbed ?? []), from.id ?? '']
+  for (const [address, entry] of Object.entries(from.ext.addresses)) {
+    mergeEntry(into.ext, address, entry)
+  }
+  const logged = new Set(into.ext.interactions.map((t) => t.recordId))
+  into.ext.interactions = [...into.ext.interactions, ...from.ext.interactions.filter((t) => !logged.has(t.recordId))]
+    .sort((a, b) => time(b.date) - time(a.date))
+    .slice(0, INTERACTION_LOG_SIZE)
+  const relays = [...new Set([...(into.ext.relays ?? []), ...(from.ext.relays ?? [])])].slice(0, RELAY_LIST_SIZE)
+  if (relays.length > 0) {
+    into.ext.relays = relays
+  }
+}
+
+// Merges a Collected card into a personal card and marks it for destroy. Its
+// addresses join the personal card, as collection does for any blank it
+// fills; so does the name if the personal card has none. A card already
+// listed in `absorbed` was merged by an earlier fold whose destroy never
+// landed: its history is not summed again, but anything added to it since
+// (an address) still moves over.
+const absorb = (into: Working, from: Working, fromEmails: Record<string, ContactCardEmail>): void => {
+  into.absorbs.push(from.id ?? '')
+  into.touched = true
+  if (!into.ext.absorbed?.includes(from.id ?? '')) {
+    absorbHistory(into, from)
+  }
+  for (const entry of Object.values(fromEmails)) {
+    const address = normalizeAddress(entry.address)
+    if (!into.addresses.has(address)) {
+      into.emails[nextEmailKey(into.emails)] = entry
+      into.addresses.add(address)
+      into.changedEmails = true
+    }
+  }
+  if (!into.name && from.name) {
+    into.name = from.name
+    into.changedName = true
+  }
+}
+
+// The properties a card collection minted carries: what the fold writes, and
+// the metadata the server and RFC 9553 add. Anything else on a Collected
+// card (a phone, a birthday, a photo, a nickname) was put there by a person.
+const COLLECTION_PROPERTIES = new Set([
+  '@type',
+  'addressBookIds',
+  'created',
+  'emails',
+  'id',
+  'kind',
+  'name',
+  'notes',
+  'prodId',
+  'uid',
+  'updated',
+  'version',
+])
+
+// A Collected card collection can merge away: in the Collected book only,
+// and carrying nothing a person put there. A detail added through
+// update_contact or a CardDAV client would be lost with the card, so such a
+// pair stays. An allow-list, because the card comes back from the server
+// with every JSContact property it holds, typed or not.
+const isDisposable = (card: ContactCard, collectedBookId: string): boolean => {
+  const books = Object.keys(card.addressBookIds).filter((id) => card.addressBookIds[id])
+  const filled = Object.entries(card).filter(([, value]) => value !== null && value !== undefined)
+  return (
+    books.length === 1 &&
+    books[0] === collectedBookId &&
+    filled.every(([key]) => COLLECTION_PROPERTIES.has(key)) &&
+    Object.keys(card.notes ?? {}).every((key) => key === COLLECTED_NOTE_KEY)
+  )
+}
+
 // The conservative merge gate: a new address may join an existing person
 // only on an exact normalized display-name match PLUS co-occurrence — the
 // same record also sighted an address already belonging to that person.
@@ -136,12 +248,47 @@ const canJoin = (w: Working, obs: Observation, recordAddresses: Map<string, Set<
   return false
 }
 
+// For each observed address held by both a card outside the Collected book
+// and one or more disposable Collected cards, absorbs the Collected cards
+// into the first such personal card. Returns the cards still in play; each
+// personal card lists the ones it absorbed, for the caller to destroy.
+const mergeCollectedTwins = (ctx: FoldContext, cards: Working[], observations: Observation[]): Working[] => {
+  const byId = new Map(ctx.cards.map((c) => [c.id, c]))
+  const inCollected = (w: Working): boolean =>
+    (byId.get(w.id ?? '')?.addressBookIds[ctx.collectedBookId] ?? false) === true
+  let kept = cards
+  for (const address of new Set(observations.map((o) => normalizeAddress(o.address)))) {
+    const holders = kept.filter((w) => w.addresses.has(address))
+    const personal = holders.find((w) => !inCollected(w))
+    if (!personal) {
+      continue
+    }
+    const disposable = holders.filter((w) => {
+      const card = byId.get(w.id ?? '')
+      return card !== undefined && isDisposable(card, ctx.collectedBookId)
+    })
+    // A Collected card that shares an address with yet another card stays:
+    // its history for that address belongs to neither card alone, and a
+    // merge writes to the personal card only, so nothing has to be split.
+    const survivors = kept.filter((w) => w !== personal && !disposable.includes(w))
+    const doomed = disposable.filter((w) =>
+      [...w.addresses].every((a) => personal.addresses.has(a) || !survivors.some((s) => s.addresses.has(a)))
+    )
+    kept = kept.filter((w) => !doomed.includes(w))
+    for (const collected of doomed) {
+      absorb(personal, collected, byId.get(collected.id ?? '')?.emails ?? {})
+    }
+  }
+  return kept
+}
+
 export const foldObservations = (
   ctx: FoldContext,
   observations: Observation[],
   relays: RelaySighting[] = []
 ): FoldResult => {
-  const existing: Working[] = ctx.cards.map((card) => ({
+  const initial: Working[] = ctx.cards.map((card) => ({
+    absorbs: [],
     addresses: new Set(cardAddresses(card)),
     changedEmails: false,
     changedName: false,
@@ -153,6 +300,10 @@ export const foldObservations = (
     recordIds: new Set<string>(),
     touched: false,
   }))
+  // A personal-book card and a Collected card holding the same observed
+  // address are one person: the personal card takes the history first, so
+  // this batch's observations land on it, and the Collected card goes.
+  const existing = mergeCollectedTwins(ctx, initial, observations)
   const drafts: Working[] = []
   const all = () => [...existing, ...drafts]
 
@@ -180,6 +331,7 @@ export const foldObservations = (
       continue
     }
     const draft: Working = {
+      absorbs: [],
       addresses: new Set(),
       changedEmails: false,
       changedName: false,
@@ -229,6 +381,7 @@ export const foldObservations = (
   const updates: FoldUpdate[] = existing
     .filter((w) => w.touched)
     .map((w) => ({
+      absorbs: w.absorbs,
       cardId: w.id ?? '',
       // The extension rides a scoped patch path so user-authored note
       // entries on the same card are never replaced — except on a card

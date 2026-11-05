@@ -34,6 +34,7 @@ import { ACCOUNT_WRITE } from './annotations.ts'
 import {
   birthdaySchema,
   type ContactWriteDeps,
+  collectedBookIdOf,
   contactCtx,
   contactIdSchema,
   emailEntrySchema,
@@ -315,10 +316,13 @@ export const updateContact = async (
     return errorResult('Nothing to change: the requested edit is already the stored state.')
   }
 
+  // Read before the write, so a failed lookup can never fail an edit that
+  // already landed.
+  const collectedBookId = await collectedBookIdOf(deps, ctx)
   await deps.contactCardUpdate({ ...ctx, cardId: args.contactId, patch })
   const stored = await readBack(deps, ctx, args.contactId)
   return textResult(
-    `Updated contact:\n\n${stored ? renderContact(stored) : args.contactId}\n\n` +
+    `Updated contact:\n\n${stored ? renderContact(stored, collectedBookId) : args.contactId}\n\n` +
       'Fields you did not name are unchanged. The edit syncs to every device connected over CardDAV.'
   )
 }
