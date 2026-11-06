@@ -251,7 +251,7 @@ const fetchPinned = async (
     try {
       // redirect: 'error' — a redirect could bounce to a host neither check
       // ever saw, so it is refused instead of followed. Verified on Bun
-      // 1.3.13 (the Dockerfile and CI pin) and 1.4.2: fetch verifies the
+      // 1.4.2 and 1.4.4 (the Dockerfile and CI pin): fetch verifies the
       // certificate against tls.serverName, not the IP, and sends the host
       // override. Re-check both when bumping Bun; the tests fake fetch.
       return await fetchImpl(pinnedUrl(url, address), {

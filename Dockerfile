@@ -1,4 +1,4 @@
-FROM oven/bun:1.3.13-slim AS base
+FROM oven/bun:1.4.4-slim AS base
 
 ARG DO_NOT_TRACK=1
 ENV DO_NOT_TRACK=$DO_NOT_TRACK
