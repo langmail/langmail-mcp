@@ -428,3 +428,145 @@ export const spliceAlarms = (ical: string, minutesBefore: number | null, recurre
   const end = calendar.header.at(-1) ?? 'END:VCALENDAR'
   return [...calendar.header.slice(0, -1), ...components.flatMap((c) => c.lines), end].join(CRLF) + CRLF
 }
+
+// Properties an edit writes itself (through buildInvite) or decides, so a
+// stored copy must never be carried across: it would duplicate the built one
+// or contradict the edit (a DURATION beside the new DTEND, an all-day marker
+// on an event made timed, a stale LAST-MODIFIED). RRULE and EXRULE belong to
+// the recurrence the edit resolves; RDATE is decided per edit (see
+// CarryOptions.replaced).
+const EDIT_OWNED_PROPERTIES = new Set([
+  'ATTENDEE',
+  'DESCRIPTION',
+  'DTEND',
+  'DTSTAMP',
+  'DTSTART',
+  'DURATION',
+  'EXDATE',
+  'EXRULE',
+  'LAST-MODIFIED',
+  'LOCATION',
+  'ORGANIZER',
+  'RECURRENCE-ID',
+  'REQUEST-STATUS',
+  'RRULE',
+  'SEQUENCE',
+  'SUMMARY',
+  'UID',
+  'X-MICROSOFT-CDO-ALLDAYEVENT',
+  'X-MICROSOFT-MSNCALENDAR-ALLDAYEVENT',
+])
+
+const PROPERTY_NAME_RE = /^([^;:]+)/u
+const propertyName = (line: string): string => PROPERTY_NAME_RE.exec(line)?.[1]?.trim().toUpperCase() ?? ''
+
+// A VEVENT's own (depth 1) properties, each as its physical lines (the first
+// line plus its folded continuations), in source order. Sub-components such
+// as VALARM are left out.
+const topLevelProperties = (lines: string[]): { lines: string[]; name: string }[] => {
+  const properties: { lines: string[]; name: string }[] = []
+  let depth = 0
+  for (const line of lines) {
+    if (BEGIN_DELIMITER_RE.test(line)) {
+      depth += 1
+      continue
+    }
+    if (END_DELIMITER_RE.test(line)) {
+      depth -= 1
+      continue
+    }
+    if (depth !== 1) {
+      continue
+    }
+    const last = properties.at(-1)
+    if ((line.startsWith(' ') || line.startsWith('\t')) && last) {
+      last.lines.push(line)
+    } else {
+      properties.push({ lines: [line], name: propertyName(line) })
+    }
+  }
+  return properties
+}
+
+// The TZIDs a carried property's parameters name (e.g. a DTSTART-like X-
+// property, or an RDATE), so their VTIMEZONEs can come along.
+const TZID_PARAM_RE = /;TZID=("[^"]*"|[^;:]*)/giu
+const referencedZones = (lines: string[]): string[] => {
+  const unfolded = unfoldLines(lines)[0] ?? ''
+  const params = unfolded.slice(0, unfolded.indexOf(':') === -1 ? undefined : unfolded.indexOf(':'))
+  return [...params.matchAll(TZID_PARAM_RE)].map((m) => (m[1] ?? '').replace(/^"|"$/gu, ''))
+}
+
+export interface CarryOptions {
+  // The occurrence the built VEVENT overrides. Its stored override is the
+  // source; without one yet, the master is, so a fresh override keeps the
+  // series' properties (RFC 5545 overrides inherit nothing).
+  recurrenceId?: string
+  // Further names the edit replaced (upper case), beyond what it always owns:
+  // a changed field's twins, such as X-ALT-DESC beside a new DESCRIPTION.
+  // A name ending in `*` matches by prefix.
+  replaced?: readonly string[]
+}
+
+// Carries every property of the stored VEVENT that the freshly built one does
+// not set onto it: CATEGORIES, CLASS, URL, TRANSP, STATUS, X- properties and
+// whatever else the builder doesn't model, so an edit changes only what the
+// caller asked for. Stored lines are copied verbatim (folds included) and go
+// before the built VEVENT's first sub-component, after its own properties; a
+// VTIMEZONE a carried property names comes along when the built object lacks
+// it. `built` is buildInvite output: one VEVENT.
+export const carryStoredProperties = (built: string, storedIcal: string, options: CarryOptions = {}): string => {
+  const target = splitCalendar(built)
+  const stored = splitCalendar(storedIcal)
+  const builtEvent = overrideVevent(target)
+  const source = storedSource(stored.components, options.recurrenceId)
+  if (!source) {
+    return built
+  }
+
+  const builtNames = new Set(topLevelProperties(builtEvent.lines).map((p) => p.name))
+  const replaced = options.replaced ?? []
+  const isReplaced = (name: string): boolean =>
+    replaced.some((r) => (r.endsWith('*') ? name.startsWith(r.slice(0, -1)) : name === r))
+  const carried = topLevelProperties(source.lines).filter(
+    (p) => p.name !== '' && !EDIT_OWNED_PROPERTIES.has(p.name) && !builtNames.has(p.name) && !isReplaced(p.name)
+  )
+  if (carried.length === 0) {
+    return built
+  }
+
+  const firstNested = builtEvent.lines.findIndex((line, i) => i > 0 && BEGIN_DELIMITER_RE.test(line))
+  const at = firstNested === -1 ? builtEvent.lines.length - 1 : firstNested
+  const patchedEvent = {
+    ...builtEvent,
+    lines: [...builtEvent.lines.slice(0, at), ...carried.flatMap((p) => p.lines), ...builtEvent.lines.slice(at)],
+  }
+
+  const builtZones = new Set(target.components.filter((c) => c.name === 'VTIMEZONE').map(componentKey))
+  const zones = [...new Set(carried.flatMap((p) => referencedZones(p.lines)))]
+    .map((tzid) => stored.components.find((c) => componentKey(c) === `VTIMEZONE:${tzid}`))
+    .filter((c): c is Component => c !== undefined && !builtZones.has(componentKey(c)))
+
+  const components = [
+    ...target.components.filter((c) => c.name !== 'VEVENT'),
+    ...zones,
+    ...target.components.filter((c) => c.name === 'VEVENT').map((c) => (c === builtEvent ? patchedEvent : c)),
+  ]
+  const end = target.header.at(-1) ?? 'END:VCALENDAR'
+  return [...target.header.slice(0, -1), ...components.flatMap((c) => c.lines), end].join(CRLF) + CRLF
+}
+
+// The stored VEVENT whose properties an edit keeps: the override for
+// `recurrenceId` if there is one, else the master (no RECURRENCE-ID), else —
+// an object holding a single invited instance — the only VEVENT.
+const storedSource = (components: Component[], recurrenceId: string | undefined): Component | undefined => {
+  const events = components.filter((c) => c.name === 'VEVENT')
+  if (recurrenceId !== undefined) {
+    const targetMs = new Date(recurrenceId).getTime()
+    const override = events.find((c) => recurrenceIdMs(c) === targetMs)
+    if (override) {
+      return override
+    }
+  }
+  return events.find((c) => recurrenceIdMs(c) === null) ?? (events.length === 1 ? events[0] : undefined)
+}

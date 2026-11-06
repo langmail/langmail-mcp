@@ -10,7 +10,10 @@
 // mode — no caller ever has to restate what it is not changing, which is what
 // used to silently drop attendees added elsewhere and collapse recurring series.
 // Clearing therefore needs an explicit value: `attendees: []`, `location: ""`,
-// `description: ""`, `recurrence: "none"`.
+// `description: ""`, `recurrence: "none"`. Properties the tool doesn't model
+// (CATEGORIES, CLASS, URL, TRANSP, X- properties, …) are carried over from the
+// stored VEVENT verbatim (caldav/occurrence.ts carryStoredProperties), so an
+// edit changes only what the caller asked for.
 //
 // Two edit scopes, chosen by `recurrenceId`:
 //   - omitted → the whole event (the entire series for a recurring one);
@@ -40,7 +43,7 @@ import {
   updateEvent,
 } from '../caldav/client.ts'
 import { buildInvite, type InviteAlarm, type InviteAttendee, maxSequence, parseSequence } from '../caldav/ical.ts'
-import { spliceAlarms, spliceOccurrenceOverride } from '../caldav/occurrence.ts'
+import { carryStoredProperties, spliceAlarms, spliceOccurrenceOverride } from '../caldav/occurrence.ts'
 import {
   alignUntil,
   isSeriesOccurrence,
@@ -319,7 +322,14 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
     ...(location ? { location } : {}),
     ...(scheduleAgent ? { scheduleAgent } : {}),
   })
-  const ical = spliceOccurrenceOverride(existing.data, override, recurrenceId)
+  // RDATE is the series' own: an override is one instance and never carries
+  // one. A fresh override starts from the master, whose Thunderbird alarm
+  // state belongs to other occurrences, so that never comes along either.
+  const patched = carryStoredProperties(override, existing.data, {
+    recurrenceId,
+    replaced: [...replacedProperties(args), ...MOZ_ALARM_STATE, 'RDATE'],
+  })
+  const ical = spliceOccurrenceOverride(existing.data, patched, recurrenceId)
 
   await deps.updateEvent({ ical, token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
   logSchedulingHandover({
@@ -349,6 +359,26 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
       `(${deliverySummary(attendees, scheduleAgent, removedAttendees.length > 0)}${reminderSummary(args, allDay)}). ` +
       'The rest of the series is unchanged.'
   )
+}
+
+// Thunderbird's state for the alarms it has seen: snoozes and the last
+// acknowledgement, tied to the old alarm times.
+const MOZ_ALARM_STATE = ['X-MOZ-SNOOZE-TIME*', 'X-MOZ-LASTACK']
+
+// Stored properties an edit replaces beyond those it always writes (see
+// carryStoredProperties): the twins of a field the caller changed, which would
+// otherwise keep showing its old value — an HTML description, the map position
+// and Apple's travel time for a location, Thunderbird's alarm state for moved
+// or replaced reminders — and a series' extra dates (RDATE), which are fixed
+// instants that neither follow a move nor a restated rule.
+const replacedProperties = (args: UpdateCalendarEventArgs): string[] => {
+  const moved = args.start !== undefined || args.end !== undefined
+  return [
+    ...(args.description === undefined ? [] : ['X-ALT-DESC', 'STYLED-DESCRIPTION']),
+    ...(args.location === undefined ? [] : ['GEO', 'X-APPLE-STRUCTURED-LOCATION', 'X-APPLE-TRAVEL-*']),
+    ...(moved || args.reminderMinutesBefore !== undefined ? MOZ_ALARM_STATE : []),
+    ...(moved || args.recurrence !== undefined ? ['RDATE'] : []),
+  ]
 }
 
 // The reminder change an edit made, for the result line; empty when the
@@ -992,12 +1022,25 @@ interface RebuildEvent {
   rrule?: string
   sequence: number
   stored: ParsedEvent[]
+  // The stored object as fetched, whose unmodelled properties the edit keeps.
+  storedIcal: string
   timeZone: string
 }
 
-// Serializes the whole-event edit as a single VEVENT.
-const rebuildEvent = ({ args, f, invitees, organizer, rrule, sequence, stored, timeZone }: RebuildEvent): string =>
-  buildInvite({
+// Serializes the whole-event edit as a single VEVENT: the fields the edit
+// resolved, plus every stored property the builder doesn't write.
+const rebuildEvent = ({
+  args,
+  f,
+  invitees,
+  organizer,
+  rrule,
+  sequence,
+  stored,
+  storedIcal,
+  timeZone,
+}: RebuildEvent): string => {
+  const built = buildInvite({
     alarms: f.alarms,
     allDay: f.allDay,
     attendees: invitees,
@@ -1018,6 +1061,8 @@ const rebuildEvent = ({ args, f, invitees, organizer, rrule, sequence, stored, t
     ...(rrule ? { rrule } : {}),
     ...(f.scheduleAgent ? { scheduleAgent: f.scheduleAgent } : {}),
   })
+  return carryStoredProperties(built, storedIcal, { replaced: replacedProperties(args) })
+}
 
 export const updateCalendarEvent = async (
   deps: UpdateCalendarEventDeps,
@@ -1111,6 +1156,7 @@ export const updateCalendarEvent = async (
     organizer: account.organizer,
     sequence,
     stored,
+    storedIcal: existing.data,
     timeZone,
     ...(rrule ? { rrule } : {}),
   })

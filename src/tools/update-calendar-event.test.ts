@@ -2164,3 +2164,165 @@ describe('updateCalendarEvent — attendee replies', () => {
     expect(maxSequence(ical)).toBe(3)
   })
 })
+
+// Properties the tool does not model, as another client would store them: a
+// folded X- property with parameters in lower case, two CATEGORIES lines.
+const UNMODELLED = [
+  'CATEGORIES:Work,Planning',
+  'CATEGORIES:Q3',
+  'CLASS:PRIVATE',
+  'STATUS:TENTATIVE',
+  'URL:https://example.com/agenda',
+  'TRANSP:TRANSPARENT',
+  'x-acme-note;X-P=1:a note long enough that its content line has to be folded across',
+  ' two physical lines',
+]
+const withProperties = (ical: string, lines: string[]): string =>
+  ical.replace('END:VEVENT', () => `${lines.join('\r\n')}\r\nEND:VEVENT`)
+
+const PROPERTY_NAME_RE = /^[^;:]+/u
+// A VEVENT's own content lines (unfolded) whose name is in `names`.
+const propertyLines = (ical: string, names: string[]): string[] =>
+  unfold(ical)
+    .split('\r\n')
+    .filter((line) => names.includes(PROPERTY_NAME_RE.exec(line)?.[0]?.toUpperCase() ?? ''))
+
+const UNMODELLED_NAMES = ['CATEGORIES', 'CLASS', 'STATUS', 'URL', 'TRANSP', 'X-ACME-NOTE']
+const UNMODELLED_UNFOLDED = propertyLines(withProperties(storedEvent().data, UNMODELLED), UNMODELLED_NAMES)
+
+describe('updateCalendarEvent — unmodelled properties are preserved', () => {
+  const stored = (): CalendarObject =>
+    storedEvent({ data: withProperties(withAlarms(storedEvent().data, ALARM_DISPLAY), UNMODELLED) })
+
+  test('the fixture holds every unmodelled property, its folded X- line joined', () => {
+    expect(UNMODELLED_UNFOLDED).toHaveLength(7)
+    expect(UNMODELLED_UNFOLDED.at(-1)).toEndWith('folded acrosstwo physical lines')
+  })
+
+  test('a title edit keeps VALARM, CATEGORIES, CLASS, URL, TRANSP and an X- property', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), stored(), cap), {
+      args: { title: 'Sync (renamed)', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    const ical = cap.updated[0]?.ical ?? ''
+    expect(propertyLines(ical, UNMODELLED_NAMES)).toEqual(UNMODELLED_UNFOLDED)
+    expect(valarmBlocks(ical)).toEqual([ALARM_DISPLAY.join('\r\n')])
+    expect(parseEvents(ical)[0]?.title).toBe('Sync (renamed)')
+    // Carried lines keep their fold, and land before the VALARM.
+    expect(ical).toContain('\r\n two physical lines\r\nBEGIN:VALARM')
+  })
+
+  test('a time move keeps them too', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), stored(), cap), {
+      args: { start: '2026-06-12T14:00:00Z', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    const ical = cap.updated[0]?.ical ?? ''
+    expect(propertyLines(ical, UNMODELLED_NAMES)).toEqual(UNMODELLED_UNFOLDED)
+    expect(valarmBlocks(ical)).toEqual([ALARM_DISPLAY.join('\r\n')])
+    expect(parseEvents(ical)[0]?.start).toBe('2026-06-12T14:00:00Z')
+  })
+
+  test('a stored copy of what the edit writes is never carried', async () => {
+    const cap = captured()
+    const extra = ['DURATION:PT30M', 'LAST-MODIFIED:20260101T000000Z', 'X-MICROSOFT-CDO-ALLDAYEVENT:FALSE']
+    await updateCalendarEvent(
+      makeDeps(account(), storedEvent({ data: withProperties(storedEvent().data, extra) }), cap),
+      {
+        args: { end: '2026-06-13', start: '2026-06-12', uid: UID },
+        token: 'tok',
+      }
+    )
+    const ical = cap.updated[0]?.ical ?? ''
+    for (const name of ['UID', 'SUMMARY', 'DTSTART', 'DTEND', 'SEQUENCE', 'ORGANIZER', 'X-MICROSOFT-CDO-ALLDAYEVENT']) {
+      expect(propertyLines(ical, [name])).toHaveLength(1)
+    }
+    expect(propertyLines(ical, ['DURATION', 'LAST-MODIFIED'])).toEqual([])
+    expect(propertyLines(ical, ['X-MICROSOFT-CDO-ALLDAYEVENT'])).toEqual(['X-MICROSOFT-CDO-ALLDAYEVENT:TRUE'])
+  })
+
+  test('a changed field drops its stale twins; an untouched one keeps them', async () => {
+    const twins = ['X-ALT-DESC;FMTTYPE=text/html:<p>Old</p>', 'GEO:52.5;13.4', 'X-APPLE-TRAVEL-DURATION:PT20M']
+    const edit = async (over: Partial<UpdateCalendarEventArgs>): Promise<string> => {
+      const cap = captured()
+      const data = withProperties(storedEvent().data, twins)
+      await updateCalendarEvent(makeDeps(account(), storedEvent({ data }), cap), {
+        args: { uid: UID, ...over },
+        token: 'tok',
+      })
+      return cap.updated[0]?.ical ?? ''
+    }
+    const names = ['X-ALT-DESC', 'GEO', 'X-APPLE-TRAVEL-DURATION']
+    expect(propertyLines(await edit({ title: 'Renamed' }), names)).toEqual(twins)
+    expect(propertyLines(await edit({ description: 'New agenda' }), names)).toEqual(twins.slice(1))
+    expect(propertyLines(await edit({ location: 'Room 2' }), names)).toEqual(twins.slice(0, 1))
+  })
+
+  test('RDATE survives a title edit and goes when the rule is restated', async () => {
+    const rdate = 'RDATE:20260625T100000Z'
+    const edit = async (over: Partial<UpdateCalendarEventArgs>): Promise<string[]> => {
+      const cap = captured()
+      const data = withProperties(recurringStored().data, [rdate])
+      await updateCalendarEvent(makeDeps(account(), recurringStored({ data }), cap), {
+        args: { uid: UID, ...over },
+        token: 'tok',
+      })
+      return propertyLines(cap.updated[0]?.ical ?? '', ['RDATE'])
+    }
+    expect(await edit({ title: 'Renamed' })).toEqual([rdate])
+    expect(await edit({ recurrence: 'FREQ=WEEKLY;BYDAY=TU' })).toEqual([])
+    // A fixed instant doesn't follow the series when it moves.
+    expect(await edit({ start: '2026-06-16T11:00:00Z' })).toEqual([])
+  })
+
+  test('an occurrence edit keeps the existing override’s properties', async () => {
+    const cap = captured()
+    const base = seriesWithOverride().data
+    // Mark only the override (the last VEVENT).
+    const at = base.lastIndexOf('END:VEVENT')
+    const data = `${base.slice(0, at)}CATEGORIES:Moved\r\nTRANSP:TRANSPARENT\r\n${base.slice(at)}`
+    await updateCalendarEvent(makeDeps(account(), storedEvent({ data }), cap), {
+      args: { recurrenceId: OVERRIDDEN_OCCURRENCE, title: 'Retitled occurrence', uid: UID },
+      token: 'tok',
+    })
+    const ical = cap.updated[0]?.ical ?? ''
+    const override = ical.slice(ical.lastIndexOf('BEGIN:VEVENT'))
+    expect(propertyLines(override, ['CATEGORIES', 'TRANSP'])).toEqual(['CATEGORIES:Moved', 'TRANSP:TRANSPARENT'])
+  })
+
+  test('a fresh occurrence override starts from the master’s properties, without its RDATE', async () => {
+    const cap = captured()
+    const data = withProperties(recurringStored().data, [...UNMODELLED, 'RDATE:20260625T100000Z'])
+    await updateCalendarEvent(makeDeps(account(), recurringStored({ data }), cap), {
+      args: { recurrenceId: '2026-06-23T10:00:00Z', title: 'Just this one', uid: UID },
+      token: 'tok',
+    })
+    const ical = cap.updated[0]?.ical ?? ''
+    const override = ical.slice(ical.lastIndexOf('BEGIN:VEVENT'))
+    expect(override).toContain('RECURRENCE-ID')
+    expect(propertyLines(override, UNMODELLED_NAMES)).toEqual(UNMODELLED_UNFOLDED)
+    expect(propertyLines(override, ['RDATE'])).toEqual([])
+    // The master is spliced across untouched.
+    expect(propertyLines(ical.slice(0, ical.lastIndexOf('BEGIN:VEVENT')), ['RDATE'])).toHaveLength(1)
+  })
+
+  test('Thunderbird alarm state goes when the reminder or the time changes', async () => {
+    const moz = ['X-MOZ-SNOOZE-TIME:20260612T095000Z', 'X-MOZ-LASTACK:20260612T094500Z']
+    const edit = async (over: Partial<UpdateCalendarEventArgs>): Promise<string[]> => {
+      const cap = captured()
+      const data = withProperties(storedEvent().data, moz)
+      await updateCalendarEvent(makeDeps(account(), storedEvent({ data }), cap), {
+        args: { uid: UID, ...over },
+        token: 'tok',
+      })
+      return propertyLines(cap.updated[0]?.ical ?? '', ['X-MOZ-SNOOZE-TIME', 'X-MOZ-LASTACK'])
+    }
+    expect(await edit({ title: 'Renamed' })).toEqual(moz)
+    expect(await edit({ start: '2026-06-12T14:00:00Z' })).toEqual([])
+    expect(await edit({ reminderMinutesBefore: 10, title: 'Renamed' })).toEqual([])
+  })
+})

@@ -3,7 +3,12 @@ import { describe, expect, test } from 'bun:test'
 import { parseEvents } from '@langmail/ical'
 
 import { buildInvite } from './ical.ts'
-import { spliceAlarms, spliceOccurrenceCancellation, spliceOccurrenceOverride } from './occurrence.ts'
+import {
+  carryStoredProperties,
+  spliceAlarms,
+  spliceOccurrenceCancellation,
+  spliceOccurrenceOverride,
+} from './occurrence.ts'
 
 const UID = 'series-1@langmail.me'
 
@@ -458,5 +463,54 @@ describe('spliceAlarms', () => {
 
   test('throws rather than silently no-op when there is no VEVENT', () => {
     expect(() => spliceAlarms('BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n', 10)).toThrow()
+  })
+})
+
+describe('carryStoredProperties', () => {
+  const built = buildInvite({
+    attendees: [],
+    end: new Date('2026-06-12T11:00:00Z'),
+    start: new Date('2026-06-12T10:00:00Z'),
+    timeZone: 'UTC',
+    title: 'Edited',
+    uid: 'u1',
+  })
+  const storedWith = (lines: string[], extraComponents: string[] = []): string =>
+    [
+      'BEGIN:VCALENDAR',
+      ...extraComponents,
+      'BEGIN:VEVENT',
+      'UID:u1',
+      'SUMMARY:Stored',
+      'DTSTART:20260612T090000Z',
+      'DTEND:20260612T093000Z',
+      ...lines,
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n')
+
+  test('copies the VTIMEZONE a carried property names, once', () => {
+    const zone = ['BEGIN:VTIMEZONE', 'TZID:Europe/Berlin', 'END:VTIMEZONE']
+    const out = carryStoredProperties(built, storedWith(['X-ACME-AT;TZID=Europe/Berlin:20260612T100000'], zone))
+    expect(out).toContain('X-ACME-AT;TZID=Europe/Berlin:20260612T100000')
+    expect(out.match(/BEGIN:VTIMEZONE/gu)).toHaveLength(1)
+    expect(out.indexOf('BEGIN:VTIMEZONE')).toBeLessThan(out.indexOf('BEGIN:VEVENT'))
+    expect(parseEvents(out)[0]?.title).toBe('Edited')
+  })
+
+  test('an object holding a single invited instance is its own source', () => {
+    const out = carryStoredProperties(built, storedWith(['RECURRENCE-ID:20260612T090000Z', 'CLASS:PRIVATE']))
+    expect(out).toContain('CLASS:PRIVATE')
+    expect(out).not.toContain('RECURRENCE-ID')
+  })
+
+  test('a prefix in `replaced` drops every matching name', () => {
+    const out = carryStoredProperties(
+      built,
+      storedWith(['X-MOZ-SNOOZE-TIME:20260612T085000Z', 'X-MOZ-SNOOZE-TIME-1:20260612T085000Z', 'X-MOZ-GENERATION:3']),
+      { replaced: ['X-MOZ-SNOOZE-TIME*'] }
+    )
+    expect(out).not.toContain('SNOOZE')
+    expect(out).toContain('X-MOZ-GENERATION:3')
   })
 })
