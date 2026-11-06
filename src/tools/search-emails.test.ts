@@ -7,7 +7,14 @@ import {
   type EmailRecord,
 } from '@langmail/jmap'
 
-import { queryTerms, searchEmails, searchEmailsInput } from './search-emails.ts'
+import {
+  decodeCursor,
+  encodeCursor,
+  queryTerms,
+  searchEmails,
+  searchEmailsInput,
+  searchFingerprint,
+} from './search-emails.ts'
 
 // Distinguishes per-hit "matched: X/N terms" lines from the "N message(s)
 // matched:" header.
@@ -18,6 +25,8 @@ const fakeDeps = (opts: {
   available?: string[]
   mailboxByName?: (name: string) => string | null
   queryIds?: string[]
+  // Multi-term searches query two tiers: every term ('all'), then only some.
+  tierIds?: { all?: string[]; some?: string[] }
   perTermIds?: string[][]
   emails?: EmailRecord[]
   onQuery?: (p: EmailQueryParams) => void
@@ -28,6 +37,9 @@ const fakeDeps = (opts: {
   emailGet: () => Promise.resolve(opts.emails ?? []),
   emailQuery: (p: EmailQueryParams) => {
     opts.onQuery?.(p)
+    if (opts.tierIds && p.filters.textMatch) {
+      return Promise.resolve((p.filters.textMatch === 'all' ? opts.tierIds.all : opts.tierIds.some) ?? [])
+    }
     return Promise.resolve(opts.queryIds ?? [])
   },
   emailQueryPerTerm: (p: EmailQueryPerTermParams) => {
@@ -275,7 +287,8 @@ describe('searchEmails', () => {
       before: '2026-07-31T00:00:00Z',
       keywords: ['$type:ticket'],
     })
-    expect(seen?.limit).toBe(5)
+    // One past the page, to tell a full last page from one with more behind it.
+    expect(seen?.limit).toBe(6)
   })
 
   test('threads text + date + from filters through to the query', async () => {
@@ -295,37 +308,95 @@ describe('searchEmails', () => {
     expect(seen?.filters).toEqual({ after: '2026-04-01T00:00:00Z', from: 'amazon', text: ['invoice'] })
   })
 
-  test('routes a multi-word query through per-term queries with the scalar filters', async () => {
-    let seen: EmailQueryPerTermParams | undefined
-    await searchEmails(
+  test('a multi-word query lists full matches first, then partial ones ranked within their dates', async () => {
+    const queries: EmailQueryParams[] = []
+    let perTerm: EmailQueryPerTermParams | undefined
+    const result = await searchEmails(
       fakeDeps({
+        emails: [
+          { id: 'full', receivedAt: '2026-01-01T00:00:00Z', subject: 'old full match' },
+          { id: 'a', receivedAt: '2026-06-03T00:00:00Z', subject: 'a' },
+          { id: 'b', receivedAt: '2026-05-01T00:00:00Z', subject: 'b' },
+        ],
         onPerTermQuery: (p) => {
-          seen = p
+          perTerm = p
         },
+        onQuery: (p) => queries.push(p),
+        tierIds: { all: ['full'], some: ['a', 'b'] },
       }),
       {
         args: { after: '2026-04-17T00:00:00Z', limit: 20, query: 'Supabase invoice receipt', read: false },
         token: 'tok',
       }
     )
-    expect(seen?.terms).toEqual(['Supabase', 'invoice', 'receipt'])
-    expect(seen?.filters).toEqual({ after: '2026-04-17T00:00:00Z', keywordStates: { $seen: false } })
+    const scalars = { after: '2026-04-17T00:00:00Z', keywordStates: { $seen: false } }
+    const text = ['Supabase', 'invoice', 'receipt']
+    expect(queries.map((q) => q.filters)).toEqual([
+      { ...scalars, text, textMatch: 'all' },
+      { ...scalars, text, textMatch: 'someButNotAll' },
+    ])
+    // The full match tops the list though it is the oldest.
+    expect(result.content[0]?.text).toContain('1. old full match')
+    expect(result.content[0]?.text).toContain('matched: 3/3 terms')
+    expect(perTerm?.terms).toEqual(text)
+    // Bounded to the partial hits' oldest and newest second, so each count is exact.
+    // Full matches stay out, so they can't crowd partial hits out of the limit.
+    expect(perTerm?.filters).toEqual({
+      after: '2026-05-01T00:00:00.000Z',
+      before: '2026-06-03T00:00:01.000Z',
+      keywordStates: { $seen: false },
+      withoutAllOf: text,
+    })
+  })
+
+  test('a page filled by full matches only peeks at the partial tier for a cursor', async () => {
+    const queries: EmailQueryParams[] = []
+    const result = await searchEmails(
+      fakeDeps({
+        emails: [{ id: 'full', receivedAt: '2026-01-01T00:00:00Z', subject: 'full' }],
+        onQuery: (p) => queries.push(p),
+        tierIds: { all: ['full'], some: ['a'] },
+        total: 2,
+      }),
+      { args: { limit: 1, query: 'alpha bravo' }, token: 'tok' }
+    )
+    expect(queries.map((q) => [q.filters.textMatch, q.limit])).toEqual([
+      ['all', 2],
+      ['someButNotAll', 1],
+    ])
+    expect(result.content[0]?.text).toContain('cursor: "v1.')
+  })
+
+  test('a page that ends with the last match prints no cursor, whatever the count says', async () => {
+    // The count saw one more (mail arriving in between); the page query, which
+    // asked for one past the page, saw none, and it decides.
+    const result = await searchEmails(
+      fakeDeps({
+        emails: [{ id: 'a', receivedAt: '2026-01-01T00:00:00Z', subject: 'a' }],
+        queryIds: ['a'],
+        total: 2,
+      }),
+      { args: { keywords: ['receipt'], limit: 1 }, token: 'tok' }
+    )
+    expect(result.content[0]?.text).toStartWith('1 of 1 message(s) matched:')
   })
 
   test('keeps a double-quoted phrase as a single term in the per-term fan-out', async () => {
     let seen: EmailQueryPerTermParams | undefined
     await searchEmails(
       fakeDeps({
+        emails: [{ id: 'a', receivedAt: '2026-06-03T00:00:00Z', subject: 'a' }],
         onPerTermQuery: (p) => {
           seen = p
         },
+        tierIds: { some: ['a'] },
       }),
       { args: { limit: 20, query: '"Google Workspace" invoice' }, token: 'tok' }
     )
     expect(seen?.terms).toEqual(['Google Workspace', 'invoice'])
   })
 
-  test('ranks messages matching more terms first and renders matched counts', async () => {
+  test('ranks partial matches holding more terms first and renders matched counts', async () => {
     // 'both' matches two term lists, 'single' only one — but 'single' is
     // newer. Match count must beat recency.
     const emails: EmailRecord[] = [
@@ -336,12 +407,13 @@ describe('searchEmails', () => {
       fakeDeps({
         emails,
         perTermIds: [['single', 'both'], ['both'], []],
+        tierIds: { some: ['single', 'both'] },
       }),
       { args: { limit: 20, query: 'alpha bravo charlie' }, token: 'tok' }
     )
     const txt = result.content[0]?.text ?? ''
-    expect(txt.indexOf('older double-term hit')).toBeLessThan(txt.indexOf('newer single-term hit'))
     expect(txt).toContain('1. older double-term hit')
+    expect(txt).toContain('2. newer single-term hit')
     expect(txt).toContain('matched: 2/3 terms')
     expect(txt).toContain('matched: 1/3 terms')
   })
@@ -354,10 +426,9 @@ describe('searchEmails', () => {
     const result = await searchEmails(
       fakeDeps({
         emails,
-        perTermIds: [
-          ['old', 'new'],
-          ['new', 'old'],
-        ],
+        perTermIds: [['old'], ['new']],
+        // Out of order on purpose: the tie-break, not the query order, decides.
+        tierIds: { some: ['old', 'new'] },
       }),
       { args: { limit: 20, query: 'alpha bravo' }, token: 'tok' }
     )
@@ -366,7 +437,7 @@ describe('searchEmails', () => {
     expect(txt).toContain('2. old tie')
   })
 
-  test('caps ranked hits at the limit and reports the total', async () => {
+  test('a full multi-term page reports the total of the union and prints a cursor', async () => {
     let seenTotal: EmailQueryTotalParams | undefined
     const emails: EmailRecord[] = [
       { id: 'a', receivedAt: '2026-06-03T00:00:00Z', subject: 'hit a' },
@@ -378,62 +449,38 @@ describe('searchEmails', () => {
         onTotalQuery: (p) => {
           seenTotal = p
         },
-        perTermIds: [
-          ['a', 'b'],
-          ['b', 'c'],
-        ],
+        perTermIds: [['a', 'b'], ['b']],
+        tierIds: { some: ['a', 'b', 'c'] },
         total: 3,
       }),
       { args: { limit: 2, query: 'alpha bravo', starred: true }, token: 'tok' }
     )
     const txt = result.content[0]?.text ?? ''
-    // 'b' matched both terms and ranks first; 'c' fell past the limit.
-    expect(txt).toContain('1. hit b')
     expect(txt).toStartWith('2 of 3 message(s) matched — 1 more not shown.')
-    // The total counts the union of all terms, not one term's hits.
+    expect(txt).toContain('cursor: "v1.')
+    // A first page counts the union of all terms, not one tier.
     expect(seenTotal?.filters.text).toEqual(['alpha', 'bravo'])
+    expect(seenTotal?.filters.textMatch).toBeUndefined()
     expect(seenTotal?.filters.keywordStates).toEqual({ $flagged: true })
   })
 
-  // A per-term window that filled up may hide older multi-term hits, so the
-  // page counts as full even though the ranked list fits the limit.
-  test('a filled per-term window triggers the count', async () => {
-    const window = Array.from({ length: 60 }, (_, i) => `w${i}`)
-    const emails: EmailRecord[] = window
-      .slice(0, 20)
-      .map((id) => ({ id, receivedAt: '2026-06-01T00:00:00Z', subject: id }))
-    let counted = false
-    const result = await searchEmails(
-      fakeDeps({
-        emails,
-        onTotalQuery: () => {
-          counted = true
-        },
-        perTermIds: [window, []],
-        total: 75,
-      }),
-      { args: { limit: 20, query: 'alpha bravo' }, token: 'tok' }
-    )
-    expect(counted).toBe(true)
-    expect(result.content[0]?.text).toStartWith('20 of 75 message(s) matched — 55 more not shown.')
-  })
-
-  test('caps the fan-out at 10 terms and widens the per-term window', async () => {
+  test('caps the fan-out at 10 terms', async () => {
     let seen: EmailQueryPerTermParams | undefined
     await searchEmails(
       fakeDeps({
+        emails: [{ id: 'a', receivedAt: '2026-06-03T00:00:00Z', subject: 'a' }],
         onPerTermQuery: (p) => {
           seen = p
         },
+        tierIds: { some: ['a'] },
       }),
       { args: { limit: 20, query: 't1 t2 t3 t4 t5 t6 t7 t8 t9 t10 t11 t12' }, token: 'tok' }
     )
     expect(seen?.terms).toEqual(['t1', 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9', 't10'])
-    expect(seen?.limit).toBe(60)
   })
 
-  test('multi-term query with no hits in any term reports no messages', async () => {
-    const result = await searchEmails(fakeDeps({ perTermIds: [[], []] }), {
+  test('a multi-term query that neither tier matches reports no messages', async () => {
+    const result = await searchEmails(fakeDeps({ tierIds: {} }), {
       args: { limit: 20, query: 'alpha bravo' },
       token: 'tok',
     })
@@ -485,7 +532,7 @@ describe('searchEmails', () => {
         onTotalQuery: (p) => {
           seenTotal = p
         },
-        queryIds: ['a', 'b'],
+        queryIds: ['a', 'b', 'c'],
         total: 213,
       }),
       { args: { from: 'billing', limit: 2, query: 'invoice' }, token: 'tok' }
@@ -545,7 +592,7 @@ describe('searchEmails', () => {
   test('does not suggest raising a limit that is already at the maximum', async () => {
     const ids = Array.from({ length: 100 }, (_, i) => `e${i}`)
     const emails: EmailRecord[] = ids.map((id) => ({ id, receivedAt: '2026-06-01T00:00:00Z', subject: id }))
-    const result = await searchEmails(fakeDeps({ emails, queryIds: ids, total: 150 }), {
+    const result = await searchEmails(fakeDeps({ emails, queryIds: [...ids, 'more'], total: 150 }), {
       args: { limit: 100, query: 'invoice' },
       token: 'tok',
     })
@@ -560,7 +607,10 @@ describe('searchEmails', () => {
       { id: 'b', receivedAt: '2026-05-01T00:00:00Z', subject: 'bravo' },
     ]
     const result = await searchEmails(
-      { ...fakeDeps({ emails, queryIds: ['a', 'b'] }), emailQueryTotal: () => Promise.reject(new Error('timeout')) },
+      {
+        ...fakeDeps({ emails, queryIds: ['a', 'b', 'c'] }),
+        emailQueryTotal: () => Promise.reject(new Error('timeout')),
+      },
       { args: { limit: 2, query: 'invoice' }, token: 'tok' }
     )
     const txt = result.content[0]?.text ?? ''
@@ -575,7 +625,10 @@ describe('searchEmails', () => {
       { id: 'b', receivedAt: '2026-05-01T00:00:00Z', subject: 'bravo' },
     ]
     const result = await searchEmails(
-      { ...fakeDeps({ emails, queryIds: ['a', 'b'] }), emailQueryTotal: () => new Promise<number>(() => undefined) },
+      {
+        ...fakeDeps({ emails, queryIds: ['a', 'b', 'c'] }),
+        emailQueryTotal: () => new Promise<number>(() => undefined),
+      },
       { args: { limit: 2, query: 'invoice' }, countDeadlineMs: 10, token: 'tok' }
     )
     const txt = result.content[0]?.text ?? ''
@@ -659,5 +712,256 @@ describe('searchEmails', () => {
     })
     expect(result.isError).toBe(true)
     expect(result.content[0]?.text ?? '').toContain('Sent Items')
+  })
+})
+
+const CURSOR_RE = /cursor: "(v1\.[\w-]+)"/u
+
+const cursorIn = (text: string): string | undefined => CURSOR_RE.exec(text)?.[1]
+
+describe('searchEmails paging', () => {
+  const page = (...hits: [string, string][]): EmailRecord[] =>
+    hits.map(([id, receivedAt]) => ({ id, receivedAt, subject: `subject ${id}` }))
+
+  type Args = Parameters<typeof searchEmails>[1]['args']
+
+  // A cursor as the tool would print it for `args`.
+  const cursorFor = (args: Args, seen: string[], watermark: string, tier: 'all' | 'any' | 'some' = 'any'): string =>
+    encodeCursor({ search: searchFingerprint(args), seen, tier, watermark })
+
+  const receipts: Args = { keywords: ['receipt'], limit: 2 }
+
+  test('a full page with more matches prints a cursor marking its oldest hit', async () => {
+    const emails = page(['a', '2026-06-03T00:00:00Z'], ['b', '2026-06-02T00:00:00Z'])
+    const result = await searchEmails(fakeDeps({ emails, queryIds: ['a', 'b', 'c'], total: 5 }), {
+      args: receipts,
+      token: 'tok',
+    })
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toStartWith(
+      '2 of 5 message(s) matched — 3 more not shown. For the next page, repeat this search with cursor: "v1.'
+    )
+    const cursor = cursorIn(txt)
+    expect(cursor && decodeCursor(cursor)).toEqual({
+      search: searchFingerprint(receipts),
+      seen: ['b'],
+      tier: 'any',
+      watermark: '2026-06-02T00:00:00Z',
+    })
+  })
+
+  test('a page that holds every match prints no cursor', async () => {
+    const emails = page(['a', '2026-06-03T00:00:00Z'], ['b', '2026-06-02T00:00:00Z'])
+    const counted = await searchEmails(fakeDeps({ emails, queryIds: ['a', 'b'], total: 2 }), {
+      args: receipts,
+      token: 'tok',
+    })
+    expect(counted.content[0]?.text).not.toContain('cursor')
+    const partial = await searchEmails(fakeDeps({ emails, queryIds: ['a', 'b'] }), {
+      args: { ...receipts, limit: 3 },
+      token: 'tok',
+    })
+    expect(partial.content[0]?.text).not.toContain('cursor')
+  })
+
+  test('an uncountable total still prints a cursor', async () => {
+    const emails = page(['a', '2026-06-03T00:00:00Z'])
+    const result = await searchEmails(
+      { ...fakeDeps({ emails, queryIds: ['a', 'b'] }), emailQueryTotal: () => Promise.reject(new Error('timeout')) },
+      { args: { ...receipts, limit: 1 }, token: 'tok' }
+    )
+    expect(cursorIn(result.content[0]?.text ?? '')).toBeDefined()
+  })
+
+  test('the next page starts in the watermark second and drops the hits already shown there', async () => {
+    const queries: EmailQueryParams[] = []
+    const totals: EmailQueryTotalParams[] = []
+    const args: Args = { from: 'billing', limit: 2 }
+    const first = await searchEmails(
+      fakeDeps({
+        emails: page(['a', '2026-06-03T00:00:00Z'], ['b', '2026-06-02T00:00:00Z']),
+        queryIds: ['a', 'b', 'c'],
+        total: 4,
+      }),
+      { args, token: 'tok' }
+    )
+    const cursor = cursorIn(first.content[0]?.text ?? '') ?? ''
+
+    // 'b' comes back again (it sits in the watermark second) and 'c' shares
+    // that second: 'b' is dropped, 'c' is kept.
+    const second = await searchEmails(
+      fakeDeps({
+        emails: page(['c', '2026-06-02T00:00:00Z'], ['d', '2026-06-01T00:00:00Z']),
+        onQuery: (p) => queries.push(p),
+        onTotalQuery: (p) => totals.push(p),
+        queryIds: ['b', 'c', 'd', 'e'],
+        total: 4,
+      }),
+      { args: { ...args, cursor }, token: 'tok' }
+    )
+    const txt = second.content[0]?.text ?? ''
+    expect(queries[0]?.filters).toEqual({ before: '2026-06-02T00:00:01.000Z', from: 'billing' })
+    expect(queries[0]?.limit).toBe(4)
+    expect(txt).toContain('1. subject c')
+    expect(txt).toContain('2. subject d')
+    expect(txt).not.toContain('subject b')
+    // 4 counted up to the watermark second, one of them already shown.
+    expect(totals[0]?.filters.before).toBe('2026-06-02T00:00:01.000Z')
+    expect(txt).toStartWith('2 of 3 remaining message(s) matched — 1 more not shown.')
+  })
+
+  test('a page that ends in the same second carries the earlier shown ids forward', async () => {
+    const args: Args = { ...receipts, limit: 1 }
+    const second = await searchEmails(
+      fakeDeps({ emails: page(['b', '2026-06-02T00:00:00Z']), queryIds: ['a', 'b', 'c'], total: 3 }),
+      { args: { ...args, cursor: cursorFor(args, ['a'], '2026-06-02T00:00:00Z') }, token: 'tok' }
+    )
+    const next = cursorIn(second.content[0]?.text ?? '')
+    expect(next && decodeCursor(next)?.seen).toEqual(['a', 'b'])
+  })
+
+  test('a shown hit that stopped matching is not taken off the remaining count', async () => {
+    // 'a' was shown and then marked read: under read: false it no longer
+    // comes back, so the 2 counted are both still ahead.
+    const args: Args = { limit: 1, read: false }
+    const result = await searchEmails(
+      fakeDeps({ emails: page(['b', '2026-06-01T00:00:00Z']), queryIds: ['b', 'c'], total: 2 }),
+      { args: { ...args, cursor: cursorFor(args, ['a'], '2026-06-02T00:00:00Z') }, token: 'tok' }
+    )
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toStartWith('1 of 2 remaining message(s) matched — 1 more not shown.')
+    expect(cursorIn(txt)).toBeDefined()
+  })
+
+  test('a cursor in the full-match tier continues it, then moves on to partial matches', async () => {
+    const args: Args = { limit: 3, query: 'alpha bravo' }
+    const queries: EmailQueryParams[] = []
+    const totals: EmailQueryTotalParams[] = []
+    const result = await searchEmails(
+      fakeDeps({
+        emails: page(['f2', '2026-03-01T00:00:00Z'], ['p1', '2026-07-01T00:00:00Z'], ['p2', '2026-06-01T00:00:00Z']),
+        onQuery: (p) => queries.push(p),
+        onTotalQuery: (p) => totals.push(p),
+        tierIds: { all: ['f1', 'f2'], some: ['p1', 'p2', 'p3'] },
+        total: 3,
+      }),
+      { args: { ...args, cursor: cursorFor(args, ['f1'], '2026-04-01T00:00:00Z', 'all') }, token: 'tok' }
+    )
+    const txt = result.content[0]?.text ?? ''
+    // The watermark bounds the full-match tier only; partial matches start
+    // from their newest.
+    expect(queries.map((q) => [q.filters.textMatch, q.filters.before])).toEqual([
+      ['all', '2026-04-01T00:00:01.000Z'],
+      ['someButNotAll', undefined],
+    ])
+    expect(txt).toContain('1. subject f2')
+    // Remaining: each tier's own count (3 + 3), less the full match already shown.
+    expect(totals).toHaveLength(2)
+    expect(txt).toStartWith('3 of 5 remaining message(s) matched — 2 more not shown.')
+    const next = cursorIn(txt)
+    expect(next && decodeCursor(next)?.tier).toBe('some')
+  })
+
+  test('a shown hit that stops matching between page and count does not end the walk', async () => {
+    // The page query still returned 'a' (shown before), then 'a' was marked
+    // read before the count: 2 remain (b, c), and the cursor must survive.
+    const args: Args = { limit: 1, read: false }
+    const result = await searchEmails(
+      fakeDeps({ emails: page(['b', '2026-06-01T00:00:00Z']), queryIds: ['a', 'b', 'c'], total: 2 }),
+      { args: { ...args, cursor: cursorFor(args, ['a'], '2026-06-02T00:00:00Z') }, token: 'tok' }
+    )
+    expect(cursorIn(result.content[0]?.text ?? '')).toBeDefined()
+  })
+
+  test('keyword order does not make a cursor belong to another search', async () => {
+    const args: Args = { keywords: ['order', 'receipt'], limit: 2 }
+    const cursor = cursorFor(args, ['x'], '2026-06-02T00:00:00Z')
+    const result = await searchEmails(fakeDeps({}), {
+      args: { cursor, keywords: ['receipt', 'order'], limit: 2 },
+      token: 'tok',
+    })
+    expect(result.isError).toBeFalsy()
+  })
+
+  test('a partial match missing from every per-term list still shows at least one matched term', async () => {
+    const result = await searchEmails(
+      fakeDeps({
+        emails: page(['p', '2026-06-01T00:00:00Z']),
+        perTermIds: [[], []],
+        tierIds: { some: ['p'] },
+      }),
+      { args: { limit: 5, query: 'alpha bravo' }, token: 'tok' }
+    )
+    expect(result.content[0]?.text).toContain('matched: 1/2 terms')
+  })
+
+  test("an earlier before of the caller's own wins over the watermark", async () => {
+    let seen: EmailQueryParams | undefined
+    const args: Args = { ...receipts, before: '2026-05-01T00:00:00Z' }
+    await searchEmails(
+      fakeDeps({
+        onQuery: (p) => {
+          seen = p
+        },
+      }),
+      { args: { ...args, cursor: cursorFor(args, ['x'], '2026-06-02T00:00:00Z') }, token: 'tok' }
+    )
+    expect(seen?.filters.before).toBe('2026-05-01T00:00:00Z')
+  })
+
+  test('a cursor past the last match says nothing more matched', async () => {
+    const result = await searchEmails(fakeDeps({ queryIds: ['x'] }), {
+      args: { ...receipts, cursor: cursorFor(receipts, ['x'], '2026-06-02T00:00:00Z') },
+      token: 'tok',
+    })
+    expect(result.isError).toBeFalsy()
+    expect(result.content[0]?.text).toBe('No more messages matched after this cursor.')
+  })
+
+  test('a cursor may change the page size, not the filters', async () => {
+    const cursor = cursorFor(receipts, ['x'], '2026-06-02T00:00:00Z')
+    const resized = await searchEmails(fakeDeps({}), { args: { ...receipts, cursor, limit: 50 }, token: 'tok' })
+    expect(resized.isError).toBeFalsy()
+
+    let queried = false
+    const other = await searchEmails(
+      fakeDeps({
+        onQuery: () => {
+          queried = true
+        },
+      }),
+      { args: { ...receipts, cursor, keywords: ['order'] }, token: 'tok' }
+    )
+    expect(other.isError).toBe(true)
+    expect(other.content[0]?.text).toStartWith('cursor belongs to a search with other filters. Nothing was searched.')
+    expect(queried).toBe(false)
+  })
+
+  test('a cursor search_emails did not print is refused before any query', async () => {
+    let queried = false
+    for (const cursor of ['garbage', 'v1.!!!', `v1.${Buffer.from('{"s":[]}').toString('base64url')}`]) {
+      const result = await searchEmails(
+        fakeDeps({
+          onQuery: () => {
+            queried = true
+          },
+        }),
+        { args: { ...receipts, cursor }, token: 'tok' }
+      )
+      expect(result.isError).toBe(true)
+      expect(result.content[0]?.text).toContain('Pass the cursor exactly as the result printed it')
+    }
+    expect(queried).toBe(false)
+  })
+
+  test('a cursor carrying many ids from one second still passes the input schema', () => {
+    const seen = Array.from({ length: 2000 }, (_, i) => `id${String(i).padStart(7, '0')}`)
+    const cursor = cursorFor(receipts, seen, '2026-06-02T00:00:00Z')
+    expect(searchEmailsInput.safeParse({ ...receipts, cursor }).success).toBe(true)
+    expect(decodeCursor(cursor)?.seen).toHaveLength(2000)
+  })
+
+  test('a cursor alone is not a filter', () => {
+    expect(searchEmailsInput.safeParse({ cursor: 'v1.abc' }).success).toBe(false)
   })
 })

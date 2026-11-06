@@ -17,6 +17,12 @@
 // caller of JMAP `notKeyword`, and only a live Email/query proves Stalwart
 // accepts it inside an AND node rather than answering `unsupportedFilter`.
 //
+// Paging is pinned last: a walk with the printed cursor must show every
+// match exactly once while mail arrives or pages are marked read between
+// calls, on mail where several messages share one received second — and a
+// multi-term walk must list full matches first, which needs Stalwart's NOT
+// filter to split partial matches off.
+//
 // The MCP tools wrap their OAuth token as `Bearer …`, but a dev-Stalwart
 // throwaway account authenticates with a Basic app password — the deps pin
 // the Basic credential while everything downstream is the live path.
@@ -55,6 +61,8 @@ const live = ADMIN_URL ? describe : describe.skip
 const TAGS_RECEIPT_RE = /tags: .*receipt/u
 const TAGS_ORDER_RE = /tags: .*order/u
 const NON_WORD_RE = /\W+/gu
+const HIT_ID_RE = /^ {3}id: (\S+)$/gmu
+const CURSOR_RE = /cursor: "(v1\.[\w-]+)"/u
 
 // Minimal admin JMAP call (x:-prefixed management methods; see
 // services/auth/src/stalwart/admin-client.ts for the full contract).
@@ -78,7 +86,7 @@ const adminCall = async (method: string, args: Record<string, unknown>): Promise
   return payload
 }
 
-live('search_emails email-type filter against live Stalwart', () => {
+live('search_emails filters and paging against live Stalwart', () => {
   const run = Date.now()
   const localPart = `mcp-search-type-e2e-${run}`
   // The show ran "yesterday"; the booking arrived two days before that. The
@@ -422,5 +430,106 @@ live('search_emails email-type filter against live Stalwart', () => {
     const result = await search({ keywords: ['ticket'], limit: 20, read: false })
 
     expect(result.content[0]?.text).toBe('No messages matched.')
+  })
+
+  // --- paging (#942) — kept last: it adds mail the counts above don't expect.
+
+  // Walk every page of one search, calling `between` after each page, and
+  // return the ids in the order they were shown.
+  const walk = async (
+    args: Omit<Parameters<typeof searchEmails>[1]['args'], 'cursor'>,
+    between: (pageIds: string[]) => Promise<void> = () => Promise.resolve()
+  ): Promise<{ ids: string[]; pages: number }> => {
+    const ids: string[] = []
+    let cursor: string | undefined
+    let pages = 0
+    do {
+      const result = await search({ ...args, ...(cursor ? { cursor } : {}) })
+      expect(result.isError).toBeFalsy()
+      const text = result.content[0]?.text ?? ''
+      const pageIds = [...text.matchAll(HIT_ID_RE)].map((m) => m[1] as string)
+      ids.push(...pageIds)
+      pages += 1
+      await between(pageIds)
+      cursor = CURSOR_RE.exec(text)?.[1]
+    } while (cursor && pages < 20)
+    return { ids, pages }
+  }
+
+  const setSeen = async (id: string): Promise<void> => {
+    const res = await fetch(apiUrl, {
+      body: JSON.stringify({
+        methodCalls: [['Email/set', { accountId, update: { [id]: { 'keywords/$seen': true } } }, '0']],
+        using: USING,
+      }),
+      headers: { authorization, 'content-type': 'application/json' },
+      method: 'POST',
+    })
+    expect(res.status).toBe(200)
+  }
+
+  test('pages of two cover every seeded message once, seven of them sharing one received second', async () => {
+    const { ids, pages } = await walk({ after: new Date(run - 60 * DAY_MS).toISOString(), limit: 2 })
+
+    expect(pages).toBeGreaterThan(1)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect([...ids].sort()).toEqual(Object.values(seeded).sort())
+  })
+
+  test('mail arriving between pages neither repeats nor skips a hit', async () => {
+    let arrived: string | undefined
+    const { ids } = await walk({ after: new Date(run - 60 * DAY_MS).toISOString(), limit: 3 }, async () => {
+      arrived ??= await importEmail({
+        body: 'Fresh in while the agent was paging.',
+        from: 'Courier <news@courier.example>',
+        keywords: { $seen: true },
+        receivedAt: new Date(),
+        subject: 'Arrived mid-walk',
+      })
+    })
+
+    expect(new Set(ids).size).toBe(ids.length)
+    expect([...ids].sort()).toEqual(Object.values(seeded).sort())
+    // Newer than the walk's first page, so it belongs to the next search.
+    expect(ids).not.toContain(arrived as string)
+    seeded.arrived = arrived as string
+  })
+
+  test('marking each unread page read does not cost the next page a hit', async () => {
+    for (const [i, days] of [5, 6, 7].entries()) {
+      seeded[`unread${i}`] = await importEmail({
+        body: 'Another unread notice.',
+        from: 'Network <messages@network.example>',
+        keywords: {},
+        receivedAt: new Date(run - days * DAY_MS),
+        subject: `Unread notice ${i}`,
+      })
+    }
+    const unread = [seeded.unread, seeded.unread0, seeded.unread1, seeded.unread2] as string[]
+
+    const { ids, pages } = await walk({ limit: 1, read: false }, async (pageIds) => {
+      for (const id of pageIds) {
+        await setSeen(id)
+      }
+    })
+
+    expect(pages).toBe(4)
+    expect([...ids].sort()).toEqual([...unread].sort())
+  })
+
+  test('a multi-term walk lists the older full match before the newer partial one', async () => {
+    // Stalwart indexes full text a moment after import; wait until both
+    // matches are searchable so the walk sees the whole result.
+    const ready = async (): Promise<boolean> => (await textOf({ limit: 20, query: 'Quiet seats' })).startsWith('2 of 2')
+    for (let tries = 0; tries < 20 && !(await ready()); tries++) {
+      await Bun.sleep(500)
+    }
+    expect(await ready()).toBe(true)
+
+    // The six-week-old show holds both terms; the newer booking only "seats".
+    const { ids, pages } = await walk({ limit: 1, query: 'Quiet seats' })
+
+    expect(pages).toBe(2)
+    expect(ids).toEqual([seeded.oldTicket, seeded.booking].map(String))
   })
 })

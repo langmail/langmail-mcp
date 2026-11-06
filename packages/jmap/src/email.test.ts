@@ -66,6 +66,46 @@ describe('emailQuery', () => {
     expect(ids).toEqual(['e1', 'e2'])
   })
 
+  const filterSent = async (filters: Parameters<typeof emailQuery>[0]['filters']): Promise<unknown> => {
+    let sent: unknown
+    await withFetch(
+      (_u: string, init?: RequestInit) => {
+        sent = JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1].filter
+        return Promise.resolve(jmapResponse([['Email/query', { ids: [] }, '0']]))
+      },
+      () => emailQuery({ accountId: 'acct', apiUrl: API, authorization: 'Bearer tok', filters, limit: 5 })
+    )
+    return sent
+  }
+
+  test("textMatch 'all' ANDs every term", async () => {
+    expect(await filterSent({ text: ['a', 'b'], textMatch: 'all' })).toEqual({
+      conditions: [{ text: 'a' }, { text: 'b' }],
+      operator: 'AND',
+    })
+  })
+
+  test("textMatch 'someButNotAll' is any term, minus messages holding every term", async () => {
+    expect(await filterSent({ mailboxId: 'm', text: ['a', 'b'], textMatch: 'someButNotAll' })).toEqual({
+      conditions: [
+        { conditions: [{ text: 'a' }, { text: 'b' }], operator: 'OR' },
+        { conditions: [{ conditions: [{ text: 'a' }, { text: 'b' }], operator: 'AND' }], operator: 'NOT' },
+        { inMailbox: 'm' },
+      ],
+      operator: 'AND',
+    })
+  })
+
+  test('withoutAllOf leaves out messages holding every listed term', async () => {
+    expect(await filterSent({ text: ['a'], withoutAllOf: ['a', 'b'] })).toEqual({
+      conditions: [
+        { text: 'a' },
+        { conditions: [{ conditions: [{ text: 'a' }, { text: 'b' }], operator: 'AND' }], operator: 'NOT' },
+      ],
+      operator: 'AND',
+    })
+  })
+
   test('AND-combines multiple scalar conditions (text + inMailbox)', async () => {
     const f = mock((_u: string, init?: RequestInit) => {
       const body = JSON.parse((init?.body as string) ?? '{}')

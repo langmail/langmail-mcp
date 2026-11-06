@@ -89,6 +89,15 @@ export interface EmailQueryFilters {
   // token occurs in a single field, so passing a whole query as one condition
   // silently drops near-matches (e.g. a subject containing 2 of 3 words).
   text?: string[]
+  // How the text terms combine: `any` (the default) matches a message holding
+  // at least one term, `all` one holding every term, and `someButNotAll` one
+  // holding at least one term but not every one — `any` split into two
+  // disjoint parts, so a caller can list full matches first and still page.
+  textMatch?: 'all' | 'any' | 'someButNotAll'
+  // Leave out messages holding every one of these terms, AND'd with the rest.
+  // Lets a per-term query count only partial matches, so full matches in the
+  // same date range cannot crowd them out of its limit.
+  withoutAllOf?: string[]
 }
 
 export interface EmailQueryParams extends JmapCall {
@@ -103,17 +112,36 @@ export interface EmailQueryParams extends JmapCall {
 const orNode = (conds: Record<string, unknown>[]): Record<string, unknown> | undefined =>
   conds.length === 1 ? conds[0] : { conditions: conds, operator: 'OR' }
 
-// Compose the JMAP filter: text terms OR'd among themselves, keyword
+// Compose the JMAP filter: text terms OR'd among themselves (or as
+// `textMatch` says), keyword
 // conditions OR'd among themselves, then both AND'd with the scalar
 // conditions (date/from/mailbox/keyword states). A single overall condition is passed
 // through flat, like the OR nodes.
+// None of: a message holding every one of `terms`.
+const notAllOf = (terms: string[]): Record<string, unknown> => ({
+  conditions: [{ conditions: terms.map((t) => ({ text: t })), operator: 'AND' }],
+  operator: 'NOT',
+})
+
+const textConditions = (text: string[], match: EmailQueryFilters['textMatch']): Record<string, unknown>[] => {
+  const each = text.map((t) => ({ text: t }))
+  const any = orNode(each)
+  if (!any) {
+    return []
+  }
+  if (match === 'all') {
+    return each
+  }
+  if (match === 'someButNotAll') {
+    return [any, notAllOf(text)]
+  }
+  return [any]
+}
+
 const buildFilter = (f: EmailQueryFilters): Record<string, unknown> => {
-  const conditions: Record<string, unknown>[] = []
-  if (f.text && f.text.length > 0) {
-    const node = orNode(f.text.map((t) => ({ text: t })))
-    if (node) {
-      conditions.push(node)
-    }
+  const conditions: Record<string, unknown>[] = f.text ? textConditions(f.text, f.textMatch) : []
+  if (f.withoutAllOf && f.withoutAllOf.length > 0) {
+    conditions.push(notAllOf(f.withoutAllOf))
   }
   if (f.after) {
     conditions.push({ after: f.after })
