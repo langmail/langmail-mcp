@@ -142,8 +142,10 @@ const completeOverride = (override: ParsedEvent, master: ParsedEvent | undefined
     return override
   }
   // The master's times and their form never carry over to an override that has
-  // its own DTSTART, nor do the series' exclusions to a single occurrence.
-  const { allDay, end: _end, excludedDates: _excluded, start: _start, startTzid, ...series } = master
+  // its own DTSTART, nor do the series' exclusions to a single occurrence. Nor
+  // does its TRANSP: an override is a whole VEVENT, so one without TRANSP is
+  // busy whatever the master says.
+  const { allDay, end: _end, excludedDates: _excluded, showAs: _showAs, start: _start, startTzid, ...series } = master
   const merged: ParsedEvent = {
     ...series,
     ...override,

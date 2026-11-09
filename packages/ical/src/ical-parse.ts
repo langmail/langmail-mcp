@@ -35,6 +35,8 @@ export interface ParsedAlarm {
   triggerParams?: string
 }
 
+type ShowAs = 'busy' | 'free'
+
 export interface ParsedEvent {
   // VALARMs nested in the VEVENT, in source order. Present (and non-empty) only
   // when the VEVENT carries any.
@@ -74,6 +76,11 @@ export interface ParsedEvent {
   // occurrence it is editing and merge omitted fields against *its* stored
   // state rather than the master's.
   recurrenceId?: string
+  // Whether the event counts as busy time, from TRANSP (RFC 5545 §3.8.2.7):
+  // OPAQUE is `busy`, TRANSPARENT is `free`. Absent when the VEVENT carries no
+  // TRANSP or an unrecognised value; consumers then treat it as busy, the
+  // RFC's default.
+  showAs?: ShowAs
   start: string
   // IANA zone named by the DTSTART `;TZID=` param, when present. This is the
   // event's own zone: update_calendar_event keeps it so an edit doesn't silently
@@ -399,6 +406,11 @@ const resolveExcludedValue = (iso: string, timeZone: string | undefined): string
 // from a producer that omits the (technically required) parameter.
 const VALUE_DATE_RE = /(?:^|;)VALUE=DATE(?:;|$)/iu
 const DATE_ONLY_VALUE_RE = /^\d{8}$/u
+// TRANSP value → showAs, case-insensitively. Anything else reads as unset.
+const SHOW_AS: Record<string, ShowAs> = { OPAQUE: 'busy', TRANSPARENT: 'free' }
+const parseShowAs = (property: ParsedProperty | undefined): ShowAs | undefined =>
+  property ? SHOW_AS[property.value.trim().toUpperCase()] : undefined
+
 const isDateValue = (property: ParsedProperty | undefined): boolean =>
   property !== undefined && (VALUE_DATE_RE.test(property.params) || DATE_ONLY_VALUE_RE.test(property.value.trim()))
 
@@ -420,6 +432,7 @@ const optionalFields = (block: ParsedBlock, attendees: ParsedAttendee[]): Partia
   // A TZID beside a DATE is off-spec and meaningless; surfacing it would let
   // consumers re-express a date-only series in that zone.
   const startTzid = allDay ? undefined : propertyTimeZone(block.props.get('DTSTART'))
+  const showAs = parseShowAs(block.props.get('TRANSP'))
   return {
     ...(block.alarms.length > 0 ? { alarms: block.alarms.map(parseAlarm) } : {}),
     ...(allDay ? { allDay: true as const } : {}),
@@ -429,6 +442,7 @@ const optionalFields = (block: ParsedBlock, attendees: ParsedAttendee[]): Partia
     ...(organizer ? { organizer } : {}),
     ...(recurrence ? { recurrence } : {}),
     ...(recurrenceId ? { recurrenceId } : {}),
+    ...(showAs ? { showAs } : {}),
     ...(startTzid ? { startTzid } : {}),
     ...(unparsedAttendeeCount > 0 ? { unparsedAttendeeCount } : {}),
   }

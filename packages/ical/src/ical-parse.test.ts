@@ -458,3 +458,34 @@ describe('parseEvents — alarms', () => {
     expect(parseEvents(invite())[0]?.alarms).toBeUndefined()
   })
 })
+
+describe('parseEvents — showAs', () => {
+  const withTransp = (line: string): string => invite().replace('END:VEVENT', `${line}\r\nEND:VEVENT`)
+
+  test('reads TRANSPARENT as free and OPAQUE as busy', () => {
+    expect(parseEvents(withTransp('TRANSP:TRANSPARENT'))[0]?.showAs).toBe('free')
+    expect(parseEvents(withTransp('TRANSP:OPAQUE'))[0]?.showAs).toBe('busy')
+  })
+
+  test('reads the value case-insensitively', () => {
+    expect(parseEvents(withTransp('TRANSP:Transparent'))[0]?.showAs).toBe('free')
+    expect(parseEvents(withTransp('transp:opaque'))[0]?.showAs).toBe('busy')
+  })
+
+  test('leaves showAs unset without TRANSP or with an unrecognised value', () => {
+    expect(parseEvents(invite())[0]?.showAs).toBeUndefined()
+    expect(parseEvents(withTransp('TRANSP:X-SOMETIMES'))[0]?.showAs).toBeUndefined()
+  })
+
+  test('reads each VEVENT of a recurring series on its own', () => {
+    const series = invite({ rrule: 'FREQ=WEEKLY' }).replace(
+      'END:VCALENDAR',
+      ['BEGIN:VEVENT', 'UID:evt-1@langmail.me', 'RECURRENCE-ID:20260619T100000Z', 'END:VEVENT', 'END:VCALENDAR'].join(
+        '\r\n'
+      )
+    )
+    const [master, override] = parseEvents(series.replace('RRULE:', 'TRANSP:TRANSPARENT\r\nRRULE:'))
+    expect(master?.showAs).toBe('free')
+    expect(override?.showAs).toBeUndefined()
+  })
+})

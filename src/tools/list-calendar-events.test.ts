@@ -566,3 +566,62 @@ describe('listCalendarEvents — occurrence ids', () => {
     expect(txt).not.toContain('recurrenceId:')
   })
 })
+
+describe('listCalendarEvents — showAs', () => {
+  const withTransp = (object: CalendarObject, line: string): CalendarObject => ({
+    ...object,
+    data: object.data.replace('END:VEVENT', `${line}\r\nEND:VEVENT`),
+  })
+  const listAll = async (objects: CalendarObject[]): Promise<string> =>
+    (await listCalendarEvents(makeDeps(account(), objects), { args: {}, token: 'tok' })).content[0]?.text ?? ''
+  const focus = event('focus@langmail.me', 'Focus time', '2026-10-06T08:00:00Z', '2026-10-06T10:00:00Z')
+
+  test('prints showAs: free for a TRANSPARENT event', async () => {
+    const txt = await listAll([withTransp(focus, 'TRANSP:TRANSPARENT')])
+    expect(txt).toContain('1. Focus time\n   when: 2026-10-06T08:00:00Z → 2026-10-06T10:00:00Z\n   showAs: free')
+  })
+
+  test('prints nothing for an OPAQUE event or one without TRANSP', async () => {
+    expect(await listAll([withTransp(focus, 'TRANSP:OPAQUE')])).not.toContain('showAs')
+    expect(await listAll([focus])).not.toContain('showAs')
+  })
+
+  // Master free, the 2026-10-20 override (moved to Thursday) free too, the
+  // attendee-only 2026-10-27 override without TRANSP of its own.
+  const freeSync: CalendarObject = {
+    ...weeklySync,
+    data: weeklySync.data
+      .replace('RRULE:', 'TRANSP:TRANSPARENT\r\nRRULE:')
+      .replace(
+        'DTSTART;TZID=Europe/Berlin:20261022T160000',
+        'TRANSP:transparent\r\nDTSTART;TZID=Europe/Berlin:20261022T160000'
+      ),
+  }
+
+  test('an occurrence generated from a free series is free', async () => {
+    const txt = await listWindow([freeSync], '2026-10-06T00:00:00+02:00', '2026-10-07T00:00:00+02:00')
+    expect(txt).toContain('recurrenceId: 2026-10-06T14:00:00Z')
+    expect(txt).toContain('showAs: free')
+  })
+
+  test('an override shows its own value, not the series’', async () => {
+    const moved = await listWindow([freeSync], '2026-10-22T00:00:00+02:00', '2026-10-23T00:00:00+02:00')
+    expect(moved).toContain('showAs: free')
+
+    const answered = await listWindow([freeSync], '2026-10-27T00:00:00+01:00', '2026-10-28T00:00:00+01:00')
+    expect(answered).toContain('recurrenceId: 2026-10-27T15:00:00Z')
+    expect(answered).not.toContain('showAs')
+  })
+
+  test('a free override of a busy series is free on its own', async () => {
+    // TRANSP on the last VEVENT only: the attendee-only 2026-10-27 override.
+    const freeOverride: CalendarObject = {
+      ...weeklySync,
+      data: weeklySync.data.replace('END:VEVENT\r\nEND:VCALENDAR', 'TRANSP:TRANSPARENT\r\nEND:VEVENT\r\nEND:VCALENDAR'),
+    }
+    const txt = await listWindow([freeOverride], '2026-10-27T00:00:00+01:00', '2026-10-28T00:00:00+01:00')
+    expect(txt).toContain('showAs: free')
+    const other = await listWindow([freeOverride], '2026-10-06T00:00:00+02:00', '2026-10-07T00:00:00+02:00')
+    expect(other).not.toContain('showAs')
+  })
+})

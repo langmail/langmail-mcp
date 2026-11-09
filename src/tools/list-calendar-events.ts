@@ -93,6 +93,10 @@ const formatEvent = (idx: number, entry: AgendaEntry, self: string | null): stri
   if (ev.location) {
     lines.push(`   location: ${ev.location}`)
   }
+  // Busy is the default (an absent TRANSP means the same), so only free is shown.
+  if (ev.showAs === 'free') {
+    lines.push('   showAs: free')
+  }
   if (ev.recurrence) {
     lines.push(`   repeats: ${ev.recurrence}`)
   }
@@ -208,7 +212,8 @@ export const registerListCalendarEvents = (
         'actual date and time; a moved occurrence says when it originally was. Without a window it lists ' +
         'each stored event once, a series at its first occurrence with its repeat rule — use a window to ' +
         'answer "what is on day X". Each entry has its title, time (dates only for all-day events), ' +
-        'location, reminders, organizer (marked "(you)" when it is the user), attendees with their ' +
+        'location, "showAs: free" on an event that does not count as busy time (every other event is busy), ' +
+        'reminders, organizer (marked "(you)" when it is the user), attendees with their ' +
         'response status for that occurrence, uid, and for an occurrence its recurrenceId and the rule of the ' +
         'series it belongs to (repeats). Pass the uid ' +
         '(and recurrenceId, to touch one occurrence only) to update_calendar_event or ' +
