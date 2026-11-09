@@ -27,6 +27,7 @@ import {
   userNoteEntry,
   userNoteKey,
   withBirthday,
+  withPreferredEmail,
 } from '@langmail/contacts'
 import { type ContactCard, type ContactCardAddress, type ContactCardEmail, type ContactCardPhone } from '@langmail/jmap'
 
@@ -84,6 +85,13 @@ const updateContactShape = {
     .max(200)
     .optional()
     .describe('New organization; `""` clears it. Omit to keep the stored one.'),
+  preferredEmail: z
+    .email()
+    .optional()
+    .describe(
+      'The address mail to this contact should go to: one already on the contact or added in this call. ' +
+        'search_contacts then ranks it first. Omit to keep the current one.'
+    ),
   removedEmails: z.array(z.email()).max(10).optional().describe('Email addresses to remove (case-insensitive).'),
   removedPhones: z
     .array(z.string().min(1))
@@ -110,6 +118,7 @@ export const updateContactInput = z
       a.name !== undefined ||
       a.note !== undefined ||
       a.organization !== undefined ||
+      a.preferredEmail !== undefined ||
       Boolean(a.addedEmails ?? a.removedEmails ?? a.addedPhones ?? a.removedPhones) ||
       Boolean(a.addedPostalAddresses ?? a.updatedPostalAddresses ?? a.removedPostalAddresses),
     { message: 'update_contact needs at least one field to change.' }
@@ -232,6 +241,34 @@ const birthdayPatch = (card: ContactCard, text: string): { error: string } | { p
   return { patch: { anniversaries: Object.keys(anniversaries).length > 0 ? anniversaries : null } }
 }
 
+// The emails with `preferredEmail` marked, on top of this call's adds and
+// removals. Undefined when neither the emails nor the preference change.
+const resolvePreferred = (
+  card: ContactCard,
+  args: UpdateContactArgs,
+  resolved: Record<string, ContactCardEmail> | undefined
+): { emails: Record<string, ContactCardEmail> | undefined } | { error: string } => {
+  const wanted = args.preferredEmail
+  if (wanted === undefined) {
+    return { emails: resolved }
+  }
+  if ((args.removedEmails ?? []).some((a) => a.trim().toLowerCase() === wanted.trim().toLowerCase())) {
+    return {
+      error:
+        `${wanted} is removed in this same call, so it cannot become the preferred address. ` +
+        'Nothing was changed. Keep it, or name another address as preferredEmail.',
+    }
+  }
+  const emails = withPreferredEmail(resolved ?? card.emails ?? {}, wanted)
+  return emails
+    ? { emails }
+    : {
+        error:
+          `${wanted} is not an address of this contact. Nothing was changed. ` +
+          'Add it with addedEmails in the same call to make it the preferred one.',
+      }
+}
+
 const organizationPatch = (card: ContactCard, organization: string): Record<string, unknown> => {
   if (organization.length === 0) {
     return { organizations: {} }
@@ -293,7 +330,8 @@ export const updateContact = async (
     if (owner && owner !== args.contactId) {
       return errorResult(
         `${address} already belongs to a different contact (contact_id: ${owner}). ` +
-          'Remove it there first, or add what is missing to that record instead.'
+          'Remove it there first, add what is missing to that record instead, or, if both are the same ' +
+          'person or organization, fold them into one with merge_contacts.'
       )
     }
   }
@@ -304,7 +342,11 @@ export const updateContact = async (
   }
 
   const addresses = resolvePostal(card, args)
-  const emails = resolveEmails(card, args)
+  const preferred = resolvePreferred(card, args, resolveEmails(card, args))
+  if ('error' in preferred) {
+    return errorResult(preferred.error)
+  }
+  const { emails } = preferred
   const phones = resolvePhones(card, args)
   const changed: Changed = {
     ...(addresses === undefined ? {} : { addresses }),
@@ -339,8 +381,10 @@ export const registerUpdateContact = (server: McpServer, deps: ContactWriteDeps,
         'is kept, so you never have to read the record and re-send it. Set `name`, ' +
         '`organization`, `birthday` or `note` directly (`""` clears all but the name); add or remove email ' +
         'addresses, phone numbers and postal addresses with the `added…`/`removed…` lists; ' +
-        'correct one component of a stored postal address with `updatedPostalAddresses`. ' +
-        'Find the contact_id and the `[a0]`-style handles with search_contacts.',
+        'correct one component of a stored postal address with `updatedPostalAddresses`; ' +
+        'mark the address mail should go to with `preferredEmail`. ' +
+        'Find the contact_id and the `[a0]`-style handles with search_contacts. ' +
+        'To fold two contacts that are the same person into one, use merge_contacts instead.',
       inputSchema: z.object(updateContactShape),
       title: 'Update contact',
     },

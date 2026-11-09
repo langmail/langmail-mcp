@@ -158,10 +158,13 @@ export interface AddressBookRecord {
 }
 
 // JSContact EmailAddress (RFC 9553 §2.3.1). `contexts` carries the
-// work/private classification search_contacts biases on.
+// work/private classification search_contacts biases on. `pref` (RFC 9553
+// §1.5.4, 1–100, lower is more preferred) marks the address mail should go
+// to; CardDAV carries it as vCard `PREF`/`TYPE=pref`.
 export interface ContactCardEmail {
   address: string
   contexts?: Record<string, boolean> | null
+  pref?: number | null
   [extension: `${string}:${string}`]: unknown
 }
 

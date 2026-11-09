@@ -60,7 +60,13 @@ export const profileLines = (card: ContactCard, shown: { birthday: boolean } = {
 // so the caller never has to re-read to see the result of its own write.
 export const renderContact = (card: ContactCard, collectedBookId: string | undefined): string => {
   const organization = readOrganization(card)
-  const emails = Object.values(card.emails ?? {}).map((e) => e.address)
+  // Only the lowest `pref` is the preferred one (RFC 9553 §1.5.4), as in
+  // search_contacts: an imported card can rank several addresses.
+  const prefs = Object.values(card.emails ?? {}).flatMap((e) => (typeof e.pref === 'number' ? [e.pref] : []))
+  const top = prefs.length > 0 ? Math.min(...prefs) : undefined
+  const emails = Object.values(card.emails ?? {}).map((e) =>
+    top !== undefined && e.pref === top ? `${e.address} (preferred)` : e.address
+  )
   return [
     card.name?.full ?? '(unnamed)',
     `   contact_id: ${card.id}`,

@@ -70,7 +70,9 @@ export const registerDeleteContact = (server: McpServer, deps: ContactWriteDeps,
         'Delete a contact by id, removing it from the account and from every device syncing ' +
         'the address book. A contact derived from mail headers or calendar attendees is only ' +
         'removed until the next message from that person recreates it — to drop one field ' +
-        'instead of the whole record, use update_contact. Find the id with search_contacts.',
+        'instead of the whole record, use update_contact; if it duplicates another contact of the same ' +
+        'person or organization, use merge_contacts, which keeps its addresses, notes and history. ' +
+        'Find the id with search_contacts.',
       inputSchema: z.object(deleteContactShape),
       title: 'Delete contact',
     },

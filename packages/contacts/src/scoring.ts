@@ -64,6 +64,9 @@ export interface AddressCandidate {
   confidence: Confidence
   context: AddressContext
   lastSeen?: string
+  // The card marks this address as the one mail should go to (JSContact
+  // `pref`, set by merge_contacts or update_contact).
+  preferred?: boolean
 }
 
 // Every address on a card with its stored grade. An address the user added
@@ -71,6 +74,8 @@ export interface AddressCandidate {
 // pairing outranks anything we inferred.
 export const addressCandidates = (card: ContactCard): AddressCandidate[] => {
   const ext = readCollected(card)
+  const prefs = Object.values(card.emails ?? {}).flatMap((e) => (typeof e.pref === 'number' ? [e.pref] : []))
+  const topPref = prefs.length > 0 ? Math.min(...prefs) : undefined
   return Object.values(card.emails ?? {}).map((e) => {
     const address = normalizeAddress(e.address)
     const entry = ext.addresses[address]
@@ -85,16 +90,23 @@ export const addressCandidates = (card: ContactCard): AddressCandidate[] => {
       confidence: entry?.confidence ?? 'confirmed',
       context,
       ...(entry ? { lastSeen: entry.lastSeen } : {}),
+      ...(topPref !== undefined && e.pref === topPref ? { preferred: true } : {}),
     }
   })
 }
 
 // Best address under a context bias: context match first (never filtering
-// anyone out — `any` skips the bias), then confidence, then recency.
+// anyone out — `any` skips the bias), then the address the card marks as
+// preferred, then confidence, then recency. The bias goes first because the
+// caller asked for it explicitly; the preference outranks the grades, which
+// are only inferred.
 export const bestAddress = (card: ContactCard, context: AddressContext | 'any'): AddressCandidate | undefined =>
   [...addressCandidates(card)].sort((a, b) => {
     if (context !== 'any' && (a.context === context) !== (b.context === context)) {
       return a.context === context ? -1 : 1
+    }
+    if (Boolean(a.preferred) !== Boolean(b.preferred)) {
+      return a.preferred ? -1 : 1
     }
     const conf = CONFIDENCE_RANK[b.confidence] - CONFIDENCE_RANK[a.confidence]
     if (conf !== 0) {

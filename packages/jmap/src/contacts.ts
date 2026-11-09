@@ -223,3 +223,54 @@ export const contactCardDestroy = async (p: ContactCardDestroyParams): Promise<v
     throw new JmapError(200, `ContactCard/set did not destroy ${p.cardId}: ${setErrorType(reason)}`, reason?.type)
   }
 }
+
+// --- ContactCard/set: merge --------------------------------------------------
+
+export interface ContactCardMergeParams extends JmapCall {
+  accountId: string
+  // The card that stays, and its patch (RFC 8620 §5.3).
+  cardId: string
+  // The cards folded into it, destroyed in the same call.
+  destroy: string[]
+  patch: Record<string, unknown>
+}
+
+// What the server did with each half of the merge. A JMAP /set is not
+// atomic (RFC 8620 §5.3): the update can land while a destroy is refused,
+// or the reverse, so the caller reports each part instead of one verdict.
+export interface ContactCardMergeResult {
+  destroyed: string[]
+  // SetError type per card the server refused to destroy.
+  notDestroyed: Record<string, string>
+  // SetError type when the update was refused; absent when it landed.
+  updateError?: string
+}
+
+// One ContactCard/set carrying the kept card's update and the merged cards'
+// destroys, so a CardDAV client syncs the merge as one change rather than
+// seeing a half-merged book between two calls. RFC 8620 §5.3 has the server
+// apply the update before the destroys within the call.
+export const contactCardMerge = async (p: ContactCardMergeParams): Promise<ContactCardMergeResult> => {
+  const resp = await jmapCall(p, {
+    methodCalls: [
+      ['ContactCard/set', { accountId: p.accountId, destroy: p.destroy, update: { [p.cardId]: p.patch } }, '0'],
+    ],
+    using: USING,
+  })
+  const out = methodResponse<{
+    destroyed?: string[] | null
+    notDestroyed?: Record<string, SetError> | null
+    notUpdated?: Record<string, SetError> | null
+    updated?: Record<string, unknown> | null
+  }>(resp, 'ContactCard/set', '0')
+  const updated = out.updated !== undefined && out.updated !== null && p.cardId in out.updated
+  const destroyed = out.destroyed ?? []
+  const notDestroyed = Object.fromEntries(
+    p.destroy.filter((id) => !destroyed.includes(id)).map((id) => [id, setErrorType(out.notDestroyed?.[id])])
+  )
+  return {
+    destroyed,
+    notDestroyed,
+    ...(updated ? {} : { updateError: setErrorType(out.notUpdated?.[p.cardId]) }),
+  }
+}

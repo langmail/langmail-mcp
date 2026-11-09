@@ -8,7 +8,7 @@ export {
   parseCalendarDate,
   todayIn,
 } from './birthdays.ts'
-export { collectedNoteEntry, nextKey, readCollected } from './card.ts'
+export { collectedNoteEntry, collectedUid, nextKey, readCollected } from './card.ts'
 export {
   BIRTHDAY_KEY,
   COLLECTED_BOOK_NAME,
@@ -17,6 +17,7 @@ export {
   SHOWN_INTERACTIONS,
   USER_NOTE_KEY,
 } from './constants.ts'
+export { mergeCards, withPreferredEmail } from './merge.ts'
 export {
   type EmailObservationOptions,
   type EmailObservationRecord,

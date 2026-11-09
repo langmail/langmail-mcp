@@ -305,3 +305,57 @@ describe('updateContact — ownership and preservation', () => {
     expect(sourceOf(stored(book), undefined)).toBe('imported')
   })
 })
+
+describe('updateContact — preferred address', () => {
+  const twoAddresses = () =>
+    authored({
+      emails: {
+        e0: { address: 'robin@northwind.example', contexts: { work: true }, pref: 1 },
+        e1: { address: 'robin.f@example.org' },
+      },
+    })
+
+  test('marks the named address as preferred and clears the mark on the others', async () => {
+    const book = fakeBook([twoAddresses()])
+    const result = await updateContact(book.deps, {
+      args: args({ preferredEmail: 'Robin.F@example.org' }),
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    expect(stored(book).emails).toEqual({
+      e0: { address: 'robin@northwind.example', contexts: { work: true } },
+      e1: { address: 'robin.f@example.org', pref: 1 },
+    })
+    expect(result.content[0]?.text).toContain('robin.f@example.org (preferred)')
+  })
+
+  test('can prefer an address added in the same call', async () => {
+    const book = fakeBook([authored()])
+    await updateContact(book.deps, {
+      args: args({ addedEmails: [{ address: 'robin@example.org' }], preferredEmail: 'robin@example.org' }),
+      token: 'tok',
+    })
+    expect(Object.values(stored(book).emails ?? {}).find((e) => e.pref === 1)?.address).toBe('robin@example.org')
+  })
+
+  test('refuses to prefer an address removed in the same call', async () => {
+    const book = fakeBook([twoAddresses()])
+    const result = await updateContact(book.deps, {
+      args: args({ preferredEmail: 'robin.f@example.org', removedEmails: ['robin.f@example.org'] }),
+      token: 'tok',
+    })
+    expect(result.content[0]?.text).toContain('is removed in this same call')
+    expect(book.patches).toEqual([])
+  })
+
+  test('refuses an address the contact does not hold', async () => {
+    const book = fakeBook([authored()])
+    const result = await updateContact(book.deps, {
+      args: args({ preferredEmail: 'nobody@example.org' }),
+      token: 'tok',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('Nothing was changed')
+    expect(book.patches).toEqual([])
+  })
+})

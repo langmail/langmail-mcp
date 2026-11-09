@@ -7,6 +7,7 @@ import {
   contactCardCreate,
   contactCardDestroy,
   contactCardGet,
+  contactCardMerge,
   contactCardQuery,
   contactCardUpdate,
 } from './contacts.ts'
@@ -330,5 +331,55 @@ describe('contactCardDestroy', () => {
       expect(err).toBeInstanceOf(JmapError)
       expect((err as JmapError).message).toContain('notFound')
     })
+  })
+})
+
+describe('contactCardMerge', () => {
+  const params = {
+    accountId: 'acct',
+    apiUrl: API,
+    authorization: 'Bearer tok',
+    cardId: 'keep',
+    destroy: ['m1', 'm2'],
+    patch: { 'emails/e1': { address: 'b@example.com' } },
+  }
+
+  test('sends the update and the destroys in one ContactCard/set', async () => {
+    const f = mock((_u: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}')
+      expect(body.methodCalls).toHaveLength(1)
+      const [name, args] = body.methodCalls[0]
+      expect(name).toBe('ContactCard/set')
+      expect(args).toEqual({
+        accountId: 'acct',
+        destroy: ['m1', 'm2'],
+        update: { keep: { 'emails/e1': { address: 'b@example.com' } } },
+      })
+      return Promise.resolve(
+        jmapResponse([['ContactCard/set', { destroyed: ['m1', 'm2'], updated: { keep: null } }, '0']])
+      )
+    })
+    const result = await withFetch(f, () => contactCardMerge(params))
+    expect(result).toEqual({ destroyed: ['m1', 'm2'], notDestroyed: {} })
+  })
+
+  test('reports a refused update and a refused destroy separately', async () => {
+    const f = mock(() =>
+      Promise.resolve(
+        jmapResponse([
+          [
+            'ContactCard/set',
+            {
+              destroyed: ['m1'],
+              notDestroyed: { m2: { type: 'forbidden' } },
+              notUpdated: { keep: { type: 'invalidProperties' } },
+            },
+            '0',
+          ],
+        ])
+      )
+    )
+    const result = await withFetch(f, () => contactCardMerge(params))
+    expect(result).toEqual({ destroyed: ['m1'], notDestroyed: { m2: 'forbidden' }, updateError: 'invalidProperties' })
   })
 })

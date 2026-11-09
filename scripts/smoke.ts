@@ -218,6 +218,7 @@ const main = async () => {
     'search_contacts',
     'create_contact',
     'update_contact',
+    'merge_contacts',
     'delete_contact',
   ]
   for (const required of requiredTools) {

@@ -20,13 +20,8 @@ import { type ContactCard, type ContactCardDraft, type ContactCardEmail } from '
 import { classifyContext, normalizeAddress } from './address-class.ts'
 import { cardAddresses, collectedNoteEntry, collectedUid, nextEmailKey, normalizeName, readCollected } from './card.ts'
 import { COLLECTED_NOTE_KEY, COLLECTED_PATCH_PATH, INTERACTION_LOG_SIZE, RELAY_LIST_SIZE } from './constants.ts'
-import {
-  type CollectedAddress,
-  type CollectedExtension,
-  type Confidence,
-  type Observation,
-  type RelaySighting,
-} from './types.ts'
+import { mergeCollectedExtensions } from './merge.ts'
+import { type CollectedExtension, type Confidence, type Observation, type RelaySighting } from './types.ts'
 
 export interface FoldContext {
   // Every existing card that might be touched: cards holding the observed
@@ -133,42 +128,6 @@ const apply = (w: Working, obs: Observation): void => {
   w.recordIds.add(obs.recordId)
 }
 
-const earlier = (a: string, b: string): string => (time(b) < time(a) ? b : a)
-const later = (a: string, b: string): string => (time(b) > time(a) ? b : a)
-
-const mergeEntry = (ext: CollectedExtension, address: string, entry: CollectedAddress): void => {
-  const mine = ext.addresses[address]
-  ext.addresses[address] = mine
-    ? {
-        confidence:
-          CONFIDENCE_RANK[entry.confidence] > CONFIDENCE_RANK[mine.confidence] ? entry.confidence : mine.confidence,
-        count: mine.count + entry.count,
-        firstSeen: earlier(mine.firstSeen, entry.firstSeen),
-        lastSeen: later(mine.lastSeen, entry.lastSeen),
-      }
-    : { ...entry }
-}
-
-// Folds a Collected card's history into the personal card holding the same
-// person: per address, counts summed, the earliest first-seen, the latest
-// last-seen and the highest confidence; interaction log and relays unioned
-// under their caps. The personal card keeps its own `source`, so an imported
-// card never turns derived by absorbing a collected one.
-const absorbHistory = (into: Working, from: Working): void => {
-  into.ext.absorbed = [...(into.ext.absorbed ?? []), from.id ?? '']
-  for (const [address, entry] of Object.entries(from.ext.addresses)) {
-    mergeEntry(into.ext, address, entry)
-  }
-  const logged = new Set(into.ext.interactions.map((t) => t.recordId))
-  into.ext.interactions = [...into.ext.interactions, ...from.ext.interactions.filter((t) => !logged.has(t.recordId))]
-    .sort((a, b) => time(b.date) - time(a.date))
-    .slice(0, INTERACTION_LOG_SIZE)
-  const relays = [...new Set([...(into.ext.relays ?? []), ...(from.ext.relays ?? [])])].slice(0, RELAY_LIST_SIZE)
-  if (relays.length > 0) {
-    into.ext.relays = relays
-  }
-}
-
 // Merges a Collected card into a personal card and marks it for destroy. Its
 // addresses join the personal card, as collection does for any blank it
 // fills; so does the name if the personal card has none. A card already
@@ -178,9 +137,7 @@ const absorbHistory = (into: Working, from: Working): void => {
 const absorb = (into: Working, from: Working, fromEmails: Record<string, ContactCardEmail>): void => {
   into.absorbs.push(from.id ?? '')
   into.touched = true
-  if (!into.ext.absorbed?.includes(from.id ?? '')) {
-    absorbHistory(into, from)
-  }
+  into.ext = mergeCollectedExtensions(into.ext, from.ext, from.id ?? '')
   for (const entry of Object.values(fromEmails)) {
     const address = normalizeAddress(entry.address)
     if (!into.addresses.has(address)) {
@@ -249,8 +206,9 @@ const canJoin = (w: Working, obs: Observation, recordAddresses: Map<string, Set<
 }
 
 // For each observed address held by both a card outside the Collected book
-// and one or more disposable Collected cards, absorbs the Collected cards
-// into the first such personal card. Returns the cards still in play; each
+// (or a Collected card merge_contacts merged others into) and one or more
+// disposable Collected cards, absorbs the Collected cards into the first
+// such personal card. Returns the cards still in play; each
 // personal card lists the ones it absorbed, for the caller to destroy.
 const mergeCollectedTwins = (ctx: FoldContext, cards: Working[], observations: Observation[]): Working[] => {
   const byId = new Map(ctx.cards.map((c) => [c.id, c]))
@@ -259,13 +217,20 @@ const mergeCollectedTwins = (ctx: FoldContext, cards: Working[], observations: O
   let kept = cards
   for (const address of new Set(observations.map((o) => normalizeAddress(o.address)))) {
     const holders = kept.filter((w) => w.addresses.has(address))
-    const personal = holders.find((w) => !inCollected(w))
+    // A Collected card that merge_contacts folded others into counts as a
+    // target too: in the moment before the index catches up with a merge, a
+    // sighting of a merged address mints a fresh Collected card, which the
+    // next batch then folds back into the card the user chose.
+    // Only when exactly one holder is such a card: two of them sharing an
+    // address are two choices the user made, not a duplicate to clear.
+    const mergeTargets = holders.filter((w) => (w.ext.absorbed?.length ?? 0) > 0)
+    const personal = holders.find((w) => !inCollected(w)) ?? (mergeTargets.length === 1 ? mergeTargets[0] : undefined)
     if (!personal) {
       continue
     }
     const disposable = holders.filter((w) => {
       const card = byId.get(w.id ?? '')
-      return card !== undefined && isDisposable(card, ctx.collectedBookId)
+      return w !== personal && card !== undefined && isDisposable(card, ctx.collectedBookId)
     })
     // A Collected card that shares an address with yet another card stays:
     // its history for that address belongs to neither card alone, and a

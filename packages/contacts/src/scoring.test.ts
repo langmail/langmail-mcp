@@ -87,6 +87,18 @@ describe('bestAddress', () => {
     expect(bestAddress(robin, 'work')?.address).toBe('robin@northwind.example')
   })
 
+  test('the preferred address outranks a higher grade, but not an explicit context bias', () => {
+    const pinned = {
+      ...robin,
+      emails: {
+        e0: { address: 'robin@northwind.example', contexts: { work: true } },
+        e1: { address: 'robin.private@gmail.com', contexts: { private: true }, pref: 1 },
+      },
+    }
+    expect(bestAddress(pinned, 'any')).toMatchObject({ address: 'robin.private@gmail.com', preferred: true })
+    expect(bestAddress(pinned, 'work')?.address).toBe('robin@northwind.example')
+  })
+
   test('an address the user added by hand counts as confirmed', () => {
     const manual = card('manual', {}, { e0: { address: 'hand@entered.example' } })
     expect(bestAddress(manual, 'any')).toEqual({

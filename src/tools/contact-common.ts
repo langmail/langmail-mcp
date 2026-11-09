@@ -1,4 +1,4 @@
-// Shared seam and input shapes for the three contact write tools. The read
+// Shared seam and input shapes for the contact write tools. The read
 // side (search_contacts) keeps its own richer deps bundle — it hydrates
 // subjects and event titles, which no writer needs. Prose rendering, which
 // both sides do share, lives in contact-format.ts.
@@ -16,11 +16,14 @@ import {
   type ContactCardCreateParams,
   type ContactCardDestroyParams,
   type ContactCardGetParams,
+  type ContactCardMergeParams,
+  type ContactCardMergeResult,
   type ContactCardQueryParams,
   type ContactCardUpdateParams,
   contactCardCreate,
   contactCardDestroy,
   contactCardGet,
+  contactCardMerge,
   contactCardQuery,
   contactCardUpdate,
   type JmapLive,
@@ -32,6 +35,7 @@ export interface ContactWriteDeps {
   contactCardCreate: (p: ContactCardCreateParams) => Promise<string>
   contactCardDestroy: (p: ContactCardDestroyParams) => Promise<void>
   contactCardGet: (p: ContactCardGetParams) => Promise<ContactCard[]>
+  contactCardMerge: (p: ContactCardMergeParams) => Promise<ContactCardMergeResult>
   contactCardQuery: (p: ContactCardQueryParams) => Promise<string[]>
   contactCardUpdate: (p: ContactCardUpdateParams) => Promise<void>
   // Contacts-capability account id for the bearer.
@@ -166,6 +170,7 @@ export const makeLiveDeps = (live: JmapLive): ContactWriteDeps => {
     contactCardCreate: async (p) => contactCardCreate({ ...p, apiUrl: await url(p.authorization) }),
     contactCardDestroy: async (p) => contactCardDestroy({ ...p, apiUrl: await url(p.authorization) }),
     contactCardGet: async (p) => contactCardGet({ ...p, apiUrl: await url(p.authorization) }),
+    contactCardMerge: async (p) => contactCardMerge({ ...p, apiUrl: await url(p.authorization) }),
     contactCardQuery: async (p) => contactCardQuery({ ...p, apiUrl: await url(p.authorization) }),
     contactCardUpdate: async (p) => contactCardUpdate({ ...p, apiUrl: await url(p.authorization) }),
     resolveAccountId: async (authorization) => accountIdForContacts(await live.getSession(authorization)),

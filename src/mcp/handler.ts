@@ -58,6 +58,7 @@ import { registerListMailRules } from '../tools/list-mail-rules.ts'
 import { registerListUpcomingBirthdays } from '../tools/list-upcoming-birthdays.ts'
 import { type MailRuleToolDeps } from '../tools/mail-rule-common.ts'
 import { registerMarkEmails } from '../tools/mark-emails.ts'
+import { registerMergeContacts } from '../tools/merge-contacts.ts'
 import {
   makeLiveDeps as makeMoveCalendarEventsDeps,
   registerMoveCalendarEvents,
@@ -201,6 +202,9 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     registerCreateContact(server, contactWriteDeps, () => ctx.token)
     registerUpdateContact(server, contactWriteDeps, () => ctx.token)
     registerDeleteContact(server, contactWriteDeps, () => ctx.token)
+    // Writes through the write bundle, then renders the result with the read
+    // side's subject and title lookups.
+    registerMergeContacts(server, { ...searchContactsDeps, ...contactWriteDeps }, () => ctx.token)
     registerCreateDraft(
       server,
       draftDeps,

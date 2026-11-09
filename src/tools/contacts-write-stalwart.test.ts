@@ -25,9 +25,11 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 
 import {
   collectContacts,
+  collectedUid,
   liveCollectionDeps,
   observationsFromEmail,
   readBirthday,
+  readCollected,
   readPostalAddresses,
   sourceOf,
 } from '@langmail/contacts'
@@ -37,6 +39,7 @@ import {
   contactCardCreate,
   contactCardDestroy,
   contactCardGet,
+  contactCardMerge,
   contactCardQuery,
   contactCardUpdate,
   emailGet,
@@ -48,6 +51,7 @@ import { type ContactWriteDeps } from './contact-common.ts'
 import { createContact, createContactInput } from './create-contact.ts'
 import { deleteContact, deleteContactInput } from './delete-contact.ts'
 import { listUpcomingBirthdays, listUpcomingBirthdaysInput } from './list-upcoming-birthdays.ts'
+import { mergeContacts, mergeContactsInput } from './merge-contacts.ts'
 import { type SearchContactsDeps, searchContacts, searchContactsInput } from './search-contacts.ts'
 import { updateContact, updateContactInput } from './update-contact.ts'
 
@@ -137,6 +141,7 @@ live('contact write tools against live Stalwart — author, read back, correct, 
       contactCardCreate: (p) => contactCardCreate(pin(p)),
       contactCardDestroy: (p) => contactCardDestroy(pin(p)),
       contactCardGet: (p) => contactCardGet(pin(p)),
+      contactCardMerge: (p) => contactCardMerge(pin(p)),
       contactCardQuery: (p) => contactCardQuery(pin(p)),
       contactCardUpdate: (p) => contactCardUpdate(pin(p)),
       resolveAccountId: () => Promise.resolve(accountId),
@@ -346,6 +351,54 @@ live('contact write tools against live Stalwart — author, read back, correct, 
     await updateContact(writeDeps, { args: updateContactInput.parse({ birthday: '', contactId }), token: TOKEN })
     const [cleared] = await contactCardGet({ ...ctx, ids: [contactId] })
     expect(readBirthday(cleared as NonNullable<typeof cleared>)).toBeUndefined()
+  })
+
+  // merge_contacts against the real server: the update and the destroy in
+  // one ContactCard/set, the `pref` mark surviving the round trip, and a
+  // later message from the merged address landing on the kept card.
+  test('merge_contacts folds a collected duplicate into the kept card', async () => {
+    const OTHER = 'robin.f@example.org'
+    const sighting = (id: string) =>
+      observationsFromEmail(
+        {
+          from: [{ email: OTHER, name: 'Robin F.' }],
+          id,
+          receivedAt: new Date(run - 3_600_000).toISOString(),
+          to: [{ email: address }],
+        },
+        { selfAddresses: new Set([address]) }
+      )
+    await collectContacts(liveCollectionDeps, ctx, sighting(`m-dup-${run}`))
+    const [duplicateId] = await contactCardQuery({ ...ctx, filter: { uid: collectedUid(OTHER) } })
+    expect(duplicateId).toBeDefined()
+
+    const result = await mergeContacts(
+      { ...searchDeps, ...writeDeps },
+      {
+        args: mergeContactsInput.parse({ contactId, mergeContactIds: [duplicateId] }),
+        token: TOKEN,
+      }
+    )
+    expect(result.isError).toBeUndefined()
+    expect(result.content[0]?.text).toContain('Removed contacts:')
+    expect(await contactCardGet({ ...ctx, ids: [duplicateId as string] })).toEqual([])
+
+    const [kept] = await contactCardGet({ ...ctx, ids: [contactId] })
+    const emails = Object.values(kept?.emails ?? {})
+    expect(emails.map((e) => e.address.toLowerCase()).sort()).toEqual([OTHER, 'robin@northwind.example'])
+    // The preferred mark is stored and read back, so the merge did not move it.
+    expect(emails.find((e) => e.pref === 1)?.address.toLowerCase()).toBe('robin@northwind.example')
+    expect(readCollected(kept as NonNullable<typeof kept>).addresses[OTHER]?.count).toBe(1)
+
+    await untilIndexed(
+      () => contactCardQuery({ ...ctx, filter: { email: OTHER } }),
+      (found) => found.includes(contactId),
+      'the kept contact by its merged address'
+    )
+    await collectContacts(liveCollectionDeps, ctx, sighting(`m-after-merge-${run}`))
+    expect(await contactCardQuery({ ...ctx, filter: { uid: collectedUid(OTHER) } })).toEqual([])
+    const [after] = await contactCardGet({ ...ctx, ids: [contactId] })
+    expect(readCollected(after as NonNullable<typeof after>).addresses[OTHER]?.count).toBe(2)
   })
 
   test('delete_contact removes the card from the account', async () => {

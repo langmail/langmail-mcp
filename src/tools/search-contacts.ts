@@ -164,7 +164,7 @@ interface Hydrated {
 // titles — only for the matched people (at most `limit`), never for the
 // whole book, and never per interaction line.
 const hydrate = async (
-  deps: SearchContactsDeps,
+  deps: ContactHydrationDeps,
   auth: { authorization: string; token: string },
   tuples: InteractionTuple[]
 ): Promise<Hydrated> => {
@@ -245,8 +245,9 @@ const detailedPerson = (
   if (candidates.length > 0) {
     parts.push('   addresses:')
     for (const c of candidates) {
+      const preferred = c.preferred ? ', preferred' : ''
       const seen = c.lastSeen ? `, last seen ${relativeAge(c.lastSeen, now)}` : ''
-      parts.push(`   - ${c.address} (${c.context}, ${c.confidence}${seen})`)
+      parts.push(`   - ${c.address} (${c.context}, ${c.confidence}${preferred}${seen})`)
     }
   }
   // The authored half of the record — phones, postal addresses, note. Only
@@ -271,6 +272,28 @@ const detailedPerson = (
     parts.push(`   excluded_relays: ${ext.relays.join(', ')} (relay addresses, not usable for direct contact)`)
   }
   return parts.join('\n')
+}
+
+// What rendering one contact in the detailed format needs beyond the card:
+// the subject and title lookups for its interaction lines.
+const LIST_NUMBER = /^1\. /u
+
+export type ContactHydrationDeps = Pick<SearchContactsDeps, 'emailGet' | 'fetchEventTitles' | 'resolveMailAccountId'>
+
+// One contact in the detailed format, exactly as search_contacts prints it —
+// what merge_contacts returns, so the agent checks a merge in the same shape
+// it found the cards in.
+export const renderDetailedContact = async (
+  deps: ContactHydrationDeps,
+  auth: { authorization: string; token: string },
+  card: ContactCard,
+  collectedBookId: string | undefined
+): Promise<string> => {
+  const ext = readCollected(card)
+  const hydrated = await hydrate(deps, auth, ext.interactions)
+  const args: SearchContactsArgs = { context: 'any', limit: 1, query: '', response_format: 'detailed' }
+  // One contact, so no list number in front of it.
+  return detailedPerson(card, ext, args, hydrated, new Date(), 0, collectedBookId).replace(LIST_NUMBER, '')
 }
 
 export const searchContacts = async (deps: SearchContactsDeps, ctx: SearchContactsContext): Promise<ToolResult> => {
@@ -409,7 +432,8 @@ export const registerSearchContacts = (
         'and the note. Do not use it to enumerate all contacts; a query is ' +
         'required, and for "whose birthday is coming up" use ' +
         'list_upcoming_birthdays instead. If several plausible people match, ' +
-        'present the candidates to the user rather than guessing.',
+        'present the candidates to the user rather than guessing; when two of them ' +
+        'are the same person or organization, merge_contacts folds them into one.',
       inputSchema: z.object(searchContactsShape),
       title: 'Search contacts',
     },

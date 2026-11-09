@@ -87,6 +87,20 @@ export const fakeBook = (seed: ContactCard[] = [], books?: AddressBookRecord[]):
           .map((c) => c.id)
       )
     },
+    // One ContactCard/set: the update first, then the destroys (RFC 8620
+    // §5.3), each reported on its own.
+    contactCardMerge: ({ cardId, destroy, patch }) => {
+      const card = state.cards.get(cardId)
+      if (card) {
+        state.patches.push(patch)
+        state.cards.set(cardId, applyPatch(card, patch))
+      }
+      const destroyed = destroy.filter((id) => state.cards.delete(id))
+      const notDestroyed = Object.fromEntries(
+        destroy.filter((id) => !destroyed.includes(id)).map((id) => [id, 'notFound'])
+      )
+      return Promise.resolve({ destroyed, notDestroyed, ...(card ? {} : { updateError: 'notFound' }) })
+    },
     contactCardUpdate: ({ cardId, patch }) => {
       const card = state.cards.get(cardId)
       if (!card) {

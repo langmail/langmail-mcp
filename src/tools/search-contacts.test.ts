@@ -89,6 +89,24 @@ describe('searchContacts — concise', () => {
     expect(text).toContain('address_confidence: weak')
   })
 
+  test('a preferred address comes first, unless a context asks for the other kind', async () => {
+    const pinned = robinCard({
+      emails: {
+        e0: { address: 'robin@northwind.example', contexts: { work: true } },
+        e1: { address: 'robin.private@gmail.com', contexts: { private: true }, pref: 1 },
+      },
+    })
+    const any = (await searchContacts(makeDeps([pinned]), { args: args(), token: 'tok' })).content[0]?.text ?? ''
+    expect(any).toContain('best_address: robin.private@gmail.com (private)')
+    const work = await searchContacts(makeDeps([pinned]), { args: args({ context: 'work' }), token: 'tok' })
+    expect(work.content[0]?.text).toContain('best_address: robin@northwind.example (work)')
+    const detailed = await searchContacts(makeDeps([pinned]), {
+      args: args({ response_format: 'detailed' }),
+      token: 'tok',
+    })
+    expect(detailed.content[0]?.text).toContain('- robin.private@gmail.com (private, weak, preferred,')
+  })
+
   test('empty result names the sources and steers the next attempt', async () => {
     const deps = makeDeps([], { contactCardQuery: () => Promise.resolve([]) })
     const result = await searchContacts(deps, { args: args({ query: 'nonexistent' }), token: 'tok' })
