@@ -167,7 +167,7 @@ export const createRoutes = (cfg: HandlerConfig): Routes => {
       // surface client-side. `email` is advertised as a standard, requestable
       // scope; note the mailbox-address `email` claim that Stalwart's JMAP
       // mapping and our principal read consume is asserted by Better Auth's
-      // getAdditionalUserInfoClaim regardless of whether `email` was granted.
+      // customUserInfoClaims regardless of whether `email` was granted.
       const oauth2 = `${cfg.authIssuer}/oauth2`
       return json({
         authorization_endpoint: `${oauth2}/authorize`,
