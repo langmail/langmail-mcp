@@ -235,29 +235,76 @@ describe('resolveEventTimes on an unparseable date-time', () => {
     expect(() => resolveEventTimes('not-a-time', 'also-not', 'UTC', false)).toThrow('invalid date-time: not-a-time')
   })
 
-  test('throws on a date-time eventTimeSchema accepts but the parser cannot read', () => {
-    // eventTimeSchema is not a sufficient gate: it takes minute precision and
-    // four fractional digits, while the parser demands seconds and at most
-    // three. Such a value throws instead of returning a refusal, so it escapes
-    // the EventTimesResolution contract. Today's behaviour, pinned, not fixed.
-    expect(eventTimeSchema.safeParse('2026-10-03T10:00').success).toBe(true)
-    expect(() => resolveEventTimes('2026-10-03T10:00', '2026-10-03T11:00', 'UTC', false)).toThrow(
-      'invalid date-time: 2026-10-03T10:00'
-    )
-    expect(eventTimeSchema.safeParse('2026-10-03T10:00:00.1234').success).toBe(true)
-    expect(() => resolveEventTimes('2026-10-03T10:00:00.1234', '2026-10-03T11:00:00', 'UTC', false)).toThrow(
-      'invalid date-time: 2026-10-03T10:00:00.1234'
-    )
+  test('eventTimeSchema refuses the date-times the parser cannot read', () => {
+    // Minute precision and four fractional digits used to pass the schema and
+    // then throw in resolveEventTimes, escaping the EventTimesResolution
+    // contract. The schema now refuses them, with the form to send instead.
+    for (const value of ['2026-10-03T10:00', '2026-10-03T10:00:00.1234']) {
+      const result = eventTimeSchema.safeParse(value)
+      expect(result.success).toBe(false)
+      expect(JSON.stringify(result.error?.issues)).toContain('a date-time with seconds')
+    }
+  })
+
+  test('eventTimeSchema keeps every form the parser reads', () => {
+    for (const value of [
+      '2026-10-03T10:00:00',
+      '2026-10-03T10:00:00.1',
+      '2026-10-03T10:00:00.123',
+      '2026-10-03T10:00:00Z',
+      '2026-10-03T10:00:00.123Z',
+      '2026-10-03T10:00:00+02:00',
+      '2026-10-03T10:00:00.5-05:30',
+    ]) {
+      expect(eventTimeSchema.safeParse(value).success).toBe(true)
+    }
+  })
+
+  test('every pair eventTimeSchema admits resolves without throwing', () => {
+    const admitted = [
+      '2026-10-03',
+      '2026-10-03T10:00',
+      '2026-10-03T10:00:00',
+      '2026-10-03T10:00:00.1',
+      '2026-10-03T10:00:00.123',
+      '2026-10-03T10:00:00.1234',
+      '2026-10-03T10:00:00Z',
+      '2026-10-03T10:00Z',
+      '2026-10-03T10:00:00+02:00',
+      '2026-10-03T10:00:00.5-05:30',
+    ].filter((value) => eventTimeSchema.safeParse(value).success)
+    expect(admitted).toEqual([
+      '2026-10-03',
+      '2026-10-03T10:00:00',
+      '2026-10-03T10:00:00.1',
+      '2026-10-03T10:00:00.123',
+      '2026-10-03T10:00:00Z',
+      '2026-10-03T10:00:00+02:00',
+      '2026-10-03T10:00:00.5-05:30',
+    ])
+    // update_calendar_event resolves a lone end through resolveInputDateTime
+    // (a bare date takes the dateOnlyToInstant branch before it).
+    for (const value of admitted.filter((admittedValue) => !isDateOnly(admittedValue))) {
+      for (const explicitTimeZone of [false, true]) {
+        expect(() => resolveInputDateTime(value, 'Europe/Berlin', explicitTimeZone)).not.toThrow()
+      }
+    }
+    for (const start of admitted) {
+      for (const end of admitted) {
+        for (const explicitTimeZone of [false, true]) {
+          expect(() => resolveEventTimes(start, end, 'Europe/Berlin', explicitTimeZone)).not.toThrow()
+        }
+      }
+    }
   })
 
   test('reads minute precision only on the offset branch', () => {
     // hasExplicitOffset routes the same clock digits to two different parsers:
     // `new Date` takes minute precision, parseWallClockInZone does not. So this
     // value resolves or throws depending on the offset and on explicitTimeZone.
-    // Only the throwing form in the *previous* test is reachable through a
-    // tool: the schema takes minute precision without an offset but rejects it
-    // with one, so neither call here can come from a caller — the gap this test
-    // pins is in the routing, not in what callers can send.
+    // eventTimeSchema refuses minute precision with or without an offset, so
+    // neither call here can come from a caller — the gap this test pins is in
+    // the routing, not in what callers can send.
     expect(eventTimeSchema.safeParse('2026-10-03T10:00Z').success).toBe(false)
     const resolvedPair = resolveEventTimes('2026-10-03T10:00Z', '2026-10-03T11:00Z', 'UTC', false)
     expect(resolved(resolvedPair).start.toISOString()).toBe('2026-10-03T10:00:00.000Z')

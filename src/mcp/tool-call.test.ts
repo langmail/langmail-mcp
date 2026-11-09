@@ -70,6 +70,21 @@ describe('tools/call through the MCP handler', () => {
     }
   })
 
+  // The schema refuses what the wall-clock parser cannot read, so the call is
+  // answered before the handler runs and nothing reaches the calendar.
+  test.each([
+    ['create_calendar_event', { end: '2026-10-03T11:00:00', start: '2026-10-03T10:00', title: 'Standup' }],
+    ['update_calendar_event', { start: '2026-10-03T10:00', uid: 'event-1' }],
+    ['update_calendar_event', { end: '2026-10-03T11:00', start: '2026-10-03T10:00', uid: 'event-1' }],
+    ['update_calendar_event', { end: '2026-10-03T11:00:00.1234', uid: 'event-1' }],
+  ])('%p refuses a date-time the parser cannot read, in-band', async (name, args) => {
+    const message = await callTool(name, args)
+
+    expect(message.error).toBeUndefined()
+    expect(message.result?.isError).toBe(true)
+    expect(textOf(message)).toContain('a date-time with seconds')
+  })
+
   test('rejects an unknown tool with a JSON-RPC invalid-params error', async () => {
     const message = await callTool('no_such_tool', {})
 

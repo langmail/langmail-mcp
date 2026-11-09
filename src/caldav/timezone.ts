@@ -4,7 +4,7 @@ import { z } from 'zod'
 // The wall-clock parser lives in @langmail/ical, where the VEVENT parser
 // consumes it — this module keeps the zod input schemas that validate tool
 // arguments, which are the service's concern, not the package's.
-import { parseWallClockInZone } from '@langmail/ical'
+import { DATE_TIME_RE, parseWallClockInZone } from '@langmail/ical'
 
 const OFFSET_RE = /(?:Z|[+-]\d{2}:\d{2})$/iu
 
@@ -29,12 +29,21 @@ export const timeZoneSchema = z.string().refine(isValidTimeZone, {
   message: 'timeZone must be a valid IANA timezone, e.g. Europe/Berlin',
 })
 
-const dateTimeWithOptionalOffsetSchema = z.iso.datetime({ offset: true, local: true })
+// DATE_TIME_RE narrows z.iso.datetime to what parseWallClockInZone reads: zod
+// alone also takes minute precision (`10:00`) and any number of fractional
+// digits, which would pass validation and then throw in resolveEventTimes.
+const dateTimeWithOptionalOffsetSchema = z.iso.datetime({ offset: true, local: true }).regex(DATE_TIME_RE)
 
 // An event's start or end: a date-time for a timed event, or a bare date
 // (`2026-10-03`) for an all-day one. The value type *is* the all-day signal,
 // exactly as in RFC 5545 (`DTSTART;VALUE=DATE`) — see resolveEventTimes.
-export const eventTimeSchema = z.union([z.iso.date(), dateTimeWithOptionalOffsetSchema])
+// The union's own message is what a caller sees: zod's default for a failed
+// union is a bare "Invalid input", which does not say what to send instead.
+export const eventTimeSchema = z.union([z.iso.date(), dateTimeWithOptionalOffsetSchema], {
+  error:
+    'Expected a date (2026-10-03) for an all-day event, or a date-time with seconds (2026-10-03T10:00:00, ' +
+    'optionally with up to three fractional digits and Z or an offset like +02:00).',
+})
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/u
 

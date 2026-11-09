@@ -6,7 +6,8 @@
 
 import { TZDate } from '@date-fns/tz'
 
-const DATE_TIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(?:Z|[+-]\d{2}:\d{2})?$/iu
+// Exported so services/mcp's eventTimeSchema admits exactly what this reads.
+export const DATE_TIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(?:Z|[+-]\d{2}:\d{2})?$/iu
 
 // Reads the clock digits of `value` as wall-clock time *in* `timeZone`,
 // ignoring any offset the string carries. A stored RECURRENCE-ID or DTSTART
