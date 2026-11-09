@@ -7,7 +7,7 @@
 // token for JMAP. See docs/reference/security/authentication.md.
 //
 // The principal is the `email` claim: Better Auth rewrites it to the user's
-// `username@langmail.me` mailbox address (customUserInfoClaims) and
+// `username@langmail.me` mailbox address (getAdditionalUserInfoClaim) and
 // suppresses it for a user with no active mailbox. Requiring it here means a
 // non-mailbox Google identity is rejected with a clean 401 rather than
 // failing confusingly downstream in JMAP/CalDAV.
@@ -46,7 +46,7 @@ export const fetchUserinfo = async (authIssuer: string, token: string): Promise<
   const body = (await res.json()) as Record<string, unknown>
   const principal = typeof body.email === 'string' ? body.email : undefined
   if (!principal) {
-    // Better Auth's customUserInfoClaims asserts the mailbox address as
+    // Better Auth's getAdditionalUserInfoClaim asserts the mailbox address as
     // `email` for any mailbox user irrespective of requested scope, and
     // suppresses it only when the user has no active langmail.me mailbox. So a
     // missing `email` claim means "no mailbox" — the token can't act on one.
