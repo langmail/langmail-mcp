@@ -1264,7 +1264,7 @@ describe('updateCalendarEvent — notify', () => {
       token: 'tok',
     })
     expect(unfold(cap.updated[0]?.ical ?? '')).toContain('SCHEDULE-AGENT=NONE')
-    expect(result.content[0]?.text).toContain('no notifications sent')
+    expect(result.content[0]?.text).toContain('notifications suppressed')
   })
 
   test('notify defaults to all — no SCHEDULE-AGENT, and the message names the recipients', async () => {
@@ -1274,7 +1274,8 @@ describe('updateCalendarEvent — notify', () => {
       token: 'tok',
     })
     expect(cap.updated[0]?.ical ?? '').not.toContain('SCHEDULE-AGENT')
-    expect(result.content[0]?.text).toContain('notifications sent to')
+    expect(result.content[0]?.text).toContain('notifications requested for')
+    expect(result.content[0]?.text).not.toContain('sent')
   })
 
   test('notify: none combines with a delta to make a quiet one-attendee removal', async () => {
@@ -1302,6 +1303,7 @@ describe('updateCalendarEvent — notify', () => {
       token: 'tok',
     })
     expect(result.isError).toBeUndefined()
+    expect(result.content[0]?.text).toContain('notifications suppressed for the remaining attendees')
     expect(result.content[0]?.text).toContain('may still receive a cancellation')
   })
 
@@ -1311,7 +1313,7 @@ describe('updateCalendarEvent — notify', () => {
       args: { attendees: ['guest@example.com', 'anna@example.com'], notify: 'none', uid: UID },
       token: 'tok',
     })
-    expect(result.content[0]?.text).toContain('no notifications sent')
+    expect(result.content[0]?.text).toContain('notifications suppressed')
     expect(result.content[0]?.text).not.toContain('cancellation')
   })
 
@@ -1321,7 +1323,7 @@ describe('updateCalendarEvent — notify', () => {
       args: { attendees: ['GUEST@Example.com'], notify: 'none', uid: UID },
       token: 'tok',
     })
-    expect(result.content[0]?.text).toContain('no notifications sent')
+    expect(result.content[0]?.text).toContain('notifications suppressed')
     expect(result.content[0]?.text).not.toContain('cancellation')
   })
 
@@ -1869,7 +1871,8 @@ describe('updateCalendarEvent — reminder', () => {
     expect(ical).not.toContain('SEQUENCE:3')
     expect(valarmBlocks(ical)).toHaveLength(1)
     expect(valarmBlocks(ical)[0]).toContain('TRIGGER:-PT10M')
-    expect(result.content[0]?.text).toContain('no notifications sent')
+    expect(result.content[0]?.text).toContain('no notifications requested')
+    expect(result.content[0]?.text).not.toContain('sent')
     // Everything but the alarm is byte-identical to what was stored.
     const withoutAlarms = (text: string): string => text.replace(VALARM_BLOCK_RE, '')
     expect(withoutAlarms(ical)).toBe(withoutAlarms(unfold(stored.data)).replace(TRAILING_NEWLINE_RE, '\r\n'))

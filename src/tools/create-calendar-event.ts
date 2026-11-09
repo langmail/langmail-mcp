@@ -132,10 +132,12 @@ const deliverySummary = (
 
 const inviteSummary = (attendees: string[], notify: 'all' | 'none' | undefined): string => {
   if (attendees.length === 0) {
-    return 'no attendees, no invitations sent'
+    return 'no attendees, no invitations'
   }
+  // The CalDAV write is all this tool sees; Stalwart sends the iMIP mail
+  // afterwards and may fail or skip it, so say "requested", never "sent".
   const roster = `${attendees.length} attendee(s): ${attendees.join(', ')}`
-  return notify === 'none' ? `no invitations sent to the ${roster}` : `invitations sent to ${roster}`
+  return notify === 'none' ? `invitations suppressed for the ${roster}` : `invitations requested for ${roster}`
 }
 
 // "Event", "Recurring event", "All-day event", "Recurring all-day event".

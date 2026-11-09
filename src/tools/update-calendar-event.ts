@@ -415,10 +415,10 @@ const deliverySummary = (attendees: string[], scheduleAgent?: 'NONE', removedAny
   }
   if (scheduleAgent === 'NONE') {
     return removedAny
-      ? 'no notifications sent to the remaining attendees; a removed attendee may still receive a cancellation'
-      : 'no notifications sent'
+      ? 'notifications suppressed for the remaining attendees; a removed attendee may still receive a cancellation'
+      : 'notifications suppressed'
   }
-  return `notifications sent to ${attendees.length} attendee(s): ${attendees.join(', ')}`
+  return `notifications requested for ${attendees.length} attendee(s): ${attendees.join(', ')}`
 }
 
 // The stored state an omitted field falls back to. On the whole-event path this
@@ -938,7 +938,7 @@ const updateReminderOnly = async (
   const ical = spliceAlarms(existing.data, minutes, scope.kind === 'occurrence' ? scope.recurrenceId : undefined)
   await deps.updateEvent({ ical, token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
   return textResult(
-    `Event "${master?.title || args.uid}" updated (no notifications sent${reminderSummary(args, master?.allDay === true)}); ` +
+    `Event "${master?.title || args.uid}" updated (no notifications requested${reminderSummary(args, master?.allDay === true)}); ` +
       REMINDER_SCOPE_NOTE[scope.kind]
   )
 }

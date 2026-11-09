@@ -132,7 +132,8 @@ describe('createCalendarEvent', () => {
 
     const txt = result.content[0]?.text ?? ''
     expect(txt).toContain('Sync')
-    expect(txt).toContain('guest@example.com')
+    expect(txt).toContain('invitations requested for 1 attendee(s): guest@example.com')
+    expect(txt).not.toContain('sent')
   })
 
   test('creates a personal event without attendees and sends no invitations', async () => {
@@ -153,7 +154,8 @@ describe('createCalendarEvent', () => {
     expect(ical).not.toContain('ORGANIZER')
 
     const txt = result.content[0]?.text ?? ''
-    expect(txt).toContain('no attendees, no invitations sent')
+    expect(txt).toContain('no attendees, no invitations')
+    expect(txt).not.toContain('sent')
     expect(txt).toContain('uid: ')
   })
 
@@ -191,7 +193,8 @@ describe('createCalendarEvent', () => {
 
     const ical = (captured[0]?.ical ?? '').replace(/\r\n /gu, '')
     expect(ical).not.toContain('ATTENDEE')
-    expect(result.content[0]?.text).toContain('no attendees, no invitations sent')
+    expect(result.content[0]?.text).toContain('no attendees, no invitations')
+    expect(result.content[0]?.text).not.toContain('sent')
   })
 
   test('notify: none keeps the attendees but suppresses the invitations', async () => {
@@ -204,7 +207,7 @@ describe('createCalendarEvent', () => {
     const ical = (captured[0]?.ical ?? '').replace(/\r\n /gu, '')
     expect(ical).toContain('SCHEDULE-AGENT=NONE')
     expect(ical).toContain('guest@example.com')
-    expect(result.content[0]?.text).toContain('no invitations sent to the 1 attendee(s)')
+    expect(result.content[0]?.text).toContain('invitations suppressed for the 1 attendee(s)')
   })
 
   test('PUTs a recurring invite and reports it as recurring', async () => {
