@@ -70,8 +70,9 @@ language-agnostic unit shared with the deprecated stack. Pipeline:
 1. Push to `main` → `.github/workflows/deploy-mcp.yml` tests, builds
    `services/mcp/Dockerfile`, pushes `ghcr.io/langmail/platform-mcp`,
    and commits the new `@sha256` digest into `infra/modules/mcp.nix`.
-2. `just rebuild-app` — NixOS pulls the pinned image and (re)starts the
-   `podman-mcp` container behind nginx. A fresh VM can't pull the
+2. comin on the `app` VM applies the bump within about a minute: NixOS
+   pulls the pinned image and (re)starts the `podman-mcp` container behind
+   nginx (`just rebuild-app` is the break-glass path). A fresh VM can't pull the
    placeholder digest until the first image build — expected.
 
 See `infra/AGENTS.md § app-VM services run as digest-pinned
