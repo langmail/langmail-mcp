@@ -532,4 +532,39 @@ live('search_emails filters and paging against live Stalwart', () => {
     expect(pages).toBe(2)
     expect(ids).toEqual([seeded.oldTicket, seeded.booking].map(String))
   })
+
+  // A quoted phrase reaches Stalwart quoted, so it matches the words only
+  // next to each other and in order — not a message holding them apart.
+  // Imported last and kept out of `seeded`, so the walks above are unaffected.
+  test('a quoted phrase matches the phrase, not the same words apart', async () => {
+    const phrase = await importEmail({
+      body: 'Thanks for visiting Quillfern Teapot Atelier today.',
+      from: 'Shop <hello@shop.example>',
+      keywords: { $seen: true },
+      receivedAt: bookingReceivedAt,
+      subject: 'Your visit',
+    })
+    const apart = await importEmail({
+      body: 'The atelier sold me a teapot glazed in quillfern green.',
+      from: 'Forum <digest@forum.example>',
+      keywords: { $seen: true },
+      receivedAt: bookingReceivedAt,
+      subject: 'Weekly digest',
+    })
+    // Both hold all three words, which the unquoted search proves once
+    // Stalwart has indexed them.
+    const unquoted = async (): Promise<string> => await textOf({ limit: 20, query: 'quillfern teapot atelier' })
+    for (let tries = 0; tries < 20 && !(await unquoted()).startsWith('2 of 2'); tries++) {
+      await Bun.sleep(500)
+    }
+    const loose = await unquoted()
+    expect(loose).toContain(phrase)
+    expect(loose).toContain(apart)
+
+    const text = await textOf({ limit: 20, query: '"quillfern teapot atelier"' })
+
+    expect(text).toStartWith('1 of 1 message(s) matched:')
+    expect([...text.matchAll(HIT_ID_RE)].map((m) => m[1])).toEqual([phrase])
+    expect(apart).not.toBe(phrase)
+  })
 })

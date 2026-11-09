@@ -98,7 +98,7 @@ const searchEmailsShape = {
     .max(500)
     .optional()
     .describe(
-      "Free-text search over subject, body, and addresses. Terms are OR'd — a message matches if it contains ANY term. Messages containing every term come first, then the rest ranked within their page by how many terms they contain (each hit shows matched: X/N terms). Wrap a phrase in double quotes to require all its words in the same field. Narrow with from/keywords/after/before/read/starred, not by adding terms; only the first 10 terms are used."
+      "Free-text search over subject, body, and addresses. Terms are OR'd — a message matches if it contains ANY term. Messages containing every term come first, then the rest ranked within their page by how many terms they contain (each hit shows matched: X/N terms). Wrap a phrase in double quotes to match only messages holding those words next to each other, in that order. Narrow with from/keywords/after/before/read/starred, not by adding terms; only the first 10 terms are used."
     ),
   read: z
     .boolean()
@@ -133,13 +133,21 @@ export const searchEmailsInput = z.object(searchEmailsShape).refine(hasAnyFilter
 
 export type SearchEmailsArgs = z.infer<typeof searchEmailsInput>
 
+const QUERY_TERM_RE = /"([^"]*)"|(\S+)/g
+
 // Split a free-text query into search terms: double-quoted phrases stay
-// intact, everything else splits on whitespace. Each term becomes its own
-// JMAP `text` condition, OR'd in the JMAP layer — see the rationale on
+// intact and keep their quotes, everything else splits on whitespace. Each
+// term becomes its own JMAP `text` condition, OR'd in the JMAP layer — see
 // `EmailQueryFilters.text` for why a whole query must not be sent as one
-// condition.
+// condition, and why a phrase must reach Stalwart quoted.
 export const queryTerms = (query: string): string[] =>
-  [...query.matchAll(/"([^"]*)"|(\S+)/g)].map((m) => (m[1] ?? m[2] ?? '').trim()).filter((t) => t.length > 0)
+  [...query.matchAll(QUERY_TERM_RE)].flatMap((m) => {
+    const phrase = m[1]?.trim()
+    if (phrase !== undefined) {
+      return phrase.length > 0 ? [`"${phrase}"`] : []
+    }
+    return m[2] ? [m[2]] : []
+  })
 
 // Fan-out bound for the per-term ranked queries: a degenerate 500-char query
 // must not turn into dozens of Email/query calls.

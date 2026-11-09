@@ -123,8 +123,12 @@ describe('queryTerms', () => {
     expect(queryTerms('Supabase invoice receipt')).toEqual(['Supabase', 'invoice', 'receipt'])
   })
 
-  test('keeps a quoted phrase together and strips the quotes', () => {
-    expect(queryTerms('"Google Workspace" invoice')).toEqual(['Google Workspace', 'invoice'])
+  test('keeps a quoted phrase together, quoted, so Stalwart matches it as a phrase', () => {
+    expect(queryTerms('"Acme Workspace" invoice')).toEqual(['"Acme Workspace"', 'invoice'])
+  })
+
+  test('trims the inside of a quoted phrase', () => {
+    expect(queryTerms('" Acme Workspace "')).toEqual(['"Acme Workspace"'])
   })
 
   test('collapses extra whitespace and drops empty quotes', () => {
@@ -381,7 +385,7 @@ describe('searchEmails', () => {
     expect(result.content[0]?.text).toStartWith('1 of 1 message(s) matched:')
   })
 
-  test('keeps a double-quoted phrase as a single term in the per-term fan-out', async () => {
+  test('sends a double-quoted phrase quoted, as one term, in the per-term fan-out', async () => {
     let seen: EmailQueryPerTermParams | undefined
     await searchEmails(
       fakeDeps({
@@ -391,9 +395,9 @@ describe('searchEmails', () => {
         },
         tierIds: { some: ['a'] },
       }),
-      { args: { limit: 20, query: '"Google Workspace" invoice' }, token: 'tok' }
+      { args: { limit: 20, query: '"Acme Workspace" invoice' }, token: 'tok' }
     )
-    expect(seen?.terms).toEqual(['Google Workspace', 'invoice'])
+    expect(seen?.terms).toEqual(['"Acme Workspace"', 'invoice'])
   })
 
   test('ranks partial matches holding more terms first and renders matched counts', async () => {

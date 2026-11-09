@@ -85,9 +85,11 @@ export interface EmailQueryFilters {
   keywords?: string[]
   mailboxId?: string
   // Free-text terms, OR'd among themselves. Each term is its own JMAP `text`
-  // condition: Stalwart matches a multi-word `text` string only when every
-  // token occurs in a single field, so passing a whole query as one condition
-  // silently drops near-matches (e.g. a subject containing 2 of 3 words).
+  // condition. Stalwart reads an unquoted multi-word `text` string as an AND
+  // of its tokens, each of which may sit in any field, so passing a whole
+  // query as one condition drops near-matches (a message holding 2 of 3
+  // words). A term wrapped in double quotes (`"order shipped today"`) is an
+  // exact phrase: those tokens next to each other, in that order.
   text?: string[]
   // How the text terms combine: `any` (the default) matches a message holding
   // at least one term, `all` one holding every term, and `someButNotAll` one
