@@ -44,4 +44,16 @@ describe('buildInvite → parseEvents roundtrip', () => {
     })
     expect(parseEvents(ics)[0]?.recurrence).toBe('FREQ=WEEKLY;BYDAY=TH')
   })
+
+  test.each(['busy', 'free'] as const)('showAs %s parses back', (showAs) => {
+    const ics = buildInvite({
+      attendees: [],
+      end: new Date('2026-06-12T10:30:00Z'),
+      showAs,
+      start: new Date('2026-06-12T10:00:00Z'),
+      title: 'Hold',
+      uid: 'evt-rt-s',
+    })
+    expect(parseEvents(ics)[0]?.showAs).toBe(showAs)
+  })
 })

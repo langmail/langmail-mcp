@@ -87,6 +87,14 @@ export const createCalendarEventInput = z.object({
       'Remind the user this many minutes before the start (e.g. 30); omit for no reminder. An all-day event ' +
         'starts at 00:00, so 900 = 09:00 the day before.'
     ),
+  showAs: z
+    .enum(['busy', 'free'])
+    .optional()
+    .describe(
+      'Whether this event counts as busy time. `busy` (default) means it does; `free` means it does not — ' +
+        'for holds, reminders and travel buffers the user does not want counted against their availability. ' +
+        'Inviting people makes an event count as busy time, so `free` is refused when `attendees` are given.'
+    ),
   start: eventTimeSchema.describe(
     'Event start as ISO 8601 (see `timeZone`), or a date (2026-10-03) for an all-day event.'
   ),
@@ -184,6 +192,15 @@ export const createCalendarEvent = async (
   // comment on InviteInput for the two ways that goes silently wrong.
   const attendees = args.attendees ?? []
   const isSchedulingObject = attendees.length > 0
+  // In a meeting each attendee decides their own free/busy, and the stored
+  // event is also the invitation they receive, so a meeting cannot be marked
+  // free. `busy` is the RFC default and changes nothing for them.
+  if (isSchedulingObject && args.showAs === 'free') {
+    return errorResult(
+      'An event with attendees cannot be marked `showAs: "free"`: inviting people makes it count as busy time. ' +
+        'Nothing was created. Omit `showAs` to create the meeting, or omit `attendees` for a free personal event.'
+    )
+  }
   // A bare UUID: RFC 7986 §5.3 (2016) supersedes the RFC 5545 advice to
   // qualify a UID with a domain — it MUST NOT carry host or domain data. Side
   // benefit: the mail domain no longer leaks into every invitation sent to an
@@ -201,6 +218,7 @@ export const createCalendarEvent = async (
     ...(args.description ? { description: args.description } : {}),
     ...(args.location ? { location: args.location } : {}),
     ...(rrule ? { rrule } : {}),
+    ...(args.showAs ? { showAs: args.showAs } : {}),
     ...(args.notify === 'none' ? { scheduleAgent: 'NONE' as const } : {}),
     ...(args.reminderMinutesBefore === undefined ? {} : { alarms: [{ minutesBefore: args.reminderMinutesBefore }] }),
   })

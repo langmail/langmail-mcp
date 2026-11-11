@@ -161,6 +161,25 @@ describe('buildInvite', () => {
     expect(ics).toContain('SEQUENCE:3')
   })
 
+  describe('showAs', () => {
+    const withoutDtstamp = (ics: string): string => ics.replace(DTSTAMP_LINE_RE, '')
+
+    test('free writes TRANSP:TRANSPARENT', () => {
+      expect(buildInvite({ ...baseInput, showAs: 'free' })).toContain('\r\nTRANSP:TRANSPARENT\r\n')
+    })
+
+    test('busy writes TRANSP:OPAQUE', () => {
+      expect(buildInvite({ ...baseInput, showAs: 'busy' })).toContain('\r\nTRANSP:OPAQUE\r\n')
+    })
+
+    test('omitted writes no TRANSP, and the output otherwise matches a free one line for line', () => {
+      const omitted = buildInvite(baseInput)
+      expect(omitted).not.toContain('TRANSP')
+      const free = buildInvite({ ...baseInput, showAs: 'free' }).replace('TRANSP:TRANSPARENT\r\n', '')
+      expect(withoutDtstamp(free)).toBe(withoutDtstamp(omitted))
+    })
+  })
+
   test('omits RRULE for a one-off event', () => {
     expect(buildInvite(baseInput)).not.toContain('RRULE')
   })

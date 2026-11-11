@@ -159,6 +159,48 @@ describe('createCalendarEvent', () => {
     expect(txt).toContain('uid: ')
   })
 
+  describe('showAs', () => {
+    const create = async (over: Partial<CreateCalendarEventArgs>) => {
+      const captured: PutEventParams[] = []
+      const result = await createCalendarEvent(makeDeps(account(), captured), { args: args(over), token: 'tok' })
+      return { ical: captured[0]?.ical, result }
+    }
+
+    test('free writes TRANSP:TRANSPARENT on a personal event', async () => {
+      const { ical, result } = await create({ attendees: undefined, showAs: 'free' })
+      expect(result.isError).toBeUndefined()
+      expect(ical).toContain('TRANSP:TRANSPARENT')
+    })
+
+    test('busy writes TRANSP:OPAQUE on a personal event', async () => {
+      const { ical } = await create({ attendees: undefined, showAs: 'busy' })
+      expect(ical).toContain('TRANSP:OPAQUE')
+    })
+
+    test('omitted writes no TRANSP', async () => {
+      const { ical } = await create({ attendees: undefined })
+      expect(ical).not.toContain('TRANSP')
+    })
+
+    test('free with attendees is refused and creates nothing', async () => {
+      const { ical, result } = await create({ showAs: 'free' })
+      expect(ical).toBeUndefined()
+      expect(result.isError).toBe(true)
+      expect(result.content[0]?.text).toContain('Nothing was created.')
+    })
+
+    test('busy with attendees is accepted', async () => {
+      const { ical, result } = await create({ showAs: 'busy' })
+      expect(result.isError).toBeUndefined()
+      expect(ical).toContain('TRANSP:OPAQUE')
+      expect(ical).toContain('METHOD:REQUEST')
+    })
+
+    test('the schema refuses another value', () => {
+      expect(createCalendarEventInput.safeParse({ ...args(), showAs: 'tentative' }).success).toBe(false)
+    })
+  })
+
   // RFC 7986 §5.3: a UID MUST NOT carry host or domain data. We used to mint
   // `<uuid>@<mail domain>`, which both leaked the domain into every outgoing
   // invitation and — because create named the `.ics` after the UID — put a raw

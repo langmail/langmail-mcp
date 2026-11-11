@@ -10,6 +10,7 @@ import ical, {
   ICalAttendeeRole,
   ICalAttendeeStatus,
   ICalCalendarMethod,
+  ICalEventTransparency,
 } from 'ical-generator'
 
 import { toZonedDate, UTC_TIME_ZONE } from './timezone.ts'
@@ -83,6 +84,11 @@ const ATTENDEE_ROLES: ReadonlyMap<string, ICalAttendeeRole> = new Map(
   Object.values(ICalAttendeeRole).map((role) => [role, role])
 )
 
+const TRANSPARENCY: Record<'busy' | 'free', ICalEventTransparency> = {
+  busy: ICalEventTransparency.OPAQUE,
+  free: ICalEventTransparency.TRANSPARENT,
+}
+
 export interface InviteInput {
   // VALARMs to attach, in order. See InviteAlarm.
   alarms?: InviteAlarm[]
@@ -142,6 +148,10 @@ export interface InviteInput {
   // so attendees' clients treat the re-sent REQUEST as an update, not a
   // duplicate. See update-calendar-event.ts.
   sequence?: number
+  // Whether the event counts as busy time, written as TRANSP (RFC 5545
+  // §3.8.2.7): `free` is TRANSPARENT, `busy` an explicit OPAQUE. Omit to write
+  // no TRANSP line, which reads as busy.
+  showAs?: 'busy' | 'free'
   start: Date
   timeZone?: string
   title: string
@@ -180,6 +190,7 @@ export const buildInvite = (input: InviteInput): string => {
     ...(input.description ? { description: input.description } : {}),
     ...(input.location ? { location: input.location } : {}),
     ...(input.sequence === undefined ? {} : { sequence: input.sequence }),
+    ...(input.showAs ? { transparency: TRANSPARENCY[input.showAs] } : {}),
   })
 
   // A RECURRENCE-ID makes this the override of one instance; an RRULE would
