@@ -68,6 +68,8 @@ describe('routes', () => {
     expect(body.resource).toBe(PUBLIC)
     expect(body.authorization_servers).toEqual([PUBLIC])
     expect(body.bearer_methods_supported).toEqual(['header'])
+    // offline_access makes a spec-following client ask for a refresh token.
+    expect(body.scopes_supported).toEqual(['openid', 'email', 'offline_access'])
   })
 
   test('GET /image-proxy/:token dispatches to the injected proxy', async () => {

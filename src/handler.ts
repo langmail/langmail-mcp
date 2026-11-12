@@ -9,6 +9,7 @@ import { logger } from '@langmail/logger'
 import { type AttachmentDownload } from './attachments/download.ts'
 import { type AttachmentUpload } from './attachments/upload.ts'
 import { type AuthContext, type AuthMiddleware, createAuthMiddleware } from './auth/middleware.ts'
+import { MCP_SCOPES } from './auth/scopes.ts'
 import { TokenCache } from './auth/token-cache.ts'
 import { type ImageProxy } from './email-render/image-proxy.ts'
 import {
@@ -177,7 +178,7 @@ export const createRoutes = (cfg: HandlerConfig): Routes => {
         registration_endpoint: `${oauth2}/register`,
         resource: cfg.publicUrl,
         response_types_supported: ['code'],
-        scopes_supported: ['openid', 'email', 'offline_access'],
+        scopes_supported: MCP_SCOPES,
         token_endpoint: `${oauth2}/token`,
         token_endpoint_auth_methods_supported: ['none'],
         userinfo_endpoint: `${oauth2}/userinfo`,
@@ -193,6 +194,7 @@ export const createRoutes = (cfg: HandlerConfig): Routes => {
         authorization_servers: [cfg.publicUrl],
         bearer_methods_supported: ['header'],
         resource: cfg.publicUrl,
+        scopes_supported: MCP_SCOPES,
       })
     }
 

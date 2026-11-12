@@ -34,6 +34,7 @@ describe('auth middleware', () => {
     const wa = res.headers.get('www-authenticate') ?? ''
     expect(wa.toLowerCase()).toContain('bearer')
     expect(wa).toContain(`resource_metadata="${RESOURCE}/.well-known/oauth-protected-resource"`)
+    expect(wa).toContain('scope="openid email offline_access"')
   })
 
   test('returns 401 when Authorization scheme is not Bearer', async () => {
