@@ -38,8 +38,10 @@ install Node and never will.
 - `bun run spec:check` — TLC run of the send-protocol model; see
   `spec/AGENTS.md` before touching `sendDraft` or `replyToMessage`.
 
-Point a local client at the dev server with
-`claude mcp add --transport http langmail-local http://127.0.0.1:8080/mcp`.
+Point a local client at the dev server through `local-proxy` with
+`claude mcp add --transport http langmail-local https://mcp.langmail.test:8088/mcp`:
+`.env.development` sets that origin as `MCP_PUBLIC_URL`, so OAuth fails on the
+loopback port.
 
 ### CalDAV integration tests
 
