@@ -12,6 +12,7 @@ import {
   type DraftCreateResult,
   type DraftDestroyResult,
   type EmailComposeRecord,
+  type EmailSetParams,
   type EmailSubmissionCreateParams,
   type EmailSubmissionResult,
   type IdentityRecord,
@@ -41,6 +42,9 @@ export interface DraftDepsOptions {
   // Recorded Email/set destroys, by id — empty means nothing was deleted.
   destroys?: string[]
   identities?: IdentityRecord[]
+  keywordSetError?: Error
+  // Recorded keyword patches (`$forwarded` on a forwarded original), newest last.
+  keywordSets?: EmailSetParams[]
   mailboxes?: ComposeMailboxes
   // The mailbox emailComposeGet reads from, keyed by id. A missing id reads as null.
   records?: Record<string, EmailComposeRecord>
@@ -121,6 +125,10 @@ export const draftDeps = (opts: DraftDepsOptions = {}): DraftToolDeps => {
       return Promise.resolve({ records: matches.slice(0, p.limit), total: matches.length })
     },
     emailComposeGet: (p) => Promise.resolve(opts.records?.[p.id] ?? null),
+    emailKeywordsSet: (p) => {
+      opts.keywordSets?.push(p)
+      return opts.keywordSetError ? Promise.reject(opts.keywordSetError) : Promise.resolve()
+    },
     emailSubmissionCreate: (p) => {
       opts.submissions?.push(p)
       if (opts.submitError) {

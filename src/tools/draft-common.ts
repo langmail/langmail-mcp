@@ -17,6 +17,7 @@ import {
   accountIdForSubmission,
   type BlobUploadParams,
   blobUpload,
+  DRAFT_FORWARD_OF_KEYWORD_PREFIX,
   DRAFT_ID_KEYWORD_PREFIX,
   DRAFT_KEYWORD,
   DRAFT_REPLY_TO_KEYWORD_PREFIX,
@@ -36,9 +37,11 @@ import {
   type EmailComposeGetParams,
   type EmailComposeRecord,
   type EmailDraft,
+  type EmailSetParams,
   type EmailSubmissionCreateParams,
   type EmailSubmissionResult,
   emailComposeGet,
+  emailSet,
   emailSubmissionCreate,
   type IdentityGetParams,
   type IdentityRecord,
@@ -91,6 +94,8 @@ export interface DraftToolDeps {
   draftIdResolve: (p: DraftIdResolveParams) => Promise<string | null>
   draftList: (p: DraftListParams) => Promise<DraftListResult>
   emailComposeGet: (p: EmailComposeGetParams) => Promise<EmailComposeRecord | null>
+  // Patch keywords on one message — how a forwarded original gets `$forwarded`.
+  emailKeywordsSet: (p: EmailSetParams) => Promise<void>
   emailSubmissionCreate: (p: EmailSubmissionCreateParams) => Promise<EmailSubmissionResult>
   identityGet: (p: IdentityGetParams) => Promise<IdentityRecord[]>
   resolveAccountId: (authorization: string) => Promise<string>
@@ -437,23 +442,40 @@ export const bodyTruncated = (record: EmailComposeRecord): boolean => {
 // blobId are dropped — an EmailBodyPart without one names nothing that can be
 // re-attached — which is why `unreferencableAttachments` exists to stop an edit
 // before that drop can become a silent loss.
-const attachmentsFromRecord = (record: EmailComposeRecord): DraftAttachment[] =>
-  (record.attachments ?? []).flatMap((part) =>
-    part.blobId
-      ? [
-          {
-            blobId: part.blobId,
-            ...(part.cid ? { cid: part.cid } : {}),
-            // Preserved, not re-derived — see DraftAttachment.disposition.
-            ...(part.disposition ? { disposition: part.disposition } : {}),
-            ...(part.location ? { location: part.location } : {}),
-            ...(part.name ? { name: part.name } : {}),
-            ...(typeof part.size === 'number' ? { size: part.size } : {}),
-            ...(part.type ? { type: part.type } : {}),
-          },
-        ]
-      : []
-  )
+//
+// RFC 8621 lists most files under `attachments`, but an image inline in a
+// `multipart/mixed` body — the shape Apple Mail sends, and the one a staged
+// forward that carries such an image reads back as — sits in `textBody`/
+// `htmlBody` between the text parts. Those are files too, so they are carried
+// as well, inline as they were presented; a part listed in both body lists
+// counts once.
+export const attachmentsFromRecord = (record: EmailComposeRecord): DraftAttachment[] => {
+  const inBody = [...(record.textBody ?? []), ...(record.htmlBody ?? [])]
+    .filter((part) => part.type && !part.type.startsWith('text/'))
+    .map((part) => ({ ...part, disposition: part.disposition ?? 'inline' }))
+  const seen = new Set<string>()
+  return [...(record.attachments ?? []), ...inBody].flatMap((part) => {
+    const key = part.partId ?? part.blobId
+    if (!part.blobId || (key && seen.has(key))) {
+      return []
+    }
+    if (key) {
+      seen.add(key)
+    }
+    return [
+      {
+        blobId: part.blobId,
+        ...(part.cid ? { cid: part.cid } : {}),
+        // Preserved, not re-derived — see DraftAttachment.disposition.
+        ...(part.disposition ? { disposition: part.disposition } : {}),
+        ...(part.location ? { location: part.location } : {}),
+        ...(part.name ? { name: part.name } : {}),
+        ...(typeof part.size === 'number' ? { size: part.size } : {}),
+        ...(part.type ? { type: part.type } : {}),
+      },
+    ]
+  })
+}
 
 // The attached files of a stored draft that could *not* be carried onto a
 // replacement, named for a refusal message.
@@ -527,6 +549,39 @@ export const replyOriginalKeyword = (originalId: string): string => `${DRAFT_REP
 // The JMAP id of the message a reply draft answers, when create_draft recorded it.
 export const replyOriginalId = (record: EmailComposeRecord): string | null =>
   keywordSuffix(record, DRAFT_REPLY_TO_KEYWORD_PREFIX)
+
+// The keyword a staged forward carries, naming the message it forwards — see
+// @langmail/jmap drafts.ts.
+export const forwardOriginalKeyword = (originalId: string): string => `${DRAFT_FORWARD_OF_KEYWORD_PREFIX}${originalId}`
+
+// The JMAP id of the message a forward draft forwards, when it was staged here.
+export const forwardOriginalId = (record: EmailComposeRecord): string | null =>
+  keywordSuffix(record, DRAFT_FORWARD_OF_KEYWORD_PREFIX)
+
+// RFC 5788 / RFC 8621 §4.1.1: the message has been forwarded. Clients show it
+// next to the message, the way `$answered` marks a reply.
+const FORWARDED_KEYWORD = '$forwarded'
+
+// Mark the original of a forward that has gone out. Run once the send has
+// succeeded, and never thrown from: the mail is already delivered, so a failure
+// here is a line in the result, not a failed send. Returns that line, or null.
+export const markForwarded = async (
+  deps: DraftToolDeps,
+  p: { accountId: string; authorization: string; id: string }
+): Promise<string | null> => {
+  try {
+    await deps.emailKeywordsSet({
+      accountId: p.accountId,
+      apiUrl: '',
+      authorization: p.authorization,
+      changes: { keywords: { [FORWARDED_KEYWORD]: true } },
+      id: p.id,
+    })
+    return null
+  } catch {
+    return `The forward went out, but the original (${p.id}) could not be marked as forwarded.`
+  }
+}
 
 // RFC 8620 §1.2 Id syntax. Anything else cannot be a draft id, and spliced into
 // a keyword it could make the query itself invalid.
@@ -689,6 +744,7 @@ export const makeLiveDeps = (live: JmapLive): DraftToolDeps => ({
   draftIdResolve: async (p) => draftIdResolve({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   draftList: async (p) => draftList({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   emailComposeGet: async (p) => emailComposeGet({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
+  emailKeywordsSet: async (p) => emailSet({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   emailSubmissionCreate: async (p) =>
     emailSubmissionCreate({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   identityGet: async (p) => identityGet({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),

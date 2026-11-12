@@ -25,6 +25,12 @@ downloads a pinned `tla2tools.jar`. CI runs the same script
   - An answer can be lost while its request is still in flight and lands
     later.
 
+`forward_message` runs `reply_to_message`'s steps exactly, under its own
+subject (the message being forwarded, keyed `forward_message`), so the reply
+process models it too. Marking the forwarded original `$forwarded`, after
+`forward_message` or a `send_draft` of a staged forward, runs once the hold has
+ended and outside the modelled steps: it never sends.
+
 ## Properties
 
 | Property | Meaning |

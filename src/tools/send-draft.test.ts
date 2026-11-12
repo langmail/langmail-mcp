@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 
-import { type EmailSubmissionCreateParams, JmapError } from '@langmail/jmap'
+import { type EmailSetParams, type EmailSubmissionCreateParams, JmapError } from '@langmail/jmap'
 import { logger } from '@langmail/logger'
 
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
@@ -403,5 +403,34 @@ describe('sendDraft', () => {
     }
     // A failed send must stay retryable — the key can only shadow a success.
     expect(replays.lookup('send_draft', TEST_PRINCIPAL, 'k1')).toBeNull()
+  })
+})
+
+describe('sendDraft of a staged forward', () => {
+  test('marks the forwarded original once the send succeeds', async () => {
+    const keywordSets: EmailSetParams[] = []
+    const forward = stagedDraft({
+      keywords: { $draft: true, $seen: true, '$draftid:d1': true, '$draftforwardof:e1': true },
+    })
+    await run({ draftId: 'd1' }, { keywordSets, records: { d1: forward } })
+    expect(keywordSets.map((p) => [p.id, p.changes])).toEqual([['e1', { keywords: { $forwarded: true } }]])
+  })
+
+  test('marks nothing for a plain draft, or when the send is refused', async () => {
+    const keywordSets: EmailSetParams[] = []
+    await run({ draftId: 'd1' }, { keywordSets, records: { d1: stagedDraft() } })
+    const forward = stagedDraft({
+      keywords: { $draft: true, $seen: true, '$draftid:d1': true, '$draftforwardof:e1': true },
+    })
+    const error = spyOn(logger, 'error').mockImplementation(() => undefined)
+    try {
+      await run(
+        { draftId: 'd1' },
+        { keywordSets, records: { d1: forward }, submitError: new JmapError(200, 'no', 'forbiddenFrom') }
+      )
+    } finally {
+      error.mockRestore()
+    }
+    expect(keywordSets).toEqual([])
   })
 })

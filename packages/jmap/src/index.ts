@@ -23,6 +23,7 @@ export {
   contactCardUpdate,
 } from './contacts.ts'
 export {
+  DRAFT_FORWARD_OF_KEYWORD_PREFIX,
   DRAFT_ID_KEYWORD_PREFIX,
   DRAFT_KEYWORD,
   DRAFT_REPLY_TO_KEYWORD_PREFIX,

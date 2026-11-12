@@ -27,7 +27,7 @@ export interface ReplyBody {
 }
 
 const ESCAPES: Record<string, string> = { '"': '&quot;', '&': '&amp;', '<': '&lt;', '>': '&gt;' }
-const escapeHtml = (text: string): string => text.replace(/[&<>"]/gu, (c) => ESCAPES[c] ?? c)
+export const escapeHtml = (text: string): string => text.replace(/[&<>"]/gu, (c) => ESCAPES[c] ?? c)
 
 // Pinned to UTC: the tools have no notion of the user's timezone, and a wrong
 // local offset is worse than an explicit "UTC".
@@ -42,7 +42,7 @@ const ATTRIBUTION_DATE = new Intl.DateTimeFormat('en-GB', {
   year: 'numeric',
 })
 
-const formatAttributionDate = (iso: string): string | null => {
+export const formatAttributionDate = (iso: string): string | null => {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) {
     return null
@@ -103,7 +103,7 @@ const LINE_SPACE_RE = /[ \t]+/gu
 // disallowed tag its content is sanitized like any other text.
 const NON_TEXT_TAGS = ['script', 'style', 'textarea', 'title', 'head']
 
-const htmlToText = (html: string): string =>
+export const htmlToText = (html: string): string =>
   sanitizeHtml(html.replace(BLOCK_BREAK_RE, '\n').replace(CELL_BREAK_RE, ' '), {
     allowedAttributes: {},
     allowedTags: [],
@@ -214,9 +214,13 @@ const LINK_SCHEME_RE = /^(?:https?|mailto|tel):/iu
 // sanitize-html lets a URL with no scheme through (`/pixel`, `logo.png`,
 // `//host/x`); in a reply those resolve against the recipient's webmail. Only
 // absolute web URLs and raster data images are quoted.
-const quotableImageSrc = (src: string | undefined): boolean => {
+// A forward carries the original's inline parts along, so there a `cid:` src
+// still names something the recipient receives.
+const CID_SCHEME_RE = /^cid:/iu
+
+const quotableImageSrc = (src: string | undefined, keepCid: boolean): boolean => {
   const normalized = src?.replace(SCHEME_NOISE_RE, '') ?? ''
-  return WEB_SCHEME_RE.test(normalized) || DATA_IMAGE_RE.test(normalized)
+  return WEB_SCHEME_RE.test(normalized) || DATA_IMAGE_RE.test(normalized) || (keepCid && CID_SCHEME_RE.test(normalized))
 }
 
 const quotableHref = (href: string): boolean => LINK_SCHEME_RE.test(href.replace(SCHEME_NOISE_RE, ''))
@@ -236,7 +240,9 @@ const quotableAttributes = (attribs: sanitizeHtml.Attributes): sanitizeHtml.Attr
   }
 }
 
-const quotableHtml = (body: string): string =>
+// `keepCid` is for a forward, which attaches the inline parts the `cid:` srcs
+// point at; a reply does not, so there they would render as broken images.
+export const quotableHtml = (body: string, opts: { keepCid?: boolean } = {}): string =>
   sanitizeHtml(body, {
     allowedAttributes: {
       '*': PRESENTATION_ATTRIBUTES,
@@ -248,20 +254,20 @@ const quotableHtml = (body: string): string =>
       th: ['colspan', 'rowspan', ...PRESENTATION_ATTRIBUTES],
     },
     allowedSchemes: ['http', 'https', 'mailto', 'tel'],
-    allowedSchemesByTag: { img: ['http', 'https', 'data'] },
+    allowedSchemesByTag: { img: ['http', 'https', 'data', ...(opts.keepCid ? ['cid'] : [])] },
     allowedStyles: { '*': QUOTABLE_STYLES },
     allowedTags: [...sanitizeHtml.defaults.allowedTags, 'img', 'font', 'center', 'span'],
-    // An inline image of the original is not carried over as an attachment, so
-    // its `cid:` src is refused by the scheme list above — and an <img> with
-    // nothing left to show is dropped rather than rendered as a broken box. A
-    // `data:` image must be a raster one: SVG can carry markup (see
-    // email-render/sanitize.ts).
-    exclusiveFilter: (frame) => frame.tag === 'img' && !quotableImageSrc(frame.attribs.src),
+    // In a reply an inline image of the original is not carried over as an
+    // attachment, so its `cid:` src is refused by the scheme list above — and
+    // an <img> with nothing left to show is dropped rather than rendered as a
+    // broken box. A `data:` image must be a raster one: SVG can carry markup
+    // (see email-render/sanitize.ts).
+    exclusiveFilter: (frame) => frame.tag === 'img' && !quotableImageSrc(frame.attribs.src, opts.keepCid === true),
     nonTextTags: NON_TEXT_TAGS,
     transformTags: { '*': (tagName, attribs) => ({ attribs: quotableAttributes(attribs), tagName }) },
   }).trim()
 
-const textAsHtml = (text: string): string => escapeHtml(text).replace(LINE_BREAKS_RE, '<br>')
+export const textAsHtml = (text: string): string => escapeHtml(text).replace(LINE_BREAKS_RE, '<br>')
 
 const quoteText = (text: string): string =>
   text
@@ -278,7 +284,7 @@ export const MAX_QUOTE_CHARS = 50_000
 // so 100_000 characters always fit. A staged reply's part — the caller's text
 // plus the quote — is kept inside this, or update_draft would find it
 // truncated and refuse to edit the draft at all.
-const MAX_REPLY_PART_CHARS = MAX_DRAFT_BODY_VALUE_BYTES / 4
+export const MAX_REPLY_PART_CHARS = MAX_DRAFT_BODY_VALUE_BYTES / 4
 // Room for the shortened note and the markup around the quote; the attribution
 // is measured, since it carries the sender's display name.
 const QUOTE_FRAME_CHARS = 1000
@@ -287,12 +293,15 @@ const SHORTENED_NOTE = '[… quoted message shortened]'
 // Render as much of `value` as fits in `budget` characters once rendered.
 // Rendering grows the text unevenly (`> ` prefixes, HTML escaping), so the cut
 // is found by shrinking until the output fits rather than computed up front.
-const fitted = (
+export const fitted = (
   value: string,
   render: (value: string) => string,
-  budget: number
+  budget: number,
+  // How much of `value` is ever rendered. A reply's quote stops at
+  // MAX_QUOTE_CHARS; a forward carries as much as the part budget allows.
+  cap: number = MAX_QUOTE_CHARS
 ): { rendered: string; shortened: boolean } => {
-  let limit = Math.min(value.length, MAX_QUOTE_CHARS)
+  let limit = Math.min(value.length, cap)
   for (;;) {
     const rendered = render(value.slice(0, limit))
     if (rendered.length <= budget || limit === 0) {
@@ -346,7 +355,11 @@ interface QuoteSource {
 // Whether the body value of one media type came back cut off at the read
 // budget — per part, so a complete text part is not marked shortened because
 // its HTML alternative was long.
-const partTruncated = (record: EmailComposeRecord, parts: EmailComposeRecord['textBody'], mediaType: string): boolean =>
+export const partTruncated = (
+  record: EmailComposeRecord,
+  parts: EmailComposeRecord['textBody'],
+  mediaType: string
+): boolean =>
   (parts ?? []).some(
     (part) => part.type === mediaType && part.partId && record.bodyValues?.[part.partId]?.isTruncated === true
   )
@@ -384,7 +397,7 @@ const quoteHtmlPart = (own: string, q: QuoteSource): string => {
   )
 }
 
-const nonBlank = (value: string | undefined): string | undefined =>
+export const nonBlank = (value: string | undefined): string | undefined =>
   value !== undefined && value.trim() !== '' ? value : undefined
 
 // The reply body with the original quoted below it. Returns the body unchanged

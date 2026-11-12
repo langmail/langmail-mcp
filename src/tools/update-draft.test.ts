@@ -729,3 +729,103 @@ describe('updateDraft on a reply', () => {
     expect(creates[0]?.keywords).toContain('$draftreplyto:e1')
   })
 })
+
+describe('updateDraft on a staged forward', () => {
+  const original = receivedMessage({
+    bodyValues: { t: { value: 'Rent for March' } },
+    subject: 'Invoice March',
+    textBody: [{ partId: 't', type: 'text/plain' }],
+  })
+  const forward = stagedDraft({
+    attachments: [
+      { blobId: 'bPdf', disposition: 'attachment', name: 'invoice.pdf', partId: '3', type: 'application/pdf' },
+    ],
+    bodyValues: {
+      '1': { value: 'old note\n\n---------- Forwarded message ---------\nRent for March' },
+      '2': { value: '<p>old note</p>' },
+    },
+    htmlBody: [{ partId: '2', type: 'text/html' }],
+    keywords: { $draft: true, $seen: true, '$draftid:d1': true, '$draftforwardof:e1': true },
+    references: ['orig@example.org'],
+    subject: 'Fwd: Invoice March',
+    to: [{ email: 'accountant@example.com' }],
+  })
+
+  test('a new note in text alone keeps the forwarded block below it in both parts, and the files', async () => {
+    const creates: DraftCreateParams[] = []
+    const { result } = await run(
+      { draftId: 'd1', text: 'for the tax return' },
+      { creates, records: { d1: forward, e1: original } }
+    )
+    expect(result.isError).toBeUndefined()
+    const draft = creates[0]?.draft
+    expect(draft?.text?.startsWith('for the tax return\n\n---------- Forwarded message')).toBe(true)
+    expect(draft?.text).toContain('Rent for March')
+    expect(draft?.text).not.toContain('old note')
+    expect(draft?.html?.startsWith('for the tax return')).toBe(true)
+    expect(draft?.html).toContain('Rent for March')
+    expect(draft?.attachments?.map((file) => file.blobId)).toEqual(['bPdf'])
+    expect(creates[0]?.keywords).toContain('$draftforwardof:e1')
+  })
+
+  test('a whole body passed back as text alone also replaces the html part', async () => {
+    const creates: DraftCreateParams[] = []
+    const whole = 'fixed note\n\n---------- Forwarded message ---------\nRent for March'
+    await run({ draftId: 'd1', text: whole }, { creates, records: { d1: forward, e1: original } })
+    expect(creates[0]?.draft.text).toBe(whole)
+    expect(creates[0]?.draft.html).toContain('fixed note')
+    expect(creates[0]?.draft.html).not.toContain('old note')
+  })
+
+  test('a note edit of a shortened forward keeps exactly one .eml copy of the original', async () => {
+    const creates: DraftCreateParams[] = []
+    const long = receivedMessage({
+      blobId: 'bRaw',
+      bodyValues: { t: { value: 'x'.repeat(120_000) } },
+      textBody: [{ partId: 't', type: 'text/plain' }],
+    })
+    // As read back: the .eml part carries a blobId of the draft's own blob.
+    const shortened = stagedDraft({
+      ...forward,
+      attachments: [{ blobId: 'bDraftPart', name: 'Quarterly numbers.eml', partId: '4', type: 'message/rfc822' }],
+    })
+    await run({ draftId: 'd1', text: 'see below' }, { creates, records: { d1: shortened, e1: long } })
+    expect(creates[0]?.draft.attachments?.filter((file) => file.type === 'message/rfc822')).toHaveLength(1)
+  })
+
+  test('an original with no Message-ID still gets its block rebuilt', async () => {
+    const creates: DraftCreateParams[] = []
+    const bare = receivedMessage({ ...original, messageId: null })
+    const staged = stagedDraft({ ...forward, references: null })
+    await run({ draftId: 'd1', text: 'new note' }, { creates, records: { d1: staged, e1: bare } })
+    expect(creates[0]?.draft.text).toContain('Rent for March')
+  })
+
+  test('a whole body passed back is not given a second block', async () => {
+    const creates: DraftCreateParams[] = []
+    const whole = 'new note\n\n---------- Forwarded message ---------\nRent for March'
+    await run(
+      { draftId: 'd1', html: '<p>new note</p>', text: whole },
+      { creates, records: { d1: forward, e1: original } }
+    )
+    expect(creates[0]?.draft.text).toBe(whole)
+  })
+
+  test('with the original gone, the note goes out as given and says so', async () => {
+    const creates: DraftCreateParams[] = []
+    const { text } = await run({ draftId: 'd1', text: 'note' }, { creates, records: { d1: forward } })
+    expect(creates[0]?.draft.text).toBe('note')
+    expect(creates[0]?.draft.html).toBe('note')
+    expect(text).toContain('could not be found any more')
+  })
+
+  test('refuses quoteOriginal on a forward', async () => {
+    const creates: DraftCreateParams[] = []
+    const { text } = await run(
+      { draftId: 'd1', quoteOriginal: false, text: 'x' },
+      { creates, records: { d1: forward } }
+    )
+    expect(text).toContain('applies to replies')
+    expect(creates).toHaveLength(0)
+  })
+})

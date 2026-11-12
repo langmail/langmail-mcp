@@ -241,6 +241,7 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
       draftIdResolve: (p) => draftIdResolve({ ...p, apiUrl, authorization }),
       draftList: (p) => draftList({ ...p, apiUrl, authorization }),
       emailComposeGet: (p) => emailComposeGet({ ...p, apiUrl, authorization }),
+      emailKeywordsSet: (p) => emailSet({ ...p, apiUrl, authorization }),
       emailSubmissionCreate: (p) => emailSubmissionCreate({ ...p, apiUrl, authorization }),
       identityGet: (p) => identityGet({ ...p, apiUrl, authorization }),
       resolveAccountId: () => Promise.resolve(accountId),

@@ -69,6 +69,10 @@ export type SendReservation =
 // cache under the same name.
 export const REPLY_TOOL = 'reply_to_message'
 
+// forward_message's tool name. Like a reply, its subjects are the message being
+// forwarded, and it keys its replay cache under the same name.
+export const FORWARD_TOOL = 'forward_message'
+
 // What a send reserves against: the tool, and an id that is identical on a retry
 // of the same logical send.
 export interface SendSubject {
@@ -145,6 +149,13 @@ export const createSendGuard = (now: () => number = Date.now): SendGuard => {
 // reply is pointed at the Sent folder, a draft at the draft itself. delete_draft
 // reserves a draft's subject too, so an in-flight draft holder may be a delete.
 export const reservationRefusal = (subject: SendSubject, held: SendReservation): string => {
+  if (subject.tool === FORWARD_TOOL) {
+    return held.state === 'in_flight'
+      ? `A forward of ${subject.key} is already in progress. Nothing was sent by this call. Wait, then check ` +
+          "the user's Sent folder to see whether it went out."
+      : `An earlier forward of ${subject.key} failed without saying whether it went out, so it was NOT sent ` +
+          "again — a second attempt could deliver a duplicate. Check the user's Sent folder before deciding."
+  }
   if (subject.tool === REPLY_TOOL) {
     return held.state === 'in_flight'
       ? `A reply to ${subject.key} is already in progress. Nothing was sent by this call. Wait, then check ` +

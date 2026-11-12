@@ -40,6 +40,8 @@ import {
   draftLabelKeywords,
   draftRefusalReason,
   formatDraft,
+  forwardOriginalId,
+  forwardOriginalKeyword,
   isDraft,
   isTrashed,
   loadDraft,
@@ -53,11 +55,14 @@ import {
   stableDraftIdKeyword,
   unreferencableAttachments,
 } from './draft-common.ts'
+import { carriesForwardBlock, forwardedBody, originalAsAttachment } from './forward-quote.ts'
 import {
   carriesQuoteOf,
+  htmlToText,
   quoteWithheldFrom,
   quoteWithheldNote,
   type ReplyBody,
+  textAsHtml,
   withQuotedOriginal,
 } from './reply-quote.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
@@ -536,6 +541,70 @@ const editedBody = async (
   return { body: withQuotedOriginal(supplied, original) }
 }
 
+// A body given in one form, in both: the part left out is derived from the one
+// given, so the two alternatives cannot disagree.
+const inBothParts = (body: ReplyBody): { html: string; text: string } => ({
+  html: body.html ?? textAsHtml(body.text ?? ''),
+  text: body.text ?? htmlToText(body.html ?? ''),
+})
+
+// The body an edit of a forward's note stages: the new note, with the
+// forwarded block rebuilt below it from the original, so the recipient still
+// gets the original's headers and body — both parts, whichever one the note
+// came in. `attach` is the whole original as a `message/rfc822` file, when the
+// rebuilt body no longer holds it in full and it is not attached yet.
+const forwardEditedBody = async (
+  deps: DraftToolDeps,
+  p: { accountId: string; args: UpdateDraftArgs; authorization: string; originalId: string; staged: EmailDraft }
+): Promise<{ attach?: DraftAttachment; body: ReplyBody; note?: string }> => {
+  const { args, staged } = p
+  const supplied: ReplyBody = {
+    ...(args.text === undefined ? {} : { text: args.text }),
+    ...(args.html === undefined ? {} : { html: args.html }),
+  }
+  if (args.text === undefined && args.html === undefined) {
+    return { body: {} }
+  }
+  // The caller passed the whole body back, block included: keep it as written,
+  // and derive the part they left out from it so both say the same thing.
+  if (carriesForwardBlock(supplied)) {
+    return { body: inBothParts(supplied) }
+  }
+  const candidate = await deps.emailComposeGet({
+    accountId: p.accountId,
+    apiUrl: '',
+    authorization: p.authorization,
+    bodyValues: 'body',
+    id: p.originalId,
+    maxBodyValueBytes: MAX_DRAFT_BODY_VALUE_BYTES,
+  })
+  // Only the message whose Message-ID the forward references: a recorded id
+  // that the server handed to another message must not put that one in the
+  // user's outgoing mail. An original with no Message-ID left the forward no
+  // References to check, so it is taken as long as it still has none.
+  const references = staged.references ?? []
+  const ids = candidate?.messageId ?? []
+  const verified = references.length === 0 ? ids.length === 0 : ids.some((id) => references.includes(id))
+  const original = candidate && verified ? candidate : null
+  if (!original) {
+    return {
+      body: inBothParts(supplied),
+      note:
+        'The forwarded message could not be found any more, so the forwarded block was not re-attached: the ' +
+        'body is exactly the note given. The files already attached are kept.',
+    }
+  }
+  const rebuilt = forwardedBody(supplied, original)
+  const whole = rebuilt.attachOriginal ? originalAsAttachment(original) : null
+  // By type, not blobId: a re-staged draft's parts carry blobIds of the draft's
+  // own blob, so the original's blobId never matches what reads back.
+  const alreadyAttached = (staged.attachments ?? []).some((file) => file.type === 'message/rfc822')
+  return {
+    body: { html: rebuilt.html, text: rebuilt.text },
+    ...(whole && !alreadyAttached && args.attachments === undefined ? { attach: whole } : {}),
+  }
+}
+
 // Why the arguments alone describe no edit, if they don't — checked before
 // anything is read.
 const argumentRefusal = (args: UpdateDraftArgs): ToolResult | null => {
@@ -584,6 +653,64 @@ const updatedSummary = (p: {
   return `${heading}\ndraftId: ${p.draftId}\n${formatDraft(p.merged, { threadId: p.created.threadId })}${note}${leftover}`
 }
 
+// Why the body this edit supplies cannot be staged on this draft, if it can't.
+const bodyRefusal = (args: UpdateDraftArgs, staged: EmailDraft, forwardOf: string | null): ToolResult | null => {
+  if (forwardOf && args.quoteOriginal !== undefined) {
+    return errorResult(
+      `\`quoteOriginal\` applies to replies, and draft ${args.draftId} is a forward: the forwarded message is ` +
+        'always kept below the note. The draft was left unchanged. Pass only the new `text`/`html` note.'
+    )
+  }
+  // Replacing one body part while the other survives is how a stale body gets
+  // delivered: mail clients render the html alternative, so an html draft
+  // "corrected" via `text` alone goes out saying the old thing. Both parts or
+  // neither. A forward's note is exempt: both parts are rebuilt from it.
+  const stalePart = forwardOf ? null : staleBodyPart(staged, args)
+  if (stalePart) {
+    return errorResult(
+      `This draft has both a plain-text and an HTML body, and only \`${stalePart.supplied}\` was given — the ` +
+        `\`${stalePart.stale}\` version would keep its old content, and that is the one most mail clients ` +
+        'show. Pass both `text` and `html`, or stage a fresh draft with create_draft. Nothing was changed.'
+    )
+  }
+  return null
+}
+
+// The keywords the replacement carries. The user's own labels survive the edit
+// — an edit shouldn't quietly untag a draft they filed. The reply's or the
+// forward's original rides along so the next edit can rebuild below it (and a
+// send can mark a forwarded one), and the stable id is what keeps the caller's
+// draftId pointing at this revision.
+const revisionKeywords = (
+  record: EmailComposeRecord,
+  p: { draftId: string; forwardOf: string | null; replyOriginal: string | null }
+): string[] => [
+  ...draftLabelKeywords(record),
+  ...(p.replyOriginal ? [replyOriginalKeyword(p.replyOriginal)] : []),
+  ...(p.forwardOf ? [forwardOriginalKeyword(p.forwardOf)] : []),
+  stableDraftIdKeyword(p.draftId),
+]
+
+// The replacement: the staged draft with every supplied field laid over it.
+const mergedDraft = (
+  staged: EmailDraft,
+  p: {
+    args: UpdateDraftArgs
+    attachments: DraftAttachment[] | undefined
+    edited: { attach?: DraftAttachment; body: ReplyBody }
+    recipients: ParsedRecipients
+  }
+): EmailDraft => {
+  const files = [...(p.attachments ?? []), ...(p.edited.attach ? [p.edited.attach] : [])]
+  return {
+    ...staged,
+    ...p.recipients,
+    ...(p.args.subject === undefined ? {} : { subject: p.args.subject }),
+    ...p.edited.body,
+    ...(p.attachments === undefined && !p.edited.attach ? {} : { attachments: files }),
+  }
+}
+
 export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext): Promise<ToolResult> => {
   const { args } = ctx
   const refused = argumentRefusal(args)
@@ -601,17 +728,10 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
   const { record } = loaded
 
   const staged = draftFromRecord(record)
-  // Replacing one body part while the other survives is how a stale body gets
-  // delivered: mail clients render the html alternative, so an html draft
-  // "corrected" via `text` alone goes out saying the old thing. Both parts or
-  // neither.
-  const stalePart = staleBodyPart(staged, args)
-  if (stalePart) {
-    return errorResult(
-      `This draft has both a plain-text and an HTML body, and only \`${stalePart.supplied}\` was given — the ` +
-        `\`${stalePart.stale}\` version would keep its old content, and that is the one most mail clients ` +
-        'show. Pass both `text` and `html`, or stage a fresh draft with create_draft. Nothing was changed.'
-    )
+  const forwardOf = forwardOriginalId(record)
+  const bodyRefused = bodyRefusal(args, staged, forwardOf)
+  if (bodyRefused) {
+    return bodyRefused
   }
 
   const recipients = parseRecipients({
@@ -640,21 +760,17 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
     cc: recipients.cc ?? staged.cc ?? [],
     bcc: recipients.bcc ?? staged.bcc ?? [],
   }
-  const edited = await editedBody(deps, {
-    args,
-    authorization,
-    original: resolvedOriginal.record,
-    principal: ctx.principal,
-    recipients: mergedRecipients,
-    staged,
-  })
-  const merged: EmailDraft = {
-    ...staged,
-    ...recipients,
-    ...(args.subject === undefined ? {} : { subject: args.subject }),
-    ...edited.body,
-    ...(attachments.attachments === undefined ? {} : { attachments: attachments.attachments }),
-  }
+  const edited: { attach?: DraftAttachment; body: ReplyBody; note?: string } = forwardOf
+    ? await forwardEditedBody(deps, { accountId, args, authorization, originalId: forwardOf, staged })
+    : await editedBody(deps, {
+        args,
+        authorization,
+        original: resolvedOriginal.record,
+        principal: ctx.principal,
+        recipients: mergedRecipients,
+        staged,
+      })
+  const merged = mergedDraft(staged, { args, attachments: attachments.attachments, edited, recipients })
   // A draft another client staged gets its token now — see `stableDraftId`.
   const draftId = stableDraftId(record) ?? randomUUID()
 
@@ -666,15 +782,7 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
       authorization,
       draft: merged,
       mailboxId: mailboxes.drafts,
-      // The user's own labels survive the edit — an edit shouldn't quietly
-      // untag a draft they filed. The reply's original rides along so the next
-      // edit can quote it, and the stable id is what keeps the caller's
-      // draftId pointing at this revision.
-      keywords: [
-        ...draftLabelKeywords(record),
-        ...(resolvedOriginal.id ? [replyOriginalKeyword(resolvedOriginal.id)] : []),
-        stableDraftIdKeyword(draftId),
-      ],
+      keywords: revisionKeywords(record, { draftId, forwardOf, replyOriginal: resolvedOriginal.id }),
       replaces: record.id,
     })
   } catch (error) {
@@ -710,7 +818,8 @@ export const registerUpdateDraft = (
         'existing blobIds back with get_draft first if you mean to add one rather than swap them. The ' +
         'draftId stays the same across edits, so keep using the one create_draft returned. On a reply, ' +
         '`text`/`html` is the new part only: the quoted original is kept below it (`quoteOriginal: false` ' +
-        'drops it, `true` adds one to a bare reply). The previous version is not recoverable. If the draft has both a plain-text and an HTML body, pass ' +
+        'drops it, `true` adds one to a bare reply). On a forward staged with create_draft(`forwardOf`), ' +
+        '`text`/`html` is the note only: the forwarded message is rebuilt below it. The previous version is not recoverable. If the draft has both a plain-text and an HTML body, pass ' +
         'both `text` and `html` or neither; replacing one would leave the other saying the old thing. The ' +
         'sender and the reply threading cannot be changed here; stage a new draft with create_draft instead, then retire this one ' +
         'with delete_draft.',

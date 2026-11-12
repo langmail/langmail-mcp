@@ -36,9 +36,11 @@ import {
   type DraftToolDeps,
   draftFromRecord,
   formatDraft,
+  forwardOriginalId,
   isDraft,
   isTrashed,
   loadDraft,
+  markForwarded,
   resolveIdentity,
   restoreFromTrashHint,
   stableDraftId,
@@ -255,11 +257,26 @@ export const sendDraft = async (
   if ('refused' in taken) {
     return errorResult(reservationRefusal(subject, taken.refused))
   }
+  let outcome: SentOutcome
   try {
-    return await sendHeld(deps, replays, taken.hold, ctx)
+    outcome = await sendHeld(deps, replays, taken.hold, ctx)
   } finally {
     taken.hold.end()
   }
+  // A staged forward that went out marks its original — after the hold ends,
+  // outside the send protocol's modelled steps. The mail has gone either way.
+  if (!outcome.forwarded) {
+    return outcome.result
+  }
+  const failed = await markForwarded(deps, outcome.forwarded)
+  return failed ? textResult(`${outcome.result.content[0]?.text ?? ''}\n${failed}`) : outcome.result
+}
+
+// What a send call returns, plus the original to mark `$forwarded` when the
+// draft that went out was a forward.
+interface SentOutcome {
+  forwarded?: { accountId: string; authorization: string; id: string }
+  result: ToolResult
 }
 
 const sendHeld = async (
@@ -267,14 +284,15 @@ const sendHeld = async (
   replays: IdempotencyStore<string>,
   hold: SendHold,
   ctx: SendDraftContext
-): Promise<ToolResult> => {
+): Promise<SentOutcome> => {
   const { args, principal, token } = ctx
+  const refuse = (message: string): SentOutcome => ({ result: errorResult(message) })
   const authorization = bearerAuthorization(token)
   const accountId = await deps.resolveAccountId(authorization)
   const mailboxes = await deps.resolveComposeMailboxes(authorization)
   const loaded = await loadSendableDraft(deps, { accountId, authorization, draftId: args.draftId, mailboxes })
   if ('error' in loaded) {
-    return loaded.error
+    return { result: loaded.error }
   }
   const { record } = loaded
 
@@ -289,12 +307,12 @@ const sendHeld = async (
     const aliasSubject = sendDraftSubject(alias)
     const clash = hold.cover(aliasSubject)
     if (clash) {
-      return errorResult(reservationRefusal(aliasSubject, clash))
+      return refuse(reservationRefusal(aliasSubject, clash))
     }
   }
 
   if (!mailboxes.drafts) {
-    return errorResult('This account has no Drafts folder, so the draft cannot be sent.')
+    return refuse('This account has no Drafts folder, so the draft cannot be sent.')
   }
 
   // The draft's own From is the sending address: create_draft already validated
@@ -302,7 +320,7 @@ const sendHeld = async (
   // identity id EmailSubmission needs.
   const sender = record.from?.[0]?.email
   if (!sender) {
-    return errorResult(`Draft ${args.draftId} has no sender address, so it cannot be sent.`)
+    return refuse(`Draft ${args.draftId} has no sender address, so it cannot be sent.`)
   }
   const submissionAccountId = await deps.resolveSubmissionAccountId(authorization)
   const identity = await resolveIdentity(deps, {
@@ -312,7 +330,7 @@ const sendHeld = async (
     principal,
   })
   if ('error' in identity) {
-    return errorResult(identity.error)
+    return refuse(identity.error)
   }
 
   let outcome: string
@@ -334,7 +352,7 @@ const sendHeld = async (
     // `tool_error`, so log it here to keep it in error tracking, redacted.
     logger.error({ ...describeError(error), tool: TOOL_NAME }, 'draft submission failed')
     const detail = error instanceof Error ? error.message : 'unknown error'
-    return errorResult(
+    return refuse(
       wasRefused(error)
         ? `The server refused to send ${args.draftId} (${detail}). Nothing was sent; it is still a draft.`
         : `${args.draftId} was handed to the server, but the answer was lost (${detail}), so it may already ` +
@@ -352,7 +370,11 @@ const sendHeld = async (
   if (args.idempotencyKey) {
     replays.record(TOOL_NAME, principal, args.idempotencyKey, summary)
   }
-  return textResult(summary)
+  const forwardOf = forwardOriginalId(record)
+  return {
+    ...(forwardOf ? { forwarded: { accountId, authorization, id: forwardOf } } : {}),
+    result: textResult(summary),
+  }
 }
 
 // --- MCP registration ----------------------------------------------------

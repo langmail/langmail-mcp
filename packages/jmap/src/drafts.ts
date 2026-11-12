@@ -49,6 +49,13 @@ export const DRAFT_ID_KEYWORD_PREFIX = '$draftid:'
 // re-quote the original below edited text.
 export const DRAFT_REPLY_TO_KEYWORD_PREFIX = '$draftreplyto:'
 
+// The prefix of the keyword a forward draft carries naming the message it
+// forwards, by JMAP id — the counterpart of `$draftreplyto:`. A forward has no
+// In-Reply-To to find the original by, so this is the only link an edit of the
+// note has back to the message it re-attaches below it, and the one send_draft
+// reads to mark that message `$forwarded` once the forward has gone.
+export const DRAFT_FORWARD_OF_KEYWORD_PREFIX = '$draftforwardof:'
+
 // A draft the user composed is not unread mail — Stalwart would otherwise
 // count it towards the Drafts folder's unread badge.
 const SEEN_KEYWORD = '$seen'

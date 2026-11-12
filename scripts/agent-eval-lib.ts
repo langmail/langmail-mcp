@@ -93,7 +93,7 @@ export interface JmapResponse {
   methodResponses?: [string, Record<string, unknown>, string][]
 }
 
-const jmapCall = async (session: Session, methodCalls: unknown[]): Promise<JmapResponse> => {
+export const jmapCall = async (session: Session, methodCalls: unknown[]): Promise<JmapResponse> => {
   const res = await fetch(session.apiUrl, {
     body: JSON.stringify({ methodCalls, using: JMAP_USING }),
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
@@ -144,7 +144,15 @@ export const inboxId = async (session: Session): Promise<string> => {
   return inbox.id
 }
 
+// A file the fixture carries, as a multipart/mixed part.
+export interface FixtureAttachment {
+  base64: string
+  name: string
+  type: string
+}
+
 export interface Fixture {
+  attachments?: FixtureAttachment[]
   body: string
   // Defaults to text/plain; the preview eval seeds text/html bodies.
   contentType?: string
@@ -154,17 +162,42 @@ export interface Fixture {
   typeKeyword?: string
 }
 
-const rfc822 = (f: Fixture, to: string): string =>
-  [
+const BASE64_LINE_RE = /.{1,76}/gu
+
+const rfc822 = (f: Fixture, to: string): string => {
+  const headers = [
     `From: ${f.from}`,
     `To: ${to}`,
     `Subject: ${f.subject}`,
     `Message-ID: <${crypto.randomUUID()}@langmail-eval.example>`,
     `Date: ${f.receivedAt.toUTCString()}`,
-    `Content-Type: ${f.contentType ?? 'text/plain'}; charset=utf-8`,
+  ]
+  const bodyType = `${f.contentType ?? 'text/plain'}; charset=utf-8`
+  if (!f.attachments?.length) {
+    return [...headers, `Content-Type: ${bodyType}`, '', f.body].join('\r\n')
+  }
+  const boundary = `mixed-${crypto.randomUUID()}`
+  return [
+    ...headers,
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    `Content-Type: ${bodyType}`,
     '',
     f.body,
+    ...f.attachments.flatMap((file) => [
+      `--${boundary}`,
+      `Content-Type: ${file.type}; name="${file.name}"`,
+      'Content-Transfer-Encoding: base64',
+      `Content-Disposition: attachment; filename="${file.name}"`,
+      '',
+      file.base64.match(BASE64_LINE_RE)?.join('\r\n') ?? '',
+    ]),
+    `--${boundary}--`,
+    '',
   ].join('\r\n')
+}
 
 export const seed = async (session: Session, mailboxId: string, to: string, f: Fixture): Promise<string> => {
   const uploadRes = await fetch(

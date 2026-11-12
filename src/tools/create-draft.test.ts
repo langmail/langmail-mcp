@@ -342,3 +342,65 @@ describe('createDraft', () => {
     expect(result.content[0]?.text).toContain('no Drafts folder')
   })
 })
+
+describe('createDraft with forwardOf', () => {
+  const original = receivedMessage({
+    attachments: [{ blobId: 'bPdf', disposition: 'attachment', name: 'invoice.pdf', type: 'application/pdf' }],
+    bodyValues: { t: { value: 'Rent for March' } },
+    subject: 'Invoice March',
+    textBody: [{ partId: 't', type: 'text/plain' }],
+  })
+
+  test('stages a forward with the block, the files and the original recorded, and sends nothing', async () => {
+    const creates: DraftCreateParams[] = []
+    const submissions: EmailSubmissionCreateParams[] = []
+    const { text } = await run(
+      { forwardOf: 'e1', to: ['accountant@example.com'] },
+      { creates, records: { e1: original }, submissions }
+    )
+    expect(submissions).toEqual([])
+    const draft = creates[0]?.draft
+    expect(draft?.to).toEqual([{ email: 'accountant@example.com' }])
+    expect(draft?.subject).toBe('Fwd: Invoice March')
+    expect(draft?.text).toContain('From: Nadia Bram <nadia@example.org>')
+    expect(draft?.text).toContain('Rent for March')
+    expect(draft?.html).toContain('Rent for March')
+    expect(draft?.attachments?.map((file) => file.blobId)).toEqual(['bPdf'])
+    expect(creates[0]?.keywords).toContain('$draftforwardof:e1')
+    expect(text).toContain('Nothing has been sent')
+  })
+
+  test('refuses a forward without a recipient', async () => {
+    const creates: DraftCreateParams[] = []
+    const { text } = await run({ forwardOf: 'e1' }, { creates, records: { e1: original } })
+    expect(text).toContain('never takes them from the original')
+    expect(creates).toHaveLength(0)
+  })
+
+  test('refuses forwardOf together with reply arguments', async () => {
+    for (const extra of [{ inReplyTo: 'e1' }, { replyAll: true }, { quoteOriginal: true }]) {
+      const { text } = await run({ forwardOf: 'e1', text: 'hi', to: ['a@example.org'], ...extra })
+      expect(text).toContain('`forwardOf` cannot be combined with')
+    }
+  })
+})
+
+describe('createDraft with forwardOf and attachments', () => {
+  test('adds the extra files to the original’s, never in place of them', async () => {
+    const creates: DraftCreateParams[] = []
+    const original = receivedMessage({
+      attachments: [{ blobId: 'bPdf', disposition: 'attachment', name: 'invoice.pdf', type: 'application/pdf' }],
+      bodyValues: { t: { value: 'Rent' } },
+      textBody: [{ partId: 't', type: 'text/plain' }],
+    })
+    await run(
+      {
+        attachments: [{ blobId: 'bExtra', filename: 'receipt.pdf', mimeType: 'application/pdf' }],
+        forwardOf: 'e1',
+        to: ['accountant@example.com'],
+      },
+      { creates, records: { e1: original } }
+    )
+    expect(creates[0]?.draft.attachments?.map((file) => file.blobId)).toEqual(['bPdf', 'bExtra'])
+  })
+})

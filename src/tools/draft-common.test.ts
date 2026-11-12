@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { type EmailComposeRecord, type EmailDraft, type IdentityRecord, JmapError } from '@langmail/jmap'
 
 import {
+  attachmentsFromRecord,
   draftFromRecord,
   draftRefusalReason,
   formatDraft,
@@ -14,7 +15,7 @@ import {
   replyThreading,
   resolveIdentity,
 } from './draft-common.ts'
-import { draftDeps } from './draft-test-fixtures.ts'
+import { draftDeps, stagedDraft } from './draft-test-fixtures.ts'
 
 describe('parseAddress', () => {
   test('accepts a bare address', () => {
@@ -351,5 +352,29 @@ describe('draftRefusalReason', () => {
 
   test('is null when the server did not refuse', () => {
     expect(draftRefusalReason(new Error('socket closed'), withAttachment)).toBeNull()
+  })
+})
+
+describe('attachmentsFromRecord', () => {
+  test('carries an image inline in the body parts once, inline, next to the attachments', () => {
+    const files = attachmentsFromRecord(
+      stagedDraft({
+        attachments: [
+          { blobId: 'bPdf', disposition: 'attachment', name: 'a.pdf', partId: '4', type: 'application/pdf' },
+        ],
+        htmlBody: [
+          { partId: '2', type: 'text/html' },
+          { blobId: 'bImg', partId: '3', type: 'image/jpeg' },
+        ],
+        textBody: [
+          { partId: '1', type: 'text/plain' },
+          { blobId: 'bImg', partId: '3', type: 'image/jpeg' },
+        ],
+      })
+    )
+    expect(files).toEqual([
+      { blobId: 'bPdf', disposition: 'attachment', name: 'a.pdf', type: 'application/pdf' },
+      { blobId: 'bImg', disposition: 'inline', type: 'image/jpeg' },
+    ])
   })
 })

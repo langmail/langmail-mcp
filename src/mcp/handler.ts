@@ -45,6 +45,7 @@ import { makeLiveDeps as makeDownloadAttachmentDeps, registerDownloadAttachment 
 import { makeLiveDeps as makeDownloadEmailDeps, registerDownloadEmail } from '../tools/download-email.ts'
 import { makeLiveDeps as makeDraftDeps } from '../tools/draft-common.ts'
 import { makeLiveDeps as makeFileEmailsDeps } from '../tools/file-emails-common.ts'
+import { registerForwardMessage } from '../tools/forward-message.ts'
 import { registerGetDraft } from '../tools/get-draft.ts'
 import { makeLiveDeps as makeGetEmailDeps, registerGetEmail } from '../tools/get-email.ts'
 import { makeLiveDeps as makeGetThreadDeps, registerGetThread } from '../tools/get-thread.ts'
@@ -236,6 +237,14 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
       () => ctx.principal
     )
     registerReplyToMessage(
+      server,
+      draftDeps,
+      composeReplays,
+      sendGuard,
+      () => ctx.token,
+      () => ctx.principal
+    )
+    registerForwardMessage(
       server,
       draftDeps,
       composeReplays,

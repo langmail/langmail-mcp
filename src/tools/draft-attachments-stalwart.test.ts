@@ -40,9 +40,11 @@ import {
   draftDestroy,
   draftIdResolve,
   draftList,
+  type EmailComposeRecord,
   emailComposeGet,
   emailGetDetail,
   emailQuery,
+  emailSet,
   emailSubmissionCreate,
   identityGet,
   mailboxCreate,
@@ -57,7 +59,8 @@ import { MAX_ATTACHMENT_BYTES } from '../drafts/attachments.ts'
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
 import { createSendGuard } from '../drafts/send-guard.ts'
 import { createDraft, createDraftInput } from './create-draft.ts'
-import { type DraftToolDeps } from './draft-common.ts'
+import { attachmentsFromRecord, type DraftToolDeps } from './draft-common.ts'
+import { forwardMessage, forwardMessageInput } from './forward-message.ts'
 import { getDraft, getDraftInput } from './get-draft.ts'
 import { type GetEmailDeps, getEmail, getEmailInput } from './get-email.ts'
 import { sendDraft, sendDraftInput } from './send-draft.ts'
@@ -324,6 +327,7 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
       draftIdResolve: (p) => draftIdResolve({ ...p, apiUrl, authorization }),
       draftList: (p) => draftList({ ...p, apiUrl, authorization }),
       emailComposeGet: (p) => emailComposeGet({ ...p, apiUrl, authorization }),
+      emailKeywordsSet: (p) => emailSet({ ...p, apiUrl, authorization }),
       emailSubmissionCreate: (p) => emailSubmissionCreate({ ...p, apiUrl, authorization }),
       identityGet: (p) => identityGet({ ...p, apiUrl, authorization }),
       resolveAccountId: () => Promise.resolve(accountId),
@@ -592,6 +596,91 @@ live('draft attachments against live Stalwart — attach, forward, edit, send', 
     expect(arrived.name).toBe('RE-2026-009.pdf')
     expect(arrived.type).toBe('application/pdf')
     expect(arrived.bytes).toEqual(invoiceBytes)
+  })
+
+  // --- forward_message: one call, the original's file and thread (#1201) -----
+
+  test('forward_message carries the original file into the recipient’s Inbox and threads with the original', async () => {
+    const before = await idsIn(inboxId)
+    const result = await forwardMessage(deps, replays, guard, {
+      ...toolCtx,
+      args: forwardMessageInput.parse({ messageId: contractMessageId, text: 'For your records.', to: [address] }),
+    })
+    expect(result.isError).toBeUndefined()
+    const text = result.content[0]?.text ?? ''
+    expect(text).toContain('Forward sent.')
+    expect(text).toContain('contract.pdf')
+    expect(text).not.toContain('could not be marked')
+
+    // The Sent copy holds the file, by the blob it was forwarded from, and
+    // sits in the original's conversation.
+    const messageId = MESSAGE_ID_RE.exec(text)?.[1] ?? ''
+    expect((await soleAttachment(messageId)).bytes).toEqual(contractBytes)
+    const sentCopy = await emailComposeGet({ ...ctx(), bodyValues: 'body', id: messageId, maxBodyValueBytes: 10_000 })
+    const original = await emailComposeGet({ ...ctx(), id: contractMessageId, maxBodyValueBytes: 1 })
+    expect(sentCopy?.threadId).toBe(original?.threadId ?? '')
+    expect(sentCopy?.subject).toBe('Fwd: Signed contract')
+    expect(original?.keywords?.$forwarded).toBe(true)
+
+    // And it arrives, file and forwarded header block included.
+    const delivered = await awaitDelivery(inboxId, before)
+    const arrivedId = delivered[0] ?? ''
+    expect((await soleAttachment(arrivedId)).bytes).toEqual(contractBytes)
+    const arrived = await emailComposeGet({ ...ctx(), bodyValues: 'body', id: arrivedId, maxBodyValueBytes: 10_000 })
+    const body = Object.values(arrived?.bodyValues ?? {})
+      .map((value) => value.value)
+      .join('\n')
+    expect(body).toContain('For your records.')
+    expect(body).toContain('---------- Forwarded message ---------')
+    expect(body).toContain('Countersigned copy attached.')
+  })
+
+  test('a staged forward of a photo inline in the body keeps it through an edit of the note', async () => {
+    const pixel = Buffer.from(
+      await Bun.file(new URL('../attachments/fixtures/pixel.png', import.meta.url)).arrayBuffer()
+    ).toString('base64')
+    // The Apple Mail shape: text, an inline image, more text, in one multipart/mixed.
+    const photoId = await importEmail(
+      [
+        `From: ${CORRESPONDENT}`,
+        `To: ${address}`,
+        'Subject: Photo of the meter',
+        `Message-ID: <photo-${run}@example.org>`,
+        'Date: Tue, 21 Jul 2026 11:00:00 +0000',
+        'MIME-Version: 1.0',
+        'Content-Type: multipart/mixed; boundary="m"',
+        '',
+        '--m',
+        'Content-Type: text/plain; charset=utf-8',
+        '',
+        'Here is the meter:',
+        '--m',
+        'Content-Type: image/png; name="meter.png"',
+        'Content-Disposition: inline; filename="meter.png"',
+        'Content-Transfer-Encoding: base64',
+        '',
+        pixel,
+        '--m',
+        'Content-Type: text/plain; charset=utf-8',
+        '',
+        'Reading as of today.',
+        '--m--',
+        '',
+      ].join('\r\n')
+    )
+    const images = (record: EmailComposeRecord | null): number =>
+      attachmentsFromRecord(record ?? { id: '' }).filter((file) => file.type === 'image/png').length
+    const { draftId, emailId } = await stage({ forwardOf: photoId, to: ['caretaker@example.org'] })
+    expect(images(await emailComposeGet({ ...ctx(), id: emailId, maxBodyValueBytes: 10_000 }))).toBe(1)
+
+    const edited = await updateDraft(deps, {
+      ...toolCtx,
+      args: updateDraftInput.parse({ draftId, text: 'See below.' }),
+    })
+    expect(edited.isError).toBeUndefined()
+    const current = (await draftIdResolve({ ...ctx(), draftId })) ?? ''
+    const revision = await emailComposeGet({ ...ctx(), id: current, maxBodyValueBytes: 10_000 })
+    expect(images(revision)).toBe(1)
   })
 
   // --- refusals -------------------------------------------------------------
