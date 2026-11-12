@@ -247,6 +247,10 @@ export const destroy = async (session: Session, ids: string[]): Promise<void> =>
 
 // --- trajectory capture -----------------------------------------------------
 
+const LANGMAIL_TOOL = 'mcp__langmail__'
+const LOCAL_SERVER = 'langmail-eval'
+const LOCAL_TOOL = `mcp__${LOCAL_SERVER}__`
+
 export interface ToolUse {
   input: Record<string, unknown>
   name: string
@@ -314,21 +318,25 @@ const parseTrajectory = (stdout: string): Trajectory => {
 // runs (main vs a branch) compare on right-or-wrong AND on how many calls it
 // took. Harness calls such as ToolSearch are not counted.
 let lastToolCalls: number | null = null
-const LANGMAIL_TOOL = 'mcp__langmail__'
 
 // The MCP config for `claude -p`. With AGENT_EVAL_MCP_URL a temporary config
-// names that server `langmail` (so the tools stay `mcp__langmail__*`) and sends
-// the eval's own bearer; otherwise the repo's `.mcp.json` (deployed server).
-const mcpConfig = (): { cleanup: () => void; path: string } => {
+// names that server `langmail-eval` and sends the eval's own bearer; otherwise
+// the repo's `.mcp.json` (deployed server, `langmail`). Not `langmail`: Claude
+// Code caches a server that answered 401 as needs-auth by name, so an
+// unauthorized deployed `langmail` in the operator's session would make it
+// skip the local one (if the eval sees no tools after an expired token, clear
+// `~/.claude/mcp-needs-auth-cache.json`). runAgent maps the tools back to
+// `mcp__langmail__*`.
+const mcpConfig = (): { cleanup: () => void; path: string; toolPrefix: string } => {
   const url = evalMcpUrl
   if (!url) {
-    return { cleanup: () => undefined, path: '.mcp.json' }
+    return { cleanup: () => undefined, path: '.mcp.json', toolPrefix: LANGMAIL_TOOL }
   }
   const dir = mkdtempSync(join(tmpdir(), 'agent-eval-mcp-'))
   const path = join(dir, 'mcp.json')
-  const servers = { langmail: { headers: { Authorization: `Bearer ${token}` }, type: 'http', url } }
+  const servers = { [LOCAL_SERVER]: { headers: { Authorization: `Bearer ${token}` }, type: 'http', url } }
   writeFileSync(path, JSON.stringify({ mcpServers: servers }), { mode: 0o600 })
-  return { cleanup: () => rmSync(dir, { force: true, recursive: true }), path }
+  return { cleanup: () => rmSync(dir, { force: true, recursive: true }), path, toolPrefix: LOCAL_TOOL }
 }
 
 export const runAgent = (prompt: string): Trajectory => {
@@ -345,7 +353,7 @@ export const runAgent = (prompt: string): Trajectory => {
         // the operator's session would otherwise reach their real mailbox.
         '--strict-mcp-config',
         '--allowedTools',
-        'mcp__langmail__*',
+        `${config.toolPrefix}*`,
         '--output-format',
         'stream-json',
         '--verbose',
@@ -361,9 +369,14 @@ export const runAgent = (prompt: string): Trajectory => {
       throw new Error(`claude exited ${proc.exitCode}`)
     }
     const trajectory = parseTrajectory(proc.stdout.toString())
-    const foreign = trajectory.toolUses.filter((t) => t.name.startsWith('mcp__') && !t.name.startsWith(LANGMAIL_TOOL))
+    const foreign = trajectory.toolUses.filter(
+      (t) => t.name.startsWith('mcp__') && !t.name.startsWith(config.toolPrefix)
+    )
     if (foreign.length > 0) {
       throw new Error(`the agent reached an MCP server other than the eval's: ${foreign.map((t) => t.name).join(', ')}`)
+    }
+    for (const toolUse of trajectory.toolUses) {
+      toolUse.name = toolUse.name.replace(config.toolPrefix, LANGMAIL_TOOL)
     }
     lastToolCalls = trajectory.toolUses.filter((t) => t.name.startsWith(LANGMAIL_TOOL)).length
     return trajectory
