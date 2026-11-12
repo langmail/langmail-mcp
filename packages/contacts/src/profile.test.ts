@@ -8,6 +8,7 @@ import {
   formatBirthday,
   formatCardAddress,
   hasRole,
+  isRolePhrase,
   normalizeRole,
   parseBirthday,
   patchCardAddress,
@@ -281,6 +282,12 @@ describe('roles', () => {
   test('normalizes the user phrase: case, spacing and a leading "my"', () => {
     expect(normalizeRole('  My   Divorce Lawyer ')).toBe('divorce lawyer')
     expect(normalizeRole('mystic')).toBe('mystic')
+  })
+
+  test('tells a phrase naming a role ("my …") from a plain query', () => {
+    expect(isRolePhrase('  My   Lawyer')).toBe(true)
+    expect(isRolePhrase('lawyer')).toBe(false)
+    expect(isRolePhrase('mystic')).toBe(false)
   })
 
   test('reads only role-kind titles, never a job title', () => {

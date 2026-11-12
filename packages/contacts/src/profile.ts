@@ -369,10 +369,15 @@ export const MAX_ROLES = 10
 const LEADING_MY = /^my\s+/u
 const SPACES = /\s+/gu
 
+const normalizeSpacing = (text: string): string => text.trim().replace(SPACES, ' ').toLowerCase()
+
 // "My Lawyer " and "lawyer" are the same role: the user's phrase is the
 // query, and a stored role is compared the same way.
-export const normalizeRole = (text: string): string =>
-  text.trim().replace(SPACES, ' ').toLowerCase().replace(LEADING_MY, '')
+export const normalizeRole = (text: string): string => normalizeSpacing(text).replace(LEADING_MY, '')
+
+// Whether the phrase names someone by what they are to the user ("my
+// landlord"): the leading "my" that `normalizeRole` drops.
+export const isRolePhrase = (text: string): boolean => LEADING_MY.test(normalizeSpacing(text))
 
 const roleEntries = (card: Pick<ContactCard, 'titles'>): [string, ContactCardTitle][] =>
   Object.entries(card.titles ?? {}).filter(([, t]) => t.kind === ROLE_KIND && typeof t.name === 'string')

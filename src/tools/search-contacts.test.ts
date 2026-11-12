@@ -450,14 +450,84 @@ describe('searchContacts — roles', () => {
         if (p.filter) {
           return Promise.resolve([])
         }
+        // A server whose query limit is below the sweep's page size: short
+        // pages that are not the end.
         const start = p.position ?? 0
-        return Promise.resolve(cards.slice(start, start + (p.limit ?? cards.length)).map((c) => c.id))
+        return Promise.resolve(cards.slice(start, start + Math.min(p.limit ?? cards.length, 300)).map((c) => c.id))
       },
     })
     const text = (await searchContacts(deps, { args: args({ query: 'lawyer' }), token: 'tok' })).content[0]?.text ?? ''
     expect(text).toContain('contact_id: card-lawyer')
     expect(narrowed.length).toBeGreaterThan(0)
     expect(narrowed.every((p) => p.join() === 'id,titles')).toBe(true)
+  })
+
+  test('a role phrased with "my" sweeps even with a dot in it; a bare address search does not', async () => {
+    const filler = Array.from({ length: 300 }, (_, i) =>
+      robinCard({ emails: { e0: { address: `p${i}@example.org` } }, id: `card-${i}`, name: { full: `Person ${i}` } })
+    )
+    const cards = [...filler, lawyer({ titles: { r0: { kind: 'role', name: 'c.p.a.' } } })]
+    let narrowed = 0
+    const deps = makeDeps(cards, {
+      contactCardGet: (p) => {
+        narrowed += p.properties ? 1 : 0
+        return Promise.resolve(cards.filter((c) => p.ids.includes(c.id)))
+      },
+      contactCardQuery: (p) => {
+        const start = p.position ?? 0
+        return Promise.resolve(p.filter ? [] : cards.slice(start, start + (p.limit ?? cards.length)).map((c) => c.id))
+      },
+    })
+    const text = (await searchContacts(deps, { args: args({ query: 'my C.P.A.' }), token: 'tok' })).content[0]?.text
+    expect(text).toContain('roles: c.p.a.')
+    narrowed = 0
+    const none = await searchContacts(deps, { args: args({ query: 'nobody@nowhere.example' }), token: 'tok' })
+    expect(narrowed).toBe(0)
+    expect(none.content[0]?.text).not.toContain('no contact has it as a role')
+  })
+
+  // A paged, unfiltered query over `cards`; the filtered read finds nothing,
+  // as Stalwart's cannot see a role.
+  const pagedQuery =
+    (cards: ContactCard[]): SearchContactsDeps['contactCardQuery'] =>
+    (p) => {
+      const start = p.position ?? 0
+      return Promise.resolve(p.filter ? [] : cards.slice(start, start + (p.limit ?? cards.length)).map((c) => c.id))
+    }
+  const fillerCards = (n: number): ContactCard[] =>
+    Array.from({ length: n }, (_, i) =>
+      robinCard({ emails: { e0: { address: `p${i}@example.org` } }, id: `card-${i}`, name: { full: `Person ${i}` } })
+    )
+
+  test('reads more role holders than one get takes in gets of at most 500', async () => {
+    const holders = Array.from({ length: 600 }, (_, i) => lawyer({ id: `card-lawyer-${i}` }))
+    const cards = [...fillerCards(250), ...holders]
+    const deps = makeDeps(cards, {
+      contactCardGet: (p) =>
+        p.ids.length > 500
+          ? Promise.reject(new Error('maxObjectsInGet'))
+          : Promise.resolve(cards.filter((c) => p.ids.includes(c.id))),
+      contactCardQuery: pagedQuery(cards),
+    })
+    const text = (await searchContacts(deps, { args: args({ query: 'lawyer' }), token: 'tok' })).content[0]?.text ?? ''
+    expect(text).toContain('of at least 600 matches')
+  })
+
+  test('a sweep that stops at its cap does not claim no contact has the role', async () => {
+    // The lawyer sits past the 10,000 cards the sweep reads.
+    const cards = [...fillerCards(10_100), lawyer()]
+    const deps = makeDeps(cards, { contactCardQuery: pagedQuery(cards) })
+    const empty = (await searchContacts(deps, { args: args({ query: 'my lawyer' }), token: 'tok' })).content[0]?.text
+    expect(empty).not.toContain('no contact has it as a role')
+    expect(empty).toContain('Roles were checked on the first 10000 cards only')
+    const byRole = await searchContacts(deps, { args: args({ query: 'my person 1' }), token: 'tok' })
+    expect(byRole.content[0]?.text).not.toContain('No contact has')
+    expect(byRole.content[0]?.text).toContain('None of the people above has "person 1" as a role')
+    expect(byRole.content[0]?.text).toContain('Roles were checked on the first 10000 cards only')
+    // A plain name search is not about a role: no cap note to misread as a partial search.
+    const byName = await searchContacts(deps, { args: args({ query: 'person 1' }), token: 'tok' })
+    expect(byName.content[0]?.text).toContain('person(s) matched')
+    expect(byName.content[0]?.text).not.toContain('Roles were checked')
   })
 
   test('a book inside the sweep window takes no role sweep', async () => {

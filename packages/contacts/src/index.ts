@@ -31,6 +31,7 @@ export {
   formatBirthday,
   formatCardAddress,
   hasRole,
+  isRolePhrase,
   MAX_ROLES,
   normalizeRole,
   parseBirthday,

@@ -477,6 +477,26 @@ live('search_contacts against live Stalwart — collect from mail + calendar, th
       },
     })
 
+    // The upstream gap itself: once the index has the card (found by name),
+    // a word that is only in its title is still not found. When this turns
+    // red, Stalwart searches titles and the role sweep can go
+    // (docs/upstream/stalwart/contact-query-cannot-match-titles.md).
+    const titleWord = `zzrole${run}`
+    const titleOnlyId = await contactCardCreate({
+      ...ctx,
+      card: {
+        addressBookIds: { [bookId]: true },
+        name: { full: `Title Probe ${run}` },
+        titles: { r0: { kind: 'role', name: titleWord } },
+      },
+    })
+    await untilIndexed(
+      () => contactCardQuery({ ...ctx, filter: { text: `Probe ${run}` } }),
+      (found) => found.includes(titleOnlyId),
+      'the title probe card reaching the index'
+    )
+    expect(await contactCardQuery({ ...ctx, filter: { text: titleWord } })).toEqual([])
+
     // The sweep reads titles alone: the narrowed get is honoured.
     const [narrow] = await contactCardGet({ ...ctx, ids: [lawyerId], properties: ['id', 'titles'] })
     expect(narrow?.titles).toEqual({ r0: { kind: 'role', name: 'lawyer' } })
