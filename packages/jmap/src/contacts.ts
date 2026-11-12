@@ -73,16 +73,24 @@ export const addressBookCreate = async (p: AddressBookCreateParams): Promise<str
 export interface ContactCardGetParams extends JmapCall {
   accountId: string
   ids: string[]
+  // Omitted almost everywhere: cards are small and the collected extension
+  // property must come back too, so the full default set is what callers
+  // want. search_contacts' role sweep narrows it to read a whole book cheaply.
+  properties?: string[]
 }
 
-// No `properties` argument: cards are small and the collected extension
-// property must come back too, so the full default set is what we want.
 export const contactCardGet = async (p: ContactCardGetParams): Promise<ContactCard[]> => {
   if (p.ids.length === 0) {
     return []
   }
   const resp = await jmapCall(p, {
-    methodCalls: [['ContactCard/get', { accountId: p.accountId, ids: p.ids }, '0']],
+    methodCalls: [
+      [
+        'ContactCard/get',
+        { accountId: p.accountId, ids: p.ids, ...(p.properties ? { properties: p.properties } : {}) },
+        '0',
+      ],
+    ],
     using: USING,
   })
   const out = methodResponse<{ list?: ContactCard[] }>(resp, 'ContactCard/get', '0')

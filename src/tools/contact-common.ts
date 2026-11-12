@@ -144,6 +144,15 @@ export const birthdaySchema = z
   .max(40)
   .describe('Birthday as `YYYY-MM-DD`, or `--MM-DD` when the year is unknown.')
 
+// What the person is to the user, in the user's words: "lawyer",
+// "landlord". Stored only when the user said or confirmed it.
+export const roleSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(50)
+  .describe('What the person is to the user, e.g. "lawyer" or "landlord" (a leading "my" is dropped).')
+
 export const contactIdSchema = z
   .string()
   .min(1)

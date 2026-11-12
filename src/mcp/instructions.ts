@@ -16,7 +16,7 @@ export const SERVER_INSTRUCTIONS = [
   'Where to start:',
   '- Mail: search_emails finds messages (read: false finds everything not read yet, in every folder); read one with get_email or a whole conversation with get_thread. preview_email shows one to the user as a rendered document (tickets, invoices).',
   '- Calendar: list_calendar_events for what is on the calendar; list_calendars for the calendars themselves.',
-  '- Contacts: search_contacts finds people and their addresses; list_upcoming_birthdays for birthdays.',
+  '- Contacts: search_contacts finds people and their addresses, also by what they are to the user ("my lawyer"); list_upcoming_birthdays for birthdays. When the user names or confirms such a role, record it with update_contact.',
   '- Mail rules: list_mail_rules for what is set up; preview_mail_rule before create_mail_rule to check what a rule would match. A forward action (in create_mail_rule or update_mail_rule) sends a copy of every matching future message to another address, so confirm that address with the user.',
   '',
   'Writing and sending mail:',

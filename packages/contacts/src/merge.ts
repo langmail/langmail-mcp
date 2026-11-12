@@ -14,7 +14,15 @@ import { type ContactCard, type ContactCardEmail, type ContactCardNote } from '@
 import { normalizeAddress } from './address-class.ts'
 import { collectedNoteEntry, nextKey, normalizeName, readCollected } from './card.ts'
 import { COLLECTED_NOTE_KEY, INTERACTION_LOG_SIZE, RELAY_LIST_SIZE } from './constants.ts'
-import { formatBirthday, formatCardAddress, readBirthday, readOrganization, withBirthday } from './profile.ts'
+import {
+  formatBirthday,
+  formatCardAddress,
+  readBirthday,
+  readOrganization,
+  readRoles,
+  withBirthday,
+  withRoles,
+} from './profile.ts'
 import { bestAddress } from './scoring.ts'
 import { type CollectedAddress, type CollectedExtension, type Confidence } from './types.ts'
 
@@ -124,6 +132,7 @@ const MERGED_PROPERTIES = new Set([
   'organizations',
   'phones',
   'prodId',
+  'titles',
   'uid',
   'updated',
   'version',
@@ -290,6 +299,26 @@ const mergeBirthday = (kept: ContactCard, merged: ContactCard[], conflicts: stri
   return patch
 }
 
+// Roles are what the user said each card's person is to them, so all of
+// them carry over, without duplicates. A merged card's job titles do not:
+// the kept card's own job title stands, and the others are reported.
+const mergeRoles = (kept: ContactCard, merged: ContactCard[], conflicts: string[]): Record<string, unknown> => {
+  const before = readRoles(kept)
+  const titles = withRoles(kept, merged.flatMap(readRoles), [])
+  const jobTitle = (t: { name: string }): string => t.name.trim().toLowerCase()
+  const keptJobs = new Set(
+    Object.values(kept.titles ?? {})
+      .filter((t) => t.kind !== 'role')
+      .map(jobTitle)
+  )
+  for (const card of merged) {
+    if (Object.values(card.titles ?? {}).some((t) => t.kind !== 'role' && !keptJobs.has(jobTitle(t)))) {
+      conflicts.push(`not carried over from ${labelOf(card)}: job titles`)
+    }
+  }
+  return readRoles({ titles }).length > before.length ? { titles } : {}
+}
+
 // The kept card's note entries stay; each merged card's user notes join
 // under fresh keys unless the same text is already there. The collected
 // entry carries the merged history. Entries go through patch paths when the
@@ -391,6 +420,7 @@ export const mergeCards = (
     ...mergeName(kept, merged, conflicts),
     ...mergeOrganization(kept, merged, conflicts),
     ...mergeBirthday(kept, merged, conflicts),
+    ...mergeRoles(kept, merged, conflicts),
     ...mergeNotes(kept, merged),
   }
   unmodeled(kept, merged, conflicts)

@@ -18,16 +18,19 @@ import { z } from 'zod'
 
 import {
   COLLECTED_NOTE_KEY,
+  MAX_ROLES,
   nextKey,
   parseBirthday,
   patchCardAddress,
   readPostalAddresses,
+  readRoles,
   toCardAddress,
   toCardPhone,
   userNoteEntry,
   userNoteKey,
   withBirthday,
   withPreferredEmail,
+  withRoles,
 } from '@langmail/contacts'
 import { type ContactCard, type ContactCardAddress, type ContactCardEmail, type ContactCardPhone } from '@langmail/jmap'
 
@@ -44,6 +47,7 @@ import {
   postalAddressSchema,
   postalLabelSchema,
   readBack,
+  roleSchema,
 } from './contact-common.ts'
 import { renderContact } from './contact-format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
@@ -67,6 +71,14 @@ const updateContactShape = {
   addedEmails: z.array(emailEntrySchema).max(10).optional().describe('Email addresses to add to the contact.'),
   addedPhones: z.array(phoneSchema).max(10).optional().describe('Phone numbers to add to the contact.'),
   addedPostalAddresses: z.array(postalAddressSchema).max(5).optional().describe('Postal addresses to add.'),
+  addedRoles: z
+    .array(roleSchema)
+    .max(MAX_ROLES)
+    .optional()
+    .describe(
+      'Roles to add: what the person is to the user ("lawyer"), as the user said or confirmed it. ' +
+        'Never inferred from mail.'
+    ),
   birthday: birthdaySchema
     .optional()
     .describe('New birthday as `YYYY-MM-DD`, or `--MM-DD` when the year is unknown; `""` clears it. Omit to keep it.'),
@@ -98,6 +110,7 @@ const updateContactShape = {
     .max(10)
     .optional()
     .describe('Phone numbers to remove, each given either as its `[p0]` handle or as the number itself.'),
+  removedRoles: z.array(roleSchema).max(MAX_ROLES).optional().describe('Roles to remove (case-insensitive).'),
   removedPostalAddresses: z
     .array(z.string().min(1))
     .max(5)
@@ -120,7 +133,8 @@ export const updateContactInput = z
       a.organization !== undefined ||
       a.preferredEmail !== undefined ||
       Boolean(a.addedEmails ?? a.removedEmails ?? a.addedPhones ?? a.removedPhones) ||
-      Boolean(a.addedPostalAddresses ?? a.updatedPostalAddresses ?? a.removedPostalAddresses),
+      Boolean(a.addedPostalAddresses ?? a.updatedPostalAddresses ?? a.removedPostalAddresses) ||
+      Boolean(a.addedRoles ?? a.removedRoles),
     { message: 'update_contact needs at least one field to change.' }
   )
 
@@ -277,6 +291,30 @@ const organizationPatch = (card: ContactCard, organization: string): Record<stri
   return { organizations: { [key]: { name: organization } } }
 }
 
+// The whole `titles` map, as with `anniversaries`: a whole-property set is
+// valid whether or not the card had titles before, and job titles another
+// client wrote ride along untouched. Null when nothing remains; an empty
+// patch when the roles do not change.
+const rolesPatch = (
+  card: ContactCard,
+  args: UpdateContactArgs
+): { error: string } | { patch: Record<string, unknown> } => {
+  if (!(args.addedRoles ?? args.removedRoles)) {
+    return { patch: {} }
+  }
+  const titles = withRoles(card, args.addedRoles ?? [], args.removedRoles ?? [])
+  const roles = readRoles({ titles })
+  // Only a call that adds roles is held to the cap: a merge can leave more,
+  // and removing them one at a time must still work.
+  if (roles.length > MAX_ROLES && roles.length > readRoles(card).length) {
+    return { error: `A contact holds at most ${MAX_ROLES} roles; this one would have ${roles.length}.` }
+  }
+  if (roles.join('\n') === readRoles(card).join('\n')) {
+    return { patch: {} }
+  }
+  return { patch: { titles: Object.keys(titles).length > 0 ? titles : null } }
+}
+
 // The four scalars — set by naming them, cleared with `""` (name excepted).
 const scalarPatch = (
   card: ContactCard,
@@ -340,6 +378,10 @@ export const updateContact = async (
   if ('error' in scalars) {
     return errorResult(`${scalars.error} Nothing was changed.`)
   }
+  const roles = rolesPatch(card, args)
+  if ('error' in roles) {
+    return errorResult(`${roles.error} Nothing was changed.`)
+  }
 
   const addresses = resolvePostal(card, args)
   const preferred = resolvePreferred(card, args, resolveEmails(card, args))
@@ -353,7 +395,7 @@ export const updateContact = async (
     ...(emails === undefined ? {} : { emails }),
     ...(phones === undefined ? {} : { phones }),
   }
-  const patch: Record<string, unknown> = { ...changed, ...scalars.patch }
+  const patch: Record<string, unknown> = { ...changed, ...scalars.patch, ...roles.patch }
   if (Object.keys(patch).length === 0) {
     return errorResult('Nothing to change: the requested edit is already the stored state.')
   }
@@ -380,7 +422,9 @@ export const registerUpdateContact = (server: McpServer, deps: ContactWriteDeps,
         'Edit a stored contact by id, changing only the fields you name — everything else ' +
         'is kept, so you never have to read the record and re-send it. Set `name`, ' +
         '`organization`, `birthday` or `note` directly (`""` clears all but the name); add or remove email ' +
-        'addresses, phone numbers and postal addresses with the `added…`/`removed…` lists; ' +
+        'addresses, phone numbers, postal addresses and roles with the `added…`/`removed…` lists; ' +
+        'a role is what the person is to the user ("lawyer"), recorded only when the user said or ' +
+        'confirmed it, and search_contacts then finds them by it; ' +
         'correct one component of a stored postal address with `updatedPostalAddresses`; ' +
         'mark the address mail should go to with `preferredEmail`. ' +
         'Find the contact_id and the `[a0]`-style handles with search_contacts. ' +

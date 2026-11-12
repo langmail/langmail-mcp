@@ -245,6 +245,93 @@ export const destroy = async (session: Session, ids: string[]): Promise<void> =>
   await jmapCall(session, [['Email/set', { accountId: session.accountId, destroy: ids }, '0']])
 }
 
+// --- contacts (JMAP for Contacts, RFC 9610) ---------------------------------
+
+const CONTACTS_USING = ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:contacts']
+
+export interface Contacts {
+  accountId: string
+  apiUrl: string
+  bookId: string
+}
+
+const contactsCall = async (c: Pick<Contacts, 'apiUrl'>, methodCalls: unknown[]): Promise<JmapResponse> => {
+  const res = await fetch(c.apiUrl, {
+    body: JSON.stringify({ methodCalls, using: CONTACTS_USING }),
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    method: 'POST',
+  })
+  if (!res.ok) {
+    throw new Error(`JMAP contacts call failed: HTTP ${res.status} ${await res.text()}`)
+  }
+  return (await res.json()) as JmapResponse
+}
+
+// The account's default address book, where the user's own contacts live.
+export const openContacts = async (session: Session): Promise<Contacts> => {
+  const res = await fetch(`${stalwart}/.well-known/jmap`, { headers: { authorization: `Bearer ${token}` } })
+  const body = (await res.json()) as { primaryAccounts?: Record<string, string> }
+  const accountId = body.primaryAccounts?.['urn:ietf:params:jmap:contacts']
+  if (!accountId) {
+    throw new Error('jmap session has no contacts account')
+  }
+  const books = await contactsCall(session, [['AddressBook/get', { accountId }, '0']])
+  const list = books.methodResponses?.[0]?.[1]?.list as { id: string; isDefault?: boolean }[] | undefined
+  const book = list?.find((b) => b.isDefault) ?? list?.[0]
+  if (!book) {
+    throw new Error('account has no address book')
+  }
+  return { accountId, apiUrl: session.apiUrl, bookId: book.id }
+}
+
+// Creates JSContact cards in the default book; returns their ids.
+export const createCards = async (c: Contacts, cards: Record<string, unknown>[]): Promise<string[]> => {
+  const create = Object.fromEntries(
+    cards.map((card, i) => [`c${i}`, { addressBookIds: { [c.bookId]: true }, ...card }])
+  )
+  const json = await contactsCall(c, [['ContactCard/set', { accountId: c.accountId, create }, '0']])
+  const created = json.methodResponses?.[0]?.[1]?.created as Record<string, { id: string }> | undefined
+  if (!created || Object.keys(created).length !== cards.length) {
+    throw new Error(`ContactCard/set failed: ${JSON.stringify(json.methodResponses?.[0])}`)
+  }
+  return cards.map((_, i) => created[`c${i}`]?.id ?? '')
+}
+
+export interface CardRecord {
+  emails?: Record<string, { address: string }>
+  id: string
+  name?: { full?: string }
+  notes?: Record<string, { note?: string }>
+  titles?: Record<string, { kind?: string; name: string }>
+}
+
+// Every card in the account (the evals' accounts are small and throwaway).
+export const allCards = async (c: Contacts): Promise<CardRecord[]> => {
+  const json = await contactsCall(c, [
+    ['ContactCard/query', { accountId: c.accountId }, '0'],
+    [
+      'ContactCard/get',
+      { '#ids': { name: 'ContactCard/query', path: '/ids', resultOf: '0' }, accountId: c.accountId },
+      '1',
+    ],
+  ])
+  return (json.methodResponses?.[1]?.[1]?.list as CardRecord[] | undefined) ?? []
+}
+
+export const destroyCards = async (c: Contacts, ids: string[]): Promise<void> => {
+  if (ids.length > 0) {
+    await contactsCall(c, [['ContactCard/set', { accountId: c.accountId, destroy: ids }, '0']])
+  }
+}
+
+// Drafts the agent staged, found by recipient, so a run leaves none behind.
+export const draftsTo = async (session: Session, address: string): Promise<string[]> => {
+  const json = await jmapCall(session, [
+    ['Email/query', { accountId: session.accountId, filter: { hasKeyword: '$draft', to: address } }, '0'],
+  ])
+  return (json.methodResponses?.[0]?.[1]?.ids as string[] | undefined) ?? []
+}
+
 // --- trajectory capture -----------------------------------------------------
 
 const LANGMAIL_TOOL = 'mcp__langmail__'

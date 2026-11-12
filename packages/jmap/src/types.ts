@@ -242,6 +242,16 @@ export interface ContactCardAnniversary {
   [extension: `${string}:${string}`]: unknown
 }
 
+// JSContact Title (RFC 9553 §2.2.5). `kind` is `title` (a job title, the
+// default) or `role` (what the person is: "lawyer", "landlord"); CardDAV
+// round-trips them as vCard `TITLE` and `ROLE`.
+export interface ContactCardTitle {
+  kind?: string | null
+  name: string
+  organizationId?: string | null
+  [extension: `${string}:${string}`]: unknown
+}
+
 // A ContactCard draft: JSContact Card (RFC 9553) narrowed to what Langmail
 // writes, before the server assigns an id.
 export interface ContactCardDraft {
@@ -253,6 +263,7 @@ export interface ContactCardDraft {
   notes?: Record<string, ContactCardNote> | null
   organizations?: Record<string, ContactCardOrganization> | null
   phones?: Record<string, ContactCardPhone> | null
+  titles?: Record<string, ContactCardTitle> | null
   uid?: string | null
   version?: string | null
 }

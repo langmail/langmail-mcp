@@ -16,6 +16,7 @@ import { fakeBook } from './contact-test-fixtures.ts'
 import { type SearchContactsDeps, searchContacts, searchContactsInput } from './search-contacts.ts'
 
 const DAY_MS = 86_400_000
+const LAWYER_FIRST = /^3 person\(s\) matched:\n\n1\. Robin Fairweather\n {3}contact_id: card-lawyer\n {3}roles: lawyer/u
 const daysAgo = (n: number): string => new Date(Date.now() - n * DAY_MS).toISOString()
 
 const robinCard = (over: Partial<ContactCard> = {}): ContactCard =>
@@ -384,5 +385,90 @@ describe('searchContactsInput', () => {
     expect(parsed.context).toBe('any')
     expect(parsed.limit).toBe(5)
     expect(parsed.response_format).toBe('concise')
+  })
+})
+
+describe('searchContacts — roles', () => {
+  const lawyer = (over: Partial<ContactCard> = {}): ContactCard =>
+    robinCard({
+      emails: { e0: { address: 'robin@fairweather-law.example' } },
+      id: 'card-lawyer',
+      notes: {},
+      titles: { r0: { kind: 'role', name: 'lawyer' } },
+      ...over,
+    })
+  // Both decoys carry more history than the lawyer, so plain ranking alone
+  // would put them first.
+  const lawrence = robinCard({
+    emails: { e0: { address: 'lawrence@example.org' } },
+    id: 'card-lawrence',
+    name: { full: 'Lawrence Lawyerson' },
+  })
+  const lawhouse = robinCard({
+    emails: { e0: { address: 'info@lawyer-house.example' } },
+    id: 'card-lawhouse',
+    name: { full: 'Front Desk' },
+  })
+
+  test('finds the person by role, case-insensitively and with "my", ranked above name and domain hits', async () => {
+    const deps = makeDeps([lawrence, lawhouse, lawyer()])
+    for (const query of ['lawyer', 'My Lawyer']) {
+      const text = (await searchContacts(deps, { args: args({ query }), token: 'tok' })).content[0]?.text ?? ''
+      expect(text).toMatch(LAWYER_FIRST)
+      expect(text).not.toContain('as a role')
+    }
+  })
+
+  test('a role nobody has says so, and names the way there', async () => {
+    const empty = await searchContacts(makeDeps([robinCard()]), { args: args({ query: 'my plumber' }), token: 'tok' })
+    expect(empty.content[0]?.text).toContain('no contact has it as a role')
+    expect(empty.content[0]?.text).toContain('search_emails')
+    expect(empty.content[0]?.text).toContain('addedRoles')
+    // A domain hit is no answer to "my lawyer": flagged rather than offered as the person.
+    const domainOnly = await searchContacts(makeDeps([lawhouse]), { args: args({ query: 'my lawyer' }), token: 'tok' })
+    expect(domainOnly.content[0]?.text).toContain('No contact has "lawyer" as a role')
+    // A plain name search gets no such note.
+    const byName = await searchContacts(makeDeps([robinCard()]), { args: args({ query: 'robin' }), token: 'tok' })
+    expect(byName.content[0]?.text).not.toContain('as a role')
+  })
+
+  test('reaches a role card past the unfiltered sweep window, reading titles alone', async () => {
+    const filler = Array.from({ length: 600 }, (_, i) =>
+      robinCard({ emails: { e0: { address: `p${i}@example.org` } }, id: `card-${i}`, name: { full: `Person ${i}` } })
+    )
+    const cards = [...filler, lawyer()]
+    const narrowed: string[][] = []
+    const deps = makeDeps(cards, {
+      contactCardGet: (p) => {
+        if (p.properties) {
+          narrowed.push(p.properties)
+        }
+        return Promise.resolve(cards.filter((c) => p.ids.includes(c.id)))
+      },
+      // The server's filter cannot see a role; the unfiltered read pages.
+      contactCardQuery: (p) => {
+        if (p.filter) {
+          return Promise.resolve([])
+        }
+        const start = p.position ?? 0
+        return Promise.resolve(cards.slice(start, start + (p.limit ?? cards.length)).map((c) => c.id))
+      },
+    })
+    const text = (await searchContacts(deps, { args: args({ query: 'lawyer' }), token: 'tok' })).content[0]?.text ?? ''
+    expect(text).toContain('contact_id: card-lawyer')
+    expect(narrowed.length).toBeGreaterThan(0)
+    expect(narrowed.every((p) => p.join() === 'id,titles')).toBe(true)
+  })
+
+  test('a book inside the sweep window takes no role sweep', async () => {
+    let queries = 0
+    const deps = makeDeps([lawyer()], {
+      contactCardQuery: () => {
+        queries += 1
+        return Promise.resolve(['card-lawyer'])
+      },
+    })
+    await searchContacts(deps, { args: args({ query: 'lawyer' }), token: 'tok' })
+    expect(queries).toBe(2)
   })
 })

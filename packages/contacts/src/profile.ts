@@ -20,6 +20,7 @@ import {
   type ContactCardAnniversary,
   type ContactCardNote,
   type ContactCardPhone,
+  type ContactCardTitle,
 } from '@langmail/jmap'
 
 import { daysInMonth } from './birthdays.ts'
@@ -352,6 +353,69 @@ export const withBirthday = (
   // overwritten — the birth entry takes the next free key instead.
   const [key, existing] = births[0] ?? [freeKey(kept, BIRTHDAY_KEY), undefined]
   return { ...kept, [key]: { ...existing, ...birthAnniversary(birthday) } }
+}
+
+// --- roles -----------------------------------------------------------------
+
+// What a person is to the user ("lawyer", "landlord"), as the user said or
+// confirmed it. Stored as a JSContact title of kind `role`, which CardDAV
+// serves as vCard `ROLE` (RFC 9555): an ordinary field on every device, not
+// a contact group the way `CATEGORIES` becomes one on a phone. Job titles
+// (kind `title`, vCard `TITLE`) share the property and are never touched.
+const ROLE_KIND = 'role'
+
+export const MAX_ROLES = 10
+
+const LEADING_MY = /^my\s+/u
+const SPACES = /\s+/gu
+
+// "My Lawyer " and "lawyer" are the same role: the user's phrase is the
+// query, and a stored role is compared the same way.
+export const normalizeRole = (text: string): string =>
+  text.trim().replace(SPACES, ' ').toLowerCase().replace(LEADING_MY, '')
+
+const roleEntries = (card: Pick<ContactCard, 'titles'>): [string, ContactCardTitle][] =>
+  Object.entries(card.titles ?? {}).filter(([, t]) => t.kind === ROLE_KIND && typeof t.name === 'string')
+
+export const readRoles = (card: Pick<ContactCard, 'titles'>): string[] => [
+  ...new Set(
+    roleEntries(card)
+      .map(([, t]) => normalizeRole(t.name))
+      .filter((r) => r.length > 0)
+  ),
+]
+
+// Whether one of the card's roles has a word starting with the (normalized)
+// query: "lawyer" finds a "divorce lawyer", but a name search for "Ian"
+// does not turn up everyone whose role is "physician".
+export const hasRole = (card: Pick<ContactCard, 'titles'>, query: string): boolean => {
+  const q = normalizeRole(query)
+  return q.length > 0 && readRoles(card).some((r) => ` ${r}`.includes(` ${q}`))
+}
+
+// The card's whole `titles` map with `removed` roles dropped and `added` ones
+// appended under fresh keys, without duplicates. Every other title (a job
+// title a phone wrote) keeps its key and value.
+export const withRoles = (
+  card: Pick<ContactCard, 'titles'>,
+  added: string[],
+  removed: string[]
+): Record<string, ContactCardTitle> => {
+  const gone = new Set(removed.map(normalizeRole))
+  const titles: Record<string, ContactCardTitle> = Object.fromEntries(
+    Object.entries(card.titles ?? {}).filter(
+      ([, t]) => !(t.kind === ROLE_KIND && typeof t.name === 'string' && gone.has(normalizeRole(t.name)))
+    )
+  )
+  const present = new Set(readRoles({ titles }))
+  for (const role of added.map(normalizeRole)) {
+    if (role.length === 0 || present.has(role)) {
+      continue
+    }
+    present.add(role)
+    titles[freeKey(titles, `r${Object.keys(titles).length}`)] = { kind: ROLE_KIND, name: role }
+  }
+  return titles
 }
 
 // --- organization, note, source -------------------------------------------

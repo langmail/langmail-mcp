@@ -21,12 +21,14 @@ import {
   COLLECTED_BOOK_NAME,
   COLLECTED_NOTE_KEY,
   collectedNoteEntry,
+  MAX_ROLES,
   PERSONAL_BOOK_NAME,
   parseBirthday,
   toCardAddress,
   toCardPhone,
   USER_NOTE_KEY,
   userNoteEntry,
+  withRoles,
 } from '@langmail/contacts'
 import {
   type ContactCardAddress,
@@ -46,6 +48,7 @@ import {
   phoneSchema,
   postalAddressSchema,
   readBack,
+  roleSchema,
 } from './contact-common.ts'
 import { renderContact } from './contact-format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
@@ -66,6 +69,14 @@ const createContactShape = {
     .max(5)
     .optional()
     .describe('Postal addresses, structured by component.'),
+  roles: z
+    .array(roleSchema)
+    .max(MAX_ROLES)
+    .optional()
+    .describe(
+      'What the person is to the user ("lawyer", "landlord"), so a later "write to my lawyer" finds them. ' +
+        'Only roles the user said or confirmed; never inferred from mail.'
+    ),
 }
 
 export const createContactInput = z.object(createContactShape)
@@ -133,6 +144,7 @@ export const createContact = async (
   const phones = keyed<ContactCardPhone>((args.phones ?? []).map(toCardPhone), 'p')
   const addresses = keyed<ContactCardAddress>((args.postalAddresses ?? []).map(toCardAddress), 'a')
   const note = args.note?.trim()
+  const titles = withRoles({}, args.roles ?? [], [])
 
   const bookId = await targetBook(deps, ctx)
   const card: ContactCardDraft = {
@@ -151,6 +163,7 @@ export const createContact = async (
     },
     ...(args.organization ? { organizations: { o0: { name: args.organization.trim() } } } : {}),
     ...(Object.keys(phones).length > 0 ? { phones } : {}),
+    ...(Object.keys(titles).length > 0 ? { titles } : {}),
     uid: `urn:langmail:authored:${crypto.randomUUID()}`,
     version: '1.0',
   }
@@ -178,7 +191,8 @@ export const registerCreateContact = (server: McpServer, deps: ContactWriteDeps,
         'Create a contact in the user’s address book — a person the address book does not ' +
         'yet know, typically because they have never sent mail or shared a calendar event. ' +
         'Holds a name plus optional email addresses, phone numbers, structured postal ' +
-        'addresses, an organization, a birthday, and a note. Search with search_contacts first: if the ' +
+        'addresses, an organization, a birthday, a note, and roles: what the person is to the user ' +
+        '("lawyer"), stored only when the user said or confirmed it. Search with search_contacts first: if the ' +
         'person is already known, use update_contact instead so their history stays on one ' +
         'record. The contact syncs to the user’s devices over CardDAV.',
       inputSchema: z.object(createContactShape),

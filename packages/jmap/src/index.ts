@@ -141,6 +141,7 @@ export type {
   ContactCardOrganization,
   ContactCardPartialDate,
   ContactCardPhone,
+  ContactCardTitle,
   EmailAddress,
   EmailBodyPart,
   EmailBodyValue,

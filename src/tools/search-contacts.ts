@@ -15,7 +15,9 @@ import {
   bestAddress,
   COLLECTED_BOOK_NAME,
   type CollectedExtension,
+  hasRole,
   type InteractionTuple,
+  normalizeRole,
   rankCards,
   readCollected,
   readOrganization,
@@ -44,7 +46,7 @@ import {
 
 import { type CalDavConfig, discoverAccount, fetchEvents } from '../caldav/client.ts'
 import { READ_ONLY } from './annotations.ts'
-import { birthdayLine, profileLines } from './contact-format.ts'
+import { birthdayLine, profileLines, rolesLine } from './contact-format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 const searchContactsShape = {
@@ -62,14 +64,15 @@ const searchContactsShape = {
     .min(1)
     .max(200)
     .describe(
-      'Name, partial name, email address, or organization. Matched against ' +
-        'display names, addresses, and address domains.'
+      'Name, partial name, email address, organization, or what the person is to the user ' +
+        '("lawyer", "my landlord"). Matched against display names, organizations, addresses, ' +
+        'address domains, and the roles stored on contacts.'
     ),
   response_format: z
     .enum(['concise', 'detailed'])
     .default('concise')
     .describe(
-      '`concise` returns name, contact id, best address, confidence, relationship, ' +
+      '`concise` returns name, contact id, roles, best address, confidence, relationship, ' +
         'the birthday when stored, and the last interactions. `detailed` adds all known addresses with their ' +
         'own confidence, phone numbers, postal addresses, the note, where the record ' +
         'came from, and interaction record ids (for chaining into get_email or ' +
@@ -113,30 +116,89 @@ const QUERY_WINDOW = 50
 // unbounded: past this size the filtered read is what still reaches a card.
 const SWEEP_WINDOW = 250
 
+// Page size for the role sweep's id query and its narrowed get.
+const ROLE_SWEEP_PAGE = 500
+
+// The cards past the sweep window whose role matches the query. Stalwart's
+// ContactCard/query cannot reach a role: `text` does not search `titles` and
+// there is no title condition (see
+// docs/upstream/stalwart/contact-query-cannot-match-titles.md). So on a book
+// larger than the sweep window this pages every id and reads `titles` alone,
+// one id query and one narrowed get per 500 cards, one after another: on a
+// 5,000-card book, ten of each. It runs whenever the sweep came back full
+// and the window holds fewer role holders than `limit`, which is most
+// searches on such a book; an address search, which no role can match,
+// skips it.
+const roleSweep = async (
+  deps: Pick<SearchContactsDeps, 'contactCardGet' | 'contactCardQuery'>,
+  ctx: { accountId: string; authorization: string },
+  query: string,
+  seen: Set<string>
+): Promise<string[]> => {
+  const found: string[] = []
+  for (let position = 0; ; position += ROLE_SWEEP_PAGE) {
+    const page = await deps.contactCardQuery({ ...ctx, apiUrl: '', limit: ROLE_SWEEP_PAGE, position })
+    const unseen = page.filter((id) => !seen.has(id))
+    if (unseen.length > 0) {
+      const titled = await deps.contactCardGet({ ...ctx, apiUrl: '', ids: unseen, properties: ['id', 'titles'] })
+      found.push(...titled.filter((c) => hasRole(c, query)).map((c) => c.id))
+    }
+    if (page.length < ROLE_SWEEP_PAGE) {
+      return found
+    }
+  }
+}
+
 // Client-side refinement of the server-side candidate set, and the final
 // word on what matched: the server's `text` condition also searches notes,
 // and every collected card carries the same machine-written note text, so
 // trusting a bare server hit would answer "Collection" with the whole book.
 // This mirrors the fields the description promises: display name,
-// organization, address, and address domain.
-const matchesQuery = (card: ContactCard, query: string): boolean => {
-  const q = query.trim().toLowerCase()
-  if (card.name?.full?.toLowerCase().includes(q)) {
-    return true
-  }
-  if (Object.values(card.organizations ?? {}).some((o) => o.name?.toLowerCase().includes(q))) {
-    return true
-  }
+// organization, address, address domain, and role (`hasRole`, which drops a
+// leading "my " from the query).
+const matchesQuery = (card: ContactCard, query: string): boolean =>
+  hasRole(card, query) || matchesByName(card, query) || matchesByAddress(card, query)
+
+const matchesByName = (card: ContactCard, query: string): boolean => {
+  const q = withoutMy(query)
+  return (
+    card.name?.full?.toLowerCase().includes(q) === true ||
+    Object.values(card.organizations ?? {}).some((o) => o.name?.toLowerCase().includes(q))
+  )
+}
+
+const matchesByAddress = (card: ContactCard, query: string): boolean => {
+  const q = withoutMy(query)
   return Object.values(card.emails ?? {}).some((e) => {
     const address = e.address.toLowerCase()
     return address.includes(q) || (address.split('@')[1] ?? '').includes(q)
   })
 }
 
+// How the agent gets from "my lawyer" to a person the first time, before a
+// role is stored. A role is recorded only on the user's word: a guess would
+// send their mail to the wrong person.
+const roleHint =
+  'If the query is what the person is to the user (e.g. "my lawyer"), find them with search_emails, ' +
+  'confirm with the user who it is, then record it with update_contact `addedRoles` ' +
+  '(or create_contact `roles`) so the next request takes one lookup.'
+
 const emptyResultText = (query: string): string =>
-  `No contact matched "${query}" in the collected address book (built from mail headers and calendar attendees) or the personal address books. ` +
+  `No contact matched "${query}" in the collected address book (built from mail headers and calendar attendees) or the personal address books, and no contact has it as a role. ` +
   'If you know part of the address or the organization, search for that instead. ' +
+  `${roleHint} ` +
   "If the person has only contacted the user via LinkedIn or another platform, no email address exists in this account's data."
+
+// "my lawyer" is matched as "lawyer" everywhere, so a domain like
+// `smithlawyer.example` still turns up, flagged by the note below.
+const MY_PREFIX = /^my\s+/iu
+const ADDRESS_LIKE = /[@.]/u
+const withoutMy = normalizeRole
+
+// A query phrased as a role ("my landlord") whose results hold no role
+// holder says so, so the agent does not take a name or domain hit for the
+// person the user meant.
+const looksLikeRoleQuery = (query: string): boolean => MY_PREFIX.test(query.trim())
 
 // Hydrated, relative-dated prose for one interaction tuple.
 const interactionLine = (
@@ -214,6 +276,7 @@ const concisePerson = (
     .slice(0, SHOWN_INTERACTIONS)
     .map((t) => `   - ${interactionLine(t, hydrated.subjects, hydrated.eventTitles, now)}`)
   const organization = readOrganization(card)
+  const roles = rolesLine(card)
   const birthday = birthdayLine(card)
   return [
     `${index + 1}. ${card.name?.full ?? best?.address ?? '(unnamed)'}`,
@@ -222,6 +285,7 @@ const concisePerson = (
     // costs an extra detailed round-trip.
     `   contact_id: ${card.id}`,
     ...(organization ? [`   organization: ${organization}`] : []),
+    ...(roles ? [roles] : []),
     // One short line, only when stored: "when is Robin's birthday" should
     // not need the detailed format.
     ...(birthday ? [birthday] : []),
@@ -332,16 +396,36 @@ export const searchContacts = async (deps: SearchContactsDeps, ctx: SearchContac
   ])
   const collectedBookId = books.find((b) => b.name === COLLECTED_BOOK_NAME)?.id
   const candidateIds = [...new Set([...filteredIds, ...sweptIds])]
-  const cards = await deps.contactCardGet({ accountId, apiUrl: '', authorization, ids: candidateIds })
+  const windowCards = await deps.contactCardGet({ accountId, apiUrl: '', authorization, ids: candidateIds })
+  const sweepFull = sweptIds.length >= SWEEP_WINDOW
+  const roleHoldersInWindow = windowCards.filter((c) => hasRole(c, query)).length
+  const pastWindow =
+    sweepFull && roleHoldersInWindow < args.limit && !ADDRESS_LIKE.test(query)
+      ? await roleSweep(deps, { accountId, authorization }, query, new Set(candidateIds))
+      : []
+  const cards =
+    pastWindow.length > 0
+      ? [...windowCards, ...(await deps.contactCardGet({ accountId, apiUrl: '', authorization, ids: pastWindow }))]
+      : windowCards
   const matched = cards.filter((c) => matchesQuery(c, query))
   if (matched.length === 0) {
     return textResult(emptyResultText(query))
   }
   // Either window coming back full means the count below is a floor.
-  const windowFull = filteredIds.length >= QUERY_WINDOW || sweptIds.length >= SWEEP_WINDOW
+  const windowFull = filteredIds.length >= QUERY_WINDOW || sweepFull
 
+  // The people the user named this way come first: a role is the user's own
+  // word for who they mean, which a name or domain hit ("Lawrence",
+  // `lawhouse.example` for "lawyer") is not.
   const now = new Date()
-  const ranked = rankCards(matched, now)
+  const roleHolders = matched.filter((c) => hasRole(c, query))
+  const ranked = [
+    ...rankCards(roleHolders, now),
+    ...rankCards(
+      matched.filter((c) => !hasRole(c, query)),
+      now
+    ),
+  ]
   const page = ranked.slice(0, args.limit)
 
   const shown = args.response_format === 'detailed' ? undefined : SHOWN_INTERACTIONS
@@ -367,7 +451,13 @@ export const searchContacts = async (deps: SearchContactsDeps, ctx: SearchContac
   const relayNote = page.some((card) => (readCollected(card).relays?.length ?? 0) > 0)
     ? '\n\nNote: relay addresses (e.g. LinkedIn digests) were excluded as unusable; detailed format lists them.'
     : ''
-  return textResult(`${page.length} person(s) matched:\n\n${sections.join('\n\n')}${relayNote}${truncationNote}`)
+  const noRoleNote =
+    roleHolders.length === 0 && looksLikeRoleQuery(query)
+      ? `\n\nNo contact has "${withoutMy(query)}" as a role: the people above matched by name, organization or address only. ${roleHint}`
+      : ''
+  return textResult(
+    `${page.length} person(s) matched:\n\n${sections.join('\n\n')}${noRoleNote}${relayNote}${truncationNote}`
+  )
 }
 
 // --- live-deps wiring ----------------------------------------------------
@@ -419,14 +509,15 @@ export const registerSearchContacts = (
     {
       annotations: READ_ONLY,
       description:
-        "Resolve a person's name, partial name, email address, or organization to " +
-        'known contacts, ranked by interaction recency and frequency. Sources ' +
+        "Resolve a person's name, partial name, email address, organization, or what " +
+        'they are to the user ("my lawyer", "my landlord") to known contacts. People ' +
+        'holding that role come first, the rest are ranked by interaction recency and frequency. Sources ' +
         'include the collected address book maintained from mail headers (both ' +
         'directions, including Sent) and calendar attendees and organizers, plus ' +
         "the user's personal address books, and contacts written with " +
         'create_contact. Use this before creating events or drafting mail when only ' +
         'a name is known, and before create_contact or update_contact to get the ' +
-        'contact_id. Returns for each contact one or more addresses with a ' +
+        'contact_id. Returns for each contact its roles, one or more addresses with a ' +
         'confidence level, the birthday when one is stored, and recent ' +
         'interactions; the detailed format adds phone numbers, postal addresses ' +
         'and the note. Do not use it to enumerate all contacts; a query is ' +

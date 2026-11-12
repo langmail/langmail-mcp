@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 
-import { BIRTHDAY_KEY, readBirthday, readNote, readPhones, readPostalAddresses, sourceOf } from '@langmail/contacts'
+import {
+  BIRTHDAY_KEY,
+  readBirthday,
+  readNote,
+  readPhones,
+  readPostalAddresses,
+  readRoles,
+  sourceOf,
+} from '@langmail/contacts'
 
 import { derivedCard, fakeBook } from './contact-test-fixtures.ts'
 import { createContact, createContactInput } from './create-contact.ts'
@@ -34,6 +42,15 @@ describe('createContact', () => {
     ])
     // Components, not one free-text block — the point of the structured shape.
     expect(result.content[0]?.text).toContain('[a0] Beispielweg 1, 80331 München, DE (home)')
+  })
+
+  test('stores the roles the user named as role titles and echoes them back', async () => {
+    const book = fakeBook()
+    const result = await createContact(book.deps, { args: args({ roles: ['My Lawyer', 'lawyer'] }), token: 'tok' })
+    const [card] = [...book.cards.values()]
+    expect(card?.titles).toEqual({ r0: { kind: 'role', name: 'lawyer' } })
+    expect(readRoles(card as NonNullable<typeof card>)).toEqual(['lawyer'])
+    expect(result.content[0]?.text).toContain('roles: lawyer')
   })
 
   test('stamps the card authored so a later derivation can never relabel it', async () => {

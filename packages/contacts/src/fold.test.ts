@@ -244,6 +244,16 @@ describe('foldObservations — provenance', () => {
     expect(readExt(updates[0]?.patch ?? {}).source).toBe('authored')
   })
 
+  test('a role the user named is never written or overwritten by collection', () => {
+    const card = existingCard({ titles: { r0: { kind: 'role', name: 'lawyer' } } })
+    const { creates, updates } = foldObservations({ cards: [card], collectedBookId: BOOK }, [
+      obs(),
+      obs({ address: 'kim@fairweather-law.example', name: 'Kim Lawyer' }),
+    ])
+    expect(updates[0]?.patch.titles).toBeUndefined()
+    expect(creates.every((c) => c.titles === undefined)).toBe(true)
+  })
+
   test('an authored name is never overwritten by an observed one', () => {
     const card = existingCard({ name: { full: 'Robin Fairweather-Ng' } })
     const { updates } = foldObservations({ cards: [card], collectedBookId: BOOK }, [obs({ name: 'Robin Fairweather' })])
@@ -393,6 +403,7 @@ describe('foldObservations — a personal card duplicating a Collected one', () 
     for (const over of [
       { phones: { p0: { number: '+49 30 7654321' } } },
       { anniversaries: { b0: { date: { day: 1, month: 2 }, kind: 'birth' } } },
+      { titles: { r0: { kind: 'role', name: 'lawyer' } } },
       { notes: { ...collectedTwin().notes, 'langmail-note': { note: 'Met at the fair.' } } },
       // Not in the typed ContactCard, but a CardDAV client can set it.
       { nicknames: { k0: { name: 'Robbie' } } },

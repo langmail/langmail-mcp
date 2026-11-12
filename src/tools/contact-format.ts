@@ -15,6 +15,7 @@ import {
   readOrganization,
   readPhones,
   readPostalAddresses,
+  readRoles,
   sourceOf,
 } from '@langmail/contacts'
 import { type ContactCard } from '@langmail/jmap'
@@ -28,6 +29,13 @@ const indentNote = (note: string): string => note.split('\n').join('\n     ')
 export const birthdayLine = (card: ContactCard): string | undefined => {
   const birthday = readBirthday(card)
   return birthday ? `   birthday: ${formatBirthday(birthday)}` : undefined
+}
+
+// `roles: lawyer, landlord` — what the person is to the user. On the concise
+// search format too: "write to my lawyer" resolves on that line.
+export const rolesLine = (card: ContactCard): string | undefined => {
+  const roles = readRoles(card)
+  return roles.length > 0 ? `   roles: ${roles.join(', ')}` : undefined
 }
 
 // The authored half of a card: birthday, phone numbers, postal addresses,
@@ -60,6 +68,7 @@ export const profileLines = (card: ContactCard, shown: { birthday: boolean } = {
 // so the caller never has to re-read to see the result of its own write.
 export const renderContact = (card: ContactCard, collectedBookId: string | undefined): string => {
   const organization = readOrganization(card)
+  const roles = rolesLine(card)
   // Only the lowest `pref` is the preferred one (RFC 9553 §1.5.4), as in
   // search_contacts: an imported card can rank several addresses.
   const prefs = Object.values(card.emails ?? {}).flatMap((e) => (typeof e.pref === 'number' ? [e.pref] : []))
@@ -71,6 +80,7 @@ export const renderContact = (card: ContactCard, collectedBookId: string | undef
     card.name?.full ?? '(unnamed)',
     `   contact_id: ${card.id}`,
     ...(organization ? [`   organization: ${organization}`] : []),
+    ...(roles ? [roles] : []),
     ...(emails.length > 0 ? ['   emails:', ...emails.map((a) => `   - ${a}`)] : []),
     ...profileLines(card),
     `   source: ${sourceOf(card, collectedBookId)}`,

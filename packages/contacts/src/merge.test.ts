@@ -327,6 +327,32 @@ describe('mergeCards', () => {
     expect(merged(mergeCards(kept, [booking()])).preferred).toEqual({ address: 'hello@gym.example', how: 'unchanged' })
   })
 
+  test('keeps the roles of both cards without duplicates and reports dropped job titles', () => {
+    const kept = gym({ titles: { r0: { kind: 'role', name: 'lawyer' } } })
+    const other = booking({
+      titles: {
+        r0: { kind: 'role', name: 'Lawyer' },
+        r1: { kind: 'role', name: 'landlord' },
+        t0: { kind: 'title', name: 'Partner' },
+      },
+    })
+    const { conflicts, patch } = merged(mergeCards(kept, [other]))
+    expect(patch.titles).toEqual({ r0: { kind: 'role', name: 'lawyer' }, r1: { kind: 'role', name: 'landlord' } })
+    expect(conflicts).toContain('not carried over from "Example Gym Booking" (contact_id card-booking): job titles')
+  })
+
+  test('a job title the kept card already holds is no conflict', () => {
+    const kept = gym({ titles: { t0: { kind: 'title', name: 'Partner' } } })
+    const { conflicts } = merged(mergeCards(kept, [booking({ titles: { t0: { kind: 'title', name: 'partner' } } })]))
+    expect(conflicts.filter((c) => c.includes('job titles'))).toEqual([])
+  })
+
+  test('writes no titles when the merged cards bring no new role', () => {
+    const kept = gym({ titles: { r0: { kind: 'role', name: 'lawyer' } } })
+    const { patch } = merged(mergeCards(kept, [booking({ titles: { r0: { kind: 'role', name: 'my lawyer' } } })]))
+    expect(patch.titles).toBeUndefined()
+  })
+
   test('reports properties it does not carry over', () => {
     const other = { ...booking(), nicknames: { k0: { name: 'Gymmy' } } } as ContactCard
     const { conflicts } = merged(mergeCards(gym({ name: { full: 'Example Gym Booking' } }), [other]))

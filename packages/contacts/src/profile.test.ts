@@ -7,6 +7,8 @@ import { BIRTHDAY_KEY, COLLECTED_NOTE_KEY, USER_NOTE_KEY } from './constants.ts'
 import {
   formatBirthday,
   formatCardAddress,
+  hasRole,
+  normalizeRole,
   parseBirthday,
   patchCardAddress,
   readBirthday,
@@ -14,11 +16,13 @@ import {
   readOrganization,
   readPhones,
   readPostalAddresses,
+  readRoles,
   sourceOf,
   toCardAddress,
   toCardPhone,
   userNoteKey,
   withBirthday,
+  withRoles,
 } from './profile.ts'
 
 const card = (overrides: Partial<ContactCard> = {}): ContactCard => ({
@@ -266,6 +270,46 @@ describe('birthday', () => {
   test('formatBirthday prints what parseBirthday reads', () => {
     expect(formatBirthday({ day: 3, month: 3, year: 1990 })).toBe('1990-03-03')
     expect(formatBirthday({ day: 3, month: 3 })).toBe('--03-03')
+  })
+})
+
+describe('roles', () => {
+  const jobAndRole = card({
+    titles: { r0: { kind: 'role', name: 'Lawyer' }, t0: { kind: 'title', name: 'Partner' } },
+  })
+
+  test('normalizes the user phrase: case, spacing and a leading "my"', () => {
+    expect(normalizeRole('  My   Divorce Lawyer ')).toBe('divorce lawyer')
+    expect(normalizeRole('mystic')).toBe('mystic')
+  })
+
+  test('reads only role-kind titles, never a job title', () => {
+    expect(readRoles(jobAndRole)).toEqual(['lawyer'])
+    expect(readRoles(card())).toEqual([])
+  })
+
+  test('matches a query contained in a role, after normalizing it', () => {
+    expect(hasRole(jobAndRole, 'my LAWYER')).toBe(true)
+    expect(hasRole(card({ titles: { r0: { kind: 'role', name: 'divorce lawyer' } } }), 'lawyer')).toBe(true)
+    expect(hasRole(jobAndRole, 'partner')).toBe(false)
+    expect(hasRole(jobAndRole, 'my ')).toBe(false)
+    // A name search never lands inside a role word.
+    expect(hasRole(card({ titles: { r0: { kind: 'role', name: 'physician' } } }), 'Ian')).toBe(false)
+  })
+
+  test('adds without duplicates and removes, leaving job titles in place', () => {
+    const titles = withRoles(jobAndRole, ['my landlord', 'lawyer', 'Landlord'], [])
+    expect(titles.t0).toEqual({ kind: 'title', name: 'Partner' })
+    expect(readRoles({ titles })).toEqual(['lawyer', 'landlord'])
+    const removed = withRoles({ titles }, [], ['My Lawyer'])
+    expect(readRoles({ titles: removed })).toEqual(['landlord'])
+    expect(removed.t0).toEqual({ kind: 'title', name: 'Partner' })
+  })
+
+  test('a fresh key never overwrites a stored title', () => {
+    const titles = withRoles(card({ titles: { r1: { kind: 'title', name: 'CEO' } } }), ['lawyer'], [])
+    expect(Object.keys(titles)).toHaveLength(2)
+    expect(titles.r1).toEqual({ kind: 'title', name: 'CEO' })
   })
 })
 

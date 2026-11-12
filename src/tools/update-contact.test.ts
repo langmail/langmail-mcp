@@ -8,6 +8,7 @@ import {
   readNote,
   readPhones,
   readPostalAddresses,
+  readRoles,
   sourceOf,
   toCardAddress,
   toCardPhone,
@@ -356,6 +357,52 @@ describe('updateContact — preferred address', () => {
     })
     expect(result.isError).toBe(true)
     expect(result.content[0]?.text).toContain('Nothing was changed')
+    expect(book.patches).toEqual([])
+  })
+})
+
+describe('updateContact — roles', () => {
+  test('adds a role without touching a job title, and removes it again', async () => {
+    const book = fakeBook([authored({ titles: { t0: { kind: 'title', name: 'Partner' } } })])
+    const added = await updateContact(book.deps, { args: args({ addedRoles: ['my lawyer'] }), token: 'tok' })
+    expect(added.content[0]?.text).toContain('roles: lawyer')
+    expect(readRoles(stored(book))).toEqual(['lawyer'])
+    expect(stored(book).titles?.t0).toEqual({ kind: 'title', name: 'Partner' })
+    await updateContact(book.deps, { args: args({ removedRoles: ['Lawyer'] }), token: 'tok' })
+    expect(readRoles(stored(book))).toEqual([])
+    expect(stored(book).titles).toEqual({ t0: { kind: 'title', name: 'Partner' } })
+  })
+
+  test('removing the last title clears the property', async () => {
+    const book = fakeBook([authored({ titles: { r0: { kind: 'role', name: 'landlord' } } })])
+    await updateContact(book.deps, { args: args({ removedRoles: ['landlord'] }), token: 'tok' })
+    expect(book.patches.at(-1)).toEqual({ titles: null })
+  })
+
+  test('a role the card already holds is no change', async () => {
+    const book = fakeBook([authored({ titles: { r0: { kind: 'role', name: 'lawyer' } } })])
+    const result = await updateContact(book.deps, { args: args({ addedRoles: ['Lawyer'] }), token: 'tok' })
+    expect(result.isError).toBe(true)
+    expect(book.patches).toEqual([])
+  })
+
+  test('a contact past the cap after a merge can still drop roles one by one', async () => {
+    const many = Object.fromEntries(
+      Array.from({ length: 12 }, (_, i) => [`r${i}`, { kind: 'role', name: `role ${i}` }])
+    )
+    const book = fakeBook([authored({ titles: many })])
+    const result = await updateContact(book.deps, { args: args({ removedRoles: ['role 0'] }), token: 'tok' })
+    expect(result.isError).toBeUndefined()
+    expect(readRoles(stored(book))).toHaveLength(11)
+  })
+
+  test('refuses more than ten roles on one contact', async () => {
+    const many = Object.fromEntries(
+      Array.from({ length: 10 }, (_, i) => [`r${i}`, { kind: 'role', name: `role ${i}` }])
+    )
+    const book = fakeBook([authored({ titles: many })])
+    const result = await updateContact(book.deps, { args: args({ addedRoles: ['lawyer'] }), token: 'tok' })
+    expect(result.isError).toBe(true)
     expect(book.patches).toEqual([])
   })
 })

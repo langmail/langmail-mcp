@@ -53,6 +53,10 @@ const USING = ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail']
 
 const live = ADMIN_URL ? describe : describe.skip
 
+const COLLECTION_HREF = /<D:href>([^<]+\/)<\/D:href>/giu
+const CARD_HREF = /<D:href>([^<]+[^/])<\/D:href>/giu
+const ROLE_LINE = /^ROLE[;:].*lawyer\r?$/mu
+
 // Minimal admin JMAP call (x:-prefixed management methods; see
 // services/auth/src/stalwart/admin-client.ts for the full contract).
 const adminCall = async (method: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
@@ -438,4 +442,75 @@ live('search_contacts against live Stalwart — collect from mail + calendar, th
     expect(result.isError).toBeUndefined()
     expect(result.content[0]?.text).toContain('No contact matched')
   })
+
+  // Last, because it fills the book past the sweep window. Stalwart's query
+  // cannot match a role (docs/upstream/stalwart/contact-query-cannot-match-titles.md),
+  // so the role sweep is the only read that reaches this card.
+  test('a role card past the sweep window is found by its role, and reaches CardDAV as ROLE', async () => {
+    const [book] = (await addressBookList(ctx)).filter((b) => b.name !== COLLECTED_BOOK_NAME)
+    const bookId = (book as NonNullable<typeof book>).id
+    const create: Record<string, unknown> = {}
+    for (let i = 0; i < 300; i += 1) {
+      create[`f${i}`] = {
+        addressBookIds: { [bookId]: true },
+        emails: { e0: { address: `filler-${i}@example.org` } },
+        name: { full: `Filler ${i}` },
+      }
+    }
+    const res = await fetch(apiUrl, {
+      body: JSON.stringify({
+        methodCalls: [['ContactCard/set', { accountId, create }, '0']],
+        using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:contacts'],
+      }),
+      headers: { authorization, 'content-type': 'application/json' },
+      method: 'POST',
+    })
+    expect(res.status).toBe(200)
+    const lawyerId = await contactCardCreate({
+      ...ctx,
+      card: {
+        addressBookIds: { [bookId]: true },
+        emails: { e0: { address: 'robin@fairweather-law.example' } },
+        name: { full: 'Robin Lawyer-Card' },
+        titles: { r0: { kind: 'role', name: 'lawyer' } },
+        uid: `role-card-${run}`,
+      },
+    })
+
+    // The sweep reads titles alone: the narrowed get is honoured.
+    const [narrow] = await contactCardGet({ ...ctx, ids: [lawyerId], properties: ['id', 'titles'] })
+    expect(narrow?.titles).toEqual({ r0: { kind: 'role', name: 'lawyer' } })
+    expect(narrow?.name).toBeUndefined()
+    // The window really is full, and the lawyer is outside it.
+    const window = await contactCardQuery({ ...ctx, limit: 250 })
+    expect(window).toHaveLength(250)
+
+    const result = await searchContacts(searchDeps, {
+      args: searchContactsInput.parse({ query: 'my lawyer' }),
+      token: TOKEN,
+    })
+    const text = result.content[0]?.text ?? ''
+    expect(text).toContain('1. Robin Lawyer-Card')
+    expect(text).toContain('roles: lawyer')
+
+    // Over CardDAV the role is an ordinary vCard field, not a group.
+    const home = `${ADMIN_URL}/dav/card/${encodeURIComponent(address)}/`
+    const listing = await (await fetch(home, { headers: { authorization, depth: '1' }, method: 'PROPFIND' })).text()
+    const books = [...listing.matchAll(COLLECTION_HREF)].map((m) => m[1]).filter((h) => h !== new URL(home).pathname)
+    const vcards: string[] = []
+    for (const href of books) {
+      const inBook = await (
+        await fetch(`${ADMIN_URL}${href}`, { headers: { authorization, depth: '1' }, method: 'PROPFIND' })
+      ).text()
+      for (const [, card] of inBook.matchAll(CARD_HREF)) {
+        const body = await (await fetch(`${ADMIN_URL}${card}`, { headers: { authorization } })).text()
+        if (body.includes('Robin Lawyer-Card')) {
+          vcards.push(body)
+        }
+      }
+    }
+    expect(vcards).toHaveLength(1)
+    expect(vcards[0]).toMatch(ROLE_LINE)
+    expect(vcards[0]).not.toContain('CATEGORIES')
+  }, 30_000)
 })
