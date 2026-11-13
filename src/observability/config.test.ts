@@ -23,10 +23,15 @@ const withEnv = <T>(patch: Record<string, string | undefined>, fn: () => T): T =
 
 describe('observabilityConfig', () => {
   test('reports presence, never the value', () => {
-    const config = withEnv({ BETTERSTACK_ERRORS_DSN: 'https://tok@host/1', BETTERSTACK_SOURCE_TOKEN: undefined }, () =>
-      observabilityConfig()
+    const config = withEnv(
+      {
+        BETTERSTACK_ERRORS_DSN: 'https://tok@host/1',
+        BETTERSTACK_SOURCE_TOKEN: undefined,
+        DATABASE_URL: 'postgresql://mcp_activity:secret@db.example.com/langmail',
+      },
+      () => observabilityConfig()
     )
-    expect(config).toEqual({ errorTracking: true, logShipping: false })
+    expect(config).toEqual({ activityRecording: true, errorTracking: true, logShipping: false })
   })
 })
 
@@ -36,7 +41,7 @@ describe('logObservabilityConfig', () => {
     withEnv({ NODE_ENV: 'development' }, () =>
       logObservabilityConfig(() => {
         calls += 1
-        return { errorTracking: false, logShipping: false }
+        return { activityRecording: false, errorTracking: false, logShipping: false }
       })
     )
     expect(calls).toBe(0)
@@ -47,7 +52,7 @@ describe('logObservabilityConfig', () => {
     withEnv({ NODE_ENV: 'production' }, () =>
       logObservabilityConfig(() => {
         calls += 1
-        return { errorTracking: false, logShipping: false }
+        return { activityRecording: false, errorTracking: false, logShipping: false }
       })
     )
     expect(calls).toBe(1)

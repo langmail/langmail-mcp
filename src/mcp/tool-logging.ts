@@ -1,4 +1,7 @@
-// Logs one line per tool invocation: name, duration, outcome.
+// Logs one line per tool invocation: name, duration, outcome — and reports
+// each success to `onSuccess`, which records the user's agent activity for
+// the usage metrics (activity/record-agent-activity.ts). Only a success
+// counts: an error result or a throw is not activity.
 //
 // Every tool is registered against a fresh `McpServer` in one place
 // (`createMcpHandler`), so instrumenting `registerTool` on that instance
@@ -45,7 +48,9 @@ const isErrorResult = (result: unknown): boolean =>
 
 // Registers tool call logging on a server instance. Call before the tools are
 // registered — it patches `registerTool`, so only later registrations are wrapped.
-export const instrumentToolLogging = (server: McpServer): void => {
+// `onSuccess` is not awaited: the tool's answer never waits on it, and the
+// activity recorder it carries never rejects.
+export const instrumentToolLogging = (server: McpServer, onSuccess: () => unknown = () => undefined): void => {
   const register = server.registerTool.bind(server) as unknown as OpaqueRegisterTool
 
   const instrumented: OpaqueRegisterTool = (name, config, call) => {
@@ -58,6 +63,7 @@ export const instrumentToolLogging = (server: McpServer): void => {
           logger.warn({ durationMs, outcome: 'tool_error', tool: name }, 'mcp tool returned an error result')
         } else {
           logger.info({ durationMs, outcome: 'success', tool: name }, 'mcp tool completed')
+          onSuccess()
         }
         return result
       } catch (error) {

@@ -18,6 +18,7 @@ const handle = createMcpHandler({
   imageTokens: createImageProxyStore(),
   live: makeJmapLive('https://mail.example.com'),
   publicUrl: 'https://mcp.example.com',
+  recordAgentActivity: async () => undefined,
   stalwartUrl: 'https://mail.example.com',
   tickets: createTicketStore(),
   uploadTickets: createUploadTicketStore(),
@@ -33,7 +34,7 @@ const rpc = async (method: string, params: Record<string, unknown>): Promise<Rec
       headers: { accept: 'application/json, text/event-stream', 'content-type': 'application/json' },
       method: 'POST',
     }),
-    { exp: 0, principal: 'user@example.com', token: 'token' }
+    { exp: 0, principal: 'user@example.com', token: 'token', userId: 'user_123' }
   )
   const text = await res.text()
   // The transport answers as an SSE stream; the result is the one `data:` line.

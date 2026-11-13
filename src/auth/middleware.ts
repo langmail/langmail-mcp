@@ -18,6 +18,8 @@ export interface AuthContext {
   exp: number
   principal: string
   token: string
+  // The `auth.user` id (userinfo's `sub`), for the agent-activity record.
+  userId: string
 }
 
 export interface AuthMiddlewareOptions {
@@ -58,13 +60,13 @@ export const createAuthMiddleware = (opts: AuthMiddlewareOptions): AuthMiddlewar
 
     const cached = opts.cache.get(token)
     if (cached) {
-      return { exp: cached.exp, principal: cached.principal, token }
+      return { exp: cached.exp, principal: cached.principal, token, userId: cached.userId }
     }
 
     try {
-      const { principal, exp } = await fetchUserinfo(opts.authIssuer, token)
-      opts.cache.set(token, { exp, principal })
-      return { exp, principal, token }
+      const { principal, exp, userId } = await fetchUserinfo(opts.authIssuer, token)
+      opts.cache.set(token, { exp, principal, userId })
+      return { exp, principal, token, userId }
     } catch (error) {
       if (error instanceof UserinfoError) {
         return unauth('invalid_token')

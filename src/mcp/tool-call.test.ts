@@ -12,6 +12,7 @@ const handle = createMcpHandler({
   imageTokens: createImageProxyStore(),
   live: makeJmapLive('https://mail.example.com'),
   publicUrl: 'https://mcp.example.com',
+  recordAgentActivity: async () => undefined,
   stalwartUrl: 'https://mail.example.com',
   tickets: createTicketStore(),
   uploadTickets: createUploadTicketStore(),
@@ -32,7 +33,7 @@ const callTool = async (name: string, args: Record<string, unknown>): Promise<Rp
       headers: { accept: 'application/json, text/event-stream', 'content-type': 'application/json' },
       method: 'POST',
     }),
-    { exp: 0, principal: 'user@example.com', token: 'token' }
+    { exp: 0, principal: 'user@example.com', token: 'token', userId: 'user_123' }
   )
   const text = await res.text()
   const data = text.split('\n').find((line) => line.startsWith('data: '))

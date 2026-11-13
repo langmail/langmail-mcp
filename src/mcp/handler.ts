@@ -13,6 +13,7 @@ import { McpServer, WebStandardStreamableHTTPServerTransport } from '@modelconte
 
 import { type JmapLive } from '@langmail/jmap'
 
+import { type RecordAgentActivity } from '../activity/record-agent-activity.ts'
 import { type TicketStore } from '../attachments/tickets.ts'
 import { type UploadTicketStore } from '../attachments/upload-tickets.ts'
 import { type AuthContext } from '../auth/middleware.ts'
@@ -95,6 +96,8 @@ export interface McpHandlerConfig {
   live: JmapLive
   // Base URL the download_attachment tool mints links under.
   publicUrl: string
+  // Called after each successful tool call, with the caller's user id.
+  recordAgentActivity: RecordAgentActivity
   stalwartUrl: string
   // Shared with the /attachments/:token route: the tool mints, the route redeems.
   tickets: TicketStore
@@ -166,7 +169,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
       { instructions: SERVER_INSTRUCTIONS }
     )
     // Before any registerTool call — the wrapper only covers later registrations.
-    instrumentToolLogging(server)
+    instrumentToolLogging(server, () => cfg.recordAgentActivity(ctx.userId))
     registerSearchEmails(server, searchEmailsDeps, () => ctx.token)
     registerGetEmail(server, getEmailDeps, () => ctx.token)
     registerPreviewEmail(server, previewEmailDeps, () => ctx.token)

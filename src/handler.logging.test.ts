@@ -11,7 +11,7 @@ const makeRoutes = (cache?: TokenCache) =>
   createRoutes({
     authIssuer: 'https://auth.example.com/api/auth',
     cache,
-    observability: () => ({ errorTracking: true, logShipping: true }),
+    observability: () => ({ activityRecording: true, errorTracking: true, logShipping: true }),
     publicUrl: PUBLIC,
     stalwartUrl: 'https://mail.example.com',
   })
@@ -34,7 +34,7 @@ const requestLines = async (fn: () => Promise<unknown>): Promise<Record<string, 
 describe('/mcp request logging', () => {
   test('records method, route, status and duration for an authenticated request', async () => {
     const cache = new TokenCache()
-    cache.set('good', { exp: Math.floor(Date.now() / 1000) + 60, principal: 'alice@langmail.me' })
+    cache.set('good', { exp: Math.floor(Date.now() / 1000) + 60, principal: 'alice@langmail.me', userId: 'user_123' })
 
     const lines = await requestLines(() =>
       makeRoutes(cache).fetch(

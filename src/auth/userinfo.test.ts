@@ -16,7 +16,7 @@ const withFetch = <T>(
 }
 
 describe('fetchUserinfo', () => {
-  test('resolves the mailbox address (email claim) + exp from /oauth2/userinfo', async () => {
+  test('resolves the mailbox address (email claim), user id (sub) + exp from /oauth2/userinfo', async () => {
     const f = mock((url: string, init?: RequestInit) => {
       expect(url).toBe(`${AUTH}/oauth2/userinfo`)
       expect((init?.headers as Record<string, string>)?.authorization).toBe('Bearer abc')
@@ -25,7 +25,7 @@ describe('fetchUserinfo', () => {
           {
             email: 'alice@langmail.me',
             exp: 1_900_000_000,
-            // Better Auth's `sub` is the user id, not the mailbox — it must be ignored.
+            // Better Auth's `sub` is the user id, not the mailbox: the principal stays the email.
             sub: 'user_123',
           },
           { status: 200 }
@@ -33,7 +33,7 @@ describe('fetchUserinfo', () => {
       )
     })
     const got = await withFetch(f, () => fetchUserinfo(AUTH, 'abc'))
-    expect(got).toEqual({ exp: 1_900_000_000, principal: 'alice@langmail.me' })
+    expect(got).toEqual({ exp: 1_900_000_000, principal: 'alice@langmail.me', userId: 'user_123' })
     expect(f).toHaveBeenCalledTimes(1)
   })
 
@@ -56,8 +56,20 @@ describe('fetchUserinfo', () => {
     })
   })
 
+  test('rejects a response with no sub claim', async () => {
+    const f = mock(() =>
+      Promise.resolve(Response.json({ email: 'alice@langmail.me', exp: 1_900_000_000 }, { status: 200 }))
+    )
+    await withFetch(f, async () => {
+      const err = await fetchUserinfo(AUTH, 'tok').catch((error) => error)
+      expect(err).toBeInstanceOf(UserinfoError)
+    })
+  })
+
   test('synthesises exp ~1h ahead when response has no exp', async () => {
-    const f = mock(() => Promise.resolve(Response.json({ email: 'alice@langmail.me' }, { status: 200 })))
+    const f = mock(() =>
+      Promise.resolve(Response.json({ email: 'alice@langmail.me', sub: 'user_123' }, { status: 200 }))
+    )
     const before = Math.floor(Date.now() / 1000)
     const got = await withFetch(f, () => fetchUserinfo(AUTH, 'tok'))
     expect(got.exp).toBeGreaterThanOrEqual(before + 60)

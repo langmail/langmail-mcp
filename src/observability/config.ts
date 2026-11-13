@@ -15,6 +15,10 @@
 import { logger } from '@langmail/logger'
 
 interface ObservabilityConfig {
+  // DATABASE_URL — the agent-activity record behind the usage metrics. Not
+  // part of the boot-time check below: it is set by hand after the first
+  // deploy (infra/RUNBOOK.md § Usage metrics for Claude Code).
+  activityRecording: boolean
   // BETTERSTACK_ERRORS_DSN — Sentry-compatible error tracking.
   errorTracking: boolean
   // BETTERSTACK_SOURCE_TOKEN — structured log shipping.
@@ -24,6 +28,7 @@ interface ObservabilityConfig {
 export type ObservabilityStatus = () => ObservabilityConfig
 
 export const observabilityConfig: ObservabilityStatus = () => ({
+  activityRecording: Boolean(process.env.DATABASE_URL),
   errorTracking: Boolean(process.env.BETTERSTACK_ERRORS_DSN),
   logShipping: Boolean(process.env.BETTERSTACK_SOURCE_TOKEN),
 })

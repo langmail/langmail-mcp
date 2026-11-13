@@ -18,7 +18,7 @@ const makeRoutes = (opts: { cache?: TokenCache } = {}) =>
     authIssuer: AUTH,
     cache: opts.cache,
     // Pinned so the assertion doesn't depend on the runner's environment.
-    observability: () => ({ errorTracking: true, logShipping: true }),
+    observability: () => ({ activityRecording: true, errorTracking: true, logShipping: true }),
     publicUrl: PUBLIC,
     stalwartUrl: STALWART,
   })
@@ -77,7 +77,7 @@ describe('routes', () => {
     const r = createRoutes({
       authIssuer: AUTH,
       imageProxy: proxy,
-      observability: () => ({ errorTracking: true, logShipping: true }),
+      observability: () => ({ activityRecording: true, errorTracking: true, logShipping: true }),
       publicUrl: PUBLIC,
       stalwartUrl: STALWART,
     })
@@ -113,6 +113,7 @@ describe('routes', () => {
     cache.set('good', {
       exp: Math.floor(Date.now() / 1000) + 60,
       principal: 'alice',
+      userId: 'user_123',
     })
     const r = makeRoutes({ cache })
     const f = mock(() => {
@@ -155,7 +156,7 @@ describe('routes', () => {
       () => r.fetch(new Request(`${PUBLIC}/readyz`))
     )
     const body = (await res.json()) as { observability: Record<string, boolean> }
-    expect(body.observability).toEqual({ errorTracking: true, logShipping: true })
+    expect(body.observability).toEqual({ activityRecording: true, errorTracking: true, logShipping: true })
   })
 
   test('GET /readyz returns 503 when a dependency is unreachable', async () => {

@@ -11,11 +11,15 @@
 // suppresses it for a user with no active mailbox. Requiring it here means a
 // non-mailbox Google identity is rejected with a clean 401 rather than
 // failing confusingly downstream in JMAP/CalDAV.
+//
+// The `sub` claim is the user's `auth.user` id, which the agent-activity
+// record (activity/record-agent-activity.ts) is keyed on.
 
 export interface UserinfoResult {
   // Unix seconds
   exp: number
   principal: string
+  userId: string
 }
 
 export class UserinfoError extends Error {
@@ -52,6 +56,10 @@ export const fetchUserinfo = async (authIssuer: string, token: string): Promise<
     // missing `email` claim means "no mailbox" — the token can't act on one.
     throw new UserinfoError(200, 'userinfo response missing email claim (no active mailbox)')
   }
+  const userId = typeof body.sub === 'string' ? body.sub : undefined
+  if (!userId) {
+    throw new UserinfoError(200, 'userinfo response missing sub claim')
+  }
   const exp = typeof body.exp === 'number' ? (body.exp as number) : Math.floor(Date.now() / 1000) + DEFAULT_TTL_SECONDS
-  return { exp, principal }
+  return { exp, principal, userId }
 }

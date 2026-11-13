@@ -12,14 +12,14 @@ describe('TokenCache', () => {
 
   test('set then get within exp returns the entry', () => {
     const c = new TokenCache()
-    const entry = { exp: now() + 60, principal: 'alice@example.com' }
+    const entry = { exp: now() + 60, principal: 'alice@example.com', userId: 'user_123' }
     c.set('t1', entry)
     expect(c.get('t1')).toEqual(entry)
   })
 
   test('expired entries are evicted lazily on read', () => {
     const c = new TokenCache()
-    c.set('t1', { exp: now() - 1, principal: 'alice' })
+    c.set('t1', { exp: now() - 1, principal: 'alice', userId: 'user_123' })
     expect(c.get('t1')).toBeUndefined()
     // Internal map should no longer contain the key.
     expect(c.size).toBe(0)
@@ -27,15 +27,15 @@ describe('TokenCache', () => {
 
   test('set overwrites a previous entry for the same token', () => {
     const c = new TokenCache()
-    c.set('t1', { exp: now() + 60, principal: 'alice' })
-    c.set('t1', { exp: now() + 60, principal: 'bob' })
+    c.set('t1', { exp: now() + 60, principal: 'alice', userId: 'user_123' })
+    c.set('t1', { exp: now() + 60, principal: 'bob', userId: 'user_123' })
     expect(c.get('t1')?.principal).toBe('bob')
   })
 
   test('sweep removes all expired entries', () => {
     const c = new TokenCache()
-    c.set('dead', { exp: now() - 10, principal: 'x' })
-    c.set('alive', { exp: now() + 60, principal: 'y' })
+    c.set('dead', { exp: now() - 10, principal: 'x', userId: 'user_123' })
+    c.set('alive', { exp: now() + 60, principal: 'y', userId: 'user_123' })
     c.sweep()
     expect(c.size).toBe(1)
     expect(c.get('alive')?.principal).toBe('y')

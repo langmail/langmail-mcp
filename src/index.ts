@@ -14,6 +14,7 @@ initErrorTracking('mcp')
 
 import { makeJmapLive } from '@langmail/jmap'
 
+import { agentActivityRecorderFromEnv } from './activity/record-agent-activity.ts'
 import { createAttachmentDownload } from './attachments/download.ts'
 import { createTicketStore } from './attachments/tickets.ts'
 import { createAttachmentUpload } from './attachments/upload.ts'
@@ -58,6 +59,9 @@ const routes = createRoutes({
     imageTokens,
     live: jmapLive,
     publicUrl: PUBLIC_URL,
+    // DATABASE_URL logs in as `mcp_activity`, which can only insert activity
+    // rows (infra/postgres/metrics-access.sql). Unset records nothing.
+    recordAgentActivity: agentActivityRecorderFromEnv(process.env.DATABASE_URL),
     stalwartUrl: STALWART_URL,
     tickets,
     uploadTickets,

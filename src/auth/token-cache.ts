@@ -7,6 +7,7 @@
 export interface CachedPrincipal {
   exp: number
   principal: string
+  userId: string
 }
 
 const nowSec = () => Math.floor(Date.now() / 1000)

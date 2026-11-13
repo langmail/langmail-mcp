@@ -9,7 +9,8 @@ type Registered = (args: unknown, ctx: unknown) => Promise<unknown>
 
 // A stand-in for the one method the wrapper patches, so the test drives a tool
 // callback directly instead of through a transport.
-const makeServer = (): { registered: Map<string, Registered>; server: McpServer } => {
+const makeServer = (): { registered: Map<string, Registered>; server: McpServer; successes: () => number } => {
+  let successCount = 0
   const registered = new Map<string, Registered>()
   const server = {
     registerTool: (name: string, _config: unknown, cb: Registered) => {
@@ -17,8 +18,10 @@ const makeServer = (): { registered: Map<string, Registered>; server: McpServer 
       return { name }
     },
   } as unknown as McpServer
-  instrumentToolLogging(server)
-  return { registered, server }
+  instrumentToolLogging(server, () => {
+    successCount += 1
+  })
+  return { registered, server, successes: () => successCount }
 }
 
 const register = (server: McpServer, name: string, cb: () => unknown): void => {
@@ -50,9 +53,9 @@ const withLogSpies = async (
 }
 
 describe('instrumentToolLogging', () => {
-  test('logs name, duration and outcome for a successful call', async () => {
+  test('logs name, duration and outcome for a successful call, and reports the success', async () => {
     await withLogSpies(async ({ error, info, warn }) => {
-      const { registered, server } = makeServer()
+      const { registered, server, successes } = makeServer()
       register(server, 'list_calendars', () => ({ content: [{ text: '2 calendars', type: 'text' }] }))
 
       const result = await registered.get('list_calendars')?.({}, {})
@@ -65,6 +68,7 @@ describe('instrumentToolLogging', () => {
       expect(fields.tool).toBe('list_calendars')
       expect(fields.outcome).toBe('success')
       expect(typeof fields.durationMs).toBe('number')
+      expect(successes()).toBe(1)
     })
   })
 
@@ -72,9 +76,9 @@ describe('instrumentToolLogging', () => {
   // service fault. It must stay off `error`: that is the level forwarded to
   // Better Stack Error Tracking, and paging on "no such thread" is what made
   // every tool's rejection collapse into one untriageable alert.
-  test('logs an isError result at warn, not error, without quoting its text', async () => {
+  test('logs an isError result at warn, not error, without quoting its text or reporting a success', async () => {
     await withLogSpies(async ({ error, info, warn }) => {
-      const { registered, server } = makeServer()
+      const { registered, server, successes } = makeServer()
       register(server, 'create_calendar_event', () => ({
         content: [{ text: 'Conflicts with lunch with bob@langmail.me', type: 'text' }],
         isError: true,
@@ -89,12 +93,13 @@ describe('instrumentToolLogging', () => {
       expect(fields.tool).toBe('create_calendar_event')
       expect(fields.outcome).toBe('tool_error')
       expect(JSON.stringify(fields)).not.toContain('bob@langmail.me')
+      expect(successes()).toBe(0)
     })
   })
 
-  test('logs a thrown error by class and rethrows it', async () => {
+  test('logs a thrown error by class and rethrows it, without reporting a success', async () => {
     await withLogSpies(async ({ error, warn }) => {
-      const { registered, server } = makeServer()
+      const { registered, server, successes } = makeServer()
       register(server, 'search_emails', () => {
         throw new TypeError('fetch failed for alice@langmail.me')
       })
@@ -111,6 +116,7 @@ describe('instrumentToolLogging', () => {
       expect(fields.outcome).toBe('exception')
       expect(fields.errorClass).toBe('TypeError')
       expect(fields.errorMessage).toBe('fetch failed for [email]')
+      expect(successes()).toBe(0)
     })
   })
 })

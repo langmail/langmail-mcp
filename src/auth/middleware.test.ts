@@ -91,6 +91,7 @@ describe('auth middleware', () => {
           {
             email: 'alice@langmail.me',
             exp: Math.floor(Date.now() / 1000) + 60,
+            sub: 'user_123',
           },
           { status: 200 }
         )
@@ -107,6 +108,7 @@ describe('auth middleware', () => {
     const ctx = out as AuthContext
     expect(ctx.principal).toBe('alice@langmail.me')
     expect(ctx.token).toBe('good')
+    expect(ctx.userId).toBe('user_123')
     expect(cache.size).toBe(1)
   })
 
@@ -115,6 +117,7 @@ describe('auth middleware', () => {
     cache.set('good', {
       exp: Math.floor(Date.now() / 1000) + 60,
       principal: 'alice',
+      userId: 'user_123',
     })
     const mw = makeMw({ cache })
     const f = mock(() => {
