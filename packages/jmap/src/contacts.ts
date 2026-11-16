@@ -73,10 +73,6 @@ export const addressBookCreate = async (p: AddressBookCreateParams): Promise<str
 export interface ContactCardGetParams extends JmapCall {
   accountId: string
   ids: string[]
-  // Omitted almost everywhere: cards are small and the collected extension
-  // property must come back too, so the full default set is what callers
-  // want. search_contacts' role sweep narrows it to read a whole book cheaply.
-  properties?: string[]
 }
 
 export const contactCardGet = async (p: ContactCardGetParams): Promise<ContactCard[]> => {
@@ -84,13 +80,7 @@ export const contactCardGet = async (p: ContactCardGetParams): Promise<ContactCa
     return []
   }
   const resp = await jmapCall(p, {
-    methodCalls: [
-      [
-        'ContactCard/get',
-        { accountId: p.accountId, ids: p.ids, ...(p.properties ? { properties: p.properties } : {}) },
-        '0',
-      ],
-    ],
+    methodCalls: [['ContactCard/get', { accountId: p.accountId, ids: p.ids }, '0']],
     using: USING,
   })
   const out = methodResponse<{ list?: ContactCard[] }>(resp, 'ContactCard/get', '0')
@@ -99,8 +89,8 @@ export const contactCardGet = async (p: ContactCardGetParams): Promise<ContactCa
 
 // --- ContactCard/query -----------------------------------------------------
 
-// RFC 9610 §5.5 filter conditions, narrowed to what search_contacts and the
-// collection upsert actually filter on. `email` and `name` match the
+// RFC 9610 §5.5 filter conditions, narrowed to what the collection upsert
+// and the contact write tools actually filter on. `email` and `name` match the
 // respective properties; `text` matches across all textual properties.
 // `uid` is an exact match that Stalwart 1.0 answers from the store, while
 // `email`, `name` and `text` go through its asynchronous search index and
@@ -143,6 +133,69 @@ export const contactCardQuery = async (p: ContactCardQueryParams): Promise<strin
   })
   const out = methodResponse<{ ids?: string[] }>(resp, 'ContactCard/query', '0')
   return out.ids ?? []
+}
+
+// --- ContactCard/query + ContactCard/get: one page of the account ----------
+
+export interface ContactCardPageParams extends JmapCall {
+  accountId: string
+  limit: number
+  // Zero-based offset into the unfiltered, unsorted id list.
+  position: number
+  // The card properties to read (`id` always comes back).
+  properties: string[]
+}
+
+export interface ContactCardPage {
+  // In the query's order. A card destroyed between the two calls is absent.
+  cards: ContactCard[]
+  // How many ids the query returned. Shorter than `limit` at the end of the
+  // account, or where the server caps a query below `limit`.
+  returned: number
+  // Cards in the account, when the server counts them (RFC 8620 §5.5 lets
+  // it decline).
+  total?: number
+}
+
+// One page of every card in the account, in a single request: an unfiltered
+// ContactCard/query and a ContactCard/get of its ids through a `#ids`
+// back-reference, so a sweep of the whole account costs one round trip per
+// page. Unfiltered, the query reads the store rather than the search index,
+// so a card is in it from the moment it is written.
+export const contactCardPage = async (p: ContactCardPageParams): Promise<ContactCardPage> => {
+  const resp = await jmapCall(p, {
+    methodCalls: [
+      [
+        'ContactCard/query',
+        {
+          accountId: p.accountId,
+          calculateTotal: true,
+          limit: p.limit,
+          ...(p.position > 0 ? { position: p.position } : {}),
+        },
+        '0',
+      ],
+      [
+        'ContactCard/get',
+        {
+          '#ids': { name: 'ContactCard/query', path: '/ids', resultOf: '0' },
+          accountId: p.accountId,
+          properties: p.properties,
+        },
+        '1',
+      ],
+    ],
+    using: USING,
+  })
+  const query = methodResponse<{ ids?: string[]; total?: number }>(resp, 'ContactCard/query', '0')
+  const got = methodResponse<{ list?: ContactCard[] }>(resp, 'ContactCard/get', '1')
+  const ids = query.ids ?? []
+  const byId = new Map((got.list ?? []).map((card) => [card.id, card]))
+  const cards = ids.flatMap((id) => {
+    const card = byId.get(id)
+    return card ? [card] : []
+  })
+  return { cards, returned: ids.length, ...(query.total === undefined ? {} : { total: query.total }) }
 }
 
 // --- ContactCard/set -------------------------------------------------------

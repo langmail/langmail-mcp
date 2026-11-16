@@ -8,6 +8,7 @@ import {
   contactCardDestroy,
   contactCardGet,
   contactCardMerge,
+  contactCardPage,
   contactCardQuery,
   contactCardUpdate,
 } from './contacts.ts'
@@ -129,6 +130,69 @@ describe('contactCardGet', () => {
     )
     expect(cards).toEqual([])
     expect(f).not.toHaveBeenCalled()
+  })
+})
+
+describe('contactCardPage', () => {
+  test('queries a page and reads it narrowly through a #ids back-reference, in one request', async () => {
+    const f = mock((_url: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}')
+      expect(body.methodCalls).toEqual([
+        ['ContactCard/query', { accountId: 'acct', calculateTotal: true, limit: 500, position: 1000 }, '0'],
+        [
+          'ContactCard/get',
+          {
+            '#ids': { name: 'ContactCard/query', path: '/ids', resultOf: '0' },
+            accountId: 'acct',
+            properties: ['id', 'name'],
+          },
+          '1',
+        ],
+      ])
+      return Promise.resolve(
+        jmapResponse([
+          ['ContactCard/query', { ids: ['c2', 'c1', 'gone'], total: 1203 }, '0'],
+          ['ContactCard/get', { list: [{ id: 'c1' }, { id: 'c2' }] }, '1'],
+        ])
+      )
+    })
+    const page = await withFetch(f, () =>
+      contactCardPage({
+        accountId: 'acct',
+        apiUrl: API,
+        authorization: 'Bearer tok',
+        limit: 500,
+        position: 1000,
+        properties: ['id', 'name'],
+      })
+    )
+    // The query's order, a card gone between the calls dropped, and every
+    // returned id counted.
+    expect(page).toEqual({ cards: [{ id: 'c2' }, { id: 'c1' }] as never, returned: 3, total: 1203 })
+  })
+
+  test('omits position 0 and a total the server did not count', async () => {
+    const f = mock((_url: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}')
+      expect(body.methodCalls[0][1]).toEqual({ accountId: 'acct', calculateTotal: true, limit: 10 })
+      return Promise.resolve(
+        jmapResponse([
+          ['ContactCard/query', { ids: [] }, '0'],
+          ['ContactCard/get', { list: [] }, '1'],
+        ])
+      )
+    })
+    const page = await withFetch(f, () =>
+      contactCardPage({
+        accountId: 'acct',
+        apiUrl: API,
+        authorization: 'Bearer tok',
+        limit: 10,
+        position: 0,
+        properties: ['id'],
+      })
+    )
+    expect(page).toEqual({ cards: [], returned: 0 })
   })
 })
 

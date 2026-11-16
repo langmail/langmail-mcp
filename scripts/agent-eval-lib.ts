@@ -305,17 +305,25 @@ export interface CardRecord {
   titles?: Record<string, { kind?: string; name: string }>
 }
 
-// Every card in the account (the evals' accounts are small and throwaway).
+// Every card in the account, 500 at a time (Stalwart's `maxObjectsInGet`).
 export const allCards = async (c: Contacts): Promise<CardRecord[]> => {
-  const json = await contactsCall(c, [
-    ['ContactCard/query', { accountId: c.accountId }, '0'],
-    [
-      'ContactCard/get',
-      { '#ids': { name: 'ContactCard/query', path: '/ids', resultOf: '0' }, accountId: c.accountId },
-      '1',
-    ],
-  ])
-  return (json.methodResponses?.[1]?.[1]?.list as CardRecord[] | undefined) ?? []
+  const cards: CardRecord[] = []
+  for (let position = 0; ; ) {
+    const json = await contactsCall(c, [
+      ['ContactCard/query', { accountId: c.accountId, limit: 500, position }, '0'],
+      [
+        'ContactCard/get',
+        { '#ids': { name: 'ContactCard/query', path: '/ids', resultOf: '0' }, accountId: c.accountId },
+        '1',
+      ],
+    ])
+    const ids = (json.methodResponses?.[0]?.[1]?.ids as string[] | undefined) ?? []
+    if (ids.length === 0) {
+      return cards
+    }
+    cards.push(...((json.methodResponses?.[1]?.[1]?.list as CardRecord[] | undefined) ?? []))
+    position += ids.length
+  }
 }
 
 export const destroyCards = async (c: Contacts, ids: string[]): Promise<void> => {
@@ -344,6 +352,8 @@ export interface ToolUse {
 }
 
 export interface Trajectory {
+  // The agent's final answer alone, for evals that judge what the user reads.
+  finalText: string
   resultText: string
   toolUses: ToolUse[]
 }
@@ -385,7 +395,7 @@ const collectBlock = (block: StreamBlock, into: Trajectory): void => {
 }
 
 const parseTrajectory = (stdout: string): Trajectory => {
-  const trajectory: Trajectory = { resultText: '', toolUses: [] }
+  const trajectory: Trajectory = { finalText: '', resultText: '', toolUses: [] }
   for (const line of stdout.split('\n')) {
     const event = line.trim() ? parseEvent(line) : null
     if (!event) {
@@ -395,6 +405,7 @@ const parseTrajectory = (stdout: string): Trajectory => {
       collectBlock(block, trajectory)
     }
     if (typeof event.result === 'string') {
+      trajectory.finalText = event.result
       trajectory.resultText += `${event.result}\n`
     }
   }

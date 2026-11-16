@@ -40,6 +40,7 @@ import {
   contactCardDestroy,
   contactCardGet,
   contactCardMerge,
+  contactCardPage,
   contactCardQuery,
   contactCardUpdate,
   emailGet,
@@ -149,7 +150,7 @@ live('contact write tools against live Stalwart — author, read back, correct, 
     searchDeps = {
       addressBookList: (p) => addressBookList(pin(p)),
       contactCardGet: (p) => contactCardGet(pin(p)),
-      contactCardQuery: (p) => contactCardQuery(pin(p)),
+      contactCardPage: (p) => contactCardPage(pin(p)),
       emailGet: (p) => emailGet(pin(p)),
       // No calendar seeding in this file — an authored contact has no
       // interactions to hydrate.

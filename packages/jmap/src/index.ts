@@ -12,6 +12,8 @@ export {
   type ContactCardGetParams,
   type ContactCardMergeParams,
   type ContactCardMergeResult,
+  type ContactCardPage,
+  type ContactCardPageParams,
   type ContactCardQueryParams,
   type ContactCardUpdateParams,
   ContactUidTakenError,
@@ -19,6 +21,7 @@ export {
   contactCardDestroy,
   contactCardGet,
   contactCardMerge,
+  contactCardPage,
   contactCardQuery,
   contactCardUpdate,
 } from './contacts.ts'

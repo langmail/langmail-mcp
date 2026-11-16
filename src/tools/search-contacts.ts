@@ -34,11 +34,11 @@ import {
   addressBookList,
   bearerAuthorization,
   type ContactCard,
-  type ContactCardFilter,
   type ContactCardGetParams,
-  type ContactCardQueryParams,
+  type ContactCardPage,
+  type ContactCardPageParams,
   contactCardGet,
-  contactCardQuery,
+  contactCardPage,
   type EmailGetParams,
   type EmailRecord,
   emailGet,
@@ -90,7 +90,7 @@ export interface SearchContactsDeps {
   // marker apart from an imported one.
   addressBookList: (p: { accountId: string; apiUrl: string; authorization: string }) => Promise<AddressBookRecord[]>
   contactCardGet: (p: ContactCardGetParams) => Promise<ContactCard[]>
-  contactCardQuery: (p: ContactCardQueryParams) => Promise<string[]>
+  contactCardPage: (p: ContactCardPageParams) => Promise<ContactCardPage>
   emailGet: (p: EmailGetParams) => Promise<EmailRecord[]>
   // Titles for the named event UIDs, resolved in ONE pass over the
   // principal's calendars — a per-UID lookup would re-discover the CalDAV
@@ -109,84 +109,105 @@ export interface SearchContactsContext {
   token: string
 }
 
-// Fetch window before ranking: ranking needs the whole candidate set, not
-// just the first page the server happens to return.
-const QUERY_WINDOW = 50
+// The search reads every card in the account and decides the match itself
+// (`matchesQuery`), rather than asking the server to filter. Stalwart's
+// query cannot reach a role (`text` does not search `titles`, and there is
+// no title condition: docs/upstream/stalwart/contact-query-cannot-match-titles.md),
+// its filtered ids come back unranked, so a window of them can drop the best
+// match, and its name, email and text conditions go through a search index
+// that misses a card for a moment after it is written. An unfiltered page
+// has none of these limits.
+//
+// Ids per page, and per full get below: Stalwart's default
+// `maxObjectsInGet` is 500.
+const PAGE = 500
 
-// Window for the unfiltered sweep (see below). Bounded rather than
-// unbounded: past this size the filtered read is what still reaches a card.
-const SWEEP_WINDOW = 250
+// Upper bound on the cards one search reads. Past it the result says the
+// rest of the book was not searched.
+const CARD_CAP = 50_000
 
-// Page size for the role sweep's id query and its narrowed get.
-const ROLE_SWEEP_PAGE = 500
+// Pages in flight at once. Stalwart advertises four concurrent requests per
+// account (`maxConcurrentRequests`; 1.1.0 refused only past eight), and an
+// agent may run two searches at once while the email-agent writes to the
+// same account.
+const PARALLEL_PAGES = 2
 
-// Upper bound on the cards the role sweep reads, as for the birthday sweep.
-const ROLE_SWEEP_CAP = 10_000
+// What `matchesQuery` reads. The rest of a card (the collected interaction
+// log above all) is read only for the matches.
+const MATCH_PROPERTIES = ['id', 'name', 'organizations', 'emails', 'titles']
 
-// The cards past the sweep window whose role matches the query, and whether
-// the sweep stopped at ROLE_SWEEP_CAP rather than at the end of the book (so
-// a role holder may lie past it). Stalwart's
-// ContactCard/query cannot reach a role: `text` does not search `titles` and
-// there is no title condition (see
-// docs/upstream/stalwart/contact-query-cannot-match-titles.md). So on a book
-// larger than the sweep window this pages every id and reads `titles` alone,
-// one id query and one narrowed get per 500 cards, one after another: on a
-// 5,000-card book, ten of each. It runs whenever the sweep came back full
-// and the window holds fewer role holders than `limit`, which is most
-// searches on such a book; an address search (an `@` or a `.`, unless it is
-// phrased "my …", as in "my C.P.A."), which no role can match, skips it.
-const roleSweep = async (
-  deps: Pick<SearchContactsDeps, 'contactCardGet' | 'contactCardQuery'>,
+// The ids of every card that matches the query, in the book's order, and
+// whether the sweep stopped at CARD_CAP with cards left unread. On a
+// 5,000-card book that is one page, then five rounds of two pages.
+const sweepBook = async (
+  deps: Pick<SearchContactsDeps, 'contactCardPage'>,
   ctx: { accountId: string; authorization: string },
-  query: string,
-  seen: Set<string>
-): Promise<{ capped: boolean; found: string[] }> => {
-  const found: string[] = []
-  // Paged until an empty page, not a short one, as list_upcoming_birthdays
-  // does: a server whose query limit is below the page size returns short
-  // pages that are not the end. Bounded by ROLE_SWEEP_CAP.
-  let swept = 0
-  while (swept < ROLE_SWEEP_CAP) {
-    const page = await deps.contactCardQuery({
-      ...ctx,
-      apiUrl: '',
-      limit: Math.min(ROLE_SWEEP_PAGE, ROLE_SWEEP_CAP - swept),
-      position: swept,
-    })
-    if (page.length === 0) {
-      break
+  query: string
+): Promise<{ capped: boolean; matched: string[] }> => {
+  const seen = new Set<string>()
+  const matched: string[] = []
+  const read = async (at: number, limit: number): Promise<ContactCardPage> => {
+    const page = await deps.contactCardPage({ ...ctx, apiUrl: '', limit, position: at, properties: MATCH_PROPERTIES })
+    for (const card of page.cards) {
+      // A card read twice (a page re-read after a short one) counts once.
+      if (!seen.has(card.id)) {
+        seen.add(card.id)
+        if (matchesQuery(card, query)) {
+          matched.push(card.id)
+        }
+      }
     }
-    const unseen = page.filter((id) => !seen.has(id))
-    if (unseen.length > 0) {
-      const titled = await deps.contactCardGet({ ...ctx, apiUrl: '', ids: unseen, properties: ['id', 'titles'] })
-      found.push(...titled.filter((c) => hasRole(c, query)).map((c) => c.id))
-    }
-    swept += page.length
+    return page
   }
-  return { capped: swept >= ROLE_SWEEP_CAP, found }
+  const first = await read(0, PAGE)
+  const { total } = first
+  // A server whose query limit is below PAGE returns shorter pages that are
+  // not the end, so the first page's length is the page size from here on.
+  const size = first.returned
+  const end = Math.min(total ?? Number.POSITIVE_INFINITY, CARD_CAP)
+  let position = first.returned
+  let done = first.returned === 0 || (total !== undefined && position >= total)
+  while (!done && position < end) {
+    const starts: number[] = []
+    for (let at = position; at < end && starts.length < PARALLEL_PAGES; at += size) {
+      starts.push(at)
+    }
+    const requests = starts.map((at) => ({ at, limit: Math.min(size, CARD_CAP - at) }))
+    const pages = await Promise.all(requests.map((r) => read(r.at, r.limit)))
+    const shortAt = pages.findIndex((page, i) => page.returned < (requests[i]?.limit ?? 0))
+    const short = pages[shortAt]
+    const request = requests[shortAt]
+    if (short && request) {
+      // The end of the book, or a server trimming a page: carry on right
+      // after what came back, until a page comes back empty.
+      position = request.at + short.returned
+      done = short.returned === 0
+    } else {
+      position = (starts.at(-1) ?? position) + size
+    }
+    done ||= total !== undefined && position >= total
+  }
+  return { capped: !done && position >= CARD_CAP, matched }
 }
 
-// Full cards for the sweep's matches, read in gets of at most
-// ROLE_SWEEP_PAGE ids (Stalwart's default `maxObjectsInGet` is 500).
+// Full cards for the sweep's matches, read in gets of at most PAGE ids.
 const getInPages = async (
   deps: Pick<SearchContactsDeps, 'contactCardGet'>,
   ctx: { accountId: string; authorization: string },
   ids: string[]
 ): Promise<ContactCard[]> => {
   const cards: ContactCard[] = []
-  for (let i = 0; i < ids.length; i += ROLE_SWEEP_PAGE) {
-    cards.push(...(await deps.contactCardGet({ ...ctx, apiUrl: '', ids: ids.slice(i, i + ROLE_SWEEP_PAGE) })))
+  for (let i = 0; i < ids.length; i += PAGE) {
+    cards.push(...(await deps.contactCardGet({ ...ctx, apiUrl: '', ids: ids.slice(i, i + PAGE) })))
   }
   return cards
 }
 
-// Client-side refinement of the server-side candidate set, and the final
-// word on what matched: the server's `text` condition also searches notes,
-// and every collected card carries the same machine-written note text, so
-// trusting a bare server hit would answer "Collection" with the whole book.
-// This mirrors the fields the description promises: display name,
+// What matches, over the fields the description promises: display name,
 // organization, address, address domain, and role (`hasRole`, which drops a
-// leading "my " from the query).
+// leading "my " from the query). Notes are not among them: every collected
+// card carries the same machine-written note text, so a note hit would
+// answer "Collection" with the whole book.
 const matchesQuery = (card: ContactCard, query: string): boolean =>
   hasRole(card, query) || matchesByName(card, query) || matchesByAddress(card, query)
 
@@ -214,18 +235,16 @@ const roleHint =
   'confirm with the user who it is, then record it with update_contact `addedRoles` ' +
   '(or create_contact `roles`) so the next request takes one lookup.'
 
-// `rolesChecked` is false when the role sweep was skipped on a book past the
-// sweep window, or stopped at its cap, where a role holder may be out of
-// sight.
-const emptyResultText = (query: string, rolesChecked: boolean): string =>
-  `No contact matched "${query}" in the collected address book (built from mail headers and calendar attendees) or the personal address books${rolesChecked ? ', and no contact has it as a role' : ''}. ` +
+// `capped` is true when the sweep stopped at CARD_CAP, where a match may be
+// out of sight.
+const emptyResultText = (query: string, capped: boolean): string =>
+  `No contact matched "${query}" in the collected address book (built from mail headers and calendar attendees) or the personal address books${capped ? '' : ', and no contact has it as a role'}. ` +
   'If you know part of the address or the organization, search for that instead. ' +
   `${roleHint} ` +
   "If the person has only contacted the user via LinkedIn or another platform, no email address exists in this account's data."
 
 // "my lawyer" is matched as "lawyer" everywhere, so a domain like
 // `smithlawyer.example` still turns up, flagged by the note below.
-const ADDRESS_LIKE = /[@.]/u
 const withoutMy = normalizeRole
 
 // Hydrated, relative-dated prose for one interaction tuple.
@@ -397,54 +416,21 @@ export const searchContacts = async (deps: SearchContactsDeps, ctx: SearchContac
   const authorization = bearerAuthorization(token)
   const accountId = await deps.resolveAccountId(authorization)
 
-  // Two candidate sets, unioned, then refined client-side by `matchesQuery`
-  // — which is the authority either way, because the server's `text`
-  // condition also hits the machine-written note every collected card
-  // carries. All address books are queried, collected and personal alike.
-  //
-  // The filtered read reaches cards past the sweep window on a large book.
-  // The unfiltered sweep reaches cards the filter structurally cannot see:
-  // Stalwart does not return a card with no `emails` property for a query on
-  // its display name, which is exactly what create_contact writes from a name
-  // and a postal address. Neither is a superset of the other, so a search
-  // that ran only one of them would silently drop people — the sweep alone
-  // would truncate a big book, and the filter alone would hide every
-  // emailless contact that shares a query term with an addressed one.
-  // Queries return ids only; the single `get` below is the real cost.
-  const ids = async (filter: ContactCardFilter | undefined, limit: number): Promise<string[]> =>
-    deps.contactCardQuery({ accountId, apiUrl: '', authorization, ...(filter ? { filter } : {}), limit })
-
   // Only the detailed format prints `source`, which needs the Collected
   // book's id.
   const detailed = args.response_format === 'detailed'
-  const [filteredIds, sweptIds, books] = await Promise.all([
-    ids({ conditions: [{ text: query }, { email: query }, { name: query }], operator: 'OR' }, QUERY_WINDOW),
-    ids(undefined, SWEEP_WINDOW),
+  const [sweep, books] = await Promise.all([
+    sweepBook(deps, { accountId, authorization }, query),
     detailed ? deps.addressBookList({ accountId, apiUrl: '', authorization }) : Promise.resolve([]),
   ])
   const collectedBookId = books.find((b) => b.name === COLLECTED_BOOK_NAME)?.id
-  const candidateIds = [...new Set([...filteredIds, ...sweptIds])]
-  const windowCards = await deps.contactCardGet({ accountId, apiUrl: '', authorization, ids: candidateIds })
-  const sweepFull = sweptIds.length >= SWEEP_WINDOW
-  const roleHoldersInWindow = windowCards.filter((c) => hasRole(c, query)).length
-  const sweepRoles = sweepFull && roleHoldersInWindow < args.limit
-  const skipAsAddress = sweepRoles && !isRolePhrase(query) && ADDRESS_LIKE.test(query)
-  const pastWindow =
-    sweepRoles && !skipAsAddress
-      ? await roleSweep(deps, { accountId, authorization }, query, new Set(candidateIds))
-      : { capped: false, found: [] }
-  const cards = [...windowCards, ...(await getInPages(deps, { accountId, authorization }, pastWindow.found))]
-  const matched = cards.filter((c) => matchesQuery(c, query))
-  // Names, organizations and addresses reach the whole book through the
-  // filtered query; only roles stop at the cap.
-  const capNote = pastWindow.capped
-    ? `\n\nRoles were checked on the first ${ROLE_SWEEP_CAP} cards only; a contact past them with "${withoutMy(query)}" as a role would not show here.`
+  const matched = await getInPages(deps, { accountId, authorization }, sweep.matched)
+  const capNote = sweep.capped
+    ? `\n\nOnly the first ${CARD_CAP} cards of the address books were searched; a contact past them may be missing.`
     : ''
   if (matched.length === 0) {
-    return textResult(`${emptyResultText(query, !(skipAsAddress || pastWindow.capped))}${capNote}`)
+    return textResult(`${emptyResultText(query, sweep.capped)}${capNote}`)
   }
-  // Either window coming back full means the count below is a floor.
-  const windowFull = filteredIds.length >= QUERY_WINDOW || sweepFull
 
   // The people the user named this way come first: a role is the user's own
   // word for who they mean, which a name or domain hit ("Lawrence",
@@ -473,9 +459,8 @@ export const searchContacts = async (deps: SearchContactsDeps, ctx: SearchContac
       : concisePerson(card, readCollected(card), args, hydrated, now, i)
   )
 
-  // The candidate window caps what we can count, so say "at least" when the
-  // window was full rather than understating a very ambiguous query.
-  const atLeast = windowFull ? 'at least ' : ''
+  // Every match is counted, unless the sweep stopped at its cap.
+  const atLeast = sweep.capped ? 'at least ' : ''
   const truncationNote =
     ranked.length > args.limit
       ? `\n\nShowing the top ${args.limit} of ${atLeast}${ranked.length} matches — narrow the query (add a surname, address fragment, or organization) to disambiguate.`
@@ -485,13 +470,10 @@ export const searchContacts = async (deps: SearchContactsDeps, ctx: SearchContac
     : ''
   const noRoleNote =
     roleHolders.length === 0 && isRolePhrase(query)
-      ? `\n\n${pastWindow.capped ? 'None of the people above has' : 'No contact has'} "${withoutMy(query)}" as a role: the people above matched by name, organization or address only. ${roleHint}`
+      ? `\n\n${sweep.capped ? 'None of the people above has' : 'No contact has'} "${withoutMy(query)}" as a role: the people above matched by name, organization or address only. ${roleHint}`
       : ''
-  // A plain name search on a large book caps every time; the note is only
-  // news when a role was meant or found.
-  const roleCapNote = isRolePhrase(query) || roleHolders.length > 0 ? capNote : ''
   return textResult(
-    `${page.length} person(s) matched:\n\n${sections.join('\n\n')}${noRoleNote}${relayNote}${truncationNote}${roleCapNote}`
+    `${page.length} person(s) matched:\n\n${sections.join('\n\n')}${noRoleNote}${relayNote}${truncationNote}${capNote}`
   )
 }
 
@@ -500,7 +482,7 @@ export const searchContacts = async (deps: SearchContactsDeps, ctx: SearchContac
 export const makeLiveDeps = (live: JmapLive, caldav: CalDavConfig): SearchContactsDeps => ({
   addressBookList: async (p) => addressBookList({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   contactCardGet: async (p) => contactCardGet({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
-  contactCardQuery: async (p) => contactCardQuery({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
+  contactCardPage: async (p) => contactCardPage({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   emailGet: async (p) => emailGet({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   fetchEventTitles: async (token, uids) => {
     // One discovery and at most one read per calendar, default first,

@@ -16,6 +16,7 @@ import { fakeBook } from './contact-test-fixtures.ts'
 import { type SearchContactsDeps, searchContacts, searchContactsInput } from './search-contacts.ts'
 
 const DAY_MS = 86_400_000
+const ALEX_ACTIVE_FIRST = /^5 person\(s\) matched:\n\n1\. Alex Active\n/u
 const LAWYER_FIRST = /^3 person\(s\) matched:\n\n1\. Robin Fairweather\n {3}contact_id: card-lawyer\n {3}roles: lawyer/u
 const daysAgo = (n: number): string => new Date(Date.now() - n * DAY_MS).toISOString()
 
@@ -50,12 +51,29 @@ const robinCard = (over: Partial<ContactCard> = {}): ContactCard =>
     ...over,
   }) as ContactCard
 
+// One page of `cards` as Stalwart serves it: at most `serverLimit` ids per
+// query, only the requested properties, and the total. Refuses a read of
+// more than 500 ids, as Stalwart's `maxObjectsInGet` does.
+const pagesOf =
+  (cards: ContactCard[], serverLimit = 5000): SearchContactsDeps['contactCardPage'] =>
+  (p) => {
+    if (p.limit > 500) {
+      return Promise.reject(new Error('maxObjectsInGet'))
+    }
+    const slice = cards.slice(p.position, p.position + Math.min(p.limit, serverLimit))
+    const narrow = slice.map(
+      (c) => Object.fromEntries(Object.entries(c).filter(([k]) => p.properties.includes(k))) as ContactCard
+    )
+    return Promise.resolve({ cards: narrow, returned: slice.length, total: cards.length })
+  }
+
 const makeDeps = (cards: ContactCard[], over: Partial<SearchContactsDeps> = {}): SearchContactsDeps => ({
   addressBookList: () => Promise.resolve([{ id: 'book-collected', name: COLLECTED_BOOK_NAME }]),
-  // Honours `ids` — the tool unions two query results, so a seam that
-  // returned every card regardless would hide which read found whom.
-  contactCardGet: (p) => Promise.resolve(cards.filter((c) => p.ids.includes(c.id))),
-  contactCardQuery: () => Promise.resolve(cards.map((c) => c.id)),
+  contactCardGet: (p) =>
+    p.ids.length > 500
+      ? Promise.reject(new Error('maxObjectsInGet'))
+      : Promise.resolve(cards.filter((c) => p.ids.includes(c.id))),
+  contactCardPage: pagesOf(cards),
   emailGet: (p) =>
     Promise.resolve(p.ids.map((id) => ({ id, subject: id === 'mail-1' ? 'Northwind onboarding' : 'Follow-up' }))),
   fetchEventTitles: (_token, uids) => Promise.resolve(new Map(uids.map((uid) => [uid, 'Lunch — Kai & Robin']))),
@@ -109,8 +127,7 @@ describe('searchContacts — concise', () => {
   })
 
   test('empty result names the sources and steers the next attempt', async () => {
-    const deps = makeDeps([], { contactCardQuery: () => Promise.resolve([]) })
-    const result = await searchContacts(deps, { args: args({ query: 'nonexistent' }), token: 'tok' })
+    const result = await searchContacts(makeDeps([]), { args: args({ query: 'nonexistent' }), token: 'tok' })
     const text = result.content[0]?.text ?? ''
     expect(text).toContain('No contact matched "nonexistent"')
     expect(text).toContain('collected address book')
@@ -222,7 +239,7 @@ describe('searchContacts — concise', () => {
     expect(text.indexOf('robin@northwind.example')).toBeLessThan(text.indexOf('robin@elsewhere.example'))
   })
 
-  test('client-side refinement drops cards the query does not actually match', async () => {
+  test('cards the query does not match are not returned', async () => {
     const unrelated = robinCard({
       emails: { e0: { address: 'someone@else.example' } },
       id: 'card-unrelated',
@@ -234,50 +251,25 @@ describe('searchContacts — concise', () => {
 
   test('finds a contact that has no email address at all, by name', async () => {
     // The shape create_contact can write: a name and a postal address,
-    // nobody's mail header involved. Stalwart does not return such a card for
-    // a server-side query on its display name, so the tool falls back to an
-    // unfiltered read of the book — modelled here by a query seam that
-    // answers the filtered call with nothing.
+    // nobody's mail header involved.
     const authored = robinCard({
       addresses: { a0: toCardAddress({ city: 'München', label: 'home', street: 'Beispielweg 1' }) },
       emails: {},
       id: 'card-authored',
     })
-    const deps = makeDeps([authored], {
-      contactCardQuery: (p) => Promise.resolve(p.filter === undefined ? ['card-authored'] : []),
+    const result = await searchContacts(makeDeps([robinCard(), authored]), {
+      args: args({ query: 'Fairweather' }),
+      token: 'tok',
     })
-    const result = await searchContacts(deps, { args: args({ query: 'Fairweather' }), token: 'tok' })
-    expect(result.isError).toBeUndefined()
-    expect(result.content[0]?.text).toContain('1 person(s) matched')
-    expect(result.content[0]?.text).toContain('contact_id: card-authored')
-  })
-
-  test('an emailless contact is not hidden by an addressed one matching the same query', async () => {
-    // The filtered read finds only the addressed card; the sweep finds only
-    // the emailless one. Choosing between them would drop a person, and this
-    // tool is supposed to present ambiguity rather than resolve it silently.
-    const addressed = robinCard()
-    const authored = robinCard({ emails: {}, id: 'card-authored', name: { full: 'Robin Fairweather-Ng' } })
-    const deps = makeDeps([addressed, authored], {
-      contactCardQuery: (p) => Promise.resolve(p.filter === undefined ? ['card-authored'] : ['card-robin']),
-    })
-    const result = await searchContacts(deps, { args: args({ query: 'Fairweather' }), token: 'tok' })
     const text = result.content[0]?.text ?? ''
     expect(text).toContain('2 person(s) matched')
     expect(text).toContain('contact_id: card-robin')
     expect(text).toContain('contact_id: card-authored')
   })
 
-  test('a genuinely unknown person is still the empty result after the fallback', async () => {
-    const deps = makeDeps([], { contactCardQuery: () => Promise.resolve([]) })
-    const result = await searchContacts(deps, { args: args({ query: 'nobody' }), token: 'tok' })
-    expect(result.content[0]?.text).toContain('No contact matched')
-  })
-
-  test('a server hit on the shared collection note alone is not a match', async () => {
-    // Every collected card carries the same machine-written note, so the
-    // server's `text` condition returns the whole book for a word from it.
-    // Refinement is authoritative: the answer must be the empty result.
+  test('a word only in the shared collection note is not a match', async () => {
+    // Every collected card carries the same machine-written note, so a note
+    // hit would return the whole book for a word from it.
     const result = await searchContacts(makeDeps([robinCard()]), {
       args: args({ query: 'Maintained' }),
       token: 'tok',
@@ -432,113 +424,136 @@ describe('searchContacts — roles', () => {
     expect(byName.content[0]?.text).not.toContain('as a role')
   })
 
-  test('reaches a role card past the unfiltered sweep window, reading titles alone', async () => {
-    const filler = Array.from({ length: 600 }, (_, i) =>
-      robinCard({ emails: { e0: { address: `p${i}@example.org` } }, id: `card-${i}`, name: { full: `Person ${i}` } })
-    )
-    const cards = [...filler, lawyer()]
-    const narrowed: string[][] = []
-    const deps = makeDeps(cards, {
-      contactCardGet: (p) => {
-        if (p.properties) {
-          narrowed.push(p.properties)
-        }
-        return Promise.resolve(cards.filter((c) => p.ids.includes(c.id)))
-      },
-      // The server's filter cannot see a role; the unfiltered read pages.
-      contactCardQuery: (p) => {
-        if (p.filter) {
-          return Promise.resolve([])
-        }
-        // A server whose query limit is below the sweep's page size: short
-        // pages that are not the end.
-        const start = p.position ?? 0
-        return Promise.resolve(cards.slice(start, start + Math.min(p.limit ?? cards.length, 300)).map((c) => c.id))
-      },
-    })
-    const text = (await searchContacts(deps, { args: args({ query: 'lawyer' }), token: 'tok' })).content[0]?.text ?? ''
-    expect(text).toContain('contact_id: card-lawyer')
-    expect(narrowed.length).toBeGreaterThan(0)
-    expect(narrowed.every((p) => p.join() === 'id,titles')).toBe(true)
-  })
-
-  test('a role phrased with "my" sweeps even with a dot in it; a bare address search does not', async () => {
-    const filler = Array.from({ length: 300 }, (_, i) =>
-      robinCard({ emails: { e0: { address: `p${i}@example.org` } }, id: `card-${i}`, name: { full: `Person ${i}` } })
-    )
-    const cards = [...filler, lawyer({ titles: { r0: { kind: 'role', name: 'c.p.a.' } } })]
-    let narrowed = 0
-    const deps = makeDeps(cards, {
-      contactCardGet: (p) => {
-        narrowed += p.properties ? 1 : 0
-        return Promise.resolve(cards.filter((c) => p.ids.includes(c.id)))
-      },
-      contactCardQuery: (p) => {
-        const start = p.position ?? 0
-        return Promise.resolve(p.filter ? [] : cards.slice(start, start + (p.limit ?? cards.length)).map((c) => c.id))
-      },
-    })
-    const text = (await searchContacts(deps, { args: args({ query: 'my C.P.A.' }), token: 'tok' })).content[0]?.text
-    expect(text).toContain('roles: c.p.a.')
-    narrowed = 0
-    const none = await searchContacts(deps, { args: args({ query: 'nobody@nowhere.example' }), token: 'tok' })
-    expect(narrowed).toBe(0)
-    expect(none.content[0]?.text).not.toContain('no contact has it as a role')
-  })
-
-  // A paged, unfiltered query over `cards`; the filtered read finds nothing,
-  // as Stalwart's cannot see a role.
-  const pagedQuery =
-    (cards: ContactCard[]): SearchContactsDeps['contactCardQuery'] =>
-    (p) => {
-      const start = p.position ?? 0
-      return Promise.resolve(p.filter ? [] : cards.slice(start, start + (p.limit ?? cards.length)).map((c) => c.id))
-    }
   const fillerCards = (n: number): ContactCard[] =>
     Array.from({ length: n }, (_, i) =>
       robinCard({ emails: { e0: { address: `p${i}@example.org` } }, id: `card-${i}`, name: { full: `Person ${i}` } })
     )
+  // A card with no collected history, so it ranks below any card with some.
+  const quiet = (id: string, name: string): ContactCard =>
+    robinCard({ emails: { e0: { address: `${id}@example.org` } }, id, name: { full: name }, notes: {} })
 
-  test('reads more role holders than one get takes in gets of at most 500', async () => {
+  test('finds a contact with no email address deep in a 2,000-card book by name', async () => {
+    const henrike = robinCard({ emails: {}, id: 'card-henrike', name: { full: 'Henrike Wolters' } })
+    const cards = [...fillerCards(1200), henrike, ...fillerCards(2000).slice(1201)]
+    const text =
+      (await searchContacts(makeDeps(cards), { args: args({ query: 'Wolters' }), token: 'tok' })).content[0]?.text ?? ''
+    expect(text).toContain('1 person(s) matched')
+    expect(text).toContain('contact_id: card-henrike')
+    expect(text).not.toContain('were searched')
+  })
+
+  test('finds a contact by role alone, past position 250', async () => {
+    const cards = [...fillerCards(600), lawyer({ emails: {}, name: { full: 'Quiet Counsel' } })]
+    const text =
+      (await searchContacts(makeDeps(cards), { args: args({ query: 'my lawyer' }), token: 'tok' })).content[0]?.text ??
+      ''
+    expect(text).toContain('1. Quiet Counsel')
+    expect(text).toContain('roles: lawyer')
+  })
+
+  test('ranks every match: the most active of 80 comes first, and the total is exact', async () => {
+    const alexes = Array.from({ length: 80 }, (_, i) => quiet(`card-alex-${i}`, `Alex Number${i}`))
+    // Robin's card carries the active history; it sits past the 50th id.
+    alexes[70] = robinCard({ id: 'card-alex-active', name: { full: 'Alex Active' } })
+    const cards = [...fillerCards(300), ...alexes]
+    const text =
+      (await searchContacts(makeDeps(cards), { args: args({ query: 'alex' }), token: 'tok' })).content[0]?.text ?? ''
+    expect(text).toMatch(ALEX_ACTIVE_FIRST)
+    expect(text).toContain('Showing the top 5 of 80 matches')
+    expect(text).not.toContain('at least')
+  })
+
+  test('reads every page and no read asks for more than 500 ids', async () => {
     const holders = Array.from({ length: 600 }, (_, i) => lawyer({ id: `card-lawyer-${i}` }))
-    const cards = [...fillerCards(250), ...holders]
+    const cards = [...fillerCards(1700), ...holders]
+    const asked: number[] = []
+    const pages = pagesOf(cards)
     const deps = makeDeps(cards, {
-      contactCardGet: (p) =>
-        p.ids.length > 500
-          ? Promise.reject(new Error('maxObjectsInGet'))
-          : Promise.resolve(cards.filter((c) => p.ids.includes(c.id))),
-      contactCardQuery: pagedQuery(cards),
+      contactCardGet: (p) => {
+        asked.push(p.ids.length)
+        return makeDeps(cards).contactCardGet(p)
+      },
+      contactCardPage: (p) => {
+        asked.push(p.limit)
+        return pages(p)
+      },
     })
     const text = (await searchContacts(deps, { args: args({ query: 'lawyer' }), token: 'tok' })).content[0]?.text ?? ''
-    expect(text).toContain('of at least 600 matches')
+    expect(text).toContain('Showing the top 5 of 600 matches')
+    expect(Math.max(...asked)).toBe(500)
   })
 
-  test('a sweep that stops at its cap does not claim no contact has the role', async () => {
-    // The lawyer sits past the 10,000 cards the sweep reads.
-    const cards = [...fillerCards(10_100), lawyer()]
-    const deps = makeDeps(cards, { contactCardQuery: pagedQuery(cards) })
-    const empty = (await searchContacts(deps, { args: args({ query: 'my lawyer' }), token: 'tok' })).content[0]?.text
-    expect(empty).not.toContain('no contact has it as a role')
-    expect(empty).toContain('Roles were checked on the first 10000 cards only')
-    const byRole = await searchContacts(deps, { args: args({ query: 'my person 1' }), token: 'tok' })
-    expect(byRole.content[0]?.text).not.toContain('No contact has')
-    expect(byRole.content[0]?.text).toContain('None of the people above has "person 1" as a role')
-    expect(byRole.content[0]?.text).toContain('Roles were checked on the first 10000 cards only')
-    // A plain name search is not about a role: no cap note to misread as a partial search.
-    const byName = await searchContacts(deps, { args: args({ query: 'person 1' }), token: 'tok' })
-    expect(byName.content[0]?.text).toContain('person(s) matched')
-    expect(byName.content[0]?.text).not.toContain('Roles were checked')
+  test('a server that answers fewer ids than asked for still has every card read', async () => {
+    const cards = [...fillerCards(1000), quiet('card-last', 'Last Person')]
+    let reads = 0
+    const pages = pagesOf(cards, 200)
+    const deps = makeDeps(cards, {
+      contactCardPage: (p) => {
+        reads += 1
+        return pages(p)
+      },
+    })
+    const text = (await searchContacts(deps, { args: args({ query: 'Last Person' }), token: 'tok' })).content[0]?.text
+    expect(text).toContain('contact_id: card-last')
+    // 1,001 cards in pages of 200: six pages, no re-reads.
+    expect(reads).toBe(6)
   })
 
-  test('a book inside the sweep window takes no role sweep', async () => {
-    let queries = 0
-    const deps = makeDeps([lawyer()], {
-      contactCardQuery: () => {
-        queries += 1
-        return Promise.resolve(['card-lawyer'])
+  test('a server that does not count still reads to the first empty page', async () => {
+    const cards = [...fillerCards(1100), quiet('card-last', 'Last Person')]
+    const pages = pagesOf(cards)
+    const deps = makeDeps(cards, {
+      contactCardPage: async (p) => {
+        const { cards: got, returned } = await pages(p)
+        return { cards: got, returned }
+      },
+    })
+    const text = (await searchContacts(deps, { args: args({ query: 'Last Person' }), token: 'tok' })).content[0]?.text
+    expect(text).toContain('contact_id: card-last')
+  })
+
+  test('the match reads narrow cards, and only the matches are read in full', async () => {
+    const cards = [...fillerCards(700), lawyer()]
+    const properties = new Set<string>()
+    const full: string[] = []
+    const pages = pagesOf(cards)
+    const deps = makeDeps(cards, {
+      contactCardGet: (p) => {
+        full.push(...p.ids)
+        return Promise.resolve(cards.filter((c) => p.ids.includes(c.id)))
+      },
+      contactCardPage: (p) => {
+        for (const property of p.properties) {
+          properties.add(property)
+        }
+        return pages(p)
       },
     })
     await searchContacts(deps, { args: args({ query: 'lawyer' }), token: 'tok' })
-    expect(queries).toBe(2)
+    expect([...properties].sort()).toEqual(['emails', 'id', 'name', 'organizations', 'titles'])
+    expect(full).toEqual(['card-lawyer'])
+  })
+
+  test('a book past the cap gets one note saying a contact may be missing', async () => {
+    // The lawyer sits past the 50,000 cards the sweep reads.
+    const cards = [...fillerCards(50_100), lawyer()]
+    const deps = makeDeps(cards)
+    const empty = (await searchContacts(deps, { args: args({ query: 'my lawyer' }), token: 'tok' })).content[0]?.text
+    expect(empty).toContain('No contact matched')
+    expect(empty).not.toContain('no contact has it as a role')
+    expect(empty?.match(/Only the first 50000 cards of the address books were searched/gu)).toHaveLength(1)
+    const byRole = (await searchContacts(deps, { args: args({ query: 'my person 1' }), token: 'tok' })).content[0]?.text
+    expect(byRole).toContain('of at least')
+    expect(byRole).toContain('None of the people above has "person 1" as a role')
+    expect(byRole?.match(/Only the first 50000 cards/gu)).toHaveLength(1)
+  })
+
+  test('a book of exactly the cap, or smaller, gets no cap note', async () => {
+    for (const n of [3, 50_000]) {
+      const text = (await searchContacts(makeDeps(fillerCards(n)), { args: args({ query: 'person 2' }), token: 'tok' }))
+        .content[0]?.text
+      expect(text).toContain('person(s) matched')
+      expect(text).not.toContain('were searched')
+    }
   })
 })

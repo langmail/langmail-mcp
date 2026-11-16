@@ -25,6 +25,7 @@ import {
   observationsFromEmail,
   observationsFromEvent,
   readCollected,
+  toCardAddress,
   toCardPhone,
 } from '@langmail/contacts'
 import { parseEvents } from '@langmail/ical'
@@ -32,6 +33,7 @@ import {
   addressBookList,
   contactCardCreate,
   contactCardGet,
+  contactCardPage,
   contactCardQuery,
   emailGet,
   makeJmapLive,
@@ -244,7 +246,7 @@ live('search_contacts against live Stalwart — collect from mail + calendar, th
     searchDeps = {
       addressBookList: (p) => addressBookList({ ...p, apiUrl, authorization }),
       contactCardGet: (p) => contactCardGet({ ...p, apiUrl, authorization }),
-      contactCardQuery: (p) => contactCardQuery({ ...p, apiUrl, authorization }),
+      contactCardPage: (p) => contactCardPage({ ...p, apiUrl, authorization }),
       emailGet: (p) => emailGet({ ...p, apiUrl, authorization }),
       fetchEventTitles: async (_token, uids) => {
         const wanted = new Set(uids)
@@ -443,10 +445,10 @@ live('search_contacts against live Stalwart — collect from mail + calendar, th
     expect(result.content[0]?.text).toContain('No contact matched')
   })
 
-  // Last, because it fills the book past the sweep window. Stalwart's query
-  // cannot match a role (docs/upstream/stalwart/contact-query-cannot-match-titles.md),
-  // so the role sweep is the only read that reaches this card.
-  test('a role card past the sweep window is found by its role, and reaches CardDAV as ROLE', async () => {
+  // Last, because it fills the book with 300 cards. Stalwart's query cannot
+  // match a role (docs/upstream/stalwart/contact-query-cannot-match-titles.md),
+  // so the whole-book sweep is the only read that reaches the role card.
+  test('cards past position 300 are found: one with no email by name, one by its role alone', async () => {
     const [book] = (await addressBookList(ctx)).filter((b) => b.name !== COLLECTED_BOOK_NAME)
     const bookId = (book as NonNullable<typeof book>).id
     const create: Record<string, unknown> = {}
@@ -476,10 +478,20 @@ live('search_contacts against live Stalwart — collect from mail + calendar, th
         uid: `role-card-${run}`,
       },
     })
+    // What create_contact writes from a name and a postal address.
+    const henrikeId = await contactCardCreate({
+      ...ctx,
+      card: {
+        addressBookIds: { [bookId]: true },
+        addresses: { a0: toCardAddress({ city: 'Berlin', label: 'home', street: 'Beispielweg 1' }) },
+        name: { full: 'Henrike Wolters' },
+        uid: `no-email-${run}`,
+      },
+    })
 
     // The upstream gap itself: once the index has the card (found by name),
     // a word that is only in its title is still not found. When this turns
-    // red, Stalwart searches titles and the role sweep can go
+    // red, Stalwart searches titles and that upstream entry closes
     // (docs/upstream/stalwart/contact-query-cannot-match-titles.md).
     const titleWord = `zzrole${run}`
     const titleOnlyId = await contactCardCreate({
@@ -497,21 +509,31 @@ live('search_contacts against live Stalwart — collect from mail + calendar, th
     )
     expect(await contactCardQuery({ ...ctx, filter: { text: titleWord } })).toEqual([])
 
-    // The sweep reads titles alone: the narrowed get is honoured.
-    const [narrow] = await contactCardGet({ ...ctx, ids: [lawyerId], properties: ['id', 'titles'] })
+    // Both cards really are past position 300 of the unfiltered order.
+    const order = await contactCardQuery({ ...ctx, limit: 1000 })
+    expect(order.indexOf(lawyerId)).toBeGreaterThan(300)
+    expect(order.indexOf(henrikeId)).toBeGreaterThan(300)
+    // The sweep's narrow page: one request, only the asked-for properties.
+    const page = await contactCardPage({ ...ctx, limit: 500, position: 0, properties: ['id', 'name', 'titles'] })
+    expect(page.total).toBe(order.length)
+    const narrow = page.cards.find((c) => c.id === lawyerId)
     expect(narrow?.titles).toEqual({ r0: { kind: 'role', name: 'lawyer' } })
-    expect(narrow?.name).toBeUndefined()
-    // The window really is full, and the lawyer is outside it.
-    const window = await contactCardQuery({ ...ctx, limit: 250 })
-    expect(window).toHaveLength(250)
+    expect(narrow?.emails).toBeUndefined()
 
-    const result = await searchContacts(searchDeps, {
+    const byRole = await searchContacts(searchDeps, {
       args: searchContactsInput.parse({ query: 'my lawyer' }),
       token: TOKEN,
     })
-    const text = result.content[0]?.text ?? ''
+    const text = byRole.content[0]?.text ?? ''
     expect(text).toContain('1. Robin Lawyer-Card')
     expect(text).toContain('roles: lawyer')
+
+    const byName = await searchContacts(searchDeps, {
+      args: searchContactsInput.parse({ query: 'Wolters' }),
+      token: TOKEN,
+    })
+    expect(byName.content[0]?.text).toContain('1 person(s) matched')
+    expect(byName.content[0]?.text).toContain(`contact_id: ${henrikeId}`)
 
     // Over CardDAV the role is an ordinary vCard field, not a group.
     const home = `${ADMIN_URL}/dav/card/${encodeURIComponent(address)}/`
