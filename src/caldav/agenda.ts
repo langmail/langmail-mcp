@@ -16,6 +16,7 @@
 
 import { type ParsedEvent, parseWallClockInZone } from '@langmail/ical'
 
+import { durationSeconds } from './alarm.ts'
 import { seriesOccurrences } from './recurrence.ts'
 import { isValidTimeZone, toWallClockIso } from './timezone.ts'
 
@@ -124,12 +125,17 @@ const instantOf = (value: string, form: TimeForm): number => {
   return form.kind === 'zoned' ? parseWallClockInZone(value, form.timeZone).getTime() : Date.parse(`${value}Z`)
 }
 
-// An event's length, for occurrences generated from it. No DTEND means a
-// zero-length timed event or a one-day all-day one (RFC 5545 §3.6.1).
+// An event's length, for occurrences generated from it: from DTEND, else from
+// DURATION. Neither means a zero-length timed event or a one-day all-day one
+// (RFC 5545 §3.6.1).
 const durationMs = (ev: ParsedEvent, form: TimeForm): number => {
   const length = instantOf(ev.end, form) - instantOf(ev.start, form)
   if (!Number.isNaN(length)) {
     return length
+  }
+  const seconds = ev.duration ? durationSeconds(ev.duration) : undefined
+  if (seconds !== undefined && seconds >= 0) {
+    return seconds * 1000
   }
   return form.kind === 'allDay' ? DAY_MS : 0
 }
@@ -144,7 +150,9 @@ const completeOverride = (override: ParsedEvent, master: ParsedEvent | undefined
   // The master's times and their form never carry over to an override that has
   // its own DTSTART, nor do the series' exclusions to a single occurrence. Nor
   // does its TRANSP: an override is a whole VEVENT, so one without TRANSP is
-  // busy whatever the master says.
+  // busy whatever the master says. Its CLASS and STATUS do carry over, like its
+  // title: a reply override that names neither must not turn one occurrence of
+  // a private series public, nor bring back one of a cancelled series.
   const { allDay, end: _end, excludedDates: _excluded, showAs: _showAs, start: _start, startTzid, ...series } = master
   const merged: ParsedEvent = {
     ...series,
@@ -231,6 +239,14 @@ export const storedEntries = (events: ParsedEvent[]): AgendaEntry[] =>
     ...overrides.map((o) => overrideEntry(o, master)),
   ])
 
+// The entry's end as epoch ms: its DTEND, or its start plus the RFC 5545
+// default length when it has none.
+export const entryEndMs = (entry: AgendaEntry): number => {
+  const form = timeForm(entry.event)
+  const endMs = instantOf(entry.event.end, form)
+  return Number.isNaN(endMs) ? entry.startMs + durationMs(entry.event, form) : endMs
+}
+
 // [start, end) overlaps the window. A zero-length event counts when it starts
 // inside it. All-day entries are compared on the caller's day (AgendaWindow).
 const overlaps = (entry: AgendaEntry, window: AgendaWindow): boolean => {
@@ -241,8 +257,7 @@ const overlaps = (entry: AgendaEntry, window: AgendaWindow): boolean => {
   const allDay = form.kind === 'allDay'
   const from = window.start.getTime() + (allDay ? window.startOffsetMs : 0)
   const to = window.end.getTime() + (allDay ? window.endOffsetMs : 0)
-  const endMs = instantOf(entry.event.end, form)
-  const end = Number.isNaN(endMs) ? entry.startMs + durationMs(entry.event, form) : endMs
+  const end = entryEndMs(entry)
   return entry.startMs < to && (end > from || (end === entry.startMs && entry.startMs >= from))
 }
 

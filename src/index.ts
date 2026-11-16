@@ -19,6 +19,7 @@ import { createAttachmentDownload } from './attachments/download.ts'
 import { createTicketStore } from './attachments/tickets.ts'
 import { createAttachmentUpload } from './attachments/upload.ts'
 import { createUploadTicketStore } from './attachments/upload-tickets.ts'
+import { calendarFeedFromEnv } from './calendar-feeds/live-deps.ts'
 import { createImageProxy, createImageProxyStore } from './email-render/image-proxy.ts'
 import { createRoutes } from './handler.ts'
 import { createMcpHandler } from './mcp/handler.ts'
@@ -54,6 +55,14 @@ const routes = createRoutes({
   attachmentDownload: createAttachmentDownload(jmapLive, tickets),
   attachmentUpload: createAttachmentUpload(jmapLive, uploadTickets),
   authIssuer: AUTH_ISSUER,
+  // Calendar share feeds: the share table, and the owner's Stalwart credential
+  // from Auth's internal endpoint.
+  calendarFeed: calendarFeedFromEnv({
+    authInternalToken: process.env.AUTH_INTERNAL_TOKEN,
+    authServiceUrl: (process.env.AUTH_SERVICE_URL ?? AUTH_URL).replace(TRAILING_SLASHES_RE, ''),
+    databaseUrl: process.env.DATABASE_URL,
+    stalwartUrl: STALWART_URL,
+  }),
   imageProxy: createImageProxy(imageTokens),
   mcpHandler: createMcpHandler({
     imageTokens,

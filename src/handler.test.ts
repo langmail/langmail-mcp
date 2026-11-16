@@ -95,6 +95,28 @@ describe('routes', () => {
     expect(res.status).toBe(404)
   })
 
+  test('GET /calendar-feeds/<secret>.ics dispatches to the injected feed', async () => {
+    const feed = mock((_secret: string) => Promise.resolve(new Response('BEGIN:VCALENDAR', { status: 200 })))
+    const r = createRoutes({
+      authIssuer: AUTH,
+      calendarFeed: feed,
+      observability: () => ({ activityRecording: true, errorTracking: true, logShipping: true }),
+      publicUrl: PUBLIC,
+      stalwartUrl: STALWART,
+    })
+    expect((await r.fetch(new Request(`${PUBLIC}/calendar-feeds/s3cret_-x.ics`))).status).toBe(200)
+    expect(feed).toHaveBeenCalledWith('s3cret_-x')
+    expect((await r.fetch(new Request(`${PUBLIC}/calendar-feeds/s3cret.ics`, { method: 'HEAD' }))).status).toBe(200)
+    expect((await r.fetch(new Request(`${PUBLIC}/calendar-feeds/s3cret.ics`, { method: 'POST' }))).status).toBe(404)
+    expect((await r.fetch(new Request(`${PUBLIC}/calendar-feeds/s3cret`))).status).toBe(404)
+    expect((await r.fetch(new Request(`${PUBLIC}/calendar-feeds/a/b.ics`))).status).toBe(404)
+  })
+
+  test('GET /calendar-feeds/<secret>.ics without an injected feed returns 404', async () => {
+    const res = await makeRoutes().fetch(new Request(`${PUBLIC}/calendar-feeds/s3cret.ics`))
+    expect(res.status).toBe(404)
+  })
+
   test('GET /unknown returns 404', async () => {
     const r = makeRoutes()
     const res = await r.fetch(new Request(`${PUBLIC}/nope`))

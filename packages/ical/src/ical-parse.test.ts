@@ -489,3 +489,30 @@ describe('parseEvents — showAs', () => {
     expect(override?.showAs).toBeUndefined()
   })
 })
+
+describe('parseEvents — status and classification', () => {
+  const withLine = (line: string): string => invite().replace('END:VEVENT', `${line}\r\nEND:VEVENT`)
+
+  test('reads STATUS and CLASS uppercased', () => {
+    expect(parseEvents(withLine('STATUS:cancelled'))[0]?.status).toBe('CANCELLED')
+    expect(parseEvents(withLine('CLASS:Private'))[0]?.classification).toBe('PRIVATE')
+  })
+
+  test('reads DURATION as stored', () => {
+    expect(parseEvents(withLine('DURATION:PT2H'))[0]?.duration).toBe('PT2H')
+  })
+
+  test('leaves both unset when the VEVENT carries neither', () => {
+    const [event] = parseEvents(invite())
+    expect(event?.status).toBeUndefined()
+    expect(event?.classification).toBeUndefined()
+  })
+
+  test('ignores a VALARM STATUS', () => {
+    const alarm = invite().replace(
+      'END:VEVENT',
+      'BEGIN:VALARM\r\nACTION:DISPLAY\r\nSTATUS:CANCELLED\r\nTRIGGER:-PT5M\r\nEND:VALARM\r\nEND:VEVENT'
+    )
+    expect(parseEvents(alarm)[0]?.status).toBeUndefined()
+  })
+})

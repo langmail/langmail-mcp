@@ -17,7 +17,7 @@
     "start": "NODE_ENV=production bun src/index.ts",
     "test": "bun test",
     "test:integration": "bun test caldav-integration",
-    "test:stalwart": "bun test stalwart-all-day-event stalwart-update-organizer stalwart-update-calendar stalwart-cancel-occurrence stalwart-move-occurrence stalwart-move-event stalwart-duplicate-uid-itip stalwart-reply-unmodified-instance stalwart-attendee-delta stalwart-series-edit-keeps-partstat stalwart-update-keeps-properties attachments-stalwart mail-rules-stalwart search-contacts-stalwart contacts-write-stalwart search-emails-stalwart drafts-stalwart draft-attachments-stalwart file-emails-stalwart unsubscribe-stalwart",
+    "test:stalwart": "bun test calendar-feed-stalwart stalwart-all-day-event stalwart-update-organizer stalwart-update-calendar stalwart-cancel-occurrence stalwart-move-occurrence stalwart-move-event stalwart-duplicate-uid-itip stalwart-reply-unmodified-instance stalwart-attendee-delta stalwart-series-edit-keeps-partstat stalwart-update-keeps-properties attachments-stalwart mail-rules-stalwart search-contacts-stalwart contacts-write-stalwart search-emails-stalwart drafts-stalwart draft-attachments-stalwart file-emails-stalwart unsubscribe-stalwart",
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/email-render/viewer"
   },
   "dependencies": {

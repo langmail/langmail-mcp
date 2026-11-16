@@ -11,6 +11,7 @@ import { type AttachmentUpload } from './attachments/upload.ts'
 import { type AuthContext, type AuthMiddleware, createAuthMiddleware } from './auth/middleware.ts'
 import { MCP_SCOPES } from './auth/scopes.ts'
 import { TokenCache } from './auth/token-cache.ts'
+import { type CalendarFeed } from './calendar-feeds/feed.ts'
 import { type ImageProxy } from './email-render/image-proxy.ts'
 import {
   authReachable,
@@ -35,6 +36,9 @@ export interface HandlerConfig {
   // its authorization server and validates every bearer at its userinfo.
   authIssuer: string
   cache?: TokenCache
+  // Serves a calendar share's feed (GET /calendar-feeds/<secret>.ics). No
+  // bearer — the secret in the link is the credential. Absent → the route 404s.
+  calendarFeed?: CalendarFeed
   // Redeems a minted image-proxy ticket (GET /image-proxy/:token) — the
   // email-viewer's remote images. Same credential model as attachments.
   // Absent → the route 404s.
@@ -90,6 +94,19 @@ const imageProxyRoute = (req: Request, pathname: string, proxy?: ImageProxy): Pr
   const token = pathname.slice('/image-proxy/'.length)
   if (req.method === 'GET' && proxy && token && !token.includes('/')) {
     return proxy(token)
+  }
+  return Promise.resolve(new Response('not found\n', { status: 404 }))
+}
+
+// `/calendar-feeds/<secret>.ics`: the secret is base64url, so never holds a
+// slash or a dot. Under its own prefix so nginx's access-log-off block covers
+// the secret.
+const CALENDAR_FEED_RE = /^\/calendar-feeds\/([^/.]+)\.ics$/u
+
+const calendarFeedRoute = (req: Request, pathname: string, feed?: CalendarFeed): Promise<Response> => {
+  const secret = CALENDAR_FEED_RE.exec(pathname)?.[1]
+  if ((req.method === 'GET' || req.method === 'HEAD') && feed && secret) {
+    return feed(secret)
   }
   return Promise.resolve(new Response('not found\n', { status: 404 }))
 }
@@ -200,6 +217,11 @@ export const createRoutes = (cfg: HandlerConfig): Routes => {
 
     if (url.pathname.startsWith('/attachments/')) {
       return attachmentsRoute(req, url.pathname, cfg.attachmentDownload, cfg.attachmentUpload)
+    }
+
+    if (url.pathname.startsWith('/calendar-feeds/')) {
+      // Route label only: the pathname carries the secret.
+      return logRequest(req, '/calendar-feeds', () => calendarFeedRoute(req, url.pathname, cfg.calendarFeed))
     }
 
     if (url.pathname.startsWith('/image-proxy/')) {

@@ -49,9 +49,15 @@ export interface ParsedEvent {
   // Every ATTENDEE on the VEVENT, in source order. Empty when the event has
   // none (an attendee-less personal event).
   attendees: ParsedAttendee[]
+  // CLASS (RFC 5545 §3.8.1.3), uppercased: `PUBLIC`, `PRIVATE` or
+  // `CONFIDENTIAL`. Absent when the VEVENT carries none, which means public.
+  classification?: string
   // Free-text DESCRIPTION, unescaped. Surfaced so an attendee-delta update can
   // preserve it without the caller re-supplying it.
   description?: string
+  // DURATION as stored (`PT1H`), when the VEVENT gives its length that way
+  // instead of with a DTEND (RFC 5545 §3.8.2.5).
+  duration?: string
   end: string
   // Instants the series excludes (EXDATE), as stored — how delete_calendar_event
   // cancels a single occurrence. Present (and non-empty) only when the VEVENT
@@ -90,6 +96,9 @@ export interface ParsedEvent {
   // clock for a zone to govern). `start`/`end`
   // stay pure ISO wall-clock strings — the zone lives here, not appended to them.
   startTzid?: string
+  // STATUS (RFC 5545 §3.8.1.11), uppercased: `CONFIRMED`, `TENTATIVE` or
+  // `CANCELLED`. Absent when the VEVENT carries none.
+  status?: string
   title: string
   uid: string
   // How many ATTENDEE lines could NOT be reduced to a bare email (a non-mailto
@@ -433,10 +442,15 @@ const optionalFields = (block: ParsedBlock, attendees: ParsedAttendee[]): Partia
   // consumers re-express a date-only series in that zone.
   const startTzid = allDay ? undefined : propertyTimeZone(block.props.get('DTSTART'))
   const showAs = parseShowAs(block.props.get('TRANSP'))
+  const status = block.props.get('STATUS')?.value.trim().toUpperCase()
+  const classification = block.props.get('CLASS')?.value.trim().toUpperCase()
+  const duration = block.props.get('DURATION')?.value.trim()
   return {
     ...(block.alarms.length > 0 ? { alarms: block.alarms.map(parseAlarm) } : {}),
     ...(allDay ? { allDay: true as const } : {}),
+    ...(classification ? { classification } : {}),
     ...(description ? { description: unescapeText(description) } : {}),
+    ...(duration ? { duration } : {}),
     ...(excludedDates.length > 0 ? { excludedDates } : {}),
     ...(location ? { location: unescapeText(location) } : {}),
     ...(organizer ? { organizer } : {}),
@@ -444,6 +458,7 @@ const optionalFields = (block: ParsedBlock, attendees: ParsedAttendee[]): Partia
     ...(recurrenceId ? { recurrenceId } : {}),
     ...(showAs ? { showAs } : {}),
     ...(startTzid ? { startTzid } : {}),
+    ...(status ? { status } : {}),
     ...(unparsedAttendeeCount > 0 ? { unparsedAttendeeCount } : {}),
   }
 }

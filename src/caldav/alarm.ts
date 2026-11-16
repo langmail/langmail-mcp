@@ -38,7 +38,7 @@ export const describeReminder = (minutes: number, allDay: boolean): string =>
 // duration.
 const DURATION_RE = /^([+-])?P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/iu
 const SECONDS_PER_MINUTE = 60
-const durationSeconds = (value: string): number | undefined => {
+export const durationSeconds = (value: string): number | undefined => {
   const m = DURATION_RE.exec(value)
   if (!m) {
     return

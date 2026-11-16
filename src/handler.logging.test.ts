@@ -3,6 +3,7 @@ import { describe, expect, spyOn, test } from 'bun:test'
 import { logger } from '@langmail/logger'
 
 import { TokenCache } from './auth/token-cache.ts'
+import { createCalendarFeed } from './calendar-feeds/feed.ts'
 import { createRoutes } from './handler.ts'
 
 const PUBLIC = 'https://mcp.example.com'
@@ -67,5 +68,37 @@ describe('/mcp request logging', () => {
     })
 
     expect(lines).toHaveLength(0)
+  })
+})
+
+describe('calendar feed logging', () => {
+  const SECRET = 'S'.repeat(43)
+
+  test('no line carries the secret, on success or on an upstream failure', async () => {
+    const feed = createCalendarFeed({
+      fetchCalendar: () => Promise.reject(new Error(`caldav failed for /calendar-feeds/${SECRET}.ics`)),
+      findCredential: () => Promise.resolve({ address: 'owner@example.com', authorization: 'Basic x' }),
+      findShare: () => Promise.resolve({ calendarUrl: '/dav/cal/x/default/', id: 'share', level: 'busy', userId: 'u' }),
+    })
+    const routes = createRoutes({
+      authIssuer: 'https://auth.example.com/api/auth',
+      calendarFeed: feed,
+      observability: () => ({ activityRecording: true, errorTracking: true, logShipping: true }),
+      publicUrl: PUBLIC,
+      stalwartUrl: 'https://mail.example.com',
+    })
+    const info = spyOn(logger, 'info').mockImplementation(() => undefined)
+    const error = spyOn(logger, 'error').mockImplementation(() => undefined)
+    try {
+      const res = await routes.fetch(new Request(`${PUBLIC}/calendar-feeds/${SECRET}.ics`))
+      expect(res.status).toBe(503)
+      const lines = JSON.stringify([...info.mock.calls, ...error.mock.calls])
+      expect(lines).toContain('/calendar-feeds')
+      expect(lines).toContain('calendar feed failed')
+      expect(lines).not.toContain(SECRET)
+    } finally {
+      info.mockRestore()
+      error.mockRestore()
+    }
   })
 })
