@@ -199,8 +199,8 @@ const plainEntry = (event: ParsedEvent): AgendaEntry => ({
 // Groups a calendar object's VEVENTs by UID into series: the master (absent when
 // only some occurrences were shared with this calendar), its overrides, and any
 // further component without a RECURRENCE-ID the parser could read — an override
-// whose RECURRENCE-ID names a non-IANA zone (Outlook's `W. Europe Standard
-// Time`). Those are listed as they are rather than taking the master's place.
+// whose RECURRENCE-ID names a zone that is neither IANA nor a Windows name (a
+// vendor zone defined only by the object's VTIMEZONE). Those are listed as they are rather than taking the master's place.
 interface Series {
   master?: ParsedEvent
   others: ParsedEvent[]
@@ -305,7 +305,8 @@ const seriesInWindow = ({ master, others, overrides }: Series, window: AgendaWin
   }
   // A component in `others` replaces an occurrence we can't name, so expanding
   // the rule would list that occurrence a second time at its old time. A zone
-  // that isn't IANA can't be expanded honestly either: its occurrences would get
+  // that is neither IANA nor a Windows name (the parser maps those to IANA)
+  // can't be expanded honestly either: its occurrences would get
   // recurrenceIds that update/delete_calendar_event refuse (seriesTimeZone). A
   // sub-daily rule is too costly to walk (SUB_DAILY_RE).
   if (others.length > 0 || SUB_DAILY_RE.test(rule) || (master.startTzid && !isValidTimeZone(master.startTzid))) {

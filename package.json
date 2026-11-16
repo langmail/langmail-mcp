@@ -13,6 +13,7 @@
     "smoke:agent-forward": "bun run scripts/smoke-agent-forward.ts",
     "smoke:agent-preview": "bun run scripts/smoke-agent-preview.ts",
     "smoke:agent-type-filter": "bun run scripts/smoke-agent-type-filter.ts",
+    "smoke:agent-windows-zone": "bun run scripts/smoke-agent-windows-zone.ts",
     "spec:check": "./spec/check.sh",
     "start": "NODE_ENV=production bun src/index.ts",
     "test": "bun test",

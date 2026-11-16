@@ -261,42 +261,69 @@ describe('renderFeed — repeating events', () => {
     expect(feed).not.toContain('Clinic')
   })
 
+  // Outlook's Windows zone names map to IANA zones, so such a series expands
+  // like any other: across the DST change, without the cancelled occurrence and
+  // with the moved one once.
+  test('shows a series in a Windows zone at its real times, at both levels', () => {
+    const outlook = calendar(
+      vevent([
+        'UID:outlook-weekly',
+        'DTSTART;TZID=W. Europe Standard Time:20261019T100000',
+        'DTEND;TZID=W. Europe Standard Time:20261019T110000',
+        'RRULE:FREQ=WEEKLY;COUNT=4',
+        'EXDATE;TZID=W. Europe Standard Time:20261026T100000',
+        'SUMMARY:Planning',
+      ]),
+      vevent([
+        'UID:outlook-weekly',
+        'RECURRENCE-ID;TZID=W. Europe Standard Time:20261102T100000',
+        'DTSTART;TZID=W. Europe Standard Time:20261102T120000',
+        'DTEND;TZID=W. Europe Standard Time:20261102T130000',
+        'SUMMARY:Planning',
+      ])
+    )
+    for (const level of ['busy', 'full'] as const) {
+      const starts = events(render(level, outlook)).map((lines) => lines.find((l) => l.startsWith('DTSTART')))
+      expect(starts).toEqual(['DTSTART:20261019T080000Z', 'DTSTART:20261102T110000Z', 'DTSTART:20261109T090000Z'])
+    }
+  })
+
   test('leaves out a series it cannot expand rather than passing its rule through', () => {
-    const windowsZone = calendar(
+    const vendorZone = calendar(
       vevent([
         'UID:outlook',
-        'DTSTART;TZID=W. Europe Standard Time:20261116T100000',
-        'DTEND;TZID=W. Europe Standard Time:20261116T110000',
+        'DTSTART;TZID=Example Standard Time:20261116T100000',
+        'DTEND;TZID=Example Standard Time:20261116T110000',
         'RRULE:FREQ=WEEKLY;COUNT=3',
-        'EXDATE;TZID=W. Europe Standard Time:20261123T100000',
+        'EXDATE;TZID=Example Standard Time:20261123T100000',
         'SUMMARY:Sync',
       ])
     )
-    const feed = render('full', windowsZone)
+    const feed = render('full', vendorZone)
     expect(feed).not.toContain('BEGIN:VEVENT')
     expect(feed).not.toContain('RRULE')
   })
 
   test('leaves out the unreadable overrides of a series it cannot expand too', () => {
-    const windowsZone = calendar(
+    const vendorZone = calendar(
       vevent([
         'UID:outlook-private',
-        'DTSTART;TZID=W. Europe Standard Time:20261116T100000',
-        'DTEND;TZID=W. Europe Standard Time:20261116T110000',
+        'DTSTART;TZID=Example Standard Time:20261116T100000',
+        'DTEND;TZID=Example Standard Time:20261116T110000',
         'RRULE:FREQ=WEEKLY;COUNT=3',
         'CLASS:PRIVATE',
         'SUMMARY:Therapy',
       ]),
       vevent([
         'UID:outlook-private',
-        'RECURRENCE-ID;TZID=W. Europe Standard Time:20261123T100000',
-        'DTSTART;TZID=W. Europe Standard Time:20261123T120000',
-        'DTEND;TZID=W. Europe Standard Time:20261123T130000',
+        'RECURRENCE-ID;TZID=Example Standard Time:20261123T100000',
+        'DTSTART;TZID=Example Standard Time:20261123T120000',
+        'DTEND;TZID=Example Standard Time:20261123T130000',
         'SUMMARY:Therapy',
         'LOCATION:Clinic',
       ])
     )
-    const feed = render('full', windowsZone)
+    const feed = render('full', vendorZone)
     expect(feed).not.toContain('BEGIN:VEVENT')
   })
 })

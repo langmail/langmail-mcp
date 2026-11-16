@@ -99,6 +99,34 @@ describe('parseEvents', () => {
     expect(parseEvents(ics)[0]?.startTzid).toBe('Europe/Berlin')
   })
 
+  test('maps a Windows TZID to its IANA zone and keeps the name as stored', () => {
+    const ics = [
+      'BEGIN:VEVENT',
+      'UID:outlook@example.com',
+      'DTSTART;TZID=W. Europe Standard Time:20260710T100000',
+      'RRULE:FREQ=WEEKLY',
+      'EXDATE;TZID=W. Europe Standard Time:20260717T100000',
+      'END:VEVENT',
+      'BEGIN:VEVENT',
+      'UID:outlook@example.com',
+      'RECURRENCE-ID;TZID=W. Europe Standard Time:20260724T100000',
+      'DTSTART;TZID=W. Europe Standard Time:20260724T120000',
+      'END:VEVENT',
+    ].join('\r\n')
+    const [master, override] = parseEvents(ics)
+    expect(master?.startTzid).toBe('Europe/Berlin')
+    expect(master?.storedStartTzid).toBe('W. Europe Standard Time')
+    expect(master?.excludedDates).toEqual(['2026-07-17T08:00:00.000Z'])
+    expect(override?.recurrenceId).toBe('2026-07-24T08:00:00.000Z')
+  })
+
+  test('leaves a TZID that is neither IANA nor Windows as stored', () => {
+    const ics = 'BEGIN:VEVENT\r\nUID:v@example.com\r\nDTSTART;TZID=Example Standard Time:20260612T100000\r\nEND:VEVENT'
+    const [event] = parseEvents(ics)
+    expect(event?.startTzid).toBe('Example Standard Time')
+    expect(event?.storedStartTzid).toBeUndefined()
+  })
+
   test('drops a TZID written beside an all-day DATE', () => {
     const ics = 'BEGIN:VEVENT\r\nUID:allday@langmail.me\r\nDTSTART;TZID=Europe/Berlin;VALUE=DATE:20260612\r\nEND:VEVENT'
     const [event] = parseEvents(ics)

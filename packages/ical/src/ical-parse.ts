@@ -4,6 +4,7 @@
 // location) isn't worth it — so this extracts just those, happy-path.
 
 import { parseWallClockInZone } from './timezone.ts'
+import { ianaTimeZone } from './windows-zones.ts'
 
 // One ATTENDEE of a VEVENT, reduced to what the calendar tools and contact
 // collection need: the bare email (mailto: stripped), the CN display name
@@ -88,7 +89,9 @@ export interface ParsedEvent {
   // RFC's default.
   showAs?: ShowAs
   start: string
-  // IANA zone named by the DTSTART `;TZID=` param, when present. This is the
+  // IANA zone named by the DTSTART `;TZID=` param, when present; a Windows
+  // zone name (`W. Europe Standard Time`, as Outlook writes it) is mapped to
+  // its IANA zone (`Europe/Berlin`). This is the
   // event's own zone: update_calendar_event keeps it so an edit doesn't silently
   // re-express the event elsewhere, and list rendering surfaces it. Absent for
   // the historical UTC (`…Z`) form, for foreign floating times, and for an
@@ -99,6 +102,10 @@ export interface ParsedEvent {
   // STATUS (RFC 5545 §3.8.1.11), uppercased: `CONFIRMED`, `TENTATIVE` or
   // `CANCELLED`. Absent when the VEVENT carries none.
   status?: string
+  // The DTSTART TZID as stored, when it differs from startTzid (a Windows zone
+  // name). A line spliced back into the stored object (an override's
+  // RECURRENCE-ID) names this, the zone the object's own VTIMEZONE defines.
+  storedStartTzid?: string
   title: string
   uid: string
   // How many ATTENDEE lines could NOT be reduced to a bare email (a non-mailto
@@ -440,7 +447,8 @@ const optionalFields = (block: ParsedBlock, attendees: ParsedAttendee[]): Partia
   const allDay = isDateValue(block.props.get('DTSTART'))
   // A TZID beside a DATE is off-spec and meaningless; surfacing it would let
   // consumers re-express a date-only series in that zone.
-  const startTzid = allDay ? undefined : propertyTimeZone(block.props.get('DTSTART'))
+  const storedStartTzid = allDay ? undefined : propertyTimeZone(block.props.get('DTSTART'))
+  const startTzid = storedStartTzid === undefined ? undefined : ianaTimeZone(storedStartTzid)
   const showAs = parseShowAs(block.props.get('TRANSP'))
   const status = block.props.get('STATUS')?.value.trim().toUpperCase()
   const classification = block.props.get('CLASS')?.value.trim().toUpperCase()
@@ -459,6 +467,7 @@ const optionalFields = (block: ParsedBlock, attendees: ParsedAttendee[]): Partia
     ...(showAs ? { showAs } : {}),
     ...(startTzid ? { startTzid } : {}),
     ...(status ? { status } : {}),
+    ...(storedStartTzid && storedStartTzid !== startTzid ? { storedStartTzid } : {}),
     ...(unparsedAttendeeCount > 0 ? { unparsedAttendeeCount } : {}),
   }
 }

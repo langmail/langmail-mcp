@@ -4,7 +4,7 @@ import { z } from 'zod'
 // The wall-clock parser lives in @langmail/ical, where the VEVENT parser
 // consumes it — this module keeps the zod input schemas that validate tool
 // arguments, which are the service's concern, not the package's.
-import { DATE_TIME_RE, parseWallClockInZone } from '@langmail/ical'
+import { DATE_TIME_RE, ianaTimeZone, parseWallClockInZone } from '@langmail/ical'
 
 const OFFSET_RE = /(?:Z|[+-]\d{2}:\d{2})$/iu
 
@@ -112,15 +112,17 @@ export const allDayEndError = (start: string): string =>
 
 const hasExplicitOffset = (value: string): boolean => OFFSET_RE.test(value)
 
+// A Windows zone name, as a stored TZID may carry one, reads as its IANA zone
+// here and in toWallClockIso, like parseWallClockInZone.
 export const toZonedDate = (instant: Date, timeZone: string): Date =>
-  timeZone === UTC_TIME_ZONE ? instant : TZDate.tz(timeZone, instant)
+  timeZone === UTC_TIME_ZONE ? instant : TZDate.tz(ianaTimeZone(timeZone), instant)
 
 // An instant re-expressed as a naive wall-clock ISO string in `timeZone` (no
 // offset suffix) — the inverse of parseWallClockInZone. Used wherever a stored
 // instant has to re-enter the wall-clock pipeline, e.g. an occurrence's original
 // start standing in for an omitted `start` on an update.
 export const toWallClockIso = (instant: Date, timeZone: string): string => {
-  const zoned = TZDate.tz(timeZone, instant)
+  const zoned = TZDate.tz(ianaTimeZone(timeZone), instant)
   const pad = (value: number): string => String(value).padStart(2, '0')
   return (
     `${zoned.getFullYear()}-${pad(zoned.getMonth() + 1)}-${pad(zoned.getDate())}` +

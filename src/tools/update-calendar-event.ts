@@ -311,7 +311,9 @@ const updateOccurrence = async (u: OccurrenceUpdate): Promise<ToolResult> => {
     // docs/reference/stalwart/observed-behaviour.md).
     organizer: master.organizer ?? organizer,
     recurrenceAllDay: master.allDay === true,
-    recurrenceTimeZone: master.startTzid ?? UTC_TIME_ZONE,
+    // The stored TZID name, so the RECURRENCE-ID names the object's own
+    // VTIMEZONE even when that is a Windows zone name.
+    recurrenceTimeZone: master.storedStartTzid ?? master.startTzid ?? UTC_TIME_ZONE,
     recurrenceId: new Date(recurrenceId),
     sequence,
     start,

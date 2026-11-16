@@ -206,9 +206,9 @@ const LEADING_SEPARATOR_RE = /^;/u
 const NONZERO_FRACTION_RE = /\.\d*[1-9]/u
 
 // The zone a series' RRULE expands in, for isSeriesOccurrence: the master's
-// DTSTART TZID (the parser drops one written beside an all-day DATE). A TZID
-// that isn't an IANA zone, such as a vendor zone name defined only by the object's
-// VTIMEZONE, can't be expanded at all. It is refused by name, echoing the
+// DTSTART TZID (the parser drops one written beside an all-day DATE, and maps a
+// Windows zone name to its IANA zone). A TZID that is neither, such as a vendor
+// zone name defined only by the object's VTIMEZONE, can't be expanded at all. It is refused by name, echoing the
 // caller's `recurrenceId`, rather than surfacing as an opaque rule error — and
 // never matched as if its wall clock were UTC.
 export const seriesTimeZone = (

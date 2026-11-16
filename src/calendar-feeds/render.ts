@@ -112,7 +112,7 @@ const entryLevel = (entry: AgendaEntry, level: ShareLevel): ShareLevel =>
 // declined never do; free time doesn't appear as busy.
 //
 // Nor does a series agenda.ts could not expand into occurrences (a sub-daily
-// or unreadable rule, a zone that isn't IANA, see #1260): passed through with
+// or unreadable rule, a zone that is neither IANA nor a Windows name): passed through with
 // its rule it would bring back cancelled occurrences and show moved ones twice.
 const isShown = (entry: AgendaEntry, level: ShareLevel, ownerAddress: string): boolean => {
   if (

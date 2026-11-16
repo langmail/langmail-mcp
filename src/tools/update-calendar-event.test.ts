@@ -914,8 +914,59 @@ describe('updateCalendarEvent — single occurrence (recurrenceId)', () => {
     expect(result.isError).toBeUndefined()
   })
 
+  test('edits an occurrence of a series in a Windows zone, keeping its TZID name', async () => {
+    // Outlook names the zone the Windows way, defined by the object's own
+    // VTIMEZONE: the override's RECURRENCE-ID names that same TZID.
+    const outlook = storedEvent({
+      data: [
+        'BEGIN:VCALENDAR',
+        'BEGIN:VTIMEZONE',
+        'TZID:W. Europe Standard Time',
+        'BEGIN:STANDARD',
+        'DTSTART:16010101T030000',
+        'TZOFFSETFROM:+0200',
+        'TZOFFSETTO:+0100',
+        'RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10',
+        'END:STANDARD',
+        'BEGIN:DAYLIGHT',
+        'DTSTART:16010101T020000',
+        'TZOFFSETFROM:+0100',
+        'TZOFFSETTO:+0200',
+        'RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3',
+        'END:DAYLIGHT',
+        'END:VTIMEZONE',
+        'BEGIN:VEVENT',
+        `UID:${UID}`,
+        'SUMMARY:Weekly Sync',
+        'DTSTART;TZID=W. Europe Standard Time:20260616T100000',
+        'DTEND;TZID=W. Europe Standard Time:20260616T103000',
+        'RRULE:FREQ=WEEKLY;BYDAY=TU',
+        'ORGANIZER;CN="host@langmail.me":mailto:host@langmail.me',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n'),
+    })
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), outlook, cap), {
+      // 10:00 Berlin (CEST) on 2026-06-23, moved to 11:00.
+      args: {
+        end: '2026-06-23T09:30:00Z',
+        recurrenceId: '2026-06-23T08:00:00Z',
+        start: '2026-06-23T09:00:00Z',
+        uid: UID,
+      },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    expect(ical).toContain('RECURRENCE-ID;TZID=W. Europe Standard Time:20260623T100000')
+    expect(ical).toContain('DTSTART;TZID=Europe/Berlin:20260623T110000')
+    expect(ical).toContain('TZID:Europe/Berlin')
+    expect(ical).not.toContain('NaN')
+  })
+
   test('fails loudly when the series’ zone cannot be resolved', async () => {
-    // A non-IANA zone name, defined only by the object's VTIMEZONE: it cannot be
+    // A zone name that is neither IANA nor Windows, defined only by the object's VTIMEZONE: it cannot be
     // expanded, so no override is written for an unvalidated instant.
     const windowsZoned = storedEvent({
       data: [

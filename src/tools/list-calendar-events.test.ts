@@ -426,23 +426,67 @@ describe('listCalendarEvents — occurrences in a window', () => {
     expect(txt).not.toContain('when: 2026-10-26')
   })
 
-  test('a series with an override in a non-IANA zone is listed as stored, never twice', async () => {
+  // Outlook and Exchange name zones the Windows way; those map to IANA zones.
+  const outlookObject = (uid: string, vevents: string[][]): CalendarObject => ({
+    data: [
+      'BEGIN:VCALENDAR',
+      ...vevents.flatMap((lines) => ['BEGIN:VEVENT', `UID:${uid}`, 'SUMMARY:Planning', ...lines, 'END:VEVENT']),
+      'END:VCALENDAR',
+    ].join('\r\n'),
+    url: `${CAL}${uid}.ics`,
+  })
+
+  test('lists a one-off event in a Windows zone at its real time', async () => {
+    const oneOff = outlookObject('outlook-once@example.com', [
+      ['DTSTART;TZID=W. Europe Standard Time:20260710T100000', 'DTEND;TZID=W. Europe Standard Time:20260710T110000'],
+    ])
+    // 10:00 Berlin is 08:00 UTC: a window around 08:00 UTC holds it.
+    const txt = await listWindow([oneOff], '2026-07-10T07:30:00Z', '2026-07-10T08:30:00Z')
+    expect(txt).toContain('when: 2026-07-10T10:00:00 → 2026-07-10T11:00:00 (Europe/Berlin)')
+    expect(await listWindow([oneOff], '2026-07-10T09:30:00Z', '2026-07-10T10:30:00Z')).not.toContain('Planning')
+  })
+
+  test('expands a series in a Windows zone across DST, minus the cancelled one, the moved one once', async () => {
+    const series = outlookObject('outlook-weekly@example.com', [
+      [
+        'DTSTART;TZID=W. Europe Standard Time:20261019T100000',
+        'DTEND;TZID=W. Europe Standard Time:20261019T110000',
+        'RRULE:FREQ=WEEKLY',
+        'EXDATE;TZID=W. Europe Standard Time:20261026T100000',
+      ],
+      [
+        'RECURRENCE-ID;TZID=W. Europe Standard Time:20261102T100000',
+        'DTSTART;TZID=W. Europe Standard Time:20261102T120000',
+        'DTEND;TZID=W. Europe Standard Time:20261102T130000',
+      ],
+    ])
+    const txt = await listWindow([series], '2026-10-18T00:00:00Z', '2026-11-11T00:00:00Z')
+    expect(txt).toContain('3 event(s) between')
+    expect(txt).toContain('when: 2026-10-19T10:00:00 → 2026-10-19T11:00:00 (Europe/Berlin)')
+    expect(txt).toContain('when: 2026-11-02T12:00:00 → 2026-11-02T13:00:00 (Europe/Berlin)')
+    expect(txt).toContain('when: 2026-11-09T10:00:00 → 2026-11-09T11:00:00 (Europe/Berlin)')
+    expect(txt).not.toContain('2026-10-26')
+    expect(txt).not.toContain('when: 2026-11-02T10:00:00')
+    expect(txt).not.toContain('could not be expanded')
+  })
+
+  test('a series with an override in a zone that is neither IANA nor Windows is listed as stored, never twice', async () => {
     const outlook: CalendarObject = {
       data: [
         'BEGIN:VCALENDAR',
         'BEGIN:VEVENT',
         'UID:outlook@example.com',
         'SUMMARY:Planning',
-        'DTSTART;TZID=W. Europe Standard Time:20261005T100000',
-        'DTEND;TZID=W. Europe Standard Time:20261005T110000',
+        'DTSTART;TZID=Example Standard Time:20261005T100000',
+        'DTEND;TZID=Example Standard Time:20261005T110000',
         'RRULE:FREQ=WEEKLY',
         'END:VEVENT',
         'BEGIN:VEVENT',
         'UID:outlook@example.com',
-        'RECURRENCE-ID;TZID=W. Europe Standard Time:20261012T100000',
+        'RECURRENCE-ID;TZID=Example Standard Time:20261012T100000',
         'SUMMARY:Planning',
-        'DTSTART;TZID=W. Europe Standard Time:20261012T120000',
-        'DTEND;TZID=W. Europe Standard Time:20261012T130000',
+        'DTSTART;TZID=Example Standard Time:20261012T120000',
+        'DTEND;TZID=Example Standard Time:20261012T130000',
         'END:VEVENT',
         'END:VCALENDAR',
       ].join('\r\n'),
@@ -546,15 +590,15 @@ describe('listCalendarEvents — occurrence ids', () => {
     expect(txt).toContain('could not be expanded')
   })
 
-  test('a series in a non-IANA zone is not expanded into ids update/delete would refuse', async () => {
+  test('a series in a zone that is neither IANA nor Windows is not expanded into ids update/delete would refuse', async () => {
     const object: CalendarObject = {
       data: [
         'BEGIN:VCALENDAR',
         'BEGIN:VEVENT',
         'UID:vendor@example.com',
         'SUMMARY:Vendor sync',
-        'DTSTART;TZID=W. Europe Standard Time:20261005T100000',
-        'DTEND;TZID=W. Europe Standard Time:20261005T110000',
+        'DTSTART;TZID=Example Standard Time:20261005T100000',
+        'DTEND;TZID=Example Standard Time:20261005T110000',
         'RRULE:FREQ=WEEKLY',
         'END:VEVENT',
         'END:VCALENDAR',

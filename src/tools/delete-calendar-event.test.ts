@@ -351,8 +351,17 @@ describe('deleteCalendarEvent — zoned series written by another client', () =>
     expect(cap.deleted).toHaveLength(0)
   })
 
+  test('cancels an occurrence of a series in a Windows zone, keeping its TZID name', async () => {
+    // Outlook names the zone the Windows way; the object's own VTIMEZONE
+    // defines that name, so the EXDATE names it too.
+    const { cap, ical, result } = await cancel('2026-11-18T07:15:00Z', foreignZonedStored('W. Europe Standard Time'))
+    expect(result.isError).toBeUndefined()
+    expect(cap.updated).toHaveLength(1)
+    expect(ical).toContain('EXDATE;TZID=W. Europe Standard Time:20261118T081500')
+  })
+
   test('fails loudly when the series’ zone cannot be resolved', async () => {
-    // A non-IANA zone name, defined only by the object's VTIMEZONE: matching it as
+    // A zone name that is neither IANA nor Windows, defined only by the object's VTIMEZONE: matching it as
     // UTC would cancel the wrong instant, so nothing is written.
     const { cap, result } = await cancel('2026-11-18T07:15:00Z', foreignZonedStored('Example Standard Time'))
     expect(result.isError).toBe(true)

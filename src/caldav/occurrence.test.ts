@@ -401,12 +401,20 @@ describe('spliceOccurrenceCancellation — zoned master', () => {
     expect(spliceOccurrenceCancellation(once, AFTER_DST)).toBe(once)
   })
 
-  // Outlook names its zones by Windows ID, defined only by the object's own
-  // VTIMEZONE. Without a wall clock to compute, the UTC instant is the best
-  // valid EXDATE we can write.
-  test('falls back to a UTC EXDATE for a zone it cannot resolve', () => {
+  // Outlook names its zones by Windows ID. The EXDATE keeps that name, which
+  // the object's own VTIMEZONE defines, and its wall clock is the mapped zone's.
+  test('writes a Windows-zone EXDATE under the stored name, in that zone', () => {
     const windows = berlinMaster().replaceAll(';TZID=Europe/Berlin:', ';TZID=W. Europe Standard Time:')
     const once = spliceOccurrenceCancellation(windows, AFTER_DST)
+    expect(unfold(once)).toContain('EXDATE;TZID=W. Europe Standard Time:20260331T120000')
+    expect(spliceOccurrenceCancellation(once, AFTER_DST)).toBe(once)
+  })
+
+  // A vendor zone defined only by the object's own VTIMEZONE has no wall clock
+  // to compute, so the UTC instant is the best valid EXDATE we can write.
+  test('falls back to a UTC EXDATE for a zone it cannot resolve', () => {
+    const vendor = berlinMaster().replaceAll(';TZID=Europe/Berlin:', ';TZID=Example Standard Time:')
+    const once = spliceOccurrenceCancellation(vendor, AFTER_DST)
     expect(unfold(once)).toContain('EXDATE:20260331T100000Z')
     expect(once).not.toContain('NaN')
     expect(spliceOccurrenceCancellation(once, AFTER_DST)).toBe(once)
