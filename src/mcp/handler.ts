@@ -15,6 +15,14 @@ import {
 	type JmapLive,
 	makeJmapLive,
 } from "../jmap/index.ts";
+import { makeLiveApplyIo, makeMailRulesApplier } from "../rules/apply.ts";
+import { makeLiveSieveIo, makeMailRulesStore } from "../rules/store.ts";
+import { registerCreateMailRule } from "../tools/create-mail-rule.ts";
+import { registerDeleteMailRule } from "../tools/delete-mail-rule.ts";
+import { registerListMailRules } from "../tools/list-mail-rules.ts";
+import type { MailRuleToolDeps } from "../tools/mail-rule-common.ts";
+import { registerPreviewMailRule } from "../tools/preview-mail-rule.ts";
+import { registerUpdateMailRule } from "../tools/update-mail-rule.ts";
 import { instrumentToolLogging } from "./tool-logging.ts";
 
 export const SERVER_NAME = "langmail-mcp";
@@ -133,6 +141,16 @@ export const createServer = (
 	// it sends mail) the principal:
 	//   registerGetEmail(server, makeGetEmailDeps(runtime.jmapLive), runtime.getToken)
 	//   registerSendDraft(server, …, runtime.getToken, runtime.getPrincipal)
+
+	const mailRuleDeps: MailRuleToolDeps = {
+		applier: makeMailRulesApplier(makeLiveApplyIo(runtime.jmapLive)),
+		store: makeMailRulesStore(makeLiveSieveIo(runtime.jmapLive)),
+	};
+	registerPreviewMailRule(server, mailRuleDeps, runtime.getToken);
+	registerCreateMailRule(server, mailRuleDeps, runtime.getToken);
+	registerListMailRules(server, mailRuleDeps, runtime.getToken);
+	registerUpdateMailRule(server, mailRuleDeps, runtime.getToken);
+	registerDeleteMailRule(server, mailRuleDeps, runtime.getToken);
 
 	return server;
 };

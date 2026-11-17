@@ -195,7 +195,7 @@ describe("createServer", () => {
 			const listed = await client.request("tools/list");
 			expect(
 				(listed.tools as { name: string }[]).map((tool) => tool.name)
-			).toEqual(["whoami"]);
+			).toContain("whoami");
 
 			const first = await client.request("tools/call", {
 				arguments: {},
