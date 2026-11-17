@@ -8,6 +8,10 @@
 
 import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/server";
+import {
+	type AccountTimeZoneResolver,
+	makeAccountTimeZoneResolver,
+} from "../caldav/account-settings.ts";
 import type { Config } from "../config.ts";
 import {
 	authorizationHeader,
@@ -18,7 +22,20 @@ import {
 import { makeLiveApplyIo, makeMailRulesApplier } from "../rules/apply.ts";
 import { makeLiveSieveIo, makeMailRulesStore } from "../rules/store.ts";
 import { registerArchiveEmails } from "../tools/archive-emails.ts";
+import { makeAttendeeWriteThrough } from "../tools/contact-write-through.ts";
+import {
+	makeLiveDeps as makeCreateCalendarDeps,
+	registerCreateCalendar,
+} from "../tools/create-calendar.ts";
+import {
+	makeLiveDeps as makeCreateCalendarEventDeps,
+	registerCreateCalendarEvent,
+} from "../tools/create-calendar-event.ts";
 import { registerCreateMailRule } from "../tools/create-mail-rule.ts";
+import {
+	makeLiveDeps as makeDeleteCalendarEventDeps,
+	registerDeleteCalendarEvent,
+} from "../tools/delete-calendar-event.ts";
 import { registerDeleteMailRule } from "../tools/delete-mail-rule.ts";
 import { makeLiveDeps as makeFileEmailsDeps } from "../tools/file-emails-common.ts";
 import {
@@ -29,11 +46,27 @@ import {
 	makeLiveDeps as makeGetThreadDeps,
 	registerGetThread,
 } from "../tools/get-thread.ts";
+import {
+	makeLiveDeps as makeListCalendarEventsDeps,
+	registerListCalendarEvents,
+} from "../tools/list-calendar-events.ts";
+import {
+	makeLiveDeps as makeListCalendarsDeps,
+	registerListCalendars,
+} from "../tools/list-calendars.ts";
 import { registerListMailRules } from "../tools/list-mail-rules.ts";
 import type { MailRuleToolDeps } from "../tools/mail-rule-common.ts";
 import { registerMarkEmails } from "../tools/mark-emails.ts";
+import {
+	makeLiveDeps as makeMoveCalendarEventsDeps,
+	registerMoveCalendarEvents,
+} from "../tools/move-calendar-events.ts";
 import { registerMoveEmails } from "../tools/move-emails.ts";
 import { registerPreviewMailRule } from "../tools/preview-mail-rule.ts";
+import {
+	makeLiveDeps as makeRespondToEventDeps,
+	registerRespondToEvent,
+} from "../tools/respond-to-event.ts";
 import {
 	makeLiveDeps as makeSearchEmailsDeps,
 	registerSearchEmails,
@@ -43,6 +76,14 @@ import {
 	makeLiveDeps as makeUnsubscribeDeps,
 	registerUnsubscribeFromList,
 } from "../tools/unsubscribe-from-list.ts";
+import {
+	makeLiveDeps as makeUpdateCalendarDeps,
+	registerUpdateCalendar,
+} from "../tools/update-calendar.ts";
+import {
+	makeLiveDeps as makeUpdateCalendarEventDeps,
+	registerUpdateCalendarEvent,
+} from "../tools/update-calendar-event.ts";
 import { registerUpdateMailRule } from "../tools/update-mail-rule.ts";
 import { instrumentToolLogging } from "./tool-logging.ts";
 
@@ -71,6 +112,10 @@ export interface ServerRuntime {
 	getToken: () => string;
 	// One JMAP session cache for every tool.
 	jmapLive: JmapLive;
+	// The account's time-zone preference (Stalwart's AccountSettings), cached
+	// for a few minutes. One resolver, so every tool that needs "the user's
+	// zone" shares one cache.
+	resolveTimeZone: AccountTimeZoneResolver;
 	// Resolves the JMAP session for the credential and learns the principal
 	// from it. The first tool call pays for it; later calls reuse the answer.
 	signIn: () => Promise<void>;
@@ -139,6 +184,9 @@ export const createRuntime = (
 		getPrincipal,
 		getToken,
 		jmapLive,
+		resolveTimeZone: makeAccountTimeZoneResolver({
+			serverUrl: config.stalwartUrl,
+		}),
 		signIn,
 		stalwartUrl: config.stalwartUrl,
 	};
@@ -202,6 +250,68 @@ export const createServer = (
 	registerListMailRules(server, mailRuleDeps, runtime.getToken);
 	registerUpdateMailRule(server, mailRuleDeps, runtime.getToken);
 	registerDeleteMailRule(server, mailRuleDeps, runtime.getToken);
+
+	// CalDAV tools discover against the same Stalwart base; tsdav follows
+	// /.well-known/caldav to /dav/cal. The credential goes out unchanged as the
+	// Authorization header (the default of caldav/client.ts).
+	const caldavCfg = { serverUrl: runtime.stalwartUrl };
+	// Contact write-through: scheduling actions upsert their attendees into
+	// the collected address book — shared across the three event tools so they
+	// fold through one code path.
+	const collectAttendees = makeAttendeeWriteThrough(runtime.jmapLive);
+	registerListCalendars(
+		server,
+		makeListCalendarsDeps(caldavCfg),
+		runtime.getToken
+	);
+	registerCreateCalendar(
+		server,
+		makeCreateCalendarDeps(caldavCfg),
+		runtime.getToken
+	);
+	registerUpdateCalendar(
+		server,
+		makeUpdateCalendarDeps(caldavCfg),
+		runtime.getToken
+	);
+	registerListCalendarEvents(
+		server,
+		makeListCalendarEventsDeps(caldavCfg),
+		runtime.getToken
+	);
+	registerCreateCalendarEvent(
+		server,
+		makeCreateCalendarEventDeps(
+			caldavCfg,
+			runtime.resolveTimeZone,
+			collectAttendees
+		),
+		runtime.getToken
+	);
+	registerUpdateCalendarEvent(
+		server,
+		makeUpdateCalendarEventDeps(
+			caldavCfg,
+			runtime.resolveTimeZone,
+			collectAttendees
+		),
+		runtime.getToken
+	);
+	registerDeleteCalendarEvent(
+		server,
+		makeDeleteCalendarEventDeps(caldavCfg),
+		runtime.getToken
+	);
+	registerMoveCalendarEvents(
+		server,
+		makeMoveCalendarEventsDeps(caldavCfg),
+		runtime.getToken
+	);
+	registerRespondToEvent(
+		server,
+		makeRespondToEventDeps(caldavCfg, collectAttendees),
+		runtime.getToken
+	);
 
 	return server;
 };
