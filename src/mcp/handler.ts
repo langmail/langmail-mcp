@@ -19,6 +19,11 @@ import {
 } from "../caldav/account-settings.ts";
 import type { Config } from "../config.ts";
 import {
+	createIdempotencyStore,
+	type IdempotencyStore,
+} from "../drafts/idempotency.ts";
+import { createSendGuard, type SendGuard } from "../drafts/send-guard.ts";
+import {
 	authorizationHeader,
 	JmapError,
 	type JmapLive,
@@ -38,12 +43,14 @@ import {
 	registerCreateCalendarEvent,
 } from "../tools/create-calendar-event.ts";
 import { registerCreateContact } from "../tools/create-contact.ts";
+import { registerCreateDraft } from "../tools/create-draft.ts";
 import { registerCreateMailRule } from "../tools/create-mail-rule.ts";
 import {
 	makeLiveDeps as makeDeleteCalendarEventDeps,
 	registerDeleteCalendarEvent,
 } from "../tools/delete-calendar-event.ts";
 import { registerDeleteContact } from "../tools/delete-contact.ts";
+import { registerDeleteDraft } from "../tools/delete-draft.ts";
 import { registerDeleteMailRule } from "../tools/delete-mail-rule.ts";
 import {
 	makeLiveDeps as makeDownloadAttachmentDeps,
@@ -53,7 +60,10 @@ import {
 	makeLiveDeps as makeDownloadEmailDeps,
 	registerDownloadEmail,
 } from "../tools/download-email.ts";
+import { makeLiveDeps as makeDraftDeps } from "../tools/draft-common.ts";
 import { makeLiveDeps as makeFileEmailsDeps } from "../tools/file-emails-common.ts";
+import { registerForwardMessage } from "../tools/forward-message.ts";
+import { registerGetDraft } from "../tools/get-draft.ts";
 import {
 	makeLiveDeps as makeGetEmailDeps,
 	registerGetEmail,
@@ -70,6 +80,7 @@ import {
 	makeLiveDeps as makeListCalendarsDeps,
 	registerListCalendars,
 } from "../tools/list-calendars.ts";
+import { registerListDrafts } from "../tools/list-drafts.ts";
 import { registerListMailRules } from "../tools/list-mail-rules.ts";
 import { registerListUpcomingBirthdays } from "../tools/list-upcoming-birthdays.ts";
 import type { MailRuleToolDeps } from "../tools/mail-rule-common.ts";
@@ -81,6 +92,7 @@ import {
 } from "../tools/move-calendar-events.ts";
 import { registerMoveEmails } from "../tools/move-emails.ts";
 import { registerPreviewMailRule } from "../tools/preview-mail-rule.ts";
+import { registerReplyToMessage } from "../tools/reply-to-message.ts";
 import {
 	makeLiveDeps as makeRespondToEventDeps,
 	registerRespondToEvent,
@@ -93,6 +105,7 @@ import {
 	makeLiveDeps as makeSearchEmailsDeps,
 	registerSearchEmails,
 } from "../tools/search-emails.ts";
+import { registerSendDraft } from "../tools/send-draft.ts";
 import { registerTrashEmails } from "../tools/trash-emails.ts";
 import {
 	makeLiveDeps as makeUnsubscribeDeps,
@@ -107,6 +120,7 @@ import {
 	registerUpdateCalendarEvent,
 } from "../tools/update-calendar-event.ts";
 import { registerUpdateContact } from "../tools/update-contact.ts";
+import { registerUpdateDraft } from "../tools/update-draft.ts";
 import { registerUpdateMailRule } from "../tools/update-mail-rule.ts";
 import {
 	makeLiveDeps as makeUploadAttachmentsDeps,
@@ -131,6 +145,10 @@ export const readPackageVersion = (): string => {
 };
 
 export interface ServerRuntime {
+	// Answers of the composing tools, kept under the caller's `idempotencyKey`,
+	// so a client that retries a call whose response it never saw gets the
+	// first answer back instead of a second draft or a second delivery.
+	composeReplays: IdempotencyStore<string>;
 	// The mailbox address the credential signed in as. Tools that send mail
 	// read it to pick the From identity. Only valid once `signIn` has resolved,
 	// which the server guarantees before any tool runs.
@@ -150,6 +168,11 @@ export interface ServerRuntime {
 	// for a few minutes. One resolver, so every tool that needs "the user's
 	// zone" shares one cache.
 	resolveTimeZone: AccountTimeZoneResolver;
+	// Reserves a draft while its send is in flight, so a retry that arrives
+	// before the first call answers cannot deliver a second copy. Like
+	// `composeReplays` it must outlive a request: the HTTP transport builds a
+	// server per request, and a retry is a new request.
+	sendGuard: SendGuard;
 	// Resolves the JMAP session for the credential and learns the principal
 	// from it. The first tool call pays for it; later calls reuse the answer.
 	signIn: () => Promise<void>;
@@ -250,6 +273,7 @@ export const createRuntime = (
 	};
 
 	const runtime: ServerRuntime = {
+		composeReplays: createIdempotencyStore<string>(),
 		getPrincipal,
 		getToken,
 		jmapLive,
@@ -257,6 +281,7 @@ export const createRuntime = (
 		resolveTimeZone: makeAccountTimeZoneResolver({
 			serverUrl: config.stalwartUrl,
 		}),
+		sendGuard: createSendGuard(),
 		signIn,
 		stalwartUrl: config.stalwartUrl,
 		tickets: createTicketStore(),
@@ -435,6 +460,57 @@ export const createServer = (
 		server,
 		{ ...searchContactsDeps, ...contactWriteDeps },
 		runtime.getToken
+	);
+
+	// Drafts and sending: one deps bundle for the whole surface. The replay
+	// cache and the send guard come from the runtime, so they hold across the
+	// servers an HTTP listener builds per request.
+	const draftDeps = makeDraftDeps(runtime.jmapLive);
+	registerCreateDraft(
+		server,
+		draftDeps,
+		runtime.composeReplays,
+		runtime.getToken,
+		runtime.getPrincipal
+	);
+	registerGetDraft(server, draftDeps, runtime.getToken);
+	registerListDrafts(server, draftDeps, runtime.getToken);
+	registerUpdateDraft(
+		server,
+		draftDeps,
+		runtime.getToken,
+		runtime.getPrincipal
+	);
+	registerSendDraft(
+		server,
+		draftDeps,
+		runtime.composeReplays,
+		runtime.sendGuard,
+		runtime.getToken,
+		runtime.getPrincipal
+	);
+	registerDeleteDraft(
+		server,
+		draftDeps,
+		runtime.sendGuard,
+		runtime.getToken,
+		runtime.getPrincipal
+	);
+	registerReplyToMessage(
+		server,
+		draftDeps,
+		runtime.composeReplays,
+		runtime.sendGuard,
+		runtime.getToken,
+		runtime.getPrincipal
+	);
+	registerForwardMessage(
+		server,
+		draftDeps,
+		runtime.composeReplays,
+		runtime.sendGuard,
+		runtime.getToken,
+		runtime.getPrincipal
 	);
 
 	return server;

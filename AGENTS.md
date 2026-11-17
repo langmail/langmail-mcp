@@ -62,6 +62,13 @@ Project invariants:
 - stdio transport: the first link starts a listener for `linkRoutes` alone (`startLinkListener`): `127.0.0.1` always, on `MCP_PORT` if set and free, otherwise a port the system picks. It has no `/mcp` and no health route, runs behind the same `guard.ts`, and does not keep the process alive. A server that never hands out a link opens no port. If the listener cannot start, that tool call fails and the next one tries again.
 - Never log a ticket, a link or a file name. The routes set no `logAs`; the handlers log status and size.
 
+## Sending mail
+- `send_draft`, `reply_to_message` and `forward_message` deliver mail through the user's Stalwart (`EmailSubmission/set`). `create_draft` and `update_draft` only write to the Drafts folder.
+- The From address is the Identity (`Identity/get`) whose address equals the principal; `from` picks another of the account's identities (an alias) and is refused for any other address. Stalwart names the account's primary address as the session `username` whatever login name was typed (the address, the bare local part, an alias, or an API key), so the default From is the primary address.
+- Two pieces of process-lifetime state in `createRuntime` keep a retried send from delivering twice: `runtime.sendGuard` reserves a draft while its send is in flight, and `runtime.composeReplays` returns the first answer for a repeated `idempotencyKey` (kept 15 minutes). Both are in memory and shared by every server the HTTP listener builds; a restart clears them.
+- In `sendDraft` and `replyToMessage`, the replay lookup and the reservation happen in one synchronous step before the first `await`, and the answer is recorded before the reservation is released. Do not move a `holdSend`, an `await` or a `replays.record` relative to each other: that order is what stops a retry from sending a second copy.
+- Tests and e2e suites send only between accounts they created on the test Stalwart (`example.com`), never to another host.
+
 ## Working with the user
 - When the user asks a question, answer it before editing files or running implementation commands.
 - When responding to feedback or a review, say whether you agree or disagree before saying what you changed.

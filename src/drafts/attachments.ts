@@ -17,14 +17,15 @@
 // hands out a URL the agent PUTs the file to, and the upload answers with a
 // blobId (attachments/upload.ts), so a 10 MB PDF never passes through the model.
 //
-// There is deliberately no `path`. The MCP server is a remote HTTP service
-// (services/mcp/src/index.ts — there is no stdio transport), so the agent's
-// filesystem and the server's are different machines and a path would either
-// name nothing or, worse, name one of the server's own files. `unnamedEntry`
-// says so in as many words rather than letting the call fail as a shrug, and
-// names the upload tool as the remedy.
+// There is deliberately no `path`. Over HTTP the agent's filesystem and the
+// server's can be different machines, and a path would either name nothing or,
+// worse, name one of the server's own files; over stdio they are the same
+// machine, but a tool that opened whatever path a model typed would read any
+// file the user can. So the server reads no path on either transport.
+// `unnamedEntry` says so in as many words rather than letting the call fail as
+// a shrug, and names the upload tool as the remedy.
 //
-// Inline parts (`cid`) are not exposed here yet. @langmail/jmap models them
+// Inline parts (`cid`) are not exposed here yet. src/jmap models them
 // (`DraftAttachment.cid`), so an HTML body referencing a generated chart is a
 // schema addition rather than a redesign; nothing needs one today.
 
@@ -135,8 +136,8 @@ export const attachmentsSchema = z
 		`Files to attach, at most ${MAX_ATTACHMENTS}. Each entry names its file either by \`blobId\` (already in ` +
 			"the mailbox, or uploaded with upload_attachments — nothing passes through the conversation) " +
 			"or by base64 `content` (a small file you just generated); the `content` entries may come to at most " +
-			`${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB between them. A file path cannot be used: this server runs ` +
-			"elsewhere and cannot read your disk — upload a local file with upload_attachments instead."
+			`${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB between them. A file path cannot be used: this server ` +
+			"cannot read your disk — upload a local file with upload_attachments instead."
 	);
 
 export interface AttachmentUploadDeps {
@@ -168,7 +169,7 @@ const label = (entry: AttachmentEntry, index: number): string =>
 const unnamedEntry = (index: number): string =>
 	`Attachment ${index + 1} names no file. Give it either \`blobId\` (for a file already in the mailbox — ` +
 	"the blobId that search_emails or get_email listed) or `content` (base64 bytes). A file path is not " +
-	"accepted: this MCP server runs on a different machine from you and cannot read your filesystem, so " +
+	"accepted: this MCP server cannot read your filesystem, so " +
 	"upload the file with upload_attachments and pass the `blobId` it returns.";
 
 // Decode one base64 payload, or say why it isn't one. Whitespace is stripped

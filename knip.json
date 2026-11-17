@@ -7,7 +7,6 @@
 	"ignoreIssues": {
 		"src/jmap/**": ["exports", "types"],
 		"src/contacts/**": ["exports", "types", "files"],
-		"src/ical/**": ["exports", "types"],
-		"src/tools/annotations.ts": ["exports"]
+		"src/ical/**": ["exports", "types"]
 	}
 }
