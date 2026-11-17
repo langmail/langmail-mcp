@@ -14,6 +14,7 @@ import {
 	readPackageVersion,
 	SERVER_NAME,
 } from "./handler.ts";
+import { connect, textOf } from "./test-client.ts";
 
 const SEMVER = /^\d+\.\d+\.\d+/u;
 const CREDENTIAL = "Basic dXNlckBleGFtcGxlLmNvbTpzZWNyZXQ=";
@@ -48,67 +49,6 @@ const fakeLive = (
 		seen,
 	};
 };
-
-interface RpcResult {
-	content?: { text: string; type: string }[];
-	isError?: boolean;
-	[key: string]: unknown;
-}
-
-// Drives a server over an in-memory transport the way a client would.
-const connect = async (
-	server: McpServer
-): Promise<{
-	close: () => Promise<void>;
-	request: (
-		method: string,
-		params?: Record<string, unknown>
-	) => Promise<RpcResult>;
-}> => {
-	const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-	await server.connect(serverSide);
-	const waiting = new Map<number, (message: JSONRPCMessage) => void>();
-	clientSide.onmessage = (message) => {
-		const id = (message as { id?: number }).id;
-		if (id !== undefined) {
-			waiting.get(id)?.(message);
-		}
-	};
-	await clientSide.start();
-	let nextId = 0;
-	const request = async (
-		method: string,
-		params: Record<string, unknown> = {}
-	): Promise<RpcResult> => {
-		nextId += 1;
-		const id = nextId;
-		const reply = new Promise<JSONRPCMessage>((resolve) => {
-			waiting.set(id, resolve);
-		});
-		await clientSide.send({ id, jsonrpc: "2.0", method, params });
-		const message = (await reply) as {
-			error?: { message: string };
-			result?: RpcResult;
-		};
-		if (!message.result) {
-			throw new Error(`${method} failed: ${JSON.stringify(message.error)}`);
-		}
-		return message.result;
-	};
-	await request("initialize", {
-		capabilities: {},
-		clientInfo: { name: "test-client", version: "0.0.0" },
-		protocolVersion: "2025-06-18",
-	});
-	await clientSide.send({
-		jsonrpc: "2.0",
-		method: "notifications/initialized",
-	});
-	return { close: () => server.close(), request };
-};
-
-const textOf = (result: RpcResult): string =>
-	result.content?.map((part) => part.text).join("\n") ?? "";
 
 // A tool that reports what the runtime hands a tool, registered the way the
 // real ones are: after createServer has instrumented the server.

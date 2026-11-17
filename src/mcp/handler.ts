@@ -135,6 +135,7 @@ import {
 	makeLiveDeps as makeUploadAttachmentsDeps,
 	registerUploadAttachments,
 } from "../tools/upload-attachments.ts";
+import { serverInstructions } from "./instructions.ts";
 import { startLinkListener } from "./links.ts";
 import { instrumentToolLogging } from "./tool-logging.ts";
 
@@ -312,10 +313,17 @@ export const createServer = (
 	config: Config,
 	runtime: ServerRuntime = createRuntime(config)
 ): McpServer => {
-	const server = new McpServer({
-		name: SERVER_NAME,
-		version: readPackageVersion(),
-	});
+	const server = new McpServer(
+		{
+			name: SERVER_NAME,
+			version: readPackageVersion(),
+		},
+		{
+			instructions: serverInstructions({
+				allowUnsubscribePost: config.allowUnsubscribePost,
+			}),
+		}
+	);
 	// Before any registerTool call — the wrapper only covers later
 	// registrations. It also signs in ahead of every tool, so a tool finds the
 	// principal known and a bad credential is reported the same way everywhere.
