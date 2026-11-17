@@ -24,6 +24,11 @@ import {
 } from "../drafts/idempotency.ts";
 import { createSendGuard, type SendGuard } from "../drafts/send-guard.ts";
 import {
+	createImageProxyStore,
+	type ImageProxyStore,
+} from "../email-render/image-proxy.ts";
+import { registerEmailViewerResource } from "../email-render/viewer-resource.ts";
+import {
 	authorizationHeader,
 	JmapError,
 	type JmapLive,
@@ -91,6 +96,10 @@ import {
 	registerMoveCalendarEvents,
 } from "../tools/move-calendar-events.ts";
 import { registerMoveEmails } from "../tools/move-emails.ts";
+import {
+	makeLiveDeps as makePreviewEmailDeps,
+	registerPreviewEmail,
+} from "../tools/preview-email.ts";
 import { registerPreviewMailRule } from "../tools/preview-mail-rule.ts";
 import { registerReplyToMessage } from "../tools/reply-to-message.ts";
 import {
@@ -156,6 +165,12 @@ export interface ServerRuntime {
 	// What every tool receives as its "token": the complete `Authorization`
 	// header value for Stalwart. Tools pass it through `authorizationHeader`.
 	getToken: () => string;
+	// Image-proxy tokens: preview_email mints them, the `/image-proxy/<token>`
+	// route redeems them by fetching the image from the sender's host. Only
+	// there when the user has turned remote images on
+	// (LANGMAIL_MCP_ALLOW_REMOTE_IMAGES); otherwise nothing mints a token and
+	// no route serves one.
+	imageTokens?: ImageProxyStore;
 	// One JMAP session cache for every tool.
 	jmapLive: JmapLive;
 	// The base URL the file links handed to the agent are minted under, without
@@ -276,6 +291,9 @@ export const createRuntime = (
 		composeReplays: createIdempotencyStore<string>(),
 		getPrincipal,
 		getToken,
+		...(config.allowRemoteImages
+			? { imageTokens: createImageProxyStore() }
+			: {}),
 		jmapLive,
 		publicUrl,
 		resolveTimeZone: makeAccountTimeZoneResolver({
@@ -317,6 +335,29 @@ export const createServer = (
 		server,
 		makeGetEmailDeps(runtime.jmapLive),
 		runtime.getToken
+	);
+	// Shows one email through the MCP Apps viewer template registered below.
+	// Its inline images are attachment links; remote images are proxied only
+	// with the opt-in, and dropped without it.
+	registerPreviewEmail(
+		server,
+		makePreviewEmailDeps(
+			runtime.jmapLive,
+			runtime.tickets,
+			runtime.imageTokens,
+			runtime.publicUrl
+		),
+		runtime.getToken
+	);
+	// The viewer may load images from this server's own address and nowhere
+	// else. Over HTTP that address is configuration. Over stdio it is the
+	// loopback link listener's, which does not exist yet: it is asked for when
+	// a host reads the template, so listing tools and resources opens no port.
+	registerEmailViewerResource(
+		server,
+		config.transport.kind === "http"
+			? config.transport.publicUrl
+			: runtime.publicUrl
 	);
 	registerGetThread(
 		server,

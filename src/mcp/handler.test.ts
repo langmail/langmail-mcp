@@ -184,6 +184,86 @@ describe("createServer", () => {
 		await client.close();
 	});
 
+	test("lists preview_email third, bound to the viewer template, whatever the remote-image setting", async () => {
+		for (const allowRemoteImages of [false, true]) {
+			const cfg: Config = { ...config, allowRemoteImages };
+			const live = fakeLive(() => Promise.resolve(session("user@example.com")));
+			const client = await connect(createServer(cfg, createRuntime(cfg, live)));
+			const { tools } = (await client.request("tools/list")) as unknown as {
+				tools: {
+					_meta?: Record<string, unknown>;
+					description: string;
+					name: string;
+					outputSchema?: unknown;
+				}[];
+			};
+			await client.close();
+			expect(tools.slice(0, 4).map((tool) => tool.name)).toEqual([
+				"search_emails",
+				"get_email",
+				"preview_email",
+				"get_thread",
+			]);
+			const preview = tools[2];
+			expect(preview?._meta).toEqual({
+				ui: { resourceUri: "ui://langmail/email-viewer" },
+				"ui/resourceUri": "ui://langmail/email-viewer",
+			});
+			expect(preview?.outputSchema).toBeDefined();
+			// The description is the hosted server's, with or without the flag.
+			expect(preview?.description).not.toContain("LANGMAIL_MCP");
+		}
+	});
+
+	test("over stdio, listing the viewer template names no origin and starts no listener", async () => {
+		const started: (number | undefined)[] = [];
+		const live = fakeLive(() => Promise.resolve(session("user@example.com")));
+		const runtime = createRuntime(config, live, (_, port) => {
+			started.push(port);
+			return Promise.resolve("http://127.0.0.1:4711");
+		});
+		const client = await connect(createServer(config, runtime));
+		await client.request("tools/list");
+		const listed = await client.request("resources/list");
+		expect(listed.resources).toEqual([
+			{
+				_meta: { ui: { prefersBorder: true } },
+				description:
+					"Inline full-fidelity rendering of one email, fed by the preview_email tool.",
+				mimeType: "text/html;profile=mcp-app",
+				name: "email-viewer",
+				uri: "ui://langmail/email-viewer",
+			},
+		]);
+		expect(started).toEqual([]);
+		await client.close();
+	});
+
+	test("over HTTP, the listed viewer template may load from the public URL's origin only", async () => {
+		const cfg: Config = {
+			...config,
+			transport: {
+				authToken: "a-long-random-secret",
+				host: "127.0.0.1",
+				kind: "http",
+				port: 8080,
+				publicUrl: "https://mcp.example.com/base",
+			},
+		};
+		const live = fakeLive(() => Promise.resolve(session("user@example.com")));
+		const client = await connect(createServer(cfg, createRuntime(cfg, live)));
+		const listed = (await client.request("resources/list")) as unknown as {
+			resources: { _meta?: unknown }[];
+		};
+		await client.close();
+		expect(listed.resources[0]?._meta).toEqual({
+			ui: {
+				csp: { resourceDomains: ["https://mcp.example.com"] },
+				prefersBorder: true,
+			},
+		});
+	});
+
 	test("unsubscribe_from_list sends the one-click request only when the configuration allows it", async () => {
 		const describeFor = async (allowUnsubscribePost: boolean) => {
 			const cfg: Config = { ...config, allowUnsubscribePost };

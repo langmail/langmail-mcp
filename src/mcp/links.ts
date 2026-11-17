@@ -4,7 +4,9 @@
 // download_email with a URL to fetch, upload_attachments with URLs to PUT a
 // file to. The agent moves the bytes with curl, so they never pass through
 // the conversation. Each link carries an unguessable ticket, and the routes
-// here redeem it without asking for anything else.
+// here redeem it without asking for anything else. preview_email puts the
+// same kind of link into the email it shows: one per inline image, and, only
+// when the user has turned remote images on, one per remote image.
 //
 // The HTTP transport serves these routes on its own listener, next to `/mcp`.
 // The stdio transport has no listener, so the runtime starts one for the links
@@ -15,6 +17,10 @@
 import { createAttachmentDownload } from "../attachments/download.ts";
 import { attachmentRoutes } from "../attachments/routes.ts";
 import { createAttachmentUpload } from "../attachments/upload.ts";
+import {
+	createImageProxy,
+	imageProxyRoute,
+} from "../email-render/image-proxy.ts";
 import { createRequestGuard } from "../http/guard.ts";
 import { type HttpListener, startHttpListener } from "../http/listener.ts";
 import { createFetchHandler, type Route } from "../http/routes.ts";
@@ -25,11 +31,17 @@ const LOOPBACK = "127.0.0.1";
 const ANY_FREE_PORT = 0;
 
 /** Every route that redeems a link minted by a tool of this runtime. */
-export const linkRoutes = (runtime: ServerRuntime): Route[] =>
-	attachmentRoutes(
+export const linkRoutes = (runtime: ServerRuntime): Route[] => [
+	...attachmentRoutes(
 		createAttachmentDownload(runtime.jmapLive, runtime.tickets),
 		createAttachmentUpload(runtime.jmapLive, runtime.uploadTickets)
-	);
+	),
+	// The image proxy fetches from hosts a sender chose. Without the user's
+	// opt-in the runtime has no token store, and the route does not exist.
+	...(runtime.imageTokens
+		? [imageProxyRoute(createImageProxy(runtime.imageTokens))]
+		: []),
+];
 
 /**
  * Starts the loopback listener that serves the link routes of a stdio server.

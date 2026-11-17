@@ -1,4 +1,5 @@
 import { createServer as createHttpServer, type Server } from "node:http";
+import https from "node:https";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { Config } from "../config.ts";
@@ -6,7 +7,7 @@ import type { HttpListener } from "../http/listener.ts";
 import type { JmapLive } from "../jmap/index.ts";
 import { logger } from "../logger.ts";
 import { createRuntime, type ServerRuntime } from "./handler.ts";
-import { startLinkListener } from "./links.ts";
+import { linkRoutes, startLinkListener } from "./links.ts";
 
 const CREDENTIAL = "Basic dXNlckBleGFtcGxlLmNvbTpzZWNyZXQ=";
 const PDF = "%PDF-1.4 fake";
@@ -109,7 +110,66 @@ const neverAsked: JmapLive = {
 	resolveAccountId: () => Promise.reject(new Error("must not be asked")),
 };
 
+describe("linkRoutes", () => {
+	test("has no image-proxy route unless remote images are turned on", () => {
+		const off = createRuntime(config, neverAsked);
+		expect(off.imageTokens).toBeUndefined();
+		expect(linkRoutes(off).map((route) => route.path)).toEqual([
+			"/attachments/",
+		]);
+
+		const on = createRuntime(
+			{ ...config, allowRemoteImages: true },
+			neverAsked
+		);
+		expect(on.imageTokens).toBeDefined();
+		expect(linkRoutes(on).map((route) => route.path)).toEqual([
+			"/attachments/",
+			"/image-proxy/",
+		]);
+	});
+});
+
 describe("startLinkListener", () => {
+	test("with remote images off, /image-proxy/ is a plain 404 and nothing is fetched", async () => {
+		const request = vi.spyOn(https, "request");
+		const links = await start(createRuntime(config, neverAsked));
+		// A token shaped like a real one: there is no store it could be in.
+		const token = Buffer.alloc(32, 7).toString("base64url");
+		for (const path of [
+			`/image-proxy/${token}`,
+			"/image-proxy/",
+			"/image-proxy",
+		]) {
+			const res = await fetch(`${links.origin}${path}`);
+			expect(res.status).toBe(404);
+			expect(await res.text()).toBe("not found\n");
+		}
+		expect(request).not.toHaveBeenCalled();
+	});
+
+	test("with remote images on, the route redeems only a clean GET of one token", async () => {
+		const request = vi.spyOn(https, "request");
+		const runtime = createRuntime(
+			{ ...config, allowRemoteImages: true },
+			neverAsked
+		);
+		const links = await start(runtime);
+		const token = runtime.imageTokens?.mint("https://cdn.example.com/a.png");
+		for (const [path, method] of [
+			["/image-proxy/unknown-token", "GET"],
+			[`/image-proxy/${token}/more`, "GET"],
+			[`/image-proxy/${token}`, "POST"],
+			["/image-proxy/", "GET"],
+		] as const) {
+			const res = await fetch(`${links.origin}${path}`, { method });
+			expect(res.status).toBe(404);
+		}
+		// None of those reached the fetch: an unknown token and a wrong shape
+		// are refused first.
+		expect(request).not.toHaveBeenCalled();
+	});
+
 	test("binds a free loopback port and redeems the runtime's tickets in both directions", async () => {
 		const { live, seen } = await fakeMailServer();
 		const runtime = createRuntime(config, live);

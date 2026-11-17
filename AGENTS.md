@@ -7,7 +7,8 @@ MCP server that gives an agent Langmail's email, calendar and contacts tools aga
 - Relative imports keep their `.ts` extension; `rewriteRelativeImportExtensions` turns them into `.js` in `dist/`.
 - Biome for lint + format (`npm run check` / `check:fix`) — do not add ESLint or Prettier.
 - Vitest for tests, lefthook for git hooks, semantic-release for publishing.
-- Runtime deps: `@modelcontextprotocol/server` (the v2 MCP SDK), `zod`, `pino` (logging), `@date-fns/tz` (time zones in `src/ical`). `@modelcontextprotocol/client` is a dev dependency: the end-to-end suites drive the built server with it.
+- Runtime deps: `@modelcontextprotocol/server` (the v2 MCP SDK), `zod`, `pino` (logging), `@date-fns/tz` (time zones in `src/ical`), `@modelcontextprotocol/ext-apps` (registers `preview_email` and its viewer as an MCP App) and `sanitize-html` (cleans an email's HTML for that viewer). `@modelcontextprotocol/client` is a dev dependency: the end-to-end suites drive the built server with it.
+- `esbuild` is a dev dependency used by `npm run build` only: `scripts/build-viewer.ts` bundles the email viewer into `dist/email-render/email-viewer.html`. The server reads that file and never loads a bundler.
 - TypeScript is strict with `noUncheckedIndexedAccess`; `exactOptionalPropertyTypes` is off, because the hosted code these files come from is not written for it.
 - No Bun APIs.
 
@@ -21,6 +22,7 @@ MCP server that gives an agent Langmail's email, calendar and contacts tools aga
 - `src/observability/errors.ts` — `describeError`: what an error log line may carry (no addresses, no credentials).
 - `src/jmap/`, `src/contacts/`, `src/ical/` — JMAP client, contact and iCalendar helpers.
 - `src/caldav/`, `src/rules/`, `src/drafts/`, `src/attachments/`, `src/email-render/` — what the tools build on.
+- `src/email-render/viewer/` — the one piece of browser code: the view an MCP Apps host runs in its sandbox to show a previewed email. It has its own `tsconfig.json` (DOM types, no Node types), is bundled by `scripts/viewer-bundle.ts`, and must not import anything that needs Node.
 - `src/logger.ts` — pino; logs go to stderr only, because stdout belongs to the stdio transport. `LOG_LEVEL` sets the level; the default is `warn`, and `info` adds one line per tool call.
 - `e2e/` — suites that run against a real Stalwart.
 - Configuration comes from the environment (see `.env.example`); dev loads `.env` via `tsx --env-file=.env`, not `dotenv`.
@@ -45,7 +47,7 @@ Project invariants:
 - A credential never appears in a log line, an error message or a tool result. `describeError` redacts `Bearer …` and `Basic …` values.
 
 ## Transports
-- stdio is the default: one `McpServer` for the life of the process (`src/index.ts`). It listens on no port until a tool hands out a file link (see "File links").
+- stdio is the default: one `McpServer` for the life of the process (`src/index.ts`). It listens on no port until a tool hands out a file link or a host reads the email viewer template (see "File links", "Email preview").
 - `--http` or `MCP_TRANSPORT=http` serves Streamable HTTP at `POST /mcp` on `MCP_HOST:MCP_PORT` (default `127.0.0.1:8080`). It is stateless: every request gets a fresh `McpServer` and transport (the SDK's `legacyStatelessFallback`), all sharing one runtime. `GET` and `DELETE` on `/mcp` answer 405.
 - Every `/mcp` request must carry `Authorization: Bearer <MCP_AUTH_TOKEN>`. The token is required (at least 16 characters) and compared in constant time. Anything else gets `401` with `WWW-Authenticate: Bearer` and the body `{"error":"unauthorized"}`, before the request body is read. A 401 must never say anything about the server, its tools or the mail server.
 - There is no OAuth and there are no `/.well-known/` documents. `GET /healthz` answers `ok` without the token and says nothing else. The file-link routes under `/attachments/` take a ticket instead of the token (see "File links"). Every other path is a 404.
@@ -68,6 +70,13 @@ Project invariants:
 - Two pieces of process-lifetime state in `createRuntime` keep a retried send from delivering twice: `runtime.sendGuard` reserves a draft while its send is in flight, and `runtime.composeReplays` returns the first answer for a repeated `idempotencyKey` (kept 15 minutes). Both are in memory and shared by every server the HTTP listener builds; a restart clears them.
 - In `sendDraft` and `replyToMessage`, the replay lookup and the reservation happen in one synchronous step before the first `await`, and the answer is recorded before the reservation is released. Do not move a `holdSend`, an `await` or a `replays.record` relative to each other: that order is what stops a retry from sending a second copy.
 - Tests and e2e suites send only between accounts they created on the test Stalwart (`example.com`), never to another host.
+## Email preview
+- `preview_email` answers with metadata for the model (`structuredContent`) and the sanitised HTML for the user in result `_meta`, which an MCP Apps host passes to the viewer template `ui://langmail/email-viewer` and keeps out of the conversation. `ui://langmail/email-viewer` and the `_meta` key `me.langmail/email-preview` are identifiers shared with the bundled view; do not rename them.
+- The viewer is built, not written at run time: `npm run build` bundles `src/email-render/viewer/email-viewer.ts` with the MCP Apps SDK into `dist/email-render/email-viewer.html`, and `resources/read` serves that file. Unit tests build it themselves into a temporary directory (`scripts/viewer-bundle.ts`), so `npm test` needs no prior build. A server run from source (`npm run dev`) serves the viewer of the last build.
+- Every `<img>` in the previewed HTML is rewritten or dropped (`src/email-render/sanitize.ts`): a `cid:` image becomes an attachment link (see "File links"), a raster `data:` image stays, anything else is dropped.
+- Remote images are off by default. Without `LANGMAIL_MCP_ALLOW_REMOTE_IMAGES=1` the runtime has no image-token store (`runtime.imageTokens`), `linkRoutes` has no `/image-proxy/` route, remote `<img>` elements are dropped, and the tool result says how many were left out. With it, a remote https image becomes `GET /image-proxy/<token>` on this server (valid 24 hours), which fetches the image from the sender's host: every address the host resolves to must be public, the connection goes to the checked address while TLS verifies the sender's host name (`makePinnedFetch`, on `node:https`), redirects and non-raster types are refused, and the size is capped at 10 MB. Keep it that way: the URL is the sender's.
+- The viewer template declares one origin it may load from (`_meta.ui.csp.resourceDomains`): this server's own, where the image links live. Over HTTP that is the public URL's origin, in the listing and in the content. Over stdio the origin is the loopback link listener's, which is only known once it runs: `resources/list` names no origin, and `resources/read` starts the listener and names it. Listing tools and resources must never open a port.
+- A host enforces that CSP; the server cannot. CSS in an email (`<style>`, `style=`) is kept for layout and may name remote URLs, which a host that follows the MCP Apps rules never loads.
 
 ## Working with the user
 - When the user asks a question, answer it before editing files or running implementation commands.
