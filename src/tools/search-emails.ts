@@ -876,8 +876,7 @@ export const registerSearchEmails = (
 				"when the request needs more than this page (every unread message, all invoices this year), repeat the same " +
 				"search with that cursor for the next page, until no cursor comes back. For staged drafts use list_drafts, which returns the " +
 				"draftIds the draft tools take. Searching never marks anything read; use " +
-				"mark_emails for that. Read and starred state are Langmail's own: marking a message in " +
-				"Langmail does not change it in a linked Gmail account. " +
+				"mark_emails for that. " +
 				"Filter first, search second: use query for words the sender actually " +
 				"wrote, and reach for keywords + a date window when the request names a " +
 				"kind of mail rather than its content — transactional mail is titled " +
