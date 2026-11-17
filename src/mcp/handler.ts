@@ -19,9 +19,21 @@ import { makeLiveApplyIo, makeMailRulesApplier } from "../rules/apply.ts";
 import { makeLiveSieveIo, makeMailRulesStore } from "../rules/store.ts";
 import { registerCreateMailRule } from "../tools/create-mail-rule.ts";
 import { registerDeleteMailRule } from "../tools/delete-mail-rule.ts";
+import {
+	makeLiveDeps as makeGetEmailDeps,
+	registerGetEmail,
+} from "../tools/get-email.ts";
+import {
+	makeLiveDeps as makeGetThreadDeps,
+	registerGetThread,
+} from "../tools/get-thread.ts";
 import { registerListMailRules } from "../tools/list-mail-rules.ts";
 import type { MailRuleToolDeps } from "../tools/mail-rule-common.ts";
 import { registerPreviewMailRule } from "../tools/preview-mail-rule.ts";
+import {
+	makeLiveDeps as makeSearchEmailsDeps,
+	registerSearchEmails,
+} from "../tools/search-emails.ts";
 import { registerUpdateMailRule } from "../tools/update-mail-rule.ts";
 import { instrumentToolLogging } from "./tool-logging.ts";
 
@@ -141,6 +153,21 @@ export const createServer = (
 	// it sends mail) the principal:
 	//   registerGetEmail(server, makeGetEmailDeps(runtime.jmapLive), runtime.getToken)
 	//   registerSendDraft(server, …, runtime.getToken, runtime.getPrincipal)
+	registerSearchEmails(
+		server,
+		makeSearchEmailsDeps(runtime.jmapLive),
+		runtime.getToken
+	);
+	registerGetEmail(
+		server,
+		makeGetEmailDeps(runtime.jmapLive),
+		runtime.getToken
+	);
+	registerGetThread(
+		server,
+		makeGetThreadDeps(runtime.jmapLive),
+		runtime.getToken
+	);
 
 	const mailRuleDeps: MailRuleToolDeps = {
 		applier: makeMailRulesApplier(makeLiveApplyIo(runtime.jmapLive)),

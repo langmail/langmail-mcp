@@ -8,6 +8,7 @@
 		"src/jmap/**": ["exports", "types"],
 		"src/contacts/**": ["exports", "types", "files"],
 		"src/ical/**": ["exports", "types"],
-		"src/tools/annotations.ts": ["exports"]
+		"src/tools/annotations.ts": ["exports"],
+		"src/tools/format.ts": ["exports"]
 	}
 }
