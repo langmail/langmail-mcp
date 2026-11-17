@@ -15,6 +15,49 @@ import ical, {
 
 import { toZonedDate, UTC_TIME_ZONE } from './timezone.ts'
 
+// An `Etc/GMT±N` zone name. The sign is POSIX's, the reverse of the offset:
+// `Etc/GMT-13` is UTC+13.
+const ETC_GMT_RE = /^Etc\/GMT([+-])(\d{1,2})$/u
+
+// A fixed-offset VTIMEZONE for an `Etc/GMT±N` zone: one STANDARD component
+// whose offset never changes. Returns null for any other name.
+const etcGmtVtimezone = (name: string): string | null => {
+  const match = ETC_GMT_RE.exec(name)
+  if (!match) {
+    return null
+  }
+  const [, posixSign, hours = '0'] = match
+  // RFC 5545 §3.3.14 forbids `-0000`, so a zero offset is always `+`.
+  const sign = posixSign === '+' && Number(hours) > 0 ? '-' : '+'
+  const tzname = `${sign}${hours.padStart(2, '0')}`
+  const offset = `${tzname}00`
+  return [
+    'BEGIN:VTIMEZONE',
+    `TZID:${name}`,
+    'BEGIN:STANDARD',
+    'DTSTART:19700101T000000',
+    `TZOFFSETFROM:${offset}`,
+    `TZOFFSETTO:${offset}`,
+    `TZNAME:${tzname}`,
+    'END:STANDARD',
+    'END:VTIMEZONE',
+    '',
+  ].join('\n')
+}
+
+const TZID_LINE_RE = /^TZID:.*$/mu
+
+// The VTIMEZONE for a zone the event names, under that same TZID (RFC 5545
+// §3.6.5). `Etc/GMT±N` zones are written here: @touch4it/ical-timezones lacks
+// Etc/GMT-13 and Etc/GMT-14 and ships the rest with the offset's sign flipped.
+// Every other zone takes the library's definition, renamed to the requested
+// TZID, because the library defines an alias (Asia/Calcutta) under another
+// name (Asia/Kolkata). See
+// docs/upstream/ical-timezones/etc-gmt-zones-have-inverted-offsets.md and
+// docs/upstream/ical-timezones/alias-zones-defined-under-another-tzid.md.
+export const vtimezoneComponent = (name: string): string | null =>
+  etcGmtVtimezone(name) ?? getVtimezoneComponent(name)?.replace(TZID_LINE_RE, `TZID:${name}`) ?? null
+
 const RECURRENCE_ID_LINE_RE = /^RECURRENCE-ID(?:;[^:]*)?:.*$/mu
 // The DTSTAMP content line, with whatever params ical-generator attached.
 // `buildInvite` always emits exactly one VEVENT, so the `g` flag is belt and
@@ -176,7 +219,7 @@ export const buildInvite = (input: InviteInput): string => {
     ...(input.attendees.length > 0 ? { method: ICalCalendarMethod.REQUEST } : {}),
   })
   if (timeZone !== UTC_TIME_ZONE) {
-    cal.timezone({ generator: getVtimezoneComponent, name: timeZone })
+    cal.timezone({ generator: vtimezoneComponent, name: timeZone })
   }
 
   const event = cal.createEvent({

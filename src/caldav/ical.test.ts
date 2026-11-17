@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test'
+import { getVtimezoneComponent } from '@touch4it/ical-timezones'
 
-import { buildInvite, maxSequence, parseSequence } from './ical.ts'
+import { ianaTimeZone, WINDOWS_ZONES } from '@langmail/ical'
+
+import { buildInvite, maxSequence, parseSequence, vtimezoneComponent } from './ical.ts'
 
 // RFC 5545 folds long lines at 75 octets with a CRLF + space; undo that
 // so substring assertions don't trip over a folded email address.
@@ -312,5 +315,68 @@ describe('parseSequence', () => {
 
   test('defaults to 0 when no SEQUENCE line is present', () => {
     expect(parseSequence('BEGIN:VEVENT\r\nUID:x\r\nEND:VEVENT')).toBe(0)
+  })
+})
+
+describe('VTIMEZONE for every zone written', () => {
+  const zoned = (timeZone: string): string =>
+    unfold(
+      buildInvite({
+        ...baseInput,
+        end: new Date('2026-07-20T10:30:00Z'),
+        start: new Date('2026-07-20T10:00:00Z'),
+        timeZone,
+      })
+    )
+  const vtimezoneOf = (ics: string): string => ics.slice(ics.indexOf('BEGIN:VTIMEZONE'), ics.indexOf('END:VTIMEZONE'))
+
+  test('an event in Etc/GMT-13 carries a fixed +1300 VTIMEZONE its times name', () => {
+    const ics = zoned('Etc/GMT-13')
+    const zone = vtimezoneOf(ics)
+    expect(zone).toContain('TZID:Etc/GMT-13')
+    expect(zone).toContain('TZOFFSETFROM:+1300')
+    expect(zone).toContain('TZOFFSETTO:+1300')
+    expect(ics).toContain('DTSTART;TZID=Etc/GMT-13:20260720T230000')
+    expect(ics).toContain('DTEND;TZID=Etc/GMT-13:20260720T233000')
+  })
+
+  test('an Outlook series in Windows UTC+13 is written with the same VTIMEZONE', () => {
+    expect(vtimezoneOf(zoned(ianaTimeZone('UTC+13')))).toBe(vtimezoneOf(zoned('Etc/GMT-13')))
+  })
+
+  test('Etc/GMT+N zones get the negative offset they stand for', () => {
+    const zone = vtimezoneOf(zoned('Etc/GMT+5'))
+    expect(zone).toContain('TZOFFSETTO:-0500')
+    expect(zone).not.toContain('+0500')
+  })
+
+  test('a zone the library defines correctly keeps its definition', () => {
+    expect(vtimezoneComponent('Europe/Berlin')).toBe(getVtimezoneComponent('Europe/Berlin'))
+  })
+
+  test('every zone a Windows name maps to, and Etc/GMT-14, has a matching VTIMEZONE', () => {
+    for (const timeZone of [...new Set(Object.values(WINDOWS_ZONES)), 'Etc/GMT-14']) {
+      const ics = zoned(timeZone)
+      expect(ics, timeZone).toContain(`DTSTART;TZID=${timeZone}:`)
+      expect(vtimezoneOf(ics), timeZone).toContain(`TZID:${timeZone}\r\n`)
+    }
+  })
+
+  test('an alias zone is defined under the TZID the event names', () => {
+    const zone = vtimezoneOf(zoned('Asia/Calcutta'))
+    expect(zone).toContain('TZID:Asia/Calcutta\r\n')
+    expect(zone).toContain('TZOFFSETTO:+0530')
+  })
+
+  // The upstream defects behind vtimezoneComponent's workarounds
+  // (docs/upstream/ical-timezones/): when one fails, the library got that
+  // right and its workaround can go.
+  test('upstream: @touch4it/ical-timezones still writes Etc/GMT-12 as UTC-12', () => {
+    expect(getVtimezoneComponent('Etc/GMT-12')).toContain('TZOFFSETTO:-1200')
+    expect(getVtimezoneComponent('Etc/GMT-13')).toBeNull()
+  })
+
+  test('upstream: @touch4it/ical-timezones still defines Asia/Calcutta as TZID Asia/Kolkata', () => {
+    expect(getVtimezoneComponent('Asia/Calcutta')).toContain('TZID:Asia/Kolkata')
   })
 })

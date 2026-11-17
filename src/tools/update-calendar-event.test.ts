@@ -444,6 +444,42 @@ describe('updateCalendarEvent — partial updates', () => {
     expect(cap.fetched).toHaveLength(0)
   })
 
+  test('re-writes a whole Outlook series in Windows UTC+13 with a VTIMEZONE for its zone', async () => {
+    const outlook = storedEvent({
+      data: [
+        'BEGIN:VCALENDAR',
+        'BEGIN:VTIMEZONE',
+        'TZID:UTC+13',
+        'BEGIN:STANDARD',
+        'DTSTART:16010101T000000',
+        'TZOFFSETFROM:+1300',
+        'TZOFFSETTO:+1300',
+        'END:STANDARD',
+        'END:VTIMEZONE',
+        'BEGIN:VEVENT',
+        `UID:${UID}`,
+        'SUMMARY:Weekly Sync',
+        'DTSTART;TZID=UTC+13:20260616T100000',
+        'DTEND;TZID=UTC+13:20260616T103000',
+        'RRULE:FREQ=WEEKLY;BYDAY=TU',
+        'ORGANIZER;CN="host@langmail.me":mailto:host@langmail.me',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n'),
+    })
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), outlook, cap), {
+      args: { title: 'Weekly Sync (renamed)', uid: UID },
+      token: 'tok',
+    })
+    expect(result.isError).toBeUndefined()
+    const ical = unfold(cap.updated[0]?.ical ?? '')
+    expect(ical).toContain('DTSTART;TZID=Etc/GMT-13:20260616T100000')
+    const zone = ical.slice(ical.indexOf('BEGIN:VTIMEZONE'), ical.indexOf('END:VTIMEZONE'))
+    expect(zone).toContain('TZID:Etc/GMT-13')
+    expect(zone).toContain('TZOFFSETTO:+1300')
+  })
+
   test('uses explicit timeZone as wall-clock authority', async () => {
     const cap = captured()
     await updateCalendarEvent(makeDeps(account(), storedEvent(), cap), {
