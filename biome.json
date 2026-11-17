@@ -16,7 +16,17 @@
 	"linter": {
 		"enabled": true,
 		"rules": {
-			"preset": "recommended"
+			"preset": "recommended",
+			"performance": {
+				"noAwaitInLoops": "off"
+			},
+			"style": {
+				"useDestructuring": "off"
+			},
+			"suspicious": {
+				"noMisplacedAssertion": "off",
+				"noUnnecessaryConditions": "off"
+			}
 		}
 	},
 	"javascript": {
@@ -33,7 +43,8 @@
 		"enabled": true,
 		"actions": {
 			"source": {
-				"organizeImports": "on"
+				"organizeImports": "on",
+				"useSortedKeys": "off"
 			}
 		}
 	}

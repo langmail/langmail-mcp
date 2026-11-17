@@ -136,6 +136,32 @@ export const createAccount = async (options: {
 	return account;
 };
 
+/**
+ * Creates an API key for an account and returns the `Authorization` header
+ * value that signs in with it: `Bearer <key>`. The key goes when the account
+ * is destroyed.
+ */
+export const createBearerCredential = async (
+	account: Pick<TestAccount, "id">
+): Promise<string> => {
+	const keys = await adminCall("x:ApiKey/set", {
+		accountId: account.id,
+		create: {
+			k1: {
+				allowedIps: {},
+				description: "langmail-mcp e2e",
+				permissions: { "@type": "Inherit" },
+			},
+		},
+	});
+	const secret = (keys.created as { k1?: { secret?: string } } | undefined)?.k1
+		?.secret;
+	if (!secret) {
+		throw new Error(`API key not created: ${JSON.stringify(keys)}`);
+	}
+	return `Bearer ${secret}`;
+};
+
 /** Destroys one account; its mail, calendars and contacts go with it. */
 export const destroyAccount = async (
 	account: Pick<TestAccount, "id">

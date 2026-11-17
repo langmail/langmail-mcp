@@ -7,16 +7,19 @@ MCP server that gives an agent Langmail's email, calendar and contacts tools aga
 - Relative imports keep their `.ts` extension; `rewriteRelativeImportExtensions` turns them into `.js` in `dist/`.
 - Biome for lint + format (`npm run check` / `check:fix`) — do not add ESLint or Prettier.
 - Vitest for tests, lefthook for git hooks, semantic-release for publishing.
-- Runtime deps: `@modelcontextprotocol/server` (the v2 MCP SDK), `zod`.
+- Runtime deps: `@modelcontextprotocol/server` (the v2 MCP SDK), `zod`, `pino` (logging), `@date-fns/tz` (time zones in `src/ical`).
+- TypeScript is strict with `noUncheckedIndexedAccess`; `exactOptionalPropertyTypes` is off, because the hosted code these files come from is not written for it.
 - No Bun APIs.
 
 ## Layout
-- `src/index.ts` — server entry; connects the server to the transport (stdio by default).
+- `src/index.ts` — server entry; loads the configuration and connects the server to the transport (stdio by default).
+- `src/config.ts` — reads and validates the environment and the command line; the only place that reads `process.env` for settings.
 - `src/tools/<tool>.ts` — one file per MCP tool, with `<tool>.test.ts` next to it.
-- `src/mcp/` — server wiring and tool registration.
+- `src/mcp/handler.ts` — builds the server: `createRuntime` (JMAP session cache, credential, principal) and `createServer`, where each tool is registered with one line. `src/mcp/tool-logging.ts` logs one line per tool call.
+- `src/observability/errors.ts` — `describeError`: what an error log line may carry (no addresses, no credentials).
 - `src/jmap/`, `src/contacts/`, `src/ical/` — JMAP client, contact and iCalendar helpers.
 - `src/caldav/`, `src/rules/`, `src/drafts/`, `src/attachments/`, `src/email-render/` — what the tools build on.
-- `src/logger.ts` — logs go to stderr only; stdout belongs to the stdio transport.
+- `src/logger.ts` — pino; logs go to stderr only, because stdout belongs to the stdio transport. `LOG_LEVEL` sets the level; the default is `warn`, and `info` adds one line per tool call.
 - `e2e/` — suites that run against a real Stalwart.
 - Configuration comes from the environment (see `.env.example`); dev loads `.env` via `tsx --env-file=.env`, not `dotenv`.
 
@@ -31,6 +34,13 @@ Project invariants:
 - Nothing leaves the user's machine or server except traffic to their own Stalwart, unless the user turns it on with an opt-in environment flag that defaults to off. No telemetry and no error reporting services.
 - No Langmail address or service is a default anywhere (no `*.langmail.me` defaults).
 - Nothing hosted-only comes along: no internal hostnames, secrets, or real people's names or addresses. All test data uses `example.com` addresses. Data-format identifiers that must stay compatible with existing mailboxes (the vCard property `langmail.me:collected`, `urn:langmail:authored:`) stay.
+
+## Credentials
+- The user signs in to their Stalwart with `STALWART_USERNAME` + `STALWART_PASSWORD` (an app password) or `STALWART_TOKEN`. `src/config.ts` turns either into one credential: the complete `Authorization` header value, `Basic …` or `Bearer …`.
+- That credential is what every tool receives as its "token" (`runtime.getToken`). The hosted code calls the same value a bearer token and wrapped it with `bearerAuthorization(token)`; here that function is `authorizationHeader(credential)` in `src/jmap/session.ts` and returns its argument unchanged. Never add a scheme prefix anywhere else.
+- In a test, pass the full header value in (`"Bearer tok"`, `"Basic …"`) and assert that it arrives unchanged.
+- The principal (the mailbox address mail is sent from) is the `username` of the JMAP session, read through `runtime.getPrincipal`. The server signs in before every tool call (`runtime.signIn`, cached after the first success), never at start-up: the MCP handshake must not depend on the mail server.
+- A credential never appears in a log line, an error message or a tool result. `describeError` redacts `Bearer …` and `Basic …` values.
 
 ## Working with the user
 - When the user asks a question, answer it before editing files or running implementation commands.
@@ -48,6 +58,21 @@ Project invariants:
 `npm run test:e2e` runs the suites in `e2e/` (`*.e2e.test.ts`) against a real Stalwart at the version in `.stalwart-version`. See `e2e/README.md` for how to start one and which environment variables the suites read.
 
 `.mcp.json` at the repo root registers the built server (loads `.env` via `node --env-file`) so interactive Claude Code sessions pick it up automatically.
+
+## Lint policy for ported code
+Most of `src/` is copied from Langmail's hosted server, which runs Biome with the same ultracite preset minus a few rules. Those rules are off here too (`biome.json`), so the copied files stay line-for-line comparable with their source. Counts are findings across the whole ported source when the policy was set:
+
+| Setting | Findings | Why it is off |
+| --- | --- | --- |
+| `assist` `useSortedKeys` | (auto-fix) | Sorting object keys changes behaviour: key order decides `Object.entries` iteration and the order of fields in a tool's JSON output. |
+| `suspicious/noUnnecessaryConditions` | 97 | Flags guards on values the types call non-null. The values come from a mail server and from other clients' data, and the guards are deliberate. |
+| `style/useDestructuring` | 68 | Style only. |
+| `performance/noAwaitInLoops` | 63 | The loops are sequential on purpose: ordered writes, polling, paging. |
+| `suspicious/noMisplacedAssertion` | 30 | Test helpers that assert are called from inside tests. |
+
+Every other rule stays on. Fix what it reports in the file: `i++` → `i += 1` (`noIncrementDecrement`), `== null` → explicit checks (`noEqualsToNull`), a `// biome-ignore lint/suspicious/noControlCharactersInRegex: <reason>` on a regex that matches control characters on purpose. `noUndeclaredVariables` on `Bun` and `noUndeclaredDependencies` are real findings: replace the Bun API, add the dependency. Do not turn off further rules.
+
+`knip.json` ignores unused exports under `src/jmap/`, `src/contacts/` and `src/ical/` (and `src/contacts/` as unused files) while the tools that use them are still being added. Remove that `ignoreIssues` block once every tool is in, and delete what is still unused then.
 
 # Ultracite Code Standards
 
