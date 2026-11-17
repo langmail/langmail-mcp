@@ -17,8 +17,10 @@ import {
 } from "../jmap/index.ts";
 import { makeLiveApplyIo, makeMailRulesApplier } from "../rules/apply.ts";
 import { makeLiveSieveIo, makeMailRulesStore } from "../rules/store.ts";
+import { registerArchiveEmails } from "../tools/archive-emails.ts";
 import { registerCreateMailRule } from "../tools/create-mail-rule.ts";
 import { registerDeleteMailRule } from "../tools/delete-mail-rule.ts";
+import { makeLiveDeps as makeFileEmailsDeps } from "../tools/file-emails-common.ts";
 import {
 	makeLiveDeps as makeGetEmailDeps,
 	registerGetEmail,
@@ -29,11 +31,14 @@ import {
 } from "../tools/get-thread.ts";
 import { registerListMailRules } from "../tools/list-mail-rules.ts";
 import type { MailRuleToolDeps } from "../tools/mail-rule-common.ts";
+import { registerMarkEmails } from "../tools/mark-emails.ts";
+import { registerMoveEmails } from "../tools/move-emails.ts";
 import { registerPreviewMailRule } from "../tools/preview-mail-rule.ts";
 import {
 	makeLiveDeps as makeSearchEmailsDeps,
 	registerSearchEmails,
 } from "../tools/search-emails.ts";
+import { registerTrashEmails } from "../tools/trash-emails.ts";
 import { registerUpdateMailRule } from "../tools/update-mail-rule.ts";
 import { instrumentToolLogging } from "./tool-logging.ts";
 
@@ -168,6 +173,13 @@ export const createServer = (
 		makeGetThreadDeps(runtime.jmapLive),
 		runtime.getToken
 	);
+
+	// Filing: archive/move/trash/mark share one deps bundle.
+	const fileEmailsDeps = makeFileEmailsDeps(runtime.jmapLive);
+	registerArchiveEmails(server, fileEmailsDeps, runtime.getToken);
+	registerMoveEmails(server, fileEmailsDeps, runtime.getToken);
+	registerTrashEmails(server, fileEmailsDeps, runtime.getToken);
+	registerMarkEmails(server, fileEmailsDeps, runtime.getToken);
 
 	const mailRuleDeps: MailRuleToolDeps = {
 		applier: makeMailRulesApplier(makeLiveApplyIo(runtime.jmapLive)),
