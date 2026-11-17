@@ -5,11 +5,11 @@ on:
   pull_request:
     branches: [main]
 
+# Every job gets a read-only token. The checks run `npm ci` and the code of a
+# pull request, so they must not hold anything that can write or publish; only
+# the release job, which runs on main alone, asks for more.
 permissions:
-  contents: write # Create releases and commit version bumps
-  issues: write # Comment on resolved issues
-  pull-requests: write # Comment on merged PRs
-  id-token: write # Generate OIDC token for npm trusted publishing
+  contents: read
 
 jobs:
   lint-and-format:
@@ -95,6 +95,11 @@ jobs:
     needs: [test, knip, e2e]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write # Create releases and commit version bumps
+      issues: write # Comment on resolved issues
+      pull-requests: write # Comment on merged PRs
+      id-token: write # Generate OIDC token for npm trusted publishing
     steps:
       - uses: actions/checkout@v5
         with:
