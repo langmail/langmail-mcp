@@ -1,6 +1,6 @@
 {
 	"name": "langmail-mcp",
-	"version": "0.0.0",
+	"version": "0.1.0",
 	"description": "Langmail MCP for your own Stalwart: email, calendar and contacts — a self-hosted MCP server for Stalwart over JMAP, CalDAV and CardDAV",
 	"keywords": [
 		"mcp",
