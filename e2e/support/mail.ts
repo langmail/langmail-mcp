@@ -156,6 +156,49 @@ export const uploadBlob = async (
 	return ((await res.json()) as { blobId: string }).blobId;
 };
 
+export interface MessageSourceOptions {
+	body: string;
+	/** The `Date` header. `importEmail` takes the received date separately. */
+	date: Date;
+	/** `From` header value. */
+	from: string;
+	/** `Message-ID` header value, angle brackets included. */
+	messageId: string;
+	/**
+	 * Message-IDs of the conversation so far, oldest first. The last one
+	 * becomes `In-Reply-To`, all of them `References`: the headers a mail
+	 * server threads by.
+	 */
+	references?: string[];
+	subject: string;
+	/** `To` header value. */
+	to: string;
+}
+
+/**
+ * One plain-text message as its complete RFC 5322 source, for `importEmail`'s
+ * `raw`. Unlike `importEmail`'s own fields it sets the Message-ID and the
+ * reply headers, so several of these form a conversation.
+ */
+export const messageSource = (options: MessageSourceOptions): string =>
+	[
+		`From: ${options.from}`,
+		`To: ${options.to}`,
+		`Subject: ${options.subject}`,
+		`Message-ID: ${options.messageId}`,
+		...(options.references && options.references.length > 0
+			? [
+					`In-Reply-To: ${options.references.at(-1)}`,
+					`References: ${options.references.join(" ")}`,
+				]
+			: []),
+		`Date: ${options.date.toUTCString()}`,
+		"MIME-Version: 1.0",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		options.body,
+	].join("\r\n");
+
 export interface ImportEmailOptions {
 	/** Plain-text body. Default: empty. */
 	body?: string;

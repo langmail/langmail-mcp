@@ -8,7 +8,13 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import {
+	existsSync,
+	readdirSync,
+	readFileSync,
+	readlinkSync,
+	statSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -147,6 +153,8 @@ export interface HttpServer {
 	connect: (token?: string | null) => Promise<Client>;
 	/** `<baseUrl>/mcp`. */
 	mcpUrl: string;
+	/** The server's process id. */
+	pid: number;
 	/** Everything the server has written to stderr so far. */
 	stderr: () => string;
 	/**
@@ -186,6 +194,125 @@ const waitForExit = (child: ChildProcess): Promise<number | null> =>
 			resolve(code);
 		});
 	});
+
+export interface RawStdioServer {
+	/** The server's process id. */
+	pid: number;
+	/**
+	 * Writes one JSON-RPC request to the server's stdin and resolves with the
+	 * message on its stdout that answers it.
+	 */
+	request: (
+		method: string,
+		params?: Record<string, unknown>
+	) => Promise<Record<string, unknown>>;
+	/** Everything the server has written to stderr so far. */
+	stderr: () => string;
+	/** Every complete line the server has written to stdout so far. */
+	stdoutLines: () => string[];
+	/** Closes the server's stdin and stops it. */
+	stop: () => Promise<number | null>;
+}
+
+const parsedLine = (line: string): Record<string, unknown> | undefined => {
+	try {
+		const parsed: unknown = JSON.parse(line);
+		return typeof parsed === "object" && parsed !== null
+			? (parsed as Record<string, unknown>)
+			: undefined;
+	} catch {
+		// Not JSON: for the suite to judge, through `stdoutLines`.
+		return undefined;
+	}
+};
+
+/**
+ * Spawns `node dist/index.js` and speaks MCP to it over its pipes by hand,
+ * handshake included, keeping every line of its stdout. The SDK's client
+ * skips stdout lines that are not JSON, so a suite that asks what the server
+ * writes there has to read the pipe itself.
+ */
+export const startRawStdioServer = async (
+	account: TestAccount,
+	options: ServerOptions = {}
+): Promise<RawStdioServer> => {
+	assertBuilt();
+	const child = spawn(process.execPath, [ENTRY], {
+		cwd: ROOT,
+		env: childEnv(account, options),
+		stdio: ["pipe", "pipe", "pipe"],
+	});
+	let stderr = "";
+	child.stderr.on("data", (chunk: Buffer) => {
+		stderr += chunk.toString();
+	});
+	let stdout = "";
+	child.stdout.on("data", (chunk: Buffer) => {
+		stdout += chunk.toString();
+	});
+	// The text after the last newline is a line still being written.
+	const stdoutLines = (): string[] => stdout.split("\n").slice(0, -1);
+	const send = (message: Record<string, unknown>): void => {
+		child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
+	};
+
+	let lastId = 0;
+	const request = async (
+		method: string,
+		params: Record<string, unknown> = {}
+	): Promise<Record<string, unknown>> => {
+		lastId += 1;
+		const id = lastId;
+		send({ id, method, params });
+		const answer = await pollUntil(
+			() =>
+				Promise.resolve(
+					exited(child)
+						? { exited: true }
+						: stdoutLines()
+								.map(parsedLine)
+								.find((message) => message?.id === id)
+				),
+			(found) => found !== undefined,
+			{
+				intervalMs: 20,
+				timeoutMs: START_TIMEOUT_MS,
+				waitingFor: `the stdio server's answer to ${method}. Its stderr:\n${stderr}`,
+			}
+		);
+		if (exited(child)) {
+			throw new Error(
+				`the stdio server exited with code ${child.exitCode} before answering ${method}. Its stderr:\n${stderr}`
+			);
+		}
+		return answer as Record<string, unknown>;
+	};
+
+	const stop = (): Promise<number | null> => {
+		child.stdin.end();
+		child.kill("SIGTERM");
+		return waitForExit(child);
+	};
+
+	try {
+		await request("initialize", {
+			capabilities: {},
+			clientInfo: CLIENT_INFO,
+			protocolVersion: "2025-06-18",
+		});
+		send({ method: "notifications/initialized" });
+	} catch (error) {
+		await stop();
+		throw error;
+	}
+	return {
+		pid: child.pid as number,
+		request,
+		stderr: () => stderr,
+		stdoutLines,
+		stop,
+	};
+};
 
 interface SpawnedHttp {
 	baseUrl: string;
@@ -313,5 +440,63 @@ export const startHttpServer = async (
 			{ cause: error }
 		);
 	}
-	return { baseUrl, client, connect, mcpUrl, stderr, stop, token };
+	return {
+		baseUrl,
+		client,
+		connect,
+		mcpUrl,
+		pid: child.pid as number,
+		stderr,
+		stop,
+		token,
+	};
+};
+
+const PROC_TCP_TABLES = ["net/tcp", "net/tcp6"];
+const TCP_STATE_LISTEN = "0A";
+const SOCKET_LINK_RE = /^socket:\[(\d+)\]$/u;
+const WHITESPACE_RE = /\s+/u;
+
+/** Whether `listeningTcpPorts` can answer here: it reads Linux's `/proc`. */
+export const canListListeningTcpPorts = existsSync("/proc/self/net/tcp");
+
+/**
+ * The TCP ports a process is listening on, read from `/proc`: the sockets
+ * among its open files that the kernel's TCP tables list in state LISTEN.
+ * Linux only; see `canListListeningTcpPorts`.
+ */
+export const listeningTcpPorts = (pid: number): number[] => {
+	const sockets = new Set<string>();
+	for (const fd of readdirSync(`/proc/${pid}/fd`)) {
+		try {
+			const inode = SOCKET_LINK_RE.exec(
+				readlinkSync(`/proc/${pid}/fd/${fd}`)
+			)?.[1];
+			if (inode) {
+				sockets.add(inode);
+			}
+		} catch {
+			// Closed between listing and reading.
+		}
+	}
+	const ports: number[] = [];
+	for (const table of PROC_TCP_TABLES) {
+		const path = `/proc/${pid}/${table}`;
+		if (!existsSync(path)) {
+			continue;
+		}
+		// Columns: sl, local address, remote address, state, queues, timer (two
+		// columns), retransmits, uid, timeout, inode.
+		for (const line of readFileSync(path, "utf8").split("\n").slice(1)) {
+			const columns = line.trim().split(WHITESPACE_RE);
+			const [, local, , state] = columns;
+			const inode = columns[9];
+			if (state === TCP_STATE_LISTEN && local && inode && sockets.has(inode)) {
+				ports.push(
+					Number.parseInt(local.slice(local.lastIndexOf(":") + 1), 16)
+				);
+			}
+		}
+	}
+	return ports.sort((a, b) => a - b);
 };

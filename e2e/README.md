@@ -54,9 +54,12 @@ Name the file `e2e/<name>.e2e.test.ts` and build on `e2e/support/`:
 - `mail.ts`: `openMailSession`, `importEmail`, `mailboxId`, `jmapCall`, `waitForMessage`, `waitForCalendarMessage`.
 - `server.ts`: `startStdioServer` and `startHttpServer` start the built server (`dist/index.js`) for an account and return a connected MCP client (HTTP: also `baseUrl`, `mcpUrl`, `token`, `connect`, `stop`). They fail with what to run when `dist/` is missing or older than `src/`; `npm run test:e2e` builds first.
 - `caldav.ts`: `provisionPrincipal` (an account with its calendars discovered), `waitForMoreThan`, `calendarMessageWith`, and `staysAt` for "no scheduling mail arrives" checks, whose quiet window grows with the slowest delivery the file has seen.
+- `mail.ts`: `openMailSession`, `importEmail`, `messageSource` (a message with its own Message-ID and reply headers, to build a conversation), `mailboxId`, `jmapCall`, `waitForMessage`, `waitForCalendarMessage`.
+- `server.ts`: `startStdioServer` and `startHttpServer` start the built server (`dist/index.js`) for an account and return a connected MCP client (HTTP: also `baseUrl`, `mcpUrl`, `token`, `connect`, `stop`). They fail with what to run when `dist/` is missing or older than `src/`; `npm run test:e2e` builds first. `startRawStdioServer` speaks MCP over the pipes by hand and keeps every line of stdout; `listeningTcpPorts` lists the TCP ports a process listens on (Linux).
+- `tool-output.ts`: `toolText` and `listedMessages` read a tool result the way an agent does, ids included.
 - `wait.ts`: `untilIndexed` for reads through the search index, which Stalwart updates after a write has returned; `pollUntil`, `sleep`.
 
-`harness.e2e.test.ts` uses all of them and is the suite to copy from. `http-auth.e2e.test.ts` shows how to drive the built server through an MCP client. `jmap.e2e.test.ts` shows how to drive the server's own code (`loadConfig`, `createRuntime`, `src/jmap`) with a Basic and with a Bearer credential.
+`agent.e2e.test.ts` is the suite to read first: an agent finds an old email by a phrase and reads its conversation, over stdio and over HTTP, and callers who are not allowed in get nothing. `harness.e2e.test.ts` uses all of them and is the suite to copy from. `http-auth.e2e.test.ts` shows how to drive the built server through an MCP client. `jmap.e2e.test.ts` shows how to drive the server's own code (`loadConfig`, `createRuntime`, `src/jmap`) with a Basic and with a Bearer credential.
 
 ## Stalwart version
 
