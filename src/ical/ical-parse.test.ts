@@ -3,8 +3,8 @@ import { describe, expect, test } from "vitest";
 import { parseEvents } from "./ical-parse.ts";
 
 // Hand-rolled VEVENT fixture. The real invite writer (ical-generator) lives
-// in services/mcp — its ical-roundtrip test covers writer↔parser fidelity —
-// so this package's tests stay dependency-free. Values are raw content
+// in src/caldav — its ical-roundtrip test covers writer↔parser fidelity —
+// so these tests stay dependency-free. Values are raw content
 // lines: pre-escape TEXT values (`\\;`) exactly as a server would emit them.
 interface FixtureInvite {
 	attendees?: string[];

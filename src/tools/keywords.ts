@@ -1,5 +1,5 @@
 // The searchable keyword vocabulary. Derived from the classification taxonomy
-// in @langmail/agents (not from the agent set) so a value means the same thing
+// (email-types.ts), not from the set of agents, so a value means the same thing
 // for every user: agent labels are per-user configurable and coarser than the
 // taxonomy — one agent writes `$label:receipt` for both `receipt` and `order`
 // mail, and one writes `$label:notification` for `notification`,
@@ -17,8 +17,8 @@ export const SEEN_KEYWORD = "$seen";
 export const FLAGGED_KEYWORD = "$flagged";
 
 // The one value that is not an email type: a flag orthogonal to the taxonomy
-// (a message of any type can be a to-do), so it keeps mapping onto the agent
-// label the email-agent writes.
+// (a message of any type can be a to-do), so it keeps mapping onto the
+// `$label:todo` keyword a classifier writes.
 const TODO_VALUE = "todo";
 
 // enum value -> human gloss. Type glosses live next to the taxonomy itself;
@@ -51,9 +51,9 @@ export const KEYWORDS_DESCRIPTION = `Filter by classified email type; multiple v
 	.join("; ")}`;
 
 // Two namespaces behind one enum: email types resolve to the `$type:`
-// keywords the email-agent writes for every classified message, while `todo`
-// resolves to the `$label:todo` agent label (canonical since the JMAP-first
-// migration — the legacy Gmail-echoed `$label:to-do` was dropped with it).
+// keywords a classifier writes on every classified message, while `todo`
+// resolves to the `$label:todo` label keyword (the one spelling; an older
+// `$label:to-do` is not read).
 // Enum values are already lowercase slugs and are used verbatim as suffixes.
 export const keywordToJmapKeyword = (value: string): string =>
 	value === TODO_VALUE ? toLabelKeyword(value) : toTypeKeyword(value);

@@ -41,8 +41,8 @@ describe("buildEmailSetPatch", () => {
 	});
 
 	// The two maps translate onto the wire *differently*, and this asymmetry is
-	// the whole reason patch.ts exists: keyword removal is `false` (email-sync's
-	// production-proven convention), mailbox removal is `null` (RFC 8620's
+	// the whole reason patch.ts exists: keyword removal is `false` (the form
+	// Stalwart applies), mailbox removal is `null` (RFC 8620's
 	// canonical PatchObject removal). Encoding either one the other way silently
 	// no-ops against Stalwart.
 	test("removes a keyword with false but a mailbox with null", () => {
@@ -57,11 +57,11 @@ describe("buildEmailSetPatch", () => {
 		});
 	});
 
-	// The dominant production shape: the email-agent's enrichment writer sends
-	// the whole `$type:` taxonomy in one map — the classified type `true` and
-	// every other type `false` — with agent `$label:` adds layered on top. Each
-	// entry has to keep its own polarity; a map-wide collapse either way would
-	// strip labels or leave two type keywords behind.
+	// The shape a classifier's writer sends: the whole `$type:` taxonomy in
+	// one map — the classified type `true` and every other type `false` — with
+	// agent `$label:` adds layered on top. Each entry has to keep its own
+	// polarity; a map-wide collapse either way would strip labels or leave two
+	// type keywords behind.
 	test("preserves per-entry polarity in a mixed add/remove keyword map", () => {
 		expect(
 			buildEmailSetPatch({

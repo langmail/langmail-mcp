@@ -568,7 +568,7 @@ describe("emailGetDetail", () => {
 			expect(args.properties).toContain("to");
 			expect(args.properties).toContain("attachments");
 			expect(args.properties).toContain("hasAttachment");
-			// The email-agent tells sent mail from received mail by Sent membership.
+			// A reader tells sent mail from received mail by Sent membership.
 			expect(args.properties).toContain("mailboxIds");
 			// Parts come back minimal and explicit: just enough to list files,
 			// classify cid-inline parts, and hand back the blobId handle.

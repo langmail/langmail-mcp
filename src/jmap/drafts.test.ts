@@ -601,7 +601,7 @@ describe("emailComposeGet", () => {
 describe("sentEmailPatch", () => {
 	test("moves the message out of Drafts into Sent and clears $draft", () => {
 		expect(sentEmailPatch("mbDrafts", "mbSent")).toEqual({
-			// `false` removes a keyword (email-sync's production-proven convention);
+			// `false` removes a keyword (the form Stalwart applies);
 			// `null` removes a mailbox (the RFC 8620 canonical PatchObject removal).
 			"keywords/$draft": false,
 			"mailboxIds/mbDrafts": null,

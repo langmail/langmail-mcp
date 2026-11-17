@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+
+import { logger } from "../logger.ts";
 
 import { makeAccountTimeZoneResolver } from "./account-settings.ts";
 
@@ -99,6 +101,27 @@ describe("makeAccountTimeZoneResolver", () => {
 		installFetch(() => ({ status: 403 }));
 		const resolve = makeAccountTimeZoneResolver({ serverUrl: SERVER });
 		expect(await resolve("tok")).toBeNull();
+	});
+
+	test("logs a failed read without the address or credential an upstream message carries", async () => {
+		const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+		globalThis.fetch = (() =>
+			Promise.reject(
+				new Error("user@example.com sent Bearer s3cret and was refused")
+			)) as unknown as typeof fetch;
+		try {
+			const resolve = makeAccountTimeZoneResolver({ serverUrl: SERVER });
+			expect(await resolve("tok")).toBeNull();
+			expect(warn).toHaveBeenCalledWith(
+				{
+					errorClass: "Error",
+					errorMessage: "[email] sent Bearer [redacted] and was refused",
+				},
+				"account time-zone preference read failed; falling back to UTC"
+			);
+		} finally {
+			warn.mockRestore();
+		}
 	});
 
 	test("re-reads after the cache TTL expires", async () => {

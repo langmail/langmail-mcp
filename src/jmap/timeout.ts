@@ -1,10 +1,9 @@
 // Deadlines for every JMAP fetch.
 //
-// Without one, a stalled Stalwart turns into an indefinitely hung request:
-// nginx holds the connection for up to an hour (`proxy_read_timeout 1h`, set
-// for long-lived streaming responses), so the caller sees a client-side
-// timeout while the server looks healthy. A bounded call fails instead, and a
-// failure is something the logs and error tracking can show.
+// Without one, a stalled Stalwart turns into an indefinitely hung request: a
+// reverse proxy in front of it may hold the connection open for a long time,
+// so the tool call never returns while the server looks healthy. A bounded
+// call fails instead, and a failure is something the log can show.
 //
 // 30 s is generous on purpose: queries over large mailboxes and blob transfers
 // are legitimately slow, and this deadline exists to catch a stall, not to

@@ -21,6 +21,7 @@ import {
 	jmapTimeoutSignal,
 } from "../jmap/index.ts";
 import { logger } from "../logger.ts";
+import { describeError } from "../observability/errors.ts";
 
 import { isValidTimeZone } from "./timezone.ts";
 
@@ -119,8 +120,10 @@ export const makeAccountTimeZoneResolver = (
 		} catch (err) {
 			// Failure-open: log once and fall through to UTC. Never surface this to
 			// the tool caller — a broken preference read must not fail event creation.
+			// Through describeError like every other error line: an upstream
+			// message can carry the mailbox address.
 			logger.warn(
-				{ err },
+				describeError(err),
 				"account time-zone preference read failed; falling back to UTC"
 			);
 		}

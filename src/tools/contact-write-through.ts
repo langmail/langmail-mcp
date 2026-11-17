@@ -18,6 +18,7 @@ import {
 	type JmapLive,
 } from "../jmap/index.ts";
 import { logger } from "../logger.ts";
+import { describeError } from "../observability/errors.ts";
 
 export interface AttendeeWriteThroughInput {
 	attendees: ParsedAttendee[];
@@ -68,8 +69,10 @@ export const makeAttendeeWriteThrough =
 			);
 			await collectContacts(liveCollectionDeps, ctx, extracted);
 		} catch (err) {
+			// Through describeError like every other error line: an upstream
+			// message can carry the mailbox address.
 			logger.warn(
-				{ err },
+				describeError(err),
 				"Contact write-through failed after a calendar action"
 			);
 		}

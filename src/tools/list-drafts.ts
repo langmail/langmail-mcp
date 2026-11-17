@@ -5,7 +5,7 @@
 // `stableDraftId`), not by whichever JMAP id its current revision has. Without a
 // listing that speaks draftIds, an agent that staged drafts in an earlier
 // session cannot find its own leftovers, and the user discovers the duplicates
-// in a mail client instead (issue #831).
+// in a mail client instead.
 
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";

@@ -69,7 +69,7 @@ live(
 			discovered = principal.organizer;
 			// Seed with whichever of the two account addresses discovery does NOT
 			// return, so the stored ORGANIZER genuinely differs from what the tool
-			// would stamp — the production shape after an address change.
+			// would stamp — what an account looks like after an address change.
 			const primary = `${localPart}@${DOMAIN}`;
 			const alias = `${aliasPart}@${DOMAIN}`;
 			storedOrganizer = discovered === alias ? primary : alias;

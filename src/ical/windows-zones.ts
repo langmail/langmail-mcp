@@ -3,7 +3,7 @@
 // release 49, common/supplemental/windowsZones.xml, territory `001` (each
 // Windows name's golden zone), with two edits: CLDR's deprecated
 // America/Indianapolis and America/Buenos_Aires are written as their canonical
-// names, which the VTIMEZONE generator services/mcp writes with knows; and
+// names, which the VTIMEZONE generator src/caldav writes with knows; and
 // Windows `UTC` is left out, since `UTC` already names that zone. To refresh,
 // regenerate from a newer CLDR release, reapply the edits, and update the
 // release named here.

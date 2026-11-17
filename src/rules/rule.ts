@@ -90,11 +90,10 @@ export const normalizeConditions = (
 
 // --- actions -------------------------------------------------------------------
 
-// Mirror of the JMAP client label convention's tag-id normalization
-// (originated in Bulwark; see email-sync's `sanitize_keyword`): lower →
-// non-[a-z0-9_-] to '-' → collapse runs → trim. Keeping the algorithms in
-// lockstep is what makes a rule's tag and a projected Gmail label with the
-// same name collide into one chip.
+// The tag-id normalization of the `$label:` keyword convention JMAP mail
+// clients show as label chips: lower → non-[a-z0-9_-] to '-' → collapse runs
+// → trim. Every writer of such a keyword has to normalize the same way, or a
+// rule's tag and a label of the same name written elsewhere become two chips.
 export const tagToKeywordSuffix = (name: string): string | null => {
 	const slug = name
 		.toLowerCase()
@@ -227,8 +226,8 @@ const actionCommand = (a: MailRuleAction): string | null => {
 		}
 		case "archive":
 			// :specialuse targets the account's real Archive folder by JMAP role
-			// (RFC 8579), matching how the rest of the platform resolves it;
-			// "Archive" is only the creation name if none exists yet.
+			// (RFC 8579), the same way archive_emails finds it; "Archive" is
+			// only the creation name if none exists yet.
 			return 'fileinto :specialuse "\\\\Archive" :create "Archive";';
 		case "copy":
 			// :copy keeps the message where it would otherwise go (RFC 3894).

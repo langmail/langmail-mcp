@@ -1,4 +1,4 @@
-// Minimal subset of JMAP types shared across Langmail's TS consumers.
+// Minimal subset of JMAP types shared by the tools and helpers in src/.
 //
 // JMAP is huge; this file declares only the properties we actually read
 // or send. Adding fields when a new tool needs them is preferable to

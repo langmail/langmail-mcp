@@ -2,7 +2,7 @@
 // tentative) by setting the authenticated user's own ATTENDEE PARTSTAT on the
 // stored VEVENT and PUTting it back to the same CalDAV object.
 //
-// In production, Stalwart's CalDAV scheduling (RFC 6638) sends the iTIP
+// Stalwart's CalDAV scheduling (RFC 6638) sends the iTIP
 // METHOD:REPLY to the organizer automatically when an attendee updates their
 // calendar copy, so we do not construct the reply ourselves. We only flip our
 // own PARTSTAT and leave SEQUENCE (the organizer's) untouched.

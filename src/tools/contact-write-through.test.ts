@@ -1,6 +1,7 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import type { JmapLive } from "../jmap/index.ts";
+import { logger } from "../logger.ts";
 
 import { makeAttendeeWriteThrough } from "./contact-write-through.ts";
 
@@ -23,6 +24,31 @@ describe("makeAttendeeWriteThrough", () => {
 			resolveAccountId: () => Promise.reject(new Error("stalwart down")),
 		};
 		expect(await makeAttendeeWriteThrough(live)(input)).toBeUndefined();
+	});
+
+	test("logs the failure without the address or credential an upstream message carries", async () => {
+		const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+		const live: JmapLive = {
+			getSession: () =>
+				Promise.reject(
+					new Error(
+						"mailbox robin@northwind.example rejected Basic dXNlcjpwYXNz"
+					)
+				),
+			resolveAccountId: () => Promise.resolve("acct"),
+		};
+		try {
+			await makeAttendeeWriteThrough(live)(input);
+			expect(warn).toHaveBeenCalledWith(
+				{
+					errorClass: "Error",
+					errorMessage: "mailbox [email] rejected Basic [redacted]",
+				},
+				"Contact write-through failed after a calendar action"
+			);
+		} finally {
+			warn.mockRestore();
+		}
 	});
 
 	test("resolves when the session is malformed (no contacts or mail account)", async () => {

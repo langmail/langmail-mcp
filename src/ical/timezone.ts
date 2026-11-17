@@ -1,14 +1,14 @@
 // Wall-clock time helpers the VEVENT parser needs. Only the pure time
 // arithmetic lives here — the zod input schemas that validate tool
 // arguments (timeZoneSchema, dateTimeWithOptionalOffsetSchema, …) stay in
-// services/mcp, which owns request validation, and re-export from here so
-// there is a single implementation.
+// src/caldav/timezone.ts, which owns request validation, and re-export from
+// here so there is a single implementation.
 
 import { TZDate } from "@date-fns/tz";
 
 import { ianaTimeZone } from "./windows-zones.ts";
 
-// Exported so services/mcp's eventTimeSchema admits exactly what this reads.
+// Exported so the tools' eventTimeSchema admits exactly what this reads.
 export const DATE_TIME_RE =
 	/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(?:Z|[+-]\d{2}:\d{2})?$/iu;
 

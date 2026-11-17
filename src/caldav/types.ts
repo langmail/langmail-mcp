@@ -1,6 +1,6 @@
 // Minimal CalDAV shapes used by the calendar tools.
 //
-// Like @langmail/jmap's types.ts, this declares only what the tools read or send —
+// Like src/jmap/types.ts, this declares only what the tools read or send —
 // the tsdav DAVCalendar/DAVAccount types stay behind caldav/client.ts.
 
 // A calendar collection as surfaced to the agent: a human label and the

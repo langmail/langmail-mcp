@@ -1,6 +1,6 @@
 // The collection fold: observations in, card mutations out. Pure — no IO —
-// so both writers (email-agent poller, MCP calendar tools) and the backfill
-// share one exhaustively tested core, and the thin upsert helper only has
+// so every writer (the calendar tools, anything that folds mail) shares one
+// exhaustively tested core, and the thin upsert helper only has
 // to apply the returned creates, updates and the destroys each update names
 // over JMAP.
 //

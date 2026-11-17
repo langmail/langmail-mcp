@@ -1,4 +1,4 @@
-// JMAP client label convention (originated in Bulwark). Agent/label keywords
+// The label convention of JMAP mail clients. Agent/label keywords
 // are namespaced under `$label:` so JMAP clients render them as label chips; a
 // bare keyword like `receipt` is invisible there. The prefix is persisted on
 // every message, so changing it is a data migration. Defined here exactly once

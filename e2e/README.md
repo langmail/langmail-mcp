@@ -64,4 +64,4 @@ Name the file `e2e/<name>.e2e.test.ts` and build on `e2e/support/`:
 
 ## Stalwart version
 
-`.stalwart-version` pins the version the suites run against, locally and in CI. It tracks the Stalwart version Langmail runs in production.
+`.stalwart-version` pins the version the suites are written against and run against, locally and in CI.
