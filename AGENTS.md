@@ -34,6 +34,11 @@ MCP server that gives an agent Langmail's email, calendar and contacts tools aga
 ## Where this code comes from
 The tools mirror Langmail's hosted MCP server. Tool names, inputs and descriptions must stay identical to the reference at <https://docs.langmail.me/reference/mcp/overview>. Change a description only where it names a tool this server does not have or a fact that is only true of the hosted service.
 
+`src/mcp/hosted-parity.test.ts` enforces this. It compares what the server sends (`tools/list`, the instructions, `resources/list`; over stdio and HTTP, with the opt-in flags off and on) with `src/mcp/hosted-tools.snapshot.json`, the hosted server's definitions as sent over the wire. Two tables in the test are the only differences allowed: `LEFT_OUT` (hosted tools this server does not have) and `REWORDED` (every place the wording differs: the exact hosted text, the exact text here, and why). A difference that is not listed fails, and so does an entry that no longer applies.
+- To change a description, an input-schema text or the instructions: change it in the source file, then add or update its `REWORDED` entry. Reword only for the two reasons above.
+- To pick up a change from the hosted server: regenerate the snapshot as the header of the test describes, then bring over every difference the test reports.
+- `e2e/all-tools.e2e.test.ts` calls every listed tool once through the built server, over stdio and over HTTP, and fails when a tool has no call. A new tool needs a call there.
+
 Project invariants:
 - Nothing leaves the user's machine or server except traffic to their own Stalwart, unless the user turns it on with an opt-in environment flag that defaults to off. No telemetry and no error reporting services.
 - No Langmail address or service is a default anywhere (no `*.langmail.me` defaults).
@@ -108,7 +113,7 @@ Most of `src/` is copied from Langmail's hosted server, which runs Biome with th
 
 Every other rule stays on. Fix what it reports in the file: `i++` → `i += 1` (`noIncrementDecrement`), `== null` → explicit checks (`noEqualsToNull`), a `// biome-ignore lint/suspicious/noControlCharactersInRegex: <reason>` on a regex that matches control characters on purpose. `noUndeclaredVariables` on `Bun` and `noUndeclaredDependencies` are real findings: replace the Bun API, add the dependency. Do not turn off further rules.
 
-`knip.json` ignores unused exports under `src/jmap/`, `src/contacts/` and `src/ical/` (and `src/contacts/` as unused files) while the tools that use them are still being added. Remove that `ignoreIssues` block once every tool is in, and delete what is still unused then.
+`knip.json` ignores unused exports and exported types in `src/jmap/index.ts`, `src/jmap/email.ts` and `src/contacts/index.ts`, and nothing else: vendored libraries keep their full API so they can be re-synced from upstream. What no tool here uses (6 functions, such as `emailChanges` and `emailState`, which only the hosted service's mail sync calls, and 48 types) stays exported; do not prune it, and do not widen the ignore to other files.
 
 # Ultracite Code Standards
 

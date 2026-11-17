@@ -60,7 +60,7 @@ Name the file `e2e/<name>.e2e.test.ts` and build on `e2e/support/`:
 - `tool-output.ts`: `toolText` and `listedMessages` read a tool result the way an agent does, ids included.
 - `wait.ts`: `untilIndexed` for reads through the search index, which Stalwart updates after a write has returned; `pollUntil`, `sleep`.
 
-`agent.e2e.test.ts` is the suite to read first: an agent finds an old email by a phrase and reads its conversation, over stdio and over HTTP, and callers who are not allowed in get nothing. `harness.e2e.test.ts` uses all of them and is the suite to copy from. `http-auth.e2e.test.ts` shows how to drive the built server through an MCP client. `jmap.e2e.test.ts` shows how to drive the server's own code (`loadConfig`, `createRuntime`, `src/jmap`) with a Basic and with a Bearer credential.
+`all-tools.e2e.test.ts` calls every tool once through the built server, over stdio and over HTTP, as one story; a tool added to the server needs a call there. `agent.e2e.test.ts` is the suite to read first: an agent finds an old email by a phrase and reads its conversation, over stdio and over HTTP, and callers who are not allowed in get nothing. `harness.e2e.test.ts` uses all of them and is the suite to copy from. `http-auth.e2e.test.ts` shows how to drive the built server through an MCP client. `jmap.e2e.test.ts` shows how to drive the server's own code (`loadConfig`, `createRuntime`, `src/jmap`) with a Basic and with a Bearer credential.
 
 ## Stalwart version
 

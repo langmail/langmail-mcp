@@ -5,8 +5,8 @@
 	"entry": ["scripts/stalwart/bootstrap.ts", "e2e/**/*.e2e.test.ts"],
 	"ignoreExportsUsedInFile": true,
 	"ignoreIssues": {
-		"src/jmap/**": ["exports", "types"],
-		"src/contacts/**": ["exports", "types", "files"],
-		"src/ical/**": ["exports", "types"]
+		"src/jmap/index.ts": ["exports", "types"],
+		"src/jmap/email.ts": ["exports"],
+		"src/contacts/index.ts": ["exports", "types"]
 	}
 }
