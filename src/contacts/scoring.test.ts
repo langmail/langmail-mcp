@@ -111,7 +111,7 @@ describe("bestAddress", () => {
 	const robin = card(
 		"robin",
 		{
-			"robin.private@gmail.com": entry({
+			"example-robin@gmail.com": entry({
 				confidence: "weak",
 				lastSeen: "2026-07-22T00:00:00Z",
 			}),
@@ -122,7 +122,7 @@ describe("bestAddress", () => {
 		},
 		{
 			e0: { address: "robin@northwind.example", contexts: { work: true } },
-			e1: { address: "robin.private@gmail.com", contexts: { private: true } },
+			e1: { address: "example-robin@gmail.com", contexts: { private: true } },
 		}
 	);
 
@@ -132,7 +132,7 @@ describe("bestAddress", () => {
 
 	test("a private bias prefers the private address without filtering the person", () => {
 		const best = bestAddress(robin, "private");
-		expect(best?.address).toBe("robin.private@gmail.com");
+		expect(best?.address).toBe("example-robin@gmail.com");
 		expect(best?.confidence).toBe("weak");
 	});
 
@@ -146,14 +146,14 @@ describe("bestAddress", () => {
 			emails: {
 				e0: { address: "robin@northwind.example", contexts: { work: true } },
 				e1: {
-					address: "robin.private@gmail.com",
+					address: "example-robin@gmail.com",
 					contexts: { private: true },
 					pref: 1,
 				},
 			},
 		};
 		expect(bestAddress(pinned, "any")).toMatchObject({
-			address: "robin.private@gmail.com",
+			address: "example-robin@gmail.com",
 			preferred: true,
 		});
 		expect(bestAddress(pinned, "work")?.address).toBe(

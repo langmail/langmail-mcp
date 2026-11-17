@@ -463,7 +463,7 @@ describe("createCalendarEvent", () => {
 		const result = await createCalendarEvent(deps, {
 			args: args({
 				attendees: ["robin@northwind.example"],
-				title: "Lunch — Dominik & Robin",
+				title: "Lunch — Kim & Robin",
 			}),
 			token: "tok",
 		});

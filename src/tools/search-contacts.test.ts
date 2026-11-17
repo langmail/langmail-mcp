@@ -31,14 +31,14 @@ const robinCard = (over: Partial<ContactCard> = {}): ContactCard =>
 		addressBookIds: { collected: true },
 		emails: {
 			e0: { address: "robin@northwind.example", contexts: { work: true } },
-			e1: { address: "robin.private@gmail.com", contexts: { private: true } },
+			e1: { address: "example-robin@gmail.com", contexts: { private: true } },
 		},
 		id: "card-robin",
 		name: { full: "Robin Fairweather" },
 		notes: {
 			[COLLECTED_NOTE_KEY]: collectedNoteEntry({
 				addresses: {
-					"robin.private@gmail.com": {
+					"example-robin@gmail.com": {
 						confidence: "weak",
 						count: 1,
 						firstSeen: daysAgo(200),
@@ -71,7 +71,7 @@ const robinCard = (over: Partial<ContactCard> = {}): ContactCard =>
 						recordId: "mail-2",
 					},
 				],
-				relays: ["messaging-digest-noreply@linkedin.com"],
+				relays: ["example-messaging-digest-noreply@linkedin.com"],
 			}),
 		},
 		...over,
@@ -125,9 +125,7 @@ const makeDeps = (
 			}))
 		),
 	fetchEventTitles: (_token, uids) =>
-		Promise.resolve(
-			new Map(uids.map((uid) => [uid, "Lunch — Dominik & Robin"]))
-		),
+		Promise.resolve(new Map(uids.map((uid) => [uid, "Lunch — Kim & Robin"]))),
 	resolveAccountId: () => Promise.resolve("acct"),
 	resolveMailAccountId: () => Promise.resolve("acct"),
 	...over,
@@ -149,7 +147,7 @@ describe("searchContacts — concise", () => {
 		expect(text).toContain(
 			"address_confidence: confirmed | relationship: active"
 		);
-		expect(text).toContain("4 days ago — calendar: Lunch — Dominik & Robin");
+		expect(text).toContain("4 days ago — calendar: Lunch — Kim & Robin");
 		expect(text).toContain(
 			"24 days ago — email received: Northwind onboarding"
 		);
@@ -166,7 +164,7 @@ describe("searchContacts — concise", () => {
 			token: "tok",
 		});
 		const text = result.content[0]?.text ?? "";
-		expect(text).toContain("best_address: robin.private@gmail.com (private)");
+		expect(text).toContain("best_address: example-robin@gmail.com (private)");
 		expect(text).toContain("address_confidence: weak");
 	});
 
@@ -175,7 +173,7 @@ describe("searchContacts — concise", () => {
 			emails: {
 				e0: { address: "robin@northwind.example", contexts: { work: true } },
 				e1: {
-					address: "robin.private@gmail.com",
+					address: "example-robin@gmail.com",
 					contexts: { private: true },
 					pref: 1,
 				},
@@ -184,7 +182,7 @@ describe("searchContacts — concise", () => {
 		const any =
 			(await searchContacts(makeDeps([pinned]), { args: args(), token: "tok" }))
 				.content[0]?.text ?? "";
-		expect(any).toContain("best_address: robin.private@gmail.com (private)");
+		expect(any).toContain("best_address: example-robin@gmail.com (private)");
 		const work = await searchContacts(makeDeps([pinned]), {
 			args: args({ context: "work" }),
 			token: "tok",
@@ -197,7 +195,7 @@ describe("searchContacts — concise", () => {
 			token: "tok",
 		});
 		expect(detailed.content[0]?.text).toContain(
-			"- robin.private@gmail.com (private, weak, preferred,"
+			"- example-robin@gmail.com (private, weak, preferred,"
 		);
 	});
 
@@ -290,7 +288,7 @@ describe("searchContacts — concise", () => {
 		// The collected history, now on the personal card.
 		expect(text).toContain("mail-1");
 		expect(text).toContain("mail-3");
-		expect(text).toContain("robin.private@gmail.com");
+		expect(text).toContain("example-robin@gmail.com");
 	});
 
 	test("an old Collected card without a marker prints source: derived", async () => {
@@ -424,11 +422,11 @@ describe("searchContacts — detailed", () => {
 		});
 		const text = result.content[0]?.text ?? "";
 		expect(text).toContain("robin@northwind.example (work, confirmed");
-		expect(text).toContain("robin.private@gmail.com (private, weak");
+		expect(text).toContain("example-robin@gmail.com (private, weak");
 		expect(text).toContain("[event uid: evt-lunch@example.com]");
 		expect(text).toContain("[email id: mail-1]");
 		expect(text).toContain(
-			"excluded_relays: messaging-digest-noreply@linkedin.com"
+			"excluded_relays: example-messaging-digest-noreply@linkedin.com"
 		);
 	});
 

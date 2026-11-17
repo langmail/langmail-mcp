@@ -80,10 +80,10 @@ const unvibeStored = (over: Partial<CalendarObject> = {}): CalendarObject => ({
 	data: buildInvite({
 		attendees: [
 			"me@example.com",
-			"me@gmail.com",
+			"example-me@gmail.com",
 			"avery@example.org",
-			"synthetic.guest1@gmail.com",
-			"synthetic.guest2@gmail.com",
+			"example-guest1@gmail.com",
+			"example-guest2@gmail.com",
 		],
 		description: "Weekly unvibe",
 		end: new Date("2026-06-16T10:30:00Z"),
@@ -1473,7 +1473,9 @@ describe("mergeAttendees", () => {
 	});
 
 	test("matches removals case-insensitively", () => {
-		expect(mergeAttendees(["Me@Gmail.com"], [], ["me@gmail.com"])).toEqual([]);
+		expect(
+			mergeAttendees(["Example-Me@Gmail.com"], [], ["example-me@gmail.com"])
+		).toEqual([]);
 	});
 
 	test("is a no-op when removing an absent address or adding a present one", () => {
@@ -1491,7 +1493,7 @@ describe("updateCalendarEvent — attendee delta", () => {
 		const result = await updateCalendarEvent(
 			makeDeps(account({ organizer: "me@example.com" }), unvibeStored(), cap),
 			{
-				args: { removedAttendees: ["me@gmail.com"], uid: UID },
+				args: { removedAttendees: ["example-me@gmail.com"], uid: UID },
 				token: "tok",
 			}
 		);
@@ -1501,9 +1503,9 @@ describe("updateCalendarEvent — attendee delta", () => {
 		// The four intended attendees survive; the gmail duplicate is gone.
 		expect(ical).toContain("mailto:me@example.com");
 		expect(ical).toContain("mailto:avery@example.org");
-		expect(ical).toContain("mailto:synthetic.guest1@gmail.com");
-		expect(ical).toContain("mailto:synthetic.guest2@gmail.com");
-		expect(ical).not.toContain("mailto:me@gmail.com");
+		expect(ical).toContain("mailto:example-guest1@gmail.com");
+		expect(ical).toContain("mailto:example-guest2@gmail.com");
+		expect(ical).not.toContain("mailto:example-me@gmail.com");
 		// Recurrence, title, time, location, description all preserved — not collapsed
 		// or dropped by omission.
 		expect(ical).toContain("RRULE:FREQ=WEEKLY;BYDAY=TU");
@@ -1574,7 +1576,7 @@ describe("updateCalendarEvent — attendee delta", () => {
 			makeDeps(account({ organizer: "me@example.com" }), unvibeStored(), cap),
 			{
 				args: {
-					removedAttendees: ["me@gmail.com"],
+					removedAttendees: ["example-me@gmail.com"],
 					title: "unvibe (renamed)",
 					uid: UID,
 				},
@@ -1593,7 +1595,7 @@ describe("updateCalendarEvent — attendee delta", () => {
 			{
 				args: {
 					attendees: ["a@x.example"],
-					removedAttendees: ["me@gmail.com"],
+					removedAttendees: ["example-me@gmail.com"],
 					uid: UID,
 				},
 				token: "tok",
@@ -1610,7 +1612,7 @@ describe("updateCalendarEvent — attendee delta", () => {
 			{
 				args: {
 					recurrenceId: "2026-06-23T10:00:00Z",
-					removedAttendees: ["me@gmail.com"],
+					removedAttendees: ["example-me@gmail.com"],
 					uid: UID,
 				},
 				token: "tok",
@@ -1669,7 +1671,11 @@ describe("updateCalendarEvent — notify", () => {
 		const result = await updateCalendarEvent(
 			makeDeps(account({ organizer: "me@example.com" }), unvibeStored(), cap),
 			{
-				args: { notify: "none", removedAttendees: ["me@gmail.com"], uid: UID },
+				args: {
+					notify: "none",
+					removedAttendees: ["example-me@gmail.com"],
+					uid: UID,
+				},
 				token: "tok",
 			}
 		);

@@ -120,7 +120,7 @@ describe("foldObservations — creation", () => {
 			[
 				obs({ address: "robin@northwind.example", recordId: "m9" }),
 				obs({
-					address: "robin.private@gmail.com",
+					address: "example-robin@gmail.com",
 					name: "robin  fairweather",
 					recordId: "m9",
 				}),
@@ -133,11 +133,11 @@ describe("foldObservations — creation", () => {
 			(patch.emails ?? {}) as Record<string, { address: string }>
 		);
 		expect(emails.map((e) => e.address).sort()).toEqual([
-			"robin.private@gmail.com",
+			"example-robin@gmail.com",
 			"robin@northwind.example",
 		]);
 		const ext = readExt(patch);
-		expect(ext.addresses["robin.private@gmail.com"]?.confidence).toBe("strong");
+		expect(ext.addresses["example-robin@gmail.com"]?.confidence).toBe("strong");
 	});
 
 	test("a name match without co-occurrence does NOT join — separate card instead", () => {
@@ -145,7 +145,7 @@ describe("foldObservations — creation", () => {
 			{ cards: [existingCard()], collectedBookId: BOOK },
 			[
 				obs({
-					address: "robin.private@gmail.com",
+					address: "example-robin@gmail.com",
 					name: "Robin Fairweather",
 					recordId: "m-other",
 				}),
@@ -318,20 +318,27 @@ describe("foldObservations — updates and ownership", () => {
 			[obs({ recordId: "m-digest" })],
 			[
 				{
-					address: "messaging-digest-noreply@linkedin.com",
+					address: "example-messaging-digest-noreply@linkedin.com",
 					recordId: "m-digest",
 				},
 			]
 		);
 		const ext = readExt(updates[0]?.patch ?? {});
-		expect(ext.relays).toEqual(["messaging-digest-noreply@linkedin.com"]);
+		expect(ext.relays).toEqual([
+			"example-messaging-digest-noreply@linkedin.com",
+		]);
 	});
 
 	test("a relay with no co-occurring person touches nothing", () => {
 		const { creates, updates } = foldObservations(
 			{ cards: [existingCard()], collectedBookId: BOOK },
 			[],
-			[{ address: "messaging-digest-noreply@linkedin.com", recordId: "m-solo" }]
+			[
+				{
+					address: "example-messaging-digest-noreply@linkedin.com",
+					recordId: "m-solo",
+				},
+			]
 		);
 		expect(creates).toEqual([]);
 		expect(updates).toEqual([]);
@@ -434,7 +441,7 @@ describe("foldObservations — a personal card duplicating a Collected one", () 
 							recordId: "c2",
 						},
 					],
-					relays: ["messaging-digest-noreply@linkedin.com"],
+					relays: ["example-messaging-digest-noreply@linkedin.com"],
 					source: "derived",
 				}),
 			},
@@ -522,7 +529,7 @@ describe("foldObservations — a personal card duplicating a Collected one", () 
 		]);
 		expect(ext.relays).toEqual([
 			"notifications@relay.example",
-			"messaging-digest-noreply@linkedin.com",
+			"example-messaging-digest-noreply@linkedin.com",
 		]);
 		// The personal card carried no marker: still imported, never derived.
 		expect(ext.source).toBeUndefined();

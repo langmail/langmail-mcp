@@ -5,7 +5,7 @@ import {
 	observationsFromEvent,
 } from "./observations.ts";
 
-const SELF = new Set(["me@example.com", "me.linked@gmail.com"]);
+const SELF = new Set(["me@example.com", "example-me-linked@gmail.com"]);
 
 describe("observationsFromEmail", () => {
 	test("grades an outgoing mail: To confirmed, CC weak, self excluded", () => {
@@ -63,7 +63,7 @@ describe("observationsFromEmail", () => {
 	test("detects outgoing via a linked Gmail alias sender", () => {
 		const { observations } = observationsFromEmail(
 			{
-				from: [{ email: "Me.Linked@gmail.com" }],
+				from: [{ email: "Example-Me-Linked@gmail.com" }],
 				id: "m3",
 				receivedAt: "2026-07-20T12:00:00Z",
 				to: [{ email: "robin@northwind.example" }],
@@ -117,7 +117,10 @@ describe("observationsFromEmail", () => {
 		const { observations, relays } = observationsFromEmail(
 			{
 				from: [
-					{ email: "messaging-digest-noreply@linkedin.com", name: "LinkedIn" },
+					{
+						email: "example-messaging-digest-noreply@linkedin.com",
+						name: "LinkedIn",
+					},
 				],
 				id: "m5",
 				receivedAt: "2026-07-20T12:00:00Z",
@@ -127,7 +130,10 @@ describe("observationsFromEmail", () => {
 		);
 		expect(observations).toEqual([]);
 		expect(relays).toEqual([
-			{ address: "messaging-digest-noreply@linkedin.com", recordId: "m5" },
+			{
+				address: "example-messaging-digest-noreply@linkedin.com",
+				recordId: "m5",
+			},
 		]);
 	});
 

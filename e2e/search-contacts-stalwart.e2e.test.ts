@@ -92,7 +92,7 @@ live(
 					{
 						cc: [
 							{
-								email: "messaging-digest-noreply@linkedin.com",
+								email: "example-messaging-digest-noreply@linkedin.com",
 								name: "LinkedIn",
 							},
 						],
@@ -129,7 +129,7 @@ live(
 				raw: [
 					"From: Robin Fairweather <robin@northwind.example>",
 					`To: ${address}`,
-					"Cc: LinkedIn <messaging-digest-noreply@linkedin.com>",
+					"Cc: LinkedIn <example-messaging-digest-noreply@linkedin.com>",
 					"Subject: Northwind onboarding",
 					`Message-ID: <1-${run}@mcp-contacts-e2e>`,
 					"Date: Tue, 21 Jul 2026 10:00:00 +0000",
@@ -204,7 +204,9 @@ live(
 				"confirmed"
 			);
 			expect(ext.addresses["robin@northwind.example"]?.count).toBe(2);
-			expect(ext.relays).toEqual(["messaging-digest-noreply@linkedin.com"]);
+			expect(ext.relays).toEqual([
+				"example-messaging-digest-noreply@linkedin.com",
+			]);
 		});
 
 		test("a pre-existing card WITHOUT notes still accumulates collection data in place", async () => {
@@ -297,7 +299,7 @@ live(
 			expect(text).toContain(`[event uid: ${eventUid}]`);
 			expect(text).toContain(`[email id: ${emailId}]`);
 			expect(text).toContain(
-				"excluded_relays: messaging-digest-noreply@linkedin.com"
+				"excluded_relays: example-messaging-digest-noreply@linkedin.com"
 			);
 		});
 

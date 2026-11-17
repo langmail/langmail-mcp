@@ -176,21 +176,21 @@ describe("updateContact — deltas", () => {
 		await updateContact(book.deps, {
 			args: args({
 				addedEmails: [
-					{ address: "robin.private@gmail.com", context: "private" },
+					{ address: "example-robin@gmail.com", context: "private" },
 				],
 			}),
 			token: "tok",
 		});
 		expect(
 			Object.values(stored(book).emails ?? {}).map((e) => e.address)
-		).toEqual(["robin@northwind.example", "robin.private@gmail.com"]);
+		).toEqual(["robin@northwind.example", "example-robin@gmail.com"]);
 		await updateContact(book.deps, {
 			args: args({ removedEmails: ["Robin@Northwind.example"] }),
 			token: "tok",
 		});
 		expect(
 			Object.values(stored(book).emails ?? {}).map((e) => e.address)
-		).toEqual(["robin.private@gmail.com"]);
+		).toEqual(["example-robin@gmail.com"]);
 	});
 
 	test("re-adding an address already on the card is a no-op, not a duplicate", async () => {
