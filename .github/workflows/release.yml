@@ -65,8 +65,34 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  e2e:
+    name: E2E (Stalwart)
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: "npm"
+      - run: npm ci
+      - name: Start and bootstrap Stalwart at the pinned version
+        run: |
+          echo "Stalwart $(cat .stalwart-version)"
+          scripts/stalwart/up.sh
+      - name: Run e2e suites
+        run: npm run test:e2e
+        env:
+          STALWART_ADMIN_URL: http://127.0.0.1:9090
+          # base64("admin:devpassword"), the throwaway login up.sh sets; not a secret.
+          STALWART_ADMIN_AUTHORIZATION: "Basic YWRtaW46ZGV2cGFzc3dvcmQ="
+      - name: Stalwart logs
+        if: failure()
+        run: docker logs langmail-mcp-stalwart
+
   release:
-    needs: [test, knip]
+    needs: [test, knip, e2e]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:

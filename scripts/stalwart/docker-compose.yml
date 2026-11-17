@@ -1,0 +1,26 @@
+# Throwaway Stalwart for the e2e suites (`npm run test:e2e`). Use it through
+# `scripts/stalwart/up.sh` and `scripts/stalwart/down.sh`, which read the
+# version from `.stalwart-version` and run the bootstrap.
+#
+# Stalwart's HTTP listener (JMAP, CalDAV, CardDAV, admin) is container port
+# 8080, published on the host's loopback as 9090. STALWART_PUBLIC_URL makes the
+# JMAP session advertise absolute URLs under that host address.
+#
+# STALWART_RECOVERY_ADMIN pins the admin login, so the suites can authenticate
+# as `admin:devpassword` without reading it from the log. It is a test
+# credential for a server that only listens on loopback.
+#
+# The image declares /etc/stalwart and /var/lib/stalwart as volumes. Nothing is
+# mounted over them here, so each container gets fresh anonymous volumes and
+# `docker compose down -v` deletes them: every `up` starts from an empty server.
+name: langmail-mcp-stalwart
+services:
+  stalwart:
+    image: "stalwartlabs/stalwart:v${STALWART_VERSION:?set STALWART_VERSION to the content of .stalwart-version, or run scripts/stalwart/up.sh}"
+    container_name: langmail-mcp-stalwart
+    ports:
+      - "127.0.0.1:9090:8080"
+    environment:
+      STALWART_RECOVERY_ADMIN: "admin:devpassword"
+      STALWART_HOSTNAME: "127.0.0.1"
+      STALWART_PUBLIC_URL: "http://127.0.0.1:9090"

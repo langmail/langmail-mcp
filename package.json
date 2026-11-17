@@ -46,6 +46,8 @@
 		"knip": "knip",
 		"prepare": "lefthook install",
 		"semantic-release": "semantic-release",
+		"stalwart:down": "scripts/stalwart/down.sh",
+		"stalwart:up": "scripts/stalwart/up.sh",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage",
 		"test:e2e": "vitest run --config vitest.e2e.config.ts",
