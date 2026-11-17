@@ -101,6 +101,7 @@ describe("attachment download", () => {
 		);
 		expect(res.headers.get("cache-control")).toBe("no-store");
 		expect(res.headers.get("content-type")).toBe("application/pdf");
+		expect(res.headers.get("x-content-type-options")).toBe("nosniff");
 		expect(res.headers.get("content-length")).toBe("5");
 	});
 

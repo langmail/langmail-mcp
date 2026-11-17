@@ -335,10 +335,14 @@ const expectNoRemoteImages = async (
 	expect(html).not.toMatch(CSS_URL_RE);
 	expect(toolText(result)).toContain(REMOTE_IMAGES_OFF_NOTE);
 
-	// The only URLs in the whole result: the inline image's link and the
-	// link the user may click.
+	// The only URLs in the whole result: the inline image's link, the link
+	// the user may click, and this server's own origin, which the email
+	// document's CSP names as the one place it may load an image from.
 	const urls = everyUrl(result);
-	expect(urls.filter((url) => url !== ORDER_LINK)).toEqual(imageSources(html));
+	expect(urls.filter((url) => url !== ORDER_LINK)).toEqual([
+		...imageSources(html),
+		origin,
+	]);
 	// Load everything the document would load. (The order link is not a
 	// load: the viewer hands a click to the host.)
 	for (const src of imageSources(html)) {

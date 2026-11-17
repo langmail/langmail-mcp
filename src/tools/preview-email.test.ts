@@ -1,7 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
 import {
 	EMAIL_VIEWER_RESOURCE_URI,
+	emailDocument,
 	PREVIEW_META_KEY,
+	type PreviewPayload,
 } from "../email-render/meta.ts";
 import type { EmailDetailRecord } from "../jmap/index.ts";
 import {
@@ -176,6 +178,64 @@ describe("previewEmail", () => {
 			"Seats: A1 &amp; A2 &lt;balcony&gt;"
 		);
 		expect(deps.downloadHtmlPart).not.toHaveBeenCalled();
+	});
+
+	// What the viewer does with a result: wrap the payload in the document
+	// the nested frame shows.
+	const documentOf = (out: object): string => {
+		const payload = (
+			(out as { _meta?: unknown })._meta as Record<string, PreviewPayload>
+		)[PREVIEW_META_KEY] as PreviewPayload;
+		return emailDocument(payload.html, payload.imageOrigin);
+	};
+	const CSP_WITH_LINKS = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: ${PUBLIC}; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">`;
+	const CSS =
+		"<style>@import url(https://tracker.example.com/a.css); td{background:url(https://tracker.example.com/b.png)}</style>";
+
+	test("remote images off: the document's CSP allows images from this server and data: only, and nothing else", async () => {
+		const deps = { ...makeDeps(ticketEmail, CSS + HTML) };
+		deps.mintImageToken = undefined;
+		const out = await previewEmail(deps, { args: { id: "e1" }, token: "tok" });
+		const doc = documentOf(out);
+		expect(doc).toContain(CSP_WITH_LINKS);
+		// The sender's CSS is kept for layout; the policy is what stops its URLs.
+		expect(doc).toContain("tracker.example.com/a.css");
+		expect(doc).toContain(`<img src="${PUBLIC}/attachments/att-tok"`);
+		expect(doc).not.toContain("cdn.cinema.example.com");
+	});
+
+	test("remote images on: the same CSP, because the image proxy is on this server's origin", async () => {
+		const deps = makeDeps(ticketEmail, CSS + HTML);
+		const out = await previewEmail(deps, { args: { id: "e1" }, token: "tok" });
+		const doc = documentOf(out);
+		expect(doc).toContain(CSP_WITH_LINKS);
+		expect(doc).toContain(`<img src="${PUBLIC}/image-proxy/img-tok"`);
+		// The sender's host is in no directive.
+		expect(doc.split("</head>")[0]).not.toContain("cinema.example.com");
+	});
+
+	test("names the origin of a public URL that has a path", async () => {
+		const deps = makeDeps(ticketEmail, HTML);
+		deps.publicUrl = vi.fn(() => Promise.resolve(`${PUBLIC}/mcp-base`));
+		const out = await previewEmail(deps, { args: { id: "e1" }, token: "tok" });
+		expect(documentOf(out)).toContain(CSP_WITH_LINKS);
+	});
+
+	test("a text rendering has no image origin: its CSP allows data: images only", async () => {
+		const email: EmailDetailRecord = {
+			...ticketEmail,
+			attachments: [],
+			bodyValues: { "1": { value: "plain" } },
+			htmlBody: [],
+			textBody: [{ partId: "1", type: "text/plain" }],
+		};
+		const out = await previewEmail(makeDeps(email, ""), {
+			args: { id: "e1" },
+			token: "tok",
+		});
+		expect(documentOf(out)).toContain(
+			`content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"`
+		);
 	});
 
 	test("errors when the email does not exist", async () => {

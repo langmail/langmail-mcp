@@ -70,6 +70,10 @@ export const createAttachmentDownload = (
 			"cache-control": "no-store",
 			"content-disposition": contentDisposition(ticket.name),
 			"content-type": upstream.headers.get("content-type") ?? ticket.type,
+			// The type is the sender's claim. A browser that opens the link
+			// must take it as given and not guess a more dangerous one from
+			// the bytes.
+			"x-content-type-options": "nosniff",
 		});
 		const contentLength = upstream.headers.get("content-length");
 		if (contentLength) {

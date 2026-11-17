@@ -209,7 +209,15 @@ export const previewEmail = async (
 	};
 
 	return {
-		_meta: { [PREVIEW_META_KEY]: { html, renderSource } },
+		_meta: {
+			[PREVIEW_META_KEY]: {
+				html,
+				// The one origin the email document may load images from: where
+				// the links minted above live. A text rendering has none.
+				...(publicUrl ? { imageOrigin: new URL(publicUrl).origin } : {}),
+				renderSource,
+			},
+		},
 		content: [
 			{
 				text:

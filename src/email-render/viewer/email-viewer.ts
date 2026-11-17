@@ -84,7 +84,7 @@ const renderBody = (payload: PreviewPayload): void => {
 		// reports the resulting shell size to the host.
 		frame.style.height = `${Math.min(doc.documentElement.scrollHeight + 24, 4000)}px`;
 	};
-	frame.srcdoc = emailDocument(payload.html);
+	frame.srcdoc = emailDocument(payload.html, payload.imageOrigin);
 };
 
 const app = new App(

@@ -97,9 +97,10 @@ export const sanitizeEmailHtml = (
 		],
 		// <style> is required for real-world email layouts and is the one allowed
 		// tag sanitize-html flags. The residual risk is CSS-initiated requests
-		// (url(...)), and those are contained a layer down: the viewer renders
-		// this HTML in a script-less sandboxed iframe whose host-enforced CSP
-		// only permits the origins the template declares.
+		// (url(...), @import, @font-face), and those are contained a layer down:
+		// the viewer renders this HTML in a script-less sandboxed iframe whose
+		// document carries its own CSP (`emailDocumentCsp` in meta.ts), on top
+		// of the one the host enforces for the template.
 		allowVulnerableTags: true,
 		transformTags: {
 			img: (tagName, attribs) => {
