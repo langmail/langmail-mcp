@@ -39,6 +39,10 @@ import {
 	registerSearchEmails,
 } from "../tools/search-emails.ts";
 import { registerTrashEmails } from "../tools/trash-emails.ts";
+import {
+	makeLiveDeps as makeUnsubscribeDeps,
+	registerUnsubscribeFromList,
+} from "../tools/unsubscribe-from-list.ts";
 import { registerUpdateMailRule } from "../tools/update-mail-rule.ts";
 import { instrumentToolLogging } from "./tool-logging.ts";
 
@@ -180,6 +184,14 @@ export const createServer = (
 	registerMoveEmails(server, fileEmailsDeps, runtime.getToken);
 	registerTrashEmails(server, fileEmailsDeps, runtime.getToken);
 	registerMarkEmails(server, fileEmailsDeps, runtime.getToken);
+	// The one-click POST goes to a host the sender chose: only with the opt-in.
+	registerUnsubscribeFromList(
+		server,
+		makeUnsubscribeDeps(runtime.jmapLive, {
+			allowOneClickPost: config.allowUnsubscribePost,
+		}),
+		runtime.getToken
+	);
 
 	const mailRuleDeps: MailRuleToolDeps = {
 		applier: makeMailRulesApplier(makeLiveApplyIo(runtime.jmapLive)),

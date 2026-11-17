@@ -184,6 +184,25 @@ describe("createServer", () => {
 		await client.close();
 	});
 
+	test("unsubscribe_from_list sends the one-click request only when the configuration allows it", async () => {
+		const describeFor = async (allowUnsubscribePost: boolean) => {
+			const cfg: Config = { ...config, allowUnsubscribePost };
+			const live = fakeLive(() => Promise.resolve(session("user@example.com")));
+			const client = await connect(createServer(cfg, createRuntime(cfg, live)));
+			const listed = await client.request("tools/list");
+			await client.close();
+			return (listed.tools as { description: string; name: string }[]).find(
+				(tool) => tool.name === "unsubscribe_from_list"
+			)?.description;
+		};
+		expect(await describeFor(false)).toContain(
+			"LANGMAIL_MCP_ALLOW_UNSUBSCRIBE_POST on; it is off on this server"
+		);
+		const on = await describeFor(true);
+		expect(on).toContain("sends the request itself. It never sends mail");
+		expect(on).not.toContain("LANGMAIL_MCP_ALLOW_UNSUBSCRIBE_POST");
+	});
+
 	test("hands a tool the credential and the principal from the JMAP session", async () => {
 		await quietly(async () => {
 			const live = fakeLive(() => Promise.resolve(session("user@example.com")));
