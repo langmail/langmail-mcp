@@ -301,6 +301,103 @@ describe("createRuntime", () => {
 		);
 	});
 
+	test("mints file links under the HTTP transport's public URL, and holds one ticket store of each kind", async () => {
+		const http: Config = {
+			...config,
+			transport: {
+				authToken: "a-long-random-secret",
+				host: "127.0.0.1",
+				kind: "http",
+				port: 8080,
+				publicUrl: "https://mcp.example.com",
+			},
+		};
+		const runtime = createRuntime(http, undefined, () =>
+			Promise.reject(new Error("the HTTP transport starts no link listener"))
+		);
+		expect(await runtime.publicUrl()).toBe("https://mcp.example.com");
+		const ticket = runtime.tickets.mint({
+			accountId: "acct-1",
+			authorization: CREDENTIAL,
+			blobId: "b1",
+			name: "a.pdf",
+			type: "application/pdf",
+		});
+		expect(runtime.tickets.lookup(ticket)?.blobId).toBe("b1");
+		const upload = runtime.uploadTickets.mint({
+			accountId: "acct-1",
+			authorization: CREDENTIAL,
+			filename: "a.pdf",
+			type: "application/pdf",
+		});
+		expect(runtime.uploadTickets.take(upload.token)?.filename).toBe("a.pdf");
+		// A second runtime shares nothing with the first.
+		expect(createRuntime(http).tickets.lookup(ticket)).toBeNull();
+	});
+
+	test("over stdio, nothing serves links until a tool mints one; then one listener serves them all", async () => {
+		const started: (number | undefined)[] = [];
+		const live = fakeLive(() => Promise.resolve(session("user@example.com")));
+		const cfg: Config = {
+			...config,
+			transport: { kind: "stdio", linkPort: 4711 },
+		};
+		const runtime = createRuntime(cfg, live, (given, port) => {
+			expect(given).toBe(runtime);
+			started.push(port);
+			return Promise.resolve("http://127.0.0.1:4711");
+		});
+		const client = await connect(createServer(cfg, runtime));
+		// Building the server, the handshake and listing the tools start nothing.
+		await client.request("tools/list");
+		expect(started).toEqual([]);
+
+		const upload = () =>
+			client.request("tools/call", {
+				arguments: { files: [{ filename: "scan.pdf" }] },
+				name: "upload_attachments",
+			});
+		// Two tools minting at once share the one start.
+		const [first, second] = await Promise.all([upload(), upload()]);
+		expect(textOf(first)).toContain(
+			"'http://127.0.0.1:4711/attachments/uploads/"
+		);
+		expect(textOf(second)).toContain(
+			"'http://127.0.0.1:4711/attachments/uploads/"
+		);
+		await upload();
+		expect(started).toEqual([4711]);
+		await client.close();
+	});
+
+	test("over stdio, a link listener that cannot start fails that tool call, and the next one tries again", async () => {
+		await quietly(async () => {
+			let attempts = 0;
+			const live = fakeLive(() => Promise.resolve(session("user@example.com")));
+			const runtime = createRuntime(config, live, () => {
+				attempts += 1;
+				return attempts === 1
+					? Promise.reject(new Error("cannot listen on 127.0.0.1:0: denied"))
+					: Promise.resolve("http://127.0.0.1:5000");
+			});
+			const client = await connect(createServer(config, runtime));
+			const upload = () =>
+				client.request("tools/call", {
+					arguments: { files: [{ filename: "scan.pdf" }] },
+					name: "upload_attachments",
+				});
+			const failed = await upload();
+			expect(failed.isError).toBe(true);
+			expect(textOf(failed)).toContain("cannot listen on 127.0.0.1:0");
+			// No ticket is left behind without a link to it.
+			expect(textOf(await upload())).toContain(
+				"'http://127.0.0.1:5000/attachments/uploads/"
+			);
+			expect(attempts).toBe(2);
+			await client.close();
+		});
+	});
+
 	test("exposes the Stalwart URL and one session cache", () => {
 		const live = fakeLive(() => Promise.resolve(session("user@example.com")));
 		const runtime = createRuntime(config, live);

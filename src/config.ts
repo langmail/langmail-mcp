@@ -25,6 +25,9 @@ const LOOPBACK_HOSTS: ReadonlySet<string> = new Set([
 
 export interface StdioTransportConfig {
 	kind: "stdio";
+	// The loopback port file links (attachment downloads and uploads) are
+	// served on, from `MCP_PORT`. Unset: a free port the system picks.
+	linkPort?: number;
 }
 
 export interface HttpTransportConfig {
@@ -316,7 +319,10 @@ export const loadConfig = (
 	const transport: Config["transport"] =
 		readTransportKind(env, argv, problems) === "http"
 			? readHttpTransport(env, problems, warnings)
-			: { kind: "stdio" };
+			: {
+					kind: "stdio",
+					...(env.MCP_PORT === undefined ? {} : { linkPort: env.MCP_PORT }),
+				};
 
 	if (problems.length > 0) {
 		throw new ConfigError(problems);

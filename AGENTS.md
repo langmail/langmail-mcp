@@ -17,6 +17,7 @@ MCP server that gives an agent Langmail's email, calendar and contacts tools aga
 - `src/tools/<tool>.ts` — one file per MCP tool, with `<tool>.test.ts` next to it.
 - `src/mcp/handler.ts` — builds the server: `createRuntime` (JMAP session cache, credential, principal) and `createServer`, where each tool is registered with one line. `src/mcp/tool-logging.ts` logs one line per tool call.
 - `src/http/` — the HTTP listener: `routes.ts` (a listener is a list of `Route`s; `createFetchHandler` dispatches to them and logs), `listener.ts` (serves that handler over `node:http`), `bearer.ts` (the `MCP_AUTH_TOKEN` check), `guard.ts` (Origin and Host checks). `src/mcp/http.ts` holds the `/mcp` routes.
+- `src/attachments/` — the tickets behind file links and the routes that redeem them; `src/mcp/links.ts` — which routes those are, and the loopback listener a stdio server starts for them.
 - `src/observability/errors.ts` — `describeError`: what an error log line may carry (no addresses, no credentials).
 - `src/jmap/`, `src/contacts/`, `src/ical/` — JMAP client, contact and iCalendar helpers.
 - `src/caldav/`, `src/rules/`, `src/drafts/`, `src/attachments/`, `src/email-render/` — what the tools build on.
@@ -44,14 +45,22 @@ Project invariants:
 - A credential never appears in a log line, an error message or a tool result. `describeError` redacts `Bearer …` and `Basic …` values.
 
 ## Transports
-- stdio is the default: one `McpServer` for the life of the process (`src/index.ts`).
+- stdio is the default: one `McpServer` for the life of the process (`src/index.ts`). It listens on no port until a tool hands out a file link (see "File links").
 - `--http` or `MCP_TRANSPORT=http` serves Streamable HTTP at `POST /mcp` on `MCP_HOST:MCP_PORT` (default `127.0.0.1:8080`). It is stateless: every request gets a fresh `McpServer` and transport (the SDK's `legacyStatelessFallback`), all sharing one runtime. `GET` and `DELETE` on `/mcp` answer 405.
 - Every `/mcp` request must carry `Authorization: Bearer <MCP_AUTH_TOKEN>`. The token is required (at least 16 characters) and compared in constant time. Anything else gets `401` with `WWW-Authenticate: Bearer` and the body `{"error":"unauthorized"}`, before the request body is read. A 401 must never say anything about the server, its tools or the mail server.
-- There is no OAuth and there are no `/.well-known/` documents. `GET /healthz` answers `ok` without the token and says nothing else. Every other path is a 404.
+- There is no OAuth and there are no `/.well-known/` documents. `GET /healthz` answers `ok` without the token and says nothing else. The file-link routes under `/attachments/` take a ticket instead of the token (see "File links"). Every other path is a 404.
 - `guard.ts` refuses (403) a request whose `Origin` is not the listener's own address, and, when bound to loopback, one whose `Host` is not a loopback name or the public URL's. No CORS headers are sent anywhere.
 - The server speaks plain HTTP. Binding a non-loopback `MCP_HOST` prints a warning to put a TLS-terminating reverse proxy in front.
 - To add routes to the listener, append `Route`s to the list in `serveHttp` (`src/index.ts`). A route names its `path` (a trailing slash makes it a prefix), decides for itself what it requires of the caller, and sets `logAs` only if its path is not a secret. `startHttpListener` plus `createFetchHandler` also serve a list without `/mcp`.
 - One info line per `/mcp` request (method, route name, status, duration). Never log the token, the `Authorization` header or a request path.
+
+## File links
+- `download_attachment`, `download_email` and `upload_attachments` answer with a URL, never with file content: the agent fetches it or PUTs to it with `curl`, so the bytes stay out of the conversation. Keep it that way.
+- The URL carries a ticket (32 random bytes, base64url) and the route asks for nothing else, not even `MCP_AUTH_TOKEN`: `GET /attachments/<ticket>` (valid 24 hours, any number of times) and `PUT /attachments/uploads/<ticket>` (valid 15 minutes, once, at most 25 MB). Tickets live in memory (`runtime.tickets`, `runtime.uploadTickets`), so a restart ends them. A ticket holds the Stalwart credential on the server side; it never reaches the agent.
+- A tool that mints a link asks `runtime.publicUrl()` for the base URL at that moment, never earlier. `linkRoutes(runtime)` in `src/mcp/links.ts` is the list of routes that redeem links; add a new kind of link there and both transports serve it.
+- HTTP transport: the routes are on the same listener as `/mcp`, and links are minted under `MCP_PUBLIC_URL`. A reverse proxy in front must pass `/attachments/` through and should not write those paths to its access log: the path is the credential.
+- stdio transport: the first link starts a listener for `linkRoutes` alone (`startLinkListener`): `127.0.0.1` always, on `MCP_PORT` if set and free, otherwise a port the system picks. It has no `/mcp` and no health route, runs behind the same `guard.ts`, and does not keep the process alive. A server that never hands out a link opens no port. If the listener cannot start, that tool call fails and the next one tries again.
+- Never log a ticket, a link or a file name. The routes set no `logAs`; the handlers log status and size.
 
 ## Working with the user
 - When the user asks a question, answer it before editing files or running implementation commands.

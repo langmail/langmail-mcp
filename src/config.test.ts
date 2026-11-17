@@ -185,6 +185,19 @@ describe("loadConfig", () => {
 			});
 		});
 
+		test("over stdio, MCP_PORT is the loopback port file links are served on", () => {
+			expect(loadConfig(BASIC).config.transport).not.toHaveProperty("linkPort");
+			expect(
+				loadConfig({ ...BASIC, MCP_PORT: "9000" }).config.transport
+			).toEqual({ kind: "stdio", linkPort: 9000 });
+			// The other HTTP settings stay without effect: the link listener is
+			// bound to loopback whatever MCP_HOST says.
+			expect(
+				loadConfig({ ...BASIC, MCP_HOST: "0.0.0.0", MCP_PORT: "9000" }).config
+					.transport
+			).toEqual({ kind: "stdio", linkPort: 9000 });
+		});
+
 		test("--http or MCP_TRANSPORT=http selects HTTP with its defaults", () => {
 			const expected = {
 				authToken: AUTH_TOKEN,

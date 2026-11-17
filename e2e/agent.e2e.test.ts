@@ -38,6 +38,7 @@ import {
 	canListListeningTcpPorts,
 	type HttpServer,
 	listeningTcpPorts,
+	listeningTcpSockets,
 	type RawStdioServer,
 	type ServerOptions,
 	startHttpServer,
@@ -50,6 +51,36 @@ import {
 	toolText,
 } from "./support/tool-output.ts";
 import { pollUntil } from "./support/wait.ts";
+
+// --- a message with a file ---------------------------------------------------
+
+const ATTACHMENT_TEXT = "Meter reading 4B: 10482 kWh\n";
+const ATTACHMENT_BLOB_RE = /reading\.txt — text\/plain, .* — blobId: (\S+)$/mu;
+const LINK_RE = /^(http:\/\/\S+\/attachments\/[\w-]+)$/mu;
+
+const withAttachment = (to: string): string =>
+	[
+		"From: Harbour Lettings <lettings@example.com>",
+		`To: ${to}`,
+		"Subject: Meter reading",
+		`Message-ID: <meter-${Date.now()}@mail.example.com>`,
+		"Date: Tue, 30 Jun 2026 10:00:00 +0000",
+		"MIME-Version: 1.0",
+		'Content-Type: multipart/mixed; boundary="mixed-b"',
+		"",
+		"--mixed-b",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"The reading is attached.",
+		"--mixed-b",
+		'Content-Type: text/plain; name="reading.txt"',
+		"Content-Transfer-Encoding: base64",
+		'Content-Disposition: attachment; filename="reading.txt"',
+		"",
+		Buffer.from(ATTACHMENT_TEXT).toString("base64"),
+		"--mixed-b--",
+		"",
+	].join("\r\n");
 
 // --- the mailbox ------------------------------------------------------------
 
@@ -795,9 +826,43 @@ live("an agent finds an old email on the user's own Stalwart", () => {
 
 		// Read from Linux's /proc; elsewhere there is no cheap, sure way to ask.
 		test.skipIf(!canListListeningTcpPorts)(
-			"it listens on no TCP port, where the HTTP server listens on exactly its own",
+			"it listens on no TCP port until it hands out a file link, then on one loopback port; the HTTP server listens on exactly its own",
 			async () => {
-				expect(listeningTcpPorts(server.pid)).toEqual([]);
+				// Searching, reading and listing tools have opened nothing.
+				expect(listeningTcpSockets(server.pid)).toEqual([]);
+
+				// A message with a file, and the agent's way to it.
+				const emailId = await importEmail(
+					await openMailSession(owner.authorization),
+					{ raw: withAttachment(owner.address) }
+				);
+				const blobId = (await call("get_email", { id: emailId })).text.match(
+					ATTACHMENT_BLOB_RE
+				)?.[1];
+				expect(blobId).toBeDefined();
+				// Reading about the attachment still opens nothing.
+				expect(listeningTcpSockets(server.pid)).toEqual([]);
+
+				const download = await call("download_attachment", { blobId, emailId });
+				expect(download.isError).toBe(false);
+				const url = new URL(download.text.match(LINK_RE)?.[1] as string);
+				expect(url.hostname).toBe("127.0.0.1");
+				// The link's port is the only one, and only this machine reaches it.
+				expect(listeningTcpSockets(server.pid)).toEqual([
+					{ address: "127.0.0.1", port: Number(url.port) },
+				]);
+				expect(await (await fetch(url)).text()).toBe(ATTACHMENT_TEXT);
+				// More links are served on the same port.
+				expect(
+					(await call("download_email", { emailId })).text.match(LINK_RE)?.[1]
+				).toContain(`${url.origin}/attachments/`);
+				expect(listeningTcpSockets(server.pid)).toEqual([
+					{ address: "127.0.0.1", port: Number(url.port) },
+				]);
+				// The link went out on stdout as JSON-RPC, and nothing else did.
+				for (const line of server.stdoutLines()) {
+					expect(JSON.parse(line)).toMatchObject({ jsonrpc: "2.0" });
+				}
 
 				// The same question, asked of a server that must be listening.
 				const http = await startHttpServer(owner);

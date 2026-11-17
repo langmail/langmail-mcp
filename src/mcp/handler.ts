@@ -8,6 +8,11 @@
 
 import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/server";
+import { createTicketStore, type TicketStore } from "../attachments/tickets.ts";
+import {
+	createUploadTicketStore,
+	type UploadTicketStore,
+} from "../attachments/upload-tickets.ts";
 import {
 	type AccountTimeZoneResolver,
 	makeAccountTimeZoneResolver,
@@ -40,6 +45,14 @@ import {
 } from "../tools/delete-calendar-event.ts";
 import { registerDeleteContact } from "../tools/delete-contact.ts";
 import { registerDeleteMailRule } from "../tools/delete-mail-rule.ts";
+import {
+	makeLiveDeps as makeDownloadAttachmentDeps,
+	registerDownloadAttachment,
+} from "../tools/download-attachment.ts";
+import {
+	makeLiveDeps as makeDownloadEmailDeps,
+	registerDownloadEmail,
+} from "../tools/download-email.ts";
 import { makeLiveDeps as makeFileEmailsDeps } from "../tools/file-emails-common.ts";
 import {
 	makeLiveDeps as makeGetEmailDeps,
@@ -95,6 +108,11 @@ import {
 } from "../tools/update-calendar-event.ts";
 import { registerUpdateContact } from "../tools/update-contact.ts";
 import { registerUpdateMailRule } from "../tools/update-mail-rule.ts";
+import {
+	makeLiveDeps as makeUploadAttachmentsDeps,
+	registerUploadAttachments,
+} from "../tools/upload-attachments.ts";
+import { startLinkListener } from "./links.ts";
 import { instrumentToolLogging } from "./tool-logging.ts";
 
 export const SERVER_NAME = "langmail-mcp";
@@ -122,6 +140,12 @@ export interface ServerRuntime {
 	getToken: () => string;
 	// One JMAP session cache for every tool.
 	jmapLive: JmapLive;
+	// The base URL the file links handed to the agent are minted under, without
+	// a trailing slash. A tool asks for it when it mints a link, never before.
+	// HTTP transport: the public URL of the listener. stdio: the address of the
+	// loopback link listener, which the first call starts — a stdio server
+	// that never hands out a link opens no port.
+	publicUrl: () => Promise<string>;
 	// The account's time-zone preference (Stalwart's AccountSettings), cached
 	// for a few minutes. One resolver, so every tool that needs "the user's
 	// zone" shares one cache.
@@ -130,6 +154,12 @@ export interface ServerRuntime {
 	// from it. The first tool call pays for it; later calls reuse the answer.
 	signIn: () => Promise<void>;
 	stalwartUrl: string;
+	// Download tickets: download_attachment and download_email mint them, the
+	// `/attachments/<ticket>` route redeems them.
+	tickets: TicketStore;
+	// Upload tickets: upload_attachments mints them, the
+	// `/attachments/uploads/<ticket>` route redeems them.
+	uploadTickets: UploadTicketStore;
 }
 
 const signInFailure = (stalwartUrl: string, error: unknown): Error => {
@@ -154,9 +184,20 @@ const signInFailure = (stalwartUrl: string, error: unknown): Error => {
 	);
 };
 
+// Starts whatever serves a stdio runtime's file links and resolves with the
+// base URL they live under.
+export type StartLinks = (
+	runtime: ServerRuntime,
+	port: number | undefined
+) => Promise<string>;
+
+const startLoopbackLinks: StartLinks = async (runtime, port) =>
+	(await startLinkListener(runtime, port)).origin;
+
 export const createRuntime = (
 	config: Config,
-	jmapLive: JmapLive = makeJmapLive(config.stalwartUrl)
+	jmapLive: JmapLive = makeJmapLive(config.stalwartUrl),
+	startLinks: StartLinks = startLoopbackLinks
 ): ServerRuntime => {
 	const getToken = (): string => config.credential;
 	let principal: string | undefined;
@@ -190,16 +231,38 @@ export const createRuntime = (
 		return principal;
 	};
 
-	return {
+	const { transport } = config;
+	let links: Promise<string> | undefined;
+	const publicUrl = (): Promise<string> => {
+		if (transport.kind === "http") {
+			return Promise.resolve(transport.publicUrl);
+		}
+		if (links === undefined) {
+			// One listener for the life of the process, however many tools ask
+			// at once. A failed start is not kept: the next link tries again.
+			const starting = startLinks(runtime, transport.linkPort);
+			links = starting;
+			starting.catch(() => {
+				links = undefined;
+			});
+		}
+		return links;
+	};
+
+	const runtime: ServerRuntime = {
 		getPrincipal,
 		getToken,
 		jmapLive,
+		publicUrl,
 		resolveTimeZone: makeAccountTimeZoneResolver({
 			serverUrl: config.stalwartUrl,
 		}),
 		signIn,
 		stalwartUrl: config.stalwartUrl,
+		tickets: createTicketStore(),
+		uploadTickets: createUploadTicketStore(),
 	};
+	return runtime;
 };
 
 export const createServer = (
@@ -248,6 +311,31 @@ export const createServer = (
 		makeUnsubscribeDeps(runtime.jmapLive, {
 			allowOneClickPost: config.allowUnsubscribePost,
 		}),
+		runtime.getToken
+	);
+	// Files move over links the agent fetches or PUTs to with curl: the tools
+	// mint tickets, the `/attachments/` routes redeem them.
+	registerDownloadAttachment(
+		server,
+		makeDownloadAttachmentDeps(
+			runtime.jmapLive,
+			runtime.tickets,
+			runtime.publicUrl
+		),
+		runtime.getToken
+	);
+	registerDownloadEmail(
+		server,
+		makeDownloadEmailDeps(runtime.jmapLive, runtime.tickets, runtime.publicUrl),
+		runtime.getToken
+	);
+	registerUploadAttachments(
+		server,
+		makeUploadAttachmentsDeps(
+			runtime.jmapLive,
+			runtime.uploadTickets,
+			runtime.publicUrl
+		),
 		runtime.getToken
 	);
 

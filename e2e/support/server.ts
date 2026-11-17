@@ -196,6 +196,12 @@ const waitForExit = (child: ChildProcess): Promise<number | null> =>
 	});
 
 export interface RawStdioServer {
+	/**
+	 * Closes the server's stdin and sends no signal, as a client that goes
+	 * away does. Resolves with the exit code once the server has ended by
+	 * itself: 0 for a clean end, `null` when it had to be killed.
+	 */
+	end: () => Promise<number | null>;
 	/** The server's process id. */
 	pid: number;
 	/**
@@ -294,6 +300,11 @@ export const startRawStdioServer = async (
 		return waitForExit(child);
 	};
 
+	const end = (): Promise<number | null> => {
+		child.stdin.end();
+		return waitForExit(child);
+	};
+
 	try {
 		await request("initialize", {
 			capabilities: {},
@@ -306,6 +317,7 @@ export const startRawStdioServer = async (
 		throw error;
 	}
 	return {
+		end,
 		pid: child.pid as number,
 		request,
 		stderr: () => stderr,
@@ -460,12 +472,44 @@ const WHITESPACE_RE = /\s+/u;
 /** Whether `listeningTcpPorts` can answer here: it reads Linux's `/proc`. */
 export const canListListeningTcpPorts = existsSync("/proc/self/net/tcp");
 
+export interface ListeningTcpSocket {
+	/**
+	 * The address the socket is bound to: dotted IPv4 (`127.0.0.1`, or
+	 * `0.0.0.0` for every interface), or for an IPv6 socket its 32 hex digits
+	 * in network order (`::1` ends in `…0001`, `::` is all zeros).
+	 */
+	address: string;
+	port: number;
+}
+
+const HEX_BYTE_RE = /../gu;
+const IPV4_HEX_LENGTH = 8;
+
+// `/proc/net/tcp` prints an address as 32-bit words in the machine's byte
+// order: on the little-endian machines these suites run on, each word's
+// bytes are reversed.
+const wordBytes = (hex: string): string[] =>
+	(hex.match(HEX_BYTE_RE) ?? []).reverse();
+
+const decodeAddress = (hex: string): string => {
+	if (hex.length === IPV4_HEX_LENGTH) {
+		return wordBytes(hex)
+			.map((byte) => Number.parseInt(byte, 16))
+			.join(".");
+	}
+	let address = "";
+	for (let i = 0; i < hex.length; i += IPV4_HEX_LENGTH) {
+		address += wordBytes(hex.slice(i, i + IPV4_HEX_LENGTH)).join("");
+	}
+	return address.toLowerCase();
+};
+
 /**
- * The TCP ports a process is listening on, read from `/proc`: the sockets
- * among its open files that the kernel's TCP tables list in state LISTEN.
- * Linux only; see `canListListeningTcpPorts`.
+ * The TCP sockets a process is listening on, with the address each is bound
+ * to, read from `/proc`: the sockets among its open files that the kernel's
+ * TCP tables list in state LISTEN. Linux only; see `canListListeningTcpPorts`.
  */
-export const listeningTcpPorts = (pid: number): number[] => {
+export const listeningTcpSockets = (pid: number): ListeningTcpSocket[] => {
 	const sockets = new Set<string>();
 	for (const fd of readdirSync(`/proc/${pid}/fd`)) {
 		try {
@@ -479,7 +523,7 @@ export const listeningTcpPorts = (pid: number): number[] => {
 			// Closed between listing and reading.
 		}
 	}
-	const ports: number[] = [];
+	const listening: ListeningTcpSocket[] = [];
 	for (const table of PROC_TCP_TABLES) {
 		const path = `/proc/${pid}/${table}`;
 		if (!existsSync(path)) {
@@ -492,11 +536,20 @@ export const listeningTcpPorts = (pid: number): number[] => {
 			const [, local, , state] = columns;
 			const inode = columns[9];
 			if (state === TCP_STATE_LISTEN && local && inode && sockets.has(inode)) {
-				ports.push(
-					Number.parseInt(local.slice(local.lastIndexOf(":") + 1), 16)
-				);
+				const colon = local.lastIndexOf(":");
+				listening.push({
+					address: decodeAddress(local.slice(0, colon)),
+					port: Number.parseInt(local.slice(colon + 1), 16),
+				});
 			}
 		}
 	}
-	return ports.sort((a, b) => a - b);
+	return listening.sort((a, b) => a.port - b.port);
 };
+
+/**
+ * The TCP ports a process is listening on. Linux only; see
+ * `canListListeningTcpPorts`.
+ */
+export const listeningTcpPorts = (pid: number): number[] =>
+	listeningTcpSockets(pid).map((socket) => socket.port);

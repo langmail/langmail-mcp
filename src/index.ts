@@ -9,8 +9,9 @@ import {
 import { createRequestGuard } from "./http/guard.ts";
 import { startHttpListener } from "./http/listener.ts";
 import { createFetchHandler, healthRoute } from "./http/routes.ts";
-import { createServer } from "./mcp/handler.ts";
+import { createRuntime, createServer } from "./mcp/handler.ts";
 import { MCP_PATH, mcpRoutes } from "./mcp/http.ts";
+import { linkRoutes } from "./mcp/links.ts";
 
 const EXIT_MISCONFIGURED = 1;
 
@@ -25,9 +26,16 @@ const serveHttp = async (
 	config: Config,
 	transport: HttpTransportConfig
 ): Promise<void> => {
+	const runtime = createRuntime(config);
 	const listener = await startHttpListener({
 		fetch: createFetchHandler(
-			[healthRoute, ...mcpRoutes(config, transport.authToken)],
+			[
+				healthRoute,
+				// File links (attachment downloads and uploads): the ticket in the
+				// path is the credential, so these do not ask for the bearer token.
+				...linkRoutes(runtime),
+				...mcpRoutes(config, transport.authToken, runtime),
+			],
 			{
 				guard: createRequestGuard({
 					host: transport.host,
@@ -69,6 +77,8 @@ const main = async (): Promise<void> => {
 	// No request goes to Stalwart here: the MCP handshake must not wait on, or
 	// fail with, the mail server. The credential is checked on the first tool
 	// call.
+	// Nothing listens over stdio until a tool hands out a file link: the
+	// runtime then starts a loopback listener for the links alone.
 	await createServer(config).connect(new StdioServerTransport());
 };
 

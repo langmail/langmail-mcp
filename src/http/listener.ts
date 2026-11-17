@@ -29,6 +29,9 @@ export interface HttpListenerOptions {
 	closeGraceMs?: number;
 	fetch: FetchHandler;
 	host: string;
+	// False for a listener that must not keep the process running by itself:
+	// once nothing else does, the process ends, after requests in flight.
+	keepsProcessAlive?: boolean;
 	// 0 lets the system pick a free port; read it back from `port`.
 	port: number;
 }
@@ -193,6 +196,9 @@ export const startHttpListener = async (
 	});
 	const connections = trackConnections(server);
 	await listen(server, options.host, options.port);
+	if (options.keepsProcessAlive === false) {
+		server.unref();
+	}
 	const { port } = server.address() as AddressInfo;
 	const graceMs = options.closeGraceMs ?? DEFAULT_CLOSE_GRACE_MS;
 
