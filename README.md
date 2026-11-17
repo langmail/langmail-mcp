@@ -45,6 +45,8 @@ All configuration comes from environment variables. The server checks them when 
 
 [`.env.example`](.env.example) lists the same settings with comments.
 
+Your Stalwart must advertise the same public URL you set as `STALWART_URL` (same scheme, hostname and port). The server sends your credential to that address only: if Stalwart names another one for its JMAP or CalDAV endpoints, for example `http://` behind a TLS proxy or an internal hostname, the tool call fails with a message naming both addresses and nothing is sent to the other one.
+
 ## Connect an agent
 
 The server speaks MCP over two transports. Over **stdio**, the MCP client starts the server as a child process, which fits an agent that runs on the same computer. Over **Streamable HTTP**, the server runs on its own and the agent connects to it by URL, which fits an agent on a server.
@@ -184,7 +186,7 @@ The tools behave as they do on the hosted server wherever a plain Stalwart allow
 
 ## Privacy: what leaves your machine
 
-The server's invariant is that nothing leaves your computer or server except traffic to your own Stalwart, unless you turn it on. Two settings turn something on, and both default to off: `LANGMAIL_MCP_ALLOW_UNSUBSCRIBE_POST` (a request to a sender's unsubscribe URL) and `LANGMAIL_MCP_ALLOW_REMOTE_IMAGES` (requests to the hosts a message's images are on). There is no telemetry, no error reporting service and no update check. Logs go to stderr only and carry neither credentials nor message content.
+The server's invariant is that nothing leaves your computer or server except traffic to your own Stalwart, unless you turn it on. Two settings turn something on, and both default to off: `LANGMAIL_MCP_ALLOW_UNSUBSCRIBE_POST` (a request to a sender's unsubscribe URL) and `LANGMAIL_MCP_ALLOW_REMOTE_IMAGES` (requests to the hosts a message's images are on). Your Stalwart credential is sent only to the origin of `STALWART_URL`, never to another address a server answer or a redirect names. There is no telemetry, no error reporting service and no update check. Logs go to stderr only and carry neither credentials nor message content.
 
 However, this covers the server and not the agent. Whatever a tool returns goes to the MCP client that asked for it, and from there to the model that client uses. If that model runs at a provider, the mail the agent reads passes through that provider.
 

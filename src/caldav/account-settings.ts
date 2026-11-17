@@ -17,6 +17,7 @@ import {
 	accountIdForMail,
 	authorizationHeader,
 	fetchSession,
+	jmapFetch,
 	jmapTimeoutSignal,
 } from "../jmap/index.ts";
 import { logger } from "../logger.ts";
@@ -47,7 +48,7 @@ const fetchAccountTimeZone = async (
 ): Promise<string | null> => {
 	const authorization = authorizationHeader(token);
 	const session = await fetchSession(cfg.serverUrl, authorization);
-	const res = await fetch(session.apiUrl, {
+	const res = await jmapFetch(session.apiUrl, {
 		body: JSON.stringify({
 			methodCalls: [
 				[

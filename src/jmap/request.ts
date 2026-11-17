@@ -2,6 +2,7 @@
 // method response out of the batch. Extracted from email.ts when the Sieve
 // wrappers became the second consumer.
 
+import { jmapFetch } from "./origin.ts";
 import { JmapError } from "./session.ts";
 import { jmapTimeoutSignal } from "./timeout.ts";
 import type { JmapRequest, JmapResponse } from "./types.ts";
@@ -18,7 +19,7 @@ export const jmapCall = async <T extends JmapResponse>(
 	ctx: JmapCall,
 	body: JmapRequest
 ): Promise<T> => {
-	const res = await fetch(ctx.apiUrl, {
+	const res = await jmapFetch(ctx.apiUrl, {
 		body: JSON.stringify(body),
 		headers: {
 			authorization: ctx.authorization,

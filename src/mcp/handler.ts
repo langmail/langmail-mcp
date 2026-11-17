@@ -33,6 +33,7 @@ import {
 	JmapError,
 	type JmapLive,
 	makeJmapLive,
+	OriginMismatchError,
 } from "../jmap/index.ts";
 import { makeLiveApplyIo, makeMailRulesApplier } from "../rules/apply.ts";
 import { makeLiveSieveIo, makeMailRulesStore } from "../rules/store.ts";
@@ -202,6 +203,10 @@ export interface ServerRuntime {
 }
 
 const signInFailure = (stalwartUrl: string, error: unknown): Error => {
+	// Already says what is wrong and how to fix it.
+	if (error instanceof OriginMismatchError) {
+		return error;
+	}
 	if (
 		error instanceof JmapError &&
 		(error.status === HTTP_UNAUTHORIZED || error.status === HTTP_FORBIDDEN)

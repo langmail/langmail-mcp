@@ -5,6 +5,7 @@
 // Expansion URI-encodes every value so filenames with spaces, slashes, or
 // unicode and media types with `/` stay one path/query segment.
 
+import { jmapFetch } from "./origin.ts";
 import { JmapError } from "./session.ts";
 import { fetchWithHeadersDeadline, jmapTimeoutSignal } from "./timeout.ts";
 
@@ -70,7 +71,7 @@ export const blobUpload = async (p: BlobUploadParams): Promise<string> => {
 		"{accountId}",
 		encodeURIComponent(p.accountId)
 	);
-	const res = await fetch(url, {
+	const res = await jmapFetch(url, {
 		// Node's fetch types want an ArrayBuffer-backed view; any Uint8Array
 		// is sent as its bytes.
 		body: p.content as BodyInit,

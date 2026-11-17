@@ -51,6 +51,11 @@ Project invariants:
 - The principal (the mailbox address mail is sent from) is the `username` of the JMAP session, read through `runtime.getPrincipal`. The server signs in before every tool call (`runtime.signIn`, cached after the first success), never at start-up: the MCP handshake must not depend on the mail server.
 - A credential never appears in a log line, an error message or a tool result. `describeError` redacts `Bearer …` and `Basic …` values.
 
+## Origin pinning
+- The credential is only ever sent to the origin (scheme, host and port) of `STALWART_URL`. `src/jmap/origin.ts` enforces it: `fetchSession` refuses a session whose `apiUrl`, `downloadUrl` or `uploadUrl` is on another origin, `jmapFetch` is the `fetch` for every JMAP request, and `originPinnedFetch` is the `fetch` every tsdav call in `src/caldav/client.ts` gets through `transport(...)`, together with the credential. Redirects are followed by hand and only on the same origin.
+- A URL on another origin throws `OriginMismatchError` before anything is sent. Never rewrite such a URL onto the configured origin, and never call the global `fetch` with the credential.
+- `src/caldav/client-origin.test.ts` fails when an exported function of the CalDAV client is not covered; `e2e/origin-pinning.e2e.test.ts` proves it against the built server and needs no Stalwart.
+
 ## Transports
 - stdio is the default: one `McpServer` for the life of the process (`src/index.ts`). It listens on no port until a tool hands out a file link or a host reads the email viewer template (see "File links", "Email preview").
 - `--http` or `MCP_TRANSPORT=http` serves Streamable HTTP at `POST /mcp` on `MCP_HOST:MCP_PORT` (default `127.0.0.1:8080`). It is stateless: every request gets a fresh `McpServer` and transport (the SDK's `legacyStatelessFallback`), all sharing one runtime. `GET` and `DELETE` on `/mcp` answer 405.

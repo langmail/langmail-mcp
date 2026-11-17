@@ -1,6 +1,6 @@
 # End-to-end suites
 
-These suites run the server's code against a real [Stalwart](https://stalw.art) mail server. They skip when `STALWART_ADMIN_URL` is unset, so `npm run test:e2e` without a server passes without testing anything.
+These suites run the server's code against a real [Stalwart](https://stalw.art) mail server. They skip when `STALWART_ADMIN_URL` is unset, so `npm run test:e2e` without a server runs only `origin-pinning.e2e.test.ts`, which starts its own stand-in servers to prove the credential stays on the configured origin.
 
 ## Run with docker
 

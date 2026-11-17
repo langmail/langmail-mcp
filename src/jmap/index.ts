@@ -111,6 +111,11 @@ export {
 } from "./keywords.ts";
 export { type JmapLive, makeJmapLive } from "./live.ts";
 export {
+	jmapFetch,
+	OriginMismatchError,
+	originPinnedFetch,
+} from "./origin.ts";
+export {
 	accountIdForContacts,
 	accountIdForMail,
 	accountIdForSieve,

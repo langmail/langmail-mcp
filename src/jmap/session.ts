@@ -5,6 +5,7 @@
 // caller-provided: every wrapper is handed the complete `Authorization`
 // header value — this module never mints or wraps credentials.
 
+import { originPinnedFetch, pinSessionUrl } from "./origin.ts";
 import { jmapTimeoutSignal } from "./timeout.ts";
 import type { JmapSession } from "./types.ts";
 
@@ -36,7 +37,9 @@ export const fetchSession = async (
 	authorization: string
 ): Promise<JmapSession> => {
 	const url = `${stalwartBase.replace(TRAILING_SLASHES_RE, "")}/.well-known/jmap`;
-	const res = await fetch(url, {
+	// Stalwart answers the well-known path with a redirect to the session
+	// resource; it is followed only while it stays on the configured origin.
+	const res = await originPinnedFetch(stalwartBase, "JMAP")(url, {
 		headers: { authorization },
 		signal: jmapTimeoutSignal(),
 	});
@@ -60,11 +63,15 @@ export const fetchSession = async (
 	) {
 		throw new JmapError(200, "malformed jmap session response");
 	}
+	// Every later JMAP request sends the credential to one of these three URLs,
+	// so each must be on the configured origin (`pinSessionUrl` throws
+	// otherwise, before the credential goes anywhere else). A relative URL
+	// resolves against the configured base.
 	return {
-		apiUrl,
-		downloadUrl,
+		apiUrl: pinSessionUrl(apiUrl, stalwartBase),
+		downloadUrl: pinSessionUrl(downloadUrl, stalwartBase),
 		primaryAccounts: primaryAccounts as Record<string, string>,
-		uploadUrl,
+		uploadUrl: pinSessionUrl(uploadUrl, stalwartBase),
 		// Stalwart answers a request without a credential with an anonymous
 		// session whose username is empty: that is not an identity.
 		...(typeof username === "string" && username !== "" ? { username } : {}),

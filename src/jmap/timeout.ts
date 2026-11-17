@@ -10,6 +10,8 @@
 // are legitimately slow, and this deadline exists to catch a stall, not to
 // enforce a latency budget.
 
+import { jmapFetch } from "./origin.ts";
+
 const JMAP_TIMEOUT_MS = 30_000;
 
 // Bounds the whole exchange — request, response headers, response body. The
@@ -34,7 +36,7 @@ export const fetchWithHeadersDeadline = async (
 		ms
 	);
 	try {
-		return await fetch(input, { ...init, signal: controller.signal });
+		return await jmapFetch(input, { ...init, signal: controller.signal });
 	} finally {
 		clearTimeout(timer);
 	}

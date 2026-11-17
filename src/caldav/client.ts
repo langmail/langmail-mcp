@@ -25,7 +25,11 @@ import {
 } from "tsdav";
 
 import { parseEvents } from "../ical/index.ts";
-import { authorizationHeader } from "../jmap/index.ts";
+import {
+	authorizationHeader,
+	OriginMismatchError,
+	originPinnedFetch,
+} from "../jmap/index.ts";
 
 import type {
 	CalendarObject,
@@ -82,6 +86,26 @@ const authHeaders = (
 	cfg.authHeaders
 		? cfg.authHeaders(credential)
 		: { authorization: authorizationHeader(credential) };
+
+// What every tsdav call is given: the credential, the deadline, and a `fetch`
+// that refuses any URL off the configured server's origin. tsdav follows the
+// `/.well-known/caldav` redirect and the hrefs of a multistatus wherever they
+// point and re-sends its headers there, so the pin is what keeps the
+// credential on the user's own server. The three travel together on purpose:
+// a call site cannot send the credential without the pin.
+const transport = (
+	cfg: CalDavConfig,
+	credential: string,
+	fetchOptions: RequestInit = deadline()
+): {
+	fetch: typeof fetch;
+	fetchOptions: RequestInit;
+	headers: Record<string, string>;
+} => ({
+	fetch: originPinnedFetch(cfg.serverUrl, "CalDAV") as typeof fetch,
+	fetchOptions,
+	headers: authHeaders(cfg, credential),
+});
 
 // CalDAV collection URLs are canonically trailing-slashed; tsdav resolves
 // object URLs via `new URL(filename, url)`, which silently drops the last
@@ -146,17 +170,46 @@ export const pickOrganizer = (addresses: string[]): string | null => {
 
 // Takes the caller's deadline so a function that discovers *and* then acts is
 // bounded once overall, rather than granting each leg a fresh window.
-const loadAccount = (
+//
+// tsdav's discovery tries further root URLs when one fails and reports only
+// the last failure ("cannot find principalUrl"), which would bury a refused
+// off-origin URL under a message that explains nothing. So the first refusal
+// is kept and thrown once discovery returns, whether or not a later candidate
+// answered: a server that points its CalDAV endpoints elsewhere is
+// misconfigured, and the user should hear that rather than get half an answer.
+const loadAccount = async (
 	cfg: CalDavConfig,
 	token: string,
 	fetchOptions: RequestInit
-): Promise<DAVAccount> =>
-	createAccount({
-		account: { accountType: "caldav", serverUrl: cfg.serverUrl },
-		fetchOptions,
-		headers: authHeaders(cfg, token),
-		loadCollections: true,
-	});
+): Promise<DAVAccount> => {
+	const pinned = transport(cfg, token, fetchOptions);
+	let refused: OriginMismatchError | undefined;
+	const recording = (async (input: string | URL, init?: RequestInit) => {
+		try {
+			return await pinned.fetch(input, init);
+		} catch (err) {
+			if (err instanceof OriginMismatchError) {
+				refused ??= err;
+			}
+			throw err;
+		}
+	}) as typeof fetch;
+	let account: DAVAccount;
+	try {
+		account = await createAccount({
+			account: { accountType: "caldav", serverUrl: cfg.serverUrl },
+			...pinned,
+			fetch: recording,
+			loadCollections: true,
+		});
+	} catch (err) {
+		throw refused ?? err;
+	}
+	if (refused) {
+		throw refused;
+	}
+	return account;
+};
 
 export const fetchCalendarList = async (
 	cfg: CalDavConfig,
@@ -174,8 +227,7 @@ export const discoverAccount = async (
 	const account = await loadAccount(cfg, token, fetchOptions);
 	const addresses = await fetchCalendarUserAddresses({
 		account,
-		fetchOptions,
-		headers: authHeaders(cfg, token),
+		...transport(cfg, token, fetchOptions),
 	});
 	const calendars = (account.calendars ?? []).map(toSummary);
 	return {
@@ -214,8 +266,7 @@ export const createCalendar = async (
 		`${withTrailingSlash(account.homeUrl)}${crypto.randomUUID()}`
 	);
 	const res = await makeCalendar({
-		fetchOptions,
-		headers: authHeaders(cfg, p.token),
+		...transport(cfg, p.token, fetchOptions),
 		props: {
 			[`${DAVNamespaceShort.DAV}:displayname`]: { _text: p.name },
 			...(p.color
@@ -278,8 +329,9 @@ export const updateCalendar = async (
 	cfg: CalDavConfig,
 	p: UpdateCalendarParams
 ): Promise<void> => {
+	const { headers, ...pinned } = transport(cfg, p.token);
 	const res = await davRequest({
-		fetchOptions: deadline(),
+		...pinned,
 		init: {
 			body: {
 				propertyupdate: {
@@ -306,7 +358,7 @@ export const updateCalendar = async (
 					},
 				},
 			},
-			headers: authHeaders(cfg, p.token),
+			headers,
 			method: "PROPPATCH",
 			namespace: DAVNamespaceShort.DAV,
 		},
@@ -370,9 +422,8 @@ export const putEvent = async (
 ): Promise<void> => {
 	const res = await createCalendarObject({
 		calendar: { url: withTrailingSlash(p.calendarUrl) },
-		fetchOptions: deadline(),
+		...transport(cfg, p.token),
 		filename: newEventResourceName(),
-		headers: authHeaders(cfg, p.token),
 		iCalString: p.ical,
 	});
 	if (!res.ok) {
@@ -425,8 +476,7 @@ export const fetchEvents = async (
 	try {
 		objects = await fetchCalendarObjects({
 			calendar: { url: withTrailingSlash(p.calendarUrl) },
-			fetchOptions: deadline(),
-			headers: authHeaders(cfg, p.token),
+			...transport(cfg, p.token),
 			...(p.timeRange ? { timeRange: p.timeRange } : {}),
 		});
 	} catch (err) {
@@ -485,8 +535,7 @@ export const updateEvent = async (
 ): Promise<void> => {
 	const res = await updateCalendarObject({
 		calendarObject: { data: p.ical, etag: p.etag, url: p.url },
-		fetchOptions: deadline(),
-		headers: authHeaders(cfg, p.token),
+		...transport(cfg, p.token),
 	});
 	if (!res.ok) {
 		throw new CalDavError(res.status, `caldav PUT returned ${res.status}`);
@@ -505,8 +554,7 @@ export const deleteEvent = async (
 ): Promise<void> => {
 	const res = await deleteCalendarObject({
 		calendarObject: { data: "", etag: p.etag, url: p.url },
-		fetchOptions: deadline(),
-		headers: authHeaders(cfg, p.token),
+		...transport(cfg, p.token),
 	});
 	if (!res.ok) {
 		throw new CalDavError(res.status, `caldav DELETE returned ${res.status}`);
@@ -546,12 +594,13 @@ export const moveEvent = async (
 	cfg: CalDavConfig,
 	p: MoveEventParams
 ): Promise<MoveEventOutcome> => {
+	const { headers, ...pinned } = transport(cfg, p.token);
 	const [res] = await davRequest({
-		fetchOptions: deadline(),
+		...pinned,
 		init: {
 			body: null,
 			headers: {
-				...authHeaders(cfg, p.token),
+				...headers,
 				destination: p.destination,
 				overwrite: "F",
 			},
