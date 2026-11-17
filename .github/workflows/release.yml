@@ -104,14 +104,43 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          # Deploy key is a bypass actor on the main ruleset; GITHUB_TOKEN can't push the release commit
+          # Once a ruleset protects main, GITHUB_TOKEN can't push the release
+          # commit: add a deploy key as a bypass actor and store its private
+          # half here. While the secret is unset, checkout and semantic-release
+          # fall back to GITHUB_TOKEN.
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
       - uses: actions/setup-node@v5
         with:
           node-version: "24"
       - run: npm ci
       - run: npm run build
-      - run: npx semantic-release --repository-url git@github.com:langmail/langmail-mcp.git
+      # npm trusted publishing: the package's trusted publisher on npmjs.com
+      # names this repository and this workflow file (release.yml), and the
+      # id-token permission above lets @semantic-release/npm exchange the
+      # job's OIDC token for a one-time publish token. No NPM_TOKEN exists.
+      - name: Release
+        id: release
+        run: |
+          npx semantic-release --repository-url git@github.com:langmail/langmail-mcp.git
+          # @semantic-release/git tags the release commit it makes; without a
+          # new release HEAD is the pushed commit, which carries no tag.
+          if tag=$(git describe --tags --exact-match HEAD 2>/dev/null); then
+            echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LEFTHOOK: "0"
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+
+  # A GitHub release created with GITHUB_TOKEN triggers no workflow, so the
+  # registry publish runs from here rather than on the `release` event.
+  mcp-registry:
+    needs: release
+    if: needs.release.outputs.version != ''
+    permissions:
+      contents: read
+      id-token: write # Sign in to the MCP Registry as this repository
+    uses: ./.github/workflows/publish-mcp-registry.yml
+    with:
+      version: ${{ needs.release.outputs.version }}
