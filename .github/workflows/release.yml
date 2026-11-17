@@ -1,0 +1,117 @@
+name: Release
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Every job gets a read-only token. The checks run `npm ci` and the code of a
+# pull request, so they must not hold anything that can write or publish; only
+# the release job, which runs on main alone, asks for more.
+permissions:
+  contents: read
+
+jobs:
+  lint-and-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Setup Biome
+        uses: biomejs/setup-biome@v2
+      - name: Run Biome CI
+        run: npm run check:ci
+
+  knip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Run Knip
+        run: npm run knip
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      - run: npm ci
+      - run: npm test
+
+  e2e:
+    name: E2E (Stalwart)
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: "npm"
+      - run: npm ci
+      - name: Start and bootstrap Stalwart at the pinned version
+        run: |
+          echo "Stalwart $(cat .stalwart-version)"
+          scripts/stalwart/up.sh
+      - name: Run e2e suites
+        run: npm run test:e2e
+        env:
+          STALWART_ADMIN_URL: http://127.0.0.1:9090
+          # base64("admin:devpassword"), the throwaway login up.sh sets; not a secret.
+          STALWART_ADMIN_AUTHORIZATION: "Basic YWRtaW46ZGV2cGFzc3dvcmQ="
+      - name: Stalwart logs
+        if: failure()
+        run: docker logs langmail-mcp-stalwart
+
+  release:
+    needs: [test, knip, e2e]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write # Create releases and commit version bumps
+      issues: write # Comment on resolved issues
+      pull-requests: write # Comment on merged PRs
+      id-token: write # Generate OIDC token for npm trusted publishing
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          # Deploy key is a bypass actor on the main ruleset; GITHUB_TOKEN can't push the release commit
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      - run: npm ci
+      - run: npm run build
+      - run: npx semantic-release --repository-url git@github.com:langmail/langmail-mcp.git
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LEFTHOOK: "0"

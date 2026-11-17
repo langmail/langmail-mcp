@@ -1,0 +1,12 @@
+{
+	"$schema": "https://unpkg.com/knip@6/schema.json",
+	"tags": ["-lintignore"],
+	"ignoreDependencies": ["@semantic-release/github", "@semantic-release/npm"],
+	"entry": ["scripts/stalwart/bootstrap.ts", "e2e/**/*.e2e.test.ts"],
+	"ignoreExportsUsedInFile": true,
+	"ignoreIssues": {
+		"src/jmap/index.ts": ["exports", "types"],
+		"src/jmap/email.ts": ["exports"],
+		"src/contacts/index.ts": ["exports", "types"]
+	}
+}
