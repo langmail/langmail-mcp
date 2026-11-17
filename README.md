@@ -158,7 +158,7 @@ Set `STALWART_USERNAME` to the account's login name and `STALWART_PASSWORD` to t
 
 ## Tools
 
-The server registers 40 tools. Their names, inputs and descriptions are the same as on Langmail's hosted server, so the Langmail documentation describes what each one does and how they fit together: <https://docs.langmail.me/reference/mcp/overview>.
+The server registers 40 tools. Their names and inputs are the same as on Langmail's hosted server, so the Langmail documentation describes what each one does and how they fit together: <https://docs.langmail.me/reference/mcp/overview>. Their descriptions are the same too, except for a few sentences that are only true of the hosted service. A test compares every definition with the hosted server's and lists each of those rewordings: [`src/mcp/hosted-parity.test.ts`](src/mcp/hosted-parity.test.ts).
 
 | Group | Tools |
 | --- | --- |
@@ -177,7 +177,8 @@ The tools behave as they do on the hosted server wherever a plain Stalwart allow
 - **One-click unsubscribe is off by default.** The one-click request of RFC 8058 goes to a URL the sender chose. `unsubscribe_from_list` sends it only when `LANGMAIL_MCP_ALLOW_UNSUBSCRIBE_POST=1` is set. Otherwise the tool returns the unsubscribe link or address for you to use yourself.
 - **Remote images are not loaded by default.** `preview_email` renders a message without its remote images unless `LANGMAIL_MCP_ALLOW_REMOTE_IMAGES=1` is set. When it is, this server fetches the images and passes them on, so the sender sees the server's address and not the address of the device that shows the preview.
 - **Attachment links are served by this server.** `download_attachment`, `download_email` and `upload_attachments` hand out short-lived URLs. In HTTP mode they are under `MCP_PUBLIC_URL`. In stdio mode the server listens on a local port on `127.0.0.1` for them, so they only work on the same computer.
-- **The `type` filter and to-do labels need classification keywords.** Langmail's hosted classifier writes keywords onto messages, and the `type` filter of `search_emails` and the to-do labels rely on them. On a plain Stalwart mailbox those filters match nothing unless something else sets the keywords. Search by text, sender, date, folder, read state and star works as usual.
+- **Searching by email type needs a classifier.** Langmail's hosted classifier labels each message with a type (invoice, ticket, newsletter and so on), and the `keywords` filter of `search_emails` matches those labels. Nothing writes them on a plain Stalwart mailbox, so a type filter matches nothing there. The to-do label is different: `mark_emails` sets it itself, so the agent finds what it marked. Search by text, sender, date, folder, read state and star works as usual.
+- **`archive_emails` needs an Archive folder.** Langmail creates one for every account. A new Stalwart account may not have one, and the tool then says so. Create a folder with the Archive role once, in your mail client or in Stalwart.
 - **Contacts are not collected from mail.** Hosted Langmail collects the people you correspond with from mail headers in a background service, which this server does not have. The Collected address book grows only from the calendar tools, i.e. from the people you schedule with or reply to an invitation from. Contacts that you or the agent create, and anything synced over CardDAV, work the same.
 - **You sign in with your own Stalwart login.** The hosted server uses Langmail's OAuth. This server uses an app password or a bearer token for your Stalwart account.
 
