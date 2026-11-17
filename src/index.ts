@@ -20,6 +20,8 @@ import { createTicketStore } from './attachments/tickets.ts'
 import { createAttachmentUpload } from './attachments/upload.ts'
 import { createUploadTicketStore } from './attachments/upload-tickets.ts'
 import { calendarFeedFromEnv } from './calendar-feeds/live-deps.ts'
+import { makeCalendarShareStore } from './calendar-feeds/shares.ts'
+import { databaseFromEnv } from './database.ts'
 import { createImageProxy, createImageProxyStore } from './email-render/image-proxy.ts'
 import { createRoutes } from './handler.ts'
 import { createMcpHandler } from './mcp/handler.ts'
@@ -50,6 +52,8 @@ const jmapLive = makeJmapLive(STALWART_URL)
 const tickets = createTicketStore()
 const uploadTickets = createUploadTicketStore()
 const imageTokens = createImageProxyStore()
+// What the database serves, and what runs without it: database.ts.
+const db = databaseFromEnv(process.env.DATABASE_URL)
 
 const routes = createRoutes({
   attachmentDownload: createAttachmentDownload(jmapLive, tickets),
@@ -60,17 +64,16 @@ const routes = createRoutes({
   calendarFeed: calendarFeedFromEnv({
     authInternalToken: process.env.AUTH_INTERNAL_TOKEN,
     authServiceUrl: (process.env.AUTH_SERVICE_URL ?? AUTH_URL).replace(TRAILING_SLASHES_RE, ''),
-    databaseUrl: process.env.DATABASE_URL,
+    db,
     stalwartUrl: STALWART_URL,
   }),
   imageProxy: createImageProxy(imageTokens),
   mcpHandler: createMcpHandler({
+    ...(db ? { calendarShares: makeCalendarShareStore(db) } : {}),
     imageTokens,
     live: jmapLive,
     publicUrl: PUBLIC_URL,
-    // DATABASE_URL logs in as `mcp_activity`, which can only insert activity
-    // rows (infra/postgres/metrics-access.sql). Unset records nothing.
-    recordAgentActivity: agentActivityRecorderFromEnv(process.env.DATABASE_URL),
+    recordAgentActivity: agentActivityRecorderFromEnv(db),
     stalwartUrl: STALWART_URL,
     tickets,
     uploadTickets,

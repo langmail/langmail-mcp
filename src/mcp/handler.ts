@@ -18,6 +18,7 @@ import { type TicketStore } from '../attachments/tickets.ts'
 import { type UploadTicketStore } from '../attachments/upload-tickets.ts'
 import { type AuthContext } from '../auth/middleware.ts'
 import { makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
+import { type CalendarShareStore } from '../calendar-feeds/shares.ts'
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
 import { createSendGuard } from '../drafts/send-guard.ts'
 import { type ImageProxyStore } from '../email-render/image-proxy.ts'
@@ -25,6 +26,7 @@ import { registerEmailViewerResource } from '../email-render/viewer-resource.ts'
 import { makeLiveApplyIo, makeMailRulesApplier } from '../rules/apply.ts'
 import { makeLiveSieveIo, makeMailRulesStore } from '../rules/store.ts'
 import { registerArchiveEmails } from '../tools/archive-emails.ts'
+import { makeLiveCalendarSharingDeps } from '../tools/calendar-share-common.ts'
 import { makeLiveDeps as makeContactWriteDeps } from '../tools/contact-common.ts'
 import { makeAttendeeWriteThrough } from '../tools/contact-write-through.ts'
 import { makeLiveDeps as makeCreateCalendarDeps, registerCreateCalendar } from '../tools/create-calendar.ts'
@@ -54,7 +56,7 @@ import {
   makeLiveDeps as makeListCalendarEventsDeps,
   registerListCalendarEvents,
 } from '../tools/list-calendar-events.ts'
-import { makeLiveDeps as makeListCalendarsDeps, registerListCalendars } from '../tools/list-calendars.ts'
+import { registerListCalendars } from '../tools/list-calendars.ts'
 import { registerListDrafts } from '../tools/list-drafts.ts'
 import { registerListMailRules } from '../tools/list-mail-rules.ts'
 import { registerListUpcomingBirthdays } from '../tools/list-upcoming-birthdays.ts'
@@ -73,6 +75,8 @@ import { makeLiveDeps as makeRespondToEventDeps, registerRespondToEvent } from '
 import { makeLiveDeps as makeSearchContactsDeps, registerSearchContacts } from '../tools/search-contacts.ts'
 import { makeLiveDeps as makeSearchEmailsDeps, registerSearchEmails } from '../tools/search-emails.ts'
 import { registerSendDraft } from '../tools/send-draft.ts'
+import { registerShareCalendar } from '../tools/share-calendar.ts'
+import { registerStopSharingCalendar } from '../tools/stop-sharing-calendar.ts'
 import { registerTrashEmails } from '../tools/trash-emails.ts'
 import { makeLiveDeps as makeUnsubscribeDeps, registerUnsubscribeFromList } from '../tools/unsubscribe-from-list.ts'
 import { makeLiveDeps as makeUpdateCalendarDeps, registerUpdateCalendar } from '../tools/update-calendar.ts'
@@ -88,6 +92,10 @@ import { SERVER_INSTRUCTIONS } from './instructions.ts'
 import { instrumentToolLogging } from './tool-logging.ts'
 
 export interface McpHandlerConfig {
+  // The calendar shares share_calendar, stop_sharing_calendar and
+  // list_calendars work on; undefined without a database, which turns
+  // sharing off.
+  calendarShares?: CalendarShareStore
   // Shared with the /image-proxy/:token route: preview_email mints, the
   // route redeems.
   imageTokens: ImageProxyStore
@@ -133,7 +141,9 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     applier: makeMailRulesApplier(makeLiveApplyIo(jmapLive)),
     store: makeMailRulesStore(makeLiveSieveIo(jmapLive)),
   }
-  const listCalendarsDeps = makeListCalendarsDeps(caldavCfg)
+  // list_calendars and the two sharing tools: the calendars over CalDAV, the
+  // shares in Postgres, and the base URL a share's link is minted under.
+  const calendarSharingDeps = makeLiveCalendarSharingDeps(caldavCfg, cfg.publicUrl, cfg.calendarShares)
   const createCalendarDeps = makeCreateCalendarDeps(caldavCfg)
   const updateCalendarDeps = makeUpdateCalendarDeps(caldavCfg)
   const listCalendarEventsDeps = makeListCalendarEventsDeps(caldavCfg)
@@ -190,7 +200,24 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     registerListMailRules(server, mailRuleDeps, () => ctx.token)
     registerUpdateMailRule(server, mailRuleDeps, () => ctx.token)
     registerDeleteMailRule(server, mailRuleDeps, () => ctx.token)
-    registerListCalendars(server, listCalendarsDeps, () => ctx.token)
+    registerListCalendars(
+      server,
+      calendarSharingDeps,
+      () => ctx.token,
+      () => ctx.userId
+    )
+    registerShareCalendar(
+      server,
+      calendarSharingDeps,
+      () => ctx.token,
+      () => ctx.userId
+    )
+    registerStopSharingCalendar(
+      server,
+      calendarSharingDeps,
+      () => ctx.token,
+      () => ctx.userId
+    )
     registerCreateCalendar(server, createCalendarDeps, () => ctx.token)
     registerUpdateCalendar(server, updateCalendarDeps, () => ctx.token)
     registerListCalendarEvents(server, listCalendarEventsDeps, () => ctx.token)

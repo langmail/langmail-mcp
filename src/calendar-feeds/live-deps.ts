@@ -3,7 +3,7 @@
 
 import { eq } from 'drizzle-orm'
 
-import { createDatabaseClient, type DatabaseClient } from '@langmail/database'
+import { type DatabaseClient } from '@langmail/database'
 import { calendar_shares } from '@langmail/database/schema'
 import { type AuthServiceConfig, fetchStalwartCredential } from '@langmail/jmap'
 import { logger } from '@langmail/logger'
@@ -12,8 +12,7 @@ import { type CalDavConfig, fetchCalendarList, fetchEvents } from '../caldav/cli
 import { sameCalendarUrl } from '../tools/calendar-lookup.ts'
 import { type CalendarFeed, type CalendarFeedDeps, type CalendarShareRecord, createCalendarFeed } from './feed.ts'
 import { EMPTY_FEED_NAME } from './render.ts'
-
-const toLevel = (level: string): CalendarShareRecord['level'] => (level === 'full' ? 'full' : 'busy')
+import { toShareLevel } from './shares.ts'
 
 const findShareBySecretHash =
   (db: DatabaseClient) =>
@@ -28,7 +27,7 @@ const findShareBySecretHash =
       .from(calendar_shares)
       .where(eq(calendar_shares.secret_hash, secretHash))
       .limit(1)
-    return row ? { ...row, level: toLevel(row.level) } : null
+    return row ? { ...row, level: toShareLevel(row.level) } : null
   }
 
 export interface CalendarFeedLiveConfig {
@@ -67,27 +66,25 @@ export interface CalendarFeedEnv {
   authInternalToken?: string
   // Auth's base URL for /internal/stalwart-credential; defaults to its public URL.
   authServiceUrl: string
-  // DATABASE_URL, the `mcp_activity` role: it may read calendar_shares.
-  databaseUrl?: string
+  // The server's database client (database.ts), as `mcp_activity`.
+  db?: DatabaseClient
   stalwartUrl: string
 }
 
 // The feed, or undefined (the route 404s) without a database or the token.
 export const calendarFeedFromEnv = (env: CalendarFeedEnv): CalendarFeed | undefined => {
-  if (!(env.databaseUrl && env.authInternalToken)) {
-    logger.warn('DATABASE_URL or AUTH_INTERNAL_TOKEN is not set: calendar share feeds are off')
+  if (!env.db) {
+    // database.ts already warned.
     return
   }
-  const db = createDatabaseClient(env.databaseUrl, { max: 2 })
-  // An idle client's failure arrives as a pool event; unheard, it would be an
-  // uncaught error in the process that serves every tool.
-  db.$client.on('error', (error: unknown) => {
-    logger.error({ pgCode: (error as { code?: unknown } | undefined)?.code }, 'mcp calendar feed connection failed')
-  })
+  if (!env.authInternalToken) {
+    logger.warn('AUTH_INTERNAL_TOKEN is not set: calendar share feeds are off')
+    return
+  }
   return createCalendarFeed(
     makeCalendarFeedLiveDeps({
       authService: { baseUrl: env.authServiceUrl, internalToken: env.authInternalToken },
-      db,
+      db: env.db,
       stalwartUrl: env.stalwartUrl,
     })
   )

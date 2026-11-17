@@ -20,8 +20,11 @@ import { calendar_shares, user } from '@langmail/database/schema'
 
 import { type CalDavConfig, discoverAccount, putEvent } from '../caldav/client.ts'
 import { createRoutes } from '../handler.ts'
+import { shareCalendar } from '../tools/share-calendar.ts'
+import { stopSharingCalendar } from '../tools/stop-sharing-calendar.ts'
 import { createCalendarFeed, hashSecret } from './feed.ts'
 import { makeCalendarFeedLiveDeps } from './live-deps.ts'
+import { makeCalendarShareStore } from './shares.ts'
 
 const ADMIN_URL = process.env.STALWART_ADMIN_URL
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL
@@ -95,6 +98,8 @@ const vevent = (uid: string, start: Date, lines: string[]): string[] => [
   ...lines,
   'END:VEVENT',
 ]
+
+const LINK_SECRET_RE = /\/calendar-feeds\/([A-Za-z0-9_-]{43})\.ics/u
 
 const newSecret = (): string => randomBytes(32).toString('base64url')
 
@@ -233,5 +238,55 @@ describe.skipIf(!(ADMIN_URL && TEST_DATABASE_URL))('calendar share feed against 
     expect(stopped).not.toContain('BEGIN:VEVENT')
     expect(stopped).toBe(unknown)
     expect(summaries(await fetchFeed(fullSecret))).toContain('Dentist')
+  })
+
+  test('share_calendar mints a link that serves the feed; stop_sharing_calendar empties it', async () => {
+    const deps = {
+      listCalendars: async () => [{ displayName: 'Personal', url: new URL(calendarUrl, ADMIN_URL).href }],
+      publicUrl: PUBLIC,
+      shares: makeCalendarShareStore(db),
+    }
+    const shared = await shareCalendar(deps, {
+      args: { calendar: 'Personal', level: 'busy', with: 'Sam' },
+      token: 'unused',
+      userId,
+    })
+    const secret = LINK_SECRET_RE.exec(shared.content[0]?.text ?? '')?.[1] ?? ''
+    expect(secret).not.toBe('')
+    expect(summaries(await fetchFeed(secret))).toContain('Busy')
+    expect(await fetchFeed(secret)).not.toContain('Dentist')
+
+    await shareCalendar(deps, { args: { calendar: 'Personal', level: 'full', with: 'sam' }, token: 'unused', userId })
+    expect(summaries(await fetchFeed(secret))).toContain('Dentist')
+
+    const stopped = await stopSharingCalendar(deps, { args: { with: 'Sam' }, token: 'unused', userId })
+    expect(stopped.isError).toBeUndefined()
+    expect(await fetchFeed(secret)).not.toContain('BEGIN:VEVENT')
+    expect(summaries(await fetchFeed(fullSecret))).toContain('Dentist')
+  })
+
+  test("the sharing tools change only the caller's shares", async () => {
+    const other = await createUserFactory(db).create()
+    try {
+      const path = new URL(calendarUrl, ADMIN_URL).pathname
+      const theirs = await createCalendarShareFactory(db).create({
+        calendar_url: path,
+        label: 'Sam',
+        level: 'busy',
+        user_id: other.id,
+      })
+      const deps = {
+        listCalendars: async () => [{ displayName: 'Personal', url: new URL(calendarUrl, ADMIN_URL).href }],
+        publicUrl: PUBLIC,
+        shares: makeCalendarShareStore(db),
+      }
+      await shareCalendar(deps, { args: { calendar: 'Personal', level: 'busy', with: 'Sam' }, token: 'unused', userId })
+      await shareCalendar(deps, { args: { calendar: 'Personal', level: 'full', with: 'Sam' }, token: 'unused', userId })
+      await stopSharingCalendar(deps, { args: { with: 'Sam' }, token: 'unused', userId })
+      const [row] = await db.select().from(calendar_shares).where(eq(calendar_shares.id, theirs.id))
+      expect(row?.level).toBe('busy')
+    } finally {
+      await db.delete(user).where(eq(user.id, other.id))
+    }
   })
 })

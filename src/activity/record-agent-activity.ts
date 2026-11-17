@@ -7,14 +7,14 @@
 //
 // Production connects as `mcp_activity`, which may only INSERT into this
 // table (infra/postgres/metrics-access.sql) — so no RETURNING here, and no
-// read of any kind.
+// read of it.
 //
 // A failed write is logged and dropped: losing a day's activity row must not
 // fail the tool call that earned it. The line names only the Postgres error
 // code: drizzle's message quotes the query parameters, the user id among
 // them, and log lines leave the box free of user ids.
 
-import { createDatabaseClient, type DatabaseClient } from '@langmail/database'
+import { type DatabaseClient } from '@langmail/database'
 import { user_activity } from '@langmail/database/schema'
 import { logger } from '@langmail/logger'
 
@@ -42,20 +42,8 @@ export const makeAgentActivityRecorder =
     }
   }
 
-// Without DATABASE_URL the server still serves every tool, it just records
+// Without a database the server still serves every tool, it just records
 // nothing — so an image deployed before its credential is in mcp.env keeps
-// working. The warning says why the metrics stay empty.
-export const agentActivityRecorderFromEnv = (databaseUrl: string | undefined): RecordAgentActivity => {
-  if (!databaseUrl) {
-    logger.warn('DATABASE_URL is not set: agent activity is not recorded')
-    return async () => undefined
-  }
-  const db = createDatabaseClient(databaseUrl, { max: 2 })
-  // An idle client's failure (Postgres restarted, connection reset) arrives
-  // as a pool event, not a rejected query; unheard, it would be an uncaught
-  // error in the process that serves every tool.
-  db.$client.on('error', (error: unknown) => {
-    logger.error({ pgCode: (error as { code?: unknown } | undefined)?.code }, 'mcp agent activity connection failed')
-  })
-  return makeAgentActivityRecorder(db)
-}
+// working. database.ts warns why the metrics stay empty.
+export const agentActivityRecorderFromEnv = (db: DatabaseClient | undefined): RecordAgentActivity =>
+  db ? makeAgentActivityRecorder(db) : async () => undefined

@@ -477,19 +477,30 @@ export const runAgent = (prompt: string): Trajectory => {
       toolUse.name = toolUse.name.replace(config.toolPrefix, LANGMAIL_TOOL)
     }
     lastToolCalls = trajectory.toolUses.filter((t) => t.name.startsWith(LANGMAIL_TOOL)).length
+    totalToolCalls += lastToolCalls
     return trajectory
   } finally {
     config.cleanup()
   }
 }
 
-const verdictSuffix = (): string => (lastToolCalls === null ? '' : ` · tool calls: ${lastToolCalls}`)
+// An eval of several requests in a row counts every run's calls, not the last one's.
+let totalToolCalls = 0
+let countAllRuns = false
+
+const verdictSuffix = (): string => {
+  const calls = countAllRuns ? totalToolCalls : lastToolCalls
+  return calls === null ? '' : ` · tool calls: ${calls}`
+}
 
 // Uniform exit handling: a failed expectation is the eval's own verdict and
 // reads better as one line; anything else is a genuine crash and keeps its
 // stack. Either way the exit happens here, after main's `finally` has removed
 // the fixtures.
-export const runEval = async (main: () => Promise<void>): Promise<void> => {
+// `countAllRuns`: the verdict line counts the calls of every runAgent, for an
+// eval whose requests each answer a different part of the brief.
+export const runEval = async (main: () => Promise<void>, opts: { countAllRuns?: boolean } = {}): Promise<void> => {
+  countAllRuns = opts.countAllRuns ?? false
   try {
     await main()
     process.stdout.write(`result: pass${verdictSuffix()}\n`)
