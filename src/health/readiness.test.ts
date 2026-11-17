@@ -31,7 +31,7 @@ describe('createReadiness', () => {
     expect(result.checks.slow).toContain('timed out')
   })
 
-  test('caches the aggregate result within the TTL', async () => {
+  test('caches a ready result within the TTL', async () => {
     let calls = 0
     let clock = 1000
     const readiness = createReadiness(
@@ -49,6 +49,46 @@ describe('createReadiness', () => {
     clock += 200
     await readiness()
     expect(calls).toBe(2)
+  })
+
+  test('reruns the checks on the next request after a failed check', async () => {
+    let calls = 0
+    let fail = true
+    const readiness = createReadiness(
+      {
+        auth: () => {
+          calls += 1
+          return fail ? Promise.reject(new Error('timed out after 3000ms')) : Promise.resolve('HTTP 401')
+        },
+      },
+      { ttlMs: 10_000, now: () => 1000 }
+    )
+    expect((await readiness()).ready).toBe(false)
+    fail = false
+    const second = await readiness()
+    expect(calls).toBe(2)
+    expect(second).toEqual({ ready: true, checks: { auth: 'HTTP 401' } })
+  })
+
+  test('reports every request as not ready while a dependency stays down', async () => {
+    let calls = 0
+    const readiness = createReadiness(
+      {
+        up: () => Promise.resolve('HTTP 200'),
+        auth: () => {
+          calls += 1
+          return Promise.reject(new Error('ConnectionRefused'))
+        },
+      },
+      { ttlMs: 10_000, now: () => 1000 }
+    )
+    for (let i = 0; i < 3; i += 1) {
+      const result = await readiness()
+      expect(result.ready).toBe(false)
+      expect(result.checks.auth).toBe('ConnectionRefused')
+      expect(readyzResponse(result).status).toBe(503)
+    }
+    expect(calls).toBe(3)
   })
 })
 

@@ -1,7 +1,7 @@
 // Dependency-aware readiness for the MCP resource server. /healthz proves the
 // process is up; /readyz proves it can actually reach its dependencies. Each
 // check resolves with a human detail string on success and throws on failure;
-// the runner applies a per-check timeout and caches the aggregate result.
+// the runner applies a per-check timeout and caches a ready aggregate.
 
 export interface ReadyResult {
   checks: Record<string, string>
@@ -41,7 +41,10 @@ export const createReadiness = (
 
   return async () => {
     const at = now()
-    // Cache the whole aggregate — including a not-ready result — for the TTL, so a burst of smoke retries triggers at most one real dependency check.
+    // Cache only a ready result. A not-ready one is recomputed on the next
+    // request: Better Stack confirms an incident when several regions agree
+    // within seconds, so one slow probe served from cache to every region
+    // looked like a real outage (#1282).
     if (cached && at - cached.at < ttlMs) {
       return cached.result
     }
@@ -62,7 +65,7 @@ export const createReadiness = (
         result.ready = false
       }
     }
-    cached = { at, result }
+    cached = result.ready ? { at, result } : null
     return result
   }
 }
