@@ -6,11 +6,17 @@
 // credential are always the user's own.
 
 import { z } from "zod";
+import { isLoopbackHost, urlHostname } from "./http/hosts.ts";
 
 const TRAILING_SLASHES_RE = /\/+$/u;
 const DEFAULT_HTTP_HOST = "127.0.0.1";
 const DEFAULT_HTTP_PORT = 8080;
 const MAX_PORT = 65_535;
+// Short enough to type by hand is short enough to guess.
+const MIN_AUTH_TOKEN_LENGTH = 16;
+// What an `Authorization: Bearer` header can carry as one token: visible
+// ASCII, no spaces.
+const AUTH_TOKEN_RE = /^[\x21-\x7e]+$/u;
 const LOOPBACK_HOSTS: ReadonlySet<string> = new Set([
 	"localhost",
 	"127.0.0.1",
@@ -213,13 +219,37 @@ const readCredential = (env: Env, problems: string[]): string => {
 	return "";
 };
 
+const readAuthToken = (env: Env, problems: string[]): string => {
+	const token = env.MCP_AUTH_TOKEN;
+	if (token === undefined) {
+		problems.push(
+			"MCP_AUTH_TOKEN is not set. The HTTP transport refuses to start without it: set it to a long random secret, which callers send as `Authorization: Bearer <secret>`."
+		);
+		return "";
+	}
+	if (!AUTH_TOKEN_RE.test(token)) {
+		problems.push(
+			"MCP_AUTH_TOKEN must consist of printable ASCII characters without spaces, because callers send it in an HTTP header. `openssl rand -hex 32` makes one."
+		);
+		return "";
+	}
+	if (token.length < MIN_AUTH_TOKEN_LENGTH) {
+		problems.push(
+			`MCP_AUTH_TOKEN is too short: it must be at least ${MIN_AUTH_TOKEN_LENGTH} characters. \`openssl rand -hex 32\` makes one.`
+		);
+		return "";
+	}
+	return token;
+};
+
 const readHttpTransport = (
 	env: Env,
-	problems: string[]
+	problems: string[],
+	warnings: string[]
 ): HttpTransportConfig => {
 	const host = env.MCP_HOST ?? DEFAULT_HTTP_HOST;
 	const port = env.MCP_PORT ?? DEFAULT_HTTP_PORT;
-	let publicUrl = `http://${host}:${port}`;
+	let publicUrl = `http://${urlHostname(host)}:${port}`;
 	if (env.MCP_PUBLIC_URL !== undefined) {
 		if (parseHttpUrl(env.MCP_PUBLIC_URL)) {
 			publicUrl = env.MCP_PUBLIC_URL.replace(TRAILING_SLASHES_RE, "");
@@ -229,13 +259,13 @@ const readHttpTransport = (
 			);
 		}
 	}
-	if (env.MCP_AUTH_TOKEN === undefined) {
-		problems.push(
-			"MCP_AUTH_TOKEN is not set. The HTTP transport refuses to start without it: set it to a long random secret, which callers send as `Authorization: Bearer <secret>`."
+	if (!isLoopbackHost(host)) {
+		warnings.push(
+			`MCP_HOST is ${host}, so the server is reachable from other machines over plain HTTP, and the bearer token and your mail travel unencrypted. Put a reverse proxy that terminates TLS in front of it, and set MCP_PUBLIC_URL to the https:// address callers use.`
 		);
 	}
 	return {
-		authToken: env.MCP_AUTH_TOKEN ?? "",
+		authToken: readAuthToken(env, problems),
 		host,
 		kind: "http",
 		port,
@@ -285,7 +315,7 @@ export const loadConfig = (
 	const credential = readCredential(env, problems);
 	const transport: Config["transport"] =
 		readTransportKind(env, argv, problems) === "http"
-			? readHttpTransport(env, problems)
+			? readHttpTransport(env, problems, warnings)
 			: { kind: "stdio" };
 
 	if (problems.length > 0) {

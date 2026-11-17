@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { ConfigError, loadConfig } from "./config.ts";
 
+const AUTH_TOKEN = "a-long-random-secret";
+
 const BASIC = {
 	STALWART_PASSWORD: "app-password",
 	STALWART_URL: "https://mail.example.com",
@@ -171,7 +173,7 @@ describe("loadConfig", () => {
 	});
 
 	describe("transport", () => {
-		const HTTP = { ...BASIC, MCP_AUTH_TOKEN: "s3cret" };
+		const HTTP = { ...BASIC, MCP_AUTH_TOKEN: AUTH_TOKEN };
 
 		test("stdio is the default, and can be asked for by name", () => {
 			expect(loadConfig(BASIC).config.transport).toEqual({ kind: "stdio" });
@@ -185,7 +187,7 @@ describe("loadConfig", () => {
 
 		test("--http or MCP_TRANSPORT=http selects HTTP with its defaults", () => {
 			const expected = {
-				authToken: "s3cret",
+				authToken: AUTH_TOKEN,
 				host: "127.0.0.1",
 				kind: "http",
 				port: 8080,
@@ -214,7 +216,7 @@ describe("loadConfig", () => {
 					MCP_TRANSPORT: "http",
 				}).config.transport
 			).toEqual({
-				authToken: "s3cret",
+				authToken: AUTH_TOKEN,
 				host: "0.0.0.0",
 				kind: "http",
 				port: 9000,
@@ -231,6 +233,67 @@ describe("loadConfig", () => {
 			expect(problemsOf(BASIC, ["--http"])).toEqual([
 				"MCP_AUTH_TOKEN is not set. The HTTP transport refuses to start without it: set it to a long random secret, which callers send as `Authorization: Bearer <secret>`.",
 			]);
+		});
+
+		test.each([
+			["15 characters", "123456789012345"],
+			["one character", "#"],
+		])("a token shorter than 16 characters is refused: %s", (_, token) => {
+			const problems = problemsOf({ ...BASIC, MCP_AUTH_TOKEN: token }, [
+				"--http",
+			]);
+			expect(problems).toEqual([
+				"MCP_AUTH_TOKEN is too short: it must be at least 16 characters. `openssl rand -hex 32` makes one.",
+			]);
+			expect(problems.join("\n")).not.toContain(token);
+		});
+
+		test("a token of exactly 16 characters is accepted", () => {
+			expect(
+				loadConfig({ ...BASIC, MCP_AUTH_TOKEN: "1234567890123456" }, ["--http"])
+					.config.transport
+			).toMatchObject({ authToken: "1234567890123456" });
+		});
+
+		test.each([
+			["a space inside", "a long random secret"],
+			["a space at the end", "a-long-random-secret "],
+			["a character outside ASCII", "a-long-random-s\u00e9cret"],
+			["a line break", "a-long-random\nsecret"],
+		])("a token no HTTP header can carry is refused: %s", (_, token) => {
+			expect(
+				problemsOf({ ...BASIC, MCP_AUTH_TOKEN: token }, ["--http"])
+			).toEqual([
+				"MCP_AUTH_TOKEN must consist of printable ASCII characters without spaces, because callers send it in an HTTP header. `openssl rand -hex 32` makes one.",
+			]);
+		});
+
+		test.each(["127.0.0.1", "127.0.0.53", "localhost", "::1"])(
+			"binding a loopback address warns about nothing: %s",
+			(host) => {
+				expect(
+					loadConfig({ ...HTTP, MCP_HOST: host }, ["--http"]).warnings
+				).toEqual([]);
+			}
+		);
+
+		test.each(["0.0.0.0", "::", "192.0.2.10", "mcp.example.com"])(
+			"binding any other address warns that TLS belongs in front: %s",
+			(host) => {
+				const { warnings } = loadConfig({ ...HTTP, MCP_HOST: host }, [
+					"--http",
+				]);
+				expect(warnings).toEqual([
+					`MCP_HOST is ${host}, so the server is reachable from other machines over plain HTTP, and the bearer token and your mail travel unencrypted. Put a reverse proxy that terminates TLS in front of it, and set MCP_PUBLIC_URL to the https:// address callers use.`,
+				]);
+				expect(warnings.join("\n")).not.toContain(AUTH_TOKEN);
+			}
+		);
+
+		test("an IPv6 bind address is bracketed in the default public URL", () => {
+			expect(
+				loadConfig({ ...HTTP, MCP_HOST: "::1" }, ["--http"]).config.transport
+			).toMatchObject({ host: "::1", publicUrl: "http://[::1]:8080" });
 		});
 
 		test("the HTTP settings are not required for stdio", () => {

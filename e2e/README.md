@@ -52,9 +52,10 @@ Name the file `e2e/<name>.e2e.test.ts` and build on `e2e/support/`:
 - `env.ts`: `live` (a `describe` that skips without a server), `ADMIN_URL`, `DOMAIN`.
 - `admin.ts`: `createAccount`, `createBearerCredential` (an API key for an account, as a `Bearer` credential), `destroyCreatedAccounts` for `afterAll`, `adminCall`.
 - `mail.ts`: `openMailSession`, `importEmail`, `mailboxId`, `jmapCall`, `waitForMessage`, `waitForCalendarMessage`.
+- `server.ts`: `startStdioServer` and `startHttpServer` start the built server (`dist/index.js`) for an account and return a connected MCP client (HTTP: also `baseUrl`, `mcpUrl`, `token`, `connect`, `stop`). They fail with what to run when `dist/` is missing or older than `src/`; `npm run test:e2e` builds first.
 - `wait.ts`: `untilIndexed` for reads through the search index, which Stalwart updates after a write has returned; `pollUntil`, `sleep`.
 
-`harness.e2e.test.ts` uses all of them and is the suite to copy from. `jmap.e2e.test.ts` shows how to drive the server's own code (`loadConfig`, `createRuntime`, `src/jmap`) with a Basic and with a Bearer credential.
+`harness.e2e.test.ts` uses all of them and is the suite to copy from. `http-auth.e2e.test.ts` shows how to drive the built server through an MCP client. `jmap.e2e.test.ts` shows how to drive the server's own code (`loadConfig`, `createRuntime`, `src/jmap`) with a Basic and with a Bearer credential.
 
 ## Stalwart version
 

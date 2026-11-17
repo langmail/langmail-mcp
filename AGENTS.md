@@ -7,7 +7,7 @@ MCP server that gives an agent Langmail's email, calendar and contacts tools aga
 - Relative imports keep their `.ts` extension; `rewriteRelativeImportExtensions` turns them into `.js` in `dist/`.
 - Biome for lint + format (`npm run check` / `check:fix`) — do not add ESLint or Prettier.
 - Vitest for tests, lefthook for git hooks, semantic-release for publishing.
-- Runtime deps: `@modelcontextprotocol/server` (the v2 MCP SDK), `zod`, `pino` (logging), `@date-fns/tz` (time zones in `src/ical`).
+- Runtime deps: `@modelcontextprotocol/server` (the v2 MCP SDK), `zod`, `pino` (logging), `@date-fns/tz` (time zones in `src/ical`). `@modelcontextprotocol/client` is a dev dependency: the end-to-end suites drive the built server with it.
 - TypeScript is strict with `noUncheckedIndexedAccess`; `exactOptionalPropertyTypes` is off, because the hosted code these files come from is not written for it.
 - No Bun APIs.
 
@@ -16,6 +16,7 @@ MCP server that gives an agent Langmail's email, calendar and contacts tools aga
 - `src/config.ts` — reads and validates the environment and the command line; the only place that reads `process.env` for settings.
 - `src/tools/<tool>.ts` — one file per MCP tool, with `<tool>.test.ts` next to it.
 - `src/mcp/handler.ts` — builds the server: `createRuntime` (JMAP session cache, credential, principal) and `createServer`, where each tool is registered with one line. `src/mcp/tool-logging.ts` logs one line per tool call.
+- `src/http/` — the HTTP listener: `routes.ts` (a listener is a list of `Route`s; `createFetchHandler` dispatches to them and logs), `listener.ts` (serves that handler over `node:http`), `bearer.ts` (the `MCP_AUTH_TOKEN` check), `guard.ts` (Origin and Host checks). `src/mcp/http.ts` holds the `/mcp` routes.
 - `src/observability/errors.ts` — `describeError`: what an error log line may carry (no addresses, no credentials).
 - `src/jmap/`, `src/contacts/`, `src/ical/` — JMAP client, contact and iCalendar helpers.
 - `src/caldav/`, `src/rules/`, `src/drafts/`, `src/attachments/`, `src/email-render/` — what the tools build on.
@@ -42,6 +43,16 @@ Project invariants:
 - The principal (the mailbox address mail is sent from) is the `username` of the JMAP session, read through `runtime.getPrincipal`. The server signs in before every tool call (`runtime.signIn`, cached after the first success), never at start-up: the MCP handshake must not depend on the mail server.
 - A credential never appears in a log line, an error message or a tool result. `describeError` redacts `Bearer …` and `Basic …` values.
 
+## Transports
+- stdio is the default: one `McpServer` for the life of the process (`src/index.ts`).
+- `--http` or `MCP_TRANSPORT=http` serves Streamable HTTP at `POST /mcp` on `MCP_HOST:MCP_PORT` (default `127.0.0.1:8080`). It is stateless: every request gets a fresh `McpServer` and transport (the SDK's `legacyStatelessFallback`), all sharing one runtime. `GET` and `DELETE` on `/mcp` answer 405.
+- Every `/mcp` request must carry `Authorization: Bearer <MCP_AUTH_TOKEN>`. The token is required (at least 16 characters) and compared in constant time. Anything else gets `401` with `WWW-Authenticate: Bearer` and the body `{"error":"unauthorized"}`, before the request body is read. A 401 must never say anything about the server, its tools or the mail server.
+- There is no OAuth and there are no `/.well-known/` documents. `GET /healthz` answers `ok` without the token and says nothing else. Every other path is a 404.
+- `guard.ts` refuses (403) a request whose `Origin` is not the listener's own address, and, when bound to loopback, one whose `Host` is not a loopback name or the public URL's. No CORS headers are sent anywhere.
+- The server speaks plain HTTP. Binding a non-loopback `MCP_HOST` prints a warning to put a TLS-terminating reverse proxy in front.
+- To add routes to the listener, append `Route`s to the list in `serveHttp` (`src/index.ts`). A route names its `path` (a trailing slash makes it a prefix), decides for itself what it requires of the caller, and sets `logAs` only if its path is not a secret. `startHttpListener` plus `createFetchHandler` also serve a list without `/mcp`.
+- One info line per `/mcp` request (method, route name, status, duration). Never log the token, the `Authorization` header or a request path.
+
 ## Working with the user
 - When the user asks a question, answer it before editing files or running implementation commands.
 - When responding to feedback or a review, say whether you agree or disagree before saying what you changed.
@@ -55,7 +66,7 @@ Project invariants:
 - Install locally with scripts on: `prepare` runs `lefthook install`, so `--ignore-scripts` skips the git hooks. `npm ci --ignore-scripts` fits CI jobs that only need `node_modules`.
 
 ## End-to-end tests
-`npm run test:e2e` runs the suites in `e2e/` (`*.e2e.test.ts`) against a real Stalwart at the version in `.stalwart-version`. See `e2e/README.md` for how to start one and which environment variables the suites read.
+`npm run test:e2e` builds, then runs the suites in `e2e/` (`*.e2e.test.ts`) against a real Stalwart at the version in `.stalwart-version`. See `e2e/README.md` for how to start one and which environment variables the suites read.
 
 `.mcp.json` at the repo root registers the built server (loads `.env` via `node --env-file`) so interactive Claude Code sessions pick it up automatically.
 
