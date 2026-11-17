@@ -88,6 +88,10 @@ Project invariants:
 - The viewer template declares one origin it may load from (`_meta.ui.csp.resourceDomains`): this server's own, where the image links live. Over HTTP that is the public URL's origin, in the listing and in the content. Over stdio the origin is the loopback link listener's, which is only known once it runs: `resources/list` names no origin, and `resources/read` starts the listener and names it. Listing tools and resources must never open a port.
 - A host enforces that CSP; the server cannot. So the email document the viewer puts in its nested frame carries a CSP of its own (`emailDocumentCsp` in `src/email-render/meta.ts`, as a `<meta http-equiv>`): `default-src 'none'`, images from `data:` and this server's origin only (the result's `imageOrigin`), inline styles only. CSS in an email (`<style>`, `style=`) is kept for layout and may name remote URLs (`url()`, `@import`, `@font-face`); that policy is what keeps the user's client from fetching them, whatever the host does. Do not loosen it, and keep the `<meta>` first in the document.
 
+## Third-party notices
+- The bundled viewer has other packages' code compiled into it, so their notices ship with it: `THIRD_PARTY_NOTICES.md` (in the package's `files`) and a banner at the top of the viewer's script. Both come from `scripts/third-party.ts`, which reads esbuild's metafile and the `#region` markers of code that a dependency had already compiled into its own files.
+- After changing a dependency the viewer imports, run `npm run notices` and commit the result; `npm test` fails while the file is stale. A newly vendored package needs its license text in `scripts/third-party/` first; the error says which.
+
 ## Working with the user
 - When the user asks a question, answer it before editing files or running implementation commands.
 - When responding to feedback or a review, say whether you agree or disagree before saying what you changed.

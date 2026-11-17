@@ -34,7 +34,8 @@
 		"langmail-mcp": "dist/index.js"
 	},
 	"files": [
-		"dist"
+		"dist",
+		"THIRD_PARTY_NOTICES.md"
 	],
 	"scripts": {
 		"build": "tsc && tsc --noEmit -p src/email-render/viewer && tsc -p tsconfig.build.json && tsx scripts/build-viewer.ts && shx chmod +x dist/index.js",
@@ -44,6 +45,7 @@
 		"dev": "tsx --watch --env-file=.env src/index.ts",
 		"fix": "ultracite fix",
 		"knip": "knip",
+		"notices": "tsx scripts/third-party-notices.ts",
 		"prepare": "lefthook install",
 		"semantic-release": "semantic-release",
 		"stalwart:down": "scripts/stalwart/down.sh",
