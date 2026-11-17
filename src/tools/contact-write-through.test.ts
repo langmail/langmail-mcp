@@ -6,11 +6,11 @@ import { makeAttendeeWriteThrough } from "./contact-write-through.ts";
 
 const input = {
 	attendees: [{ email: "robin@northwind.example" }],
-	organizer: "me@langmail.me",
-	selfAddress: "me@langmail.me",
+	organizer: "me@example.com",
+	selfAddress: "me@example.com",
 	start: "2026-07-28T12:00:00Z",
 	token: "tok",
-	uid: "evt-1@langmail.me",
+	uid: "evt-1@example.com",
 };
 
 // The load-bearing promise of the hook: the calendar tools await it bare

@@ -22,6 +22,7 @@ import {
 import { makeLiveApplyIo, makeMailRulesApplier } from "../rules/apply.ts";
 import { makeLiveSieveIo, makeMailRulesStore } from "../rules/store.ts";
 import { registerArchiveEmails } from "../tools/archive-emails.ts";
+import { makeLiveDeps as makeContactWriteDeps } from "../tools/contact-common.ts";
 import { makeAttendeeWriteThrough } from "../tools/contact-write-through.ts";
 import {
 	makeLiveDeps as makeCreateCalendarDeps,
@@ -31,11 +32,13 @@ import {
 	makeLiveDeps as makeCreateCalendarEventDeps,
 	registerCreateCalendarEvent,
 } from "../tools/create-calendar-event.ts";
+import { registerCreateContact } from "../tools/create-contact.ts";
 import { registerCreateMailRule } from "../tools/create-mail-rule.ts";
 import {
 	makeLiveDeps as makeDeleteCalendarEventDeps,
 	registerDeleteCalendarEvent,
 } from "../tools/delete-calendar-event.ts";
+import { registerDeleteContact } from "../tools/delete-contact.ts";
 import { registerDeleteMailRule } from "../tools/delete-mail-rule.ts";
 import { makeLiveDeps as makeFileEmailsDeps } from "../tools/file-emails-common.ts";
 import {
@@ -55,8 +58,10 @@ import {
 	registerListCalendars,
 } from "../tools/list-calendars.ts";
 import { registerListMailRules } from "../tools/list-mail-rules.ts";
+import { registerListUpcomingBirthdays } from "../tools/list-upcoming-birthdays.ts";
 import type { MailRuleToolDeps } from "../tools/mail-rule-common.ts";
 import { registerMarkEmails } from "../tools/mark-emails.ts";
+import { registerMergeContacts } from "../tools/merge-contacts.ts";
 import {
 	makeLiveDeps as makeMoveCalendarEventsDeps,
 	registerMoveCalendarEvents,
@@ -67,6 +72,10 @@ import {
 	makeLiveDeps as makeRespondToEventDeps,
 	registerRespondToEvent,
 } from "../tools/respond-to-event.ts";
+import {
+	makeLiveDeps as makeSearchContactsDeps,
+	registerSearchContacts,
+} from "../tools/search-contacts.ts";
 import {
 	makeLiveDeps as makeSearchEmailsDeps,
 	registerSearchEmails,
@@ -84,6 +93,7 @@ import {
 	makeLiveDeps as makeUpdateCalendarEventDeps,
 	registerUpdateCalendarEvent,
 } from "../tools/update-calendar-event.ts";
+import { registerUpdateContact } from "../tools/update-contact.ts";
 import { registerUpdateMailRule } from "../tools/update-mail-rule.ts";
 import { instrumentToolLogging } from "./tool-logging.ts";
 
@@ -310,6 +320,32 @@ export const createServer = (
 	registerRespondToEvent(
 		server,
 		makeRespondToEventDeps(caldavCfg, collectAttendees),
+		runtime.getToken
+	);
+
+	const searchContactsDeps = makeSearchContactsDeps(
+		runtime.jmapLive,
+		caldavCfg
+	);
+	// The write side of the address book. Same JMAP session cache as the read
+	// side; separate deps bundle because no writer hydrates subjects or titles.
+	const contactWriteDeps = makeContactWriteDeps(runtime.jmapLive);
+	registerSearchContacts(server, searchContactsDeps, runtime.getToken);
+	// Reads through the write bundle (query + get) plus the account zone, so
+	// "today" is the user's day.
+	registerListUpcomingBirthdays(
+		server,
+		{ ...contactWriteDeps, resolveTimeZone: runtime.resolveTimeZone },
+		runtime.getToken
+	);
+	registerCreateContact(server, contactWriteDeps, runtime.getToken);
+	registerUpdateContact(server, contactWriteDeps, runtime.getToken);
+	registerDeleteContact(server, contactWriteDeps, runtime.getToken);
+	// Writes through the write bundle, then renders the result with the read
+	// side's subject and title lookups.
+	registerMergeContacts(
+		server,
+		{ ...searchContactsDeps, ...contactWriteDeps },
 		runtime.getToken
 	);
 

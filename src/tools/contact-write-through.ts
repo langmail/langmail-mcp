@@ -30,11 +30,9 @@ export interface AttendeeWriteThroughInput {
 	// The event's ORGANIZER (may be a counterpart, e.g. when RSVPing).
 	organizer?: string;
 	// The authenticated principal's own calendar-user-address — excluded from
-	// collection so the user never becomes their own contact. Accepted delta
-	// from the plan's full self-address set: linked Gmail aliases live in
-	// Postgres, and this service is deliberately database-free, so an event
-	// listing the user's own Gmail alias as an attendee collects that alias.
-	// The email-agent's fold (which does know the aliases) never counts it.
+	// collection so the user never becomes their own contact. Only this one
+	// address is known here, so an event that lists another address of the
+	// user's as an attendee collects that address.
 	selfAddress: string;
 	start: string;
 	token: string;
