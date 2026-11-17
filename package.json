@@ -1,0 +1,83 @@
+{
+	"name": "langmail-mcp",
+	"version": "0.0.0",
+	"description": "Langmail MCP for your own Stalwart: email, calendar and contacts — a self-hosted MCP server for Stalwart over JMAP, CalDAV and CardDAV",
+	"keywords": [
+		"mcp",
+		"mcp-server",
+		"model-context-protocol",
+		"stalwart",
+		"stalwart-mail",
+		"jmap",
+		"caldav",
+		"carddav",
+		"email",
+		"calendar",
+		"contacts",
+		"self-hosted",
+		"langmail",
+		"ai-agent"
+	],
+	"homepage": "https://github.com/langmail/langmail-mcp#readme",
+	"bugs": {
+		"url": "https://github.com/langmail/langmail-mcp/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/langmail/langmail-mcp.git"
+	},
+	"license": "MIT",
+	"author": "Dominik Grusemann",
+	"type": "module",
+	"main": "dist/index.js",
+	"bin": {
+		"langmail-mcp": "dist/index.js"
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsc && tsc -p tsconfig.build.json && shx chmod +x dist/index.js",
+		"check": "biome check .",
+		"check:ci": "biome ci .",
+		"check:fix": "biome check --write .",
+		"dev": "tsx --watch --env-file=.env src/index.ts",
+		"fix": "ultracite fix",
+		"knip": "knip",
+		"prepare": "lefthook install",
+		"semantic-release": "semantic-release",
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage",
+		"test:e2e": "vitest run --config vitest.e2e.config.ts",
+		"test:watch": "vitest",
+		"validate": "npm run check && npm test && npm run knip && npm run build",
+		"watch": "tsc -p tsconfig.build.json --watch"
+	},
+	"dependencies": {
+		"@modelcontextprotocol/server": "2.4.0",
+		"zod": "4.6.7"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.15",
+		"@commitlint/cli": "^21.0.0",
+		"@commitlint/config-conventional": "^21.0.0",
+		"@semantic-release/changelog": "^7.0.0",
+		"@semantic-release/git": "^11.0.1",
+		"@semantic-release/github": "^12.0.5",
+		"@semantic-release/npm": "^13.1.4",
+		"@types/node": "^26.0.0",
+		"@vitest/coverage-v8": "^5.0.0",
+		"knip": "^6.12.1",
+		"lefthook": "^2.1.6",
+		"semantic-release": "^25.0.3",
+		"shx": "^0.4.0",
+		"tsx": "^4.21.0",
+		"typescript": "^7.0.2",
+		"ultracite": "8.0.1",
+		"vitest": "^5.0.0"
+	},
+	"engines": {
+		"node": ">=22"
+	},
+	"mcpName": "io.github.langmail/langmail-mcp"
+}

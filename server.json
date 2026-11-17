@@ -1,0 +1,51 @@
+{
+	"$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+	"name": "io.github.langmail/langmail-mcp",
+	"title": "Langmail MCP for your own Stalwart",
+	"description": "Email, calendar and contacts tools for your own Stalwart server, over JMAP and CalDAV.",
+	"repository": {
+		"url": "https://github.com/langmail/langmail-mcp",
+		"source": "github"
+	},
+	"version": "0.0.0",
+	"packages": [
+		{
+			"registryType": "npm",
+			"identifier": "langmail-mcp",
+			"version": "0.0.0",
+			"transport": {
+				"type": "stdio"
+			},
+			"environmentVariables": [
+				{
+					"name": "STALWART_URL",
+					"description": "Base URL of your Stalwart server (e.g. https://mail.example.com)",
+					"isRequired": true,
+					"format": "string",
+					"isSecret": false
+				},
+				{
+					"name": "STALWART_USERNAME",
+					"description": "Account name to sign in with; use together with STALWART_PASSWORD",
+					"isRequired": false,
+					"format": "string",
+					"isSecret": false
+				},
+				{
+					"name": "STALWART_PASSWORD",
+					"description": "App password for STALWART_USERNAME",
+					"isRequired": false,
+					"format": "string",
+					"isSecret": true
+				},
+				{
+					"name": "STALWART_TOKEN",
+					"description": "Bearer token, as an alternative to STALWART_USERNAME and STALWART_PASSWORD",
+					"isRequired": false,
+					"format": "string",
+					"isSecret": true
+				}
+			]
+		}
+	]
+}
