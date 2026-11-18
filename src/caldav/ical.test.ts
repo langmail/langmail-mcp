@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { getVtimezoneComponent } from '@touch4it/ical-timezones'
+import { rrulestr } from 'rrule'
+import { tzlib_get_ical_block } from 'timezones-ical-library'
 
 import { ianaTimeZone, WINDOWS_ZONES } from '@langmail/ical'
 
-import { buildInvite, maxSequence, parseSequence, vtimezoneComponent } from './ical.ts'
+import { buildInvite, maxSequence, parseSequence } from './ical.ts'
 
 // RFC 5545 folds long lines at 75 octets with a CRLF + space; undo that
 // so substring assertions don't trip over a folded email address.
@@ -350,10 +351,6 @@ describe('VTIMEZONE for every zone written', () => {
     expect(zone).not.toContain('+0500')
   })
 
-  test('a zone the library defines correctly keeps its definition', () => {
-    expect(vtimezoneComponent('Europe/Berlin')).toBe(getVtimezoneComponent('Europe/Berlin'))
-  })
-
   test('every zone a Windows name maps to, and Etc/GMT-14, has a matching VTIMEZONE', () => {
     for (const timeZone of [...new Set(Object.values(WINDOWS_ZONES)), 'Etc/GMT-14']) {
       const ics = zoned(timeZone)
@@ -368,15 +365,166 @@ describe('VTIMEZONE for every zone written', () => {
     expect(zone).toContain('TZOFFSETTO:+0530')
   })
 
-  // The upstream defects behind vtimezoneComponent's workarounds
-  // (docs/upstream/ical-timezones/): when one fails, the library got that
-  // right and its workaround can go.
-  test('upstream: @touch4it/ical-timezones still writes Etc/GMT-12 as UTC-12', () => {
-    expect(getVtimezoneComponent('Etc/GMT-12')).toContain('TZOFFSETTO:-1200')
-    expect(getVtimezoneComponent('Etc/GMT-13')).toBeNull()
+  test('the aliases Outlook and older clients name get a VTIMEZONE under their own TZID', () => {
+    for (const timeZone of ['Asia/Saigon', 'America/Godthab', 'Asia/Calcutta']) {
+      expect(vtimezoneOf(zoned(timeZone)), timeZone).toContain(`TZID:${timeZone}\r\n`)
+    }
   })
 
-  test('upstream: @touch4it/ical-timezones still defines Asia/Calcutta as TZID Asia/Kolkata', () => {
-    expect(getVtimezoneComponent('Asia/Calcutta')).toContain('TZID:Asia/Kolkata')
+  test('every zone written keeps the offsets the runtime gives it, 2025 to 2028', () => {
+    const zones = new Set([
+      ...Intl.supportedValuesOf('timeZone'),
+      ...Object.values(WINDOWS_ZONES),
+      'Asia/Saigon',
+      'America/Godthab',
+      'Asia/Calcutta',
+      // Zones whose rules changed, or that were added, after 2018.
+      'America/Mexico_City',
+      'Asia/Almaty',
+      'Europe/Kyiv',
+      'America/Nuuk',
+      'Pacific/Kanton',
+      'Africa/Cairo',
+      'Europe/Volgograd',
+      'Pacific/Norfolk',
+      ...Array.from({ length: 27 }, (_, i) => i - 14)
+        .filter((hours) => hours !== 0)
+        .map((hours) => `Etc/GMT${hours < 0 ? '-' : '+'}${Math.abs(hours)}`),
+    ])
+    const mismatches: string[] = []
+    for (const timeZone of zones) {
+      // UTC times are written with `Z` and need no VTIMEZONE.
+      if (timeZone === 'UTC' || timeZone in SKIPPED_ZONES) {
+        continue
+      }
+      const ics = zoned(timeZone)
+      const zone = vtimezoneOf(ics)
+      expect(zone, timeZone).toContain(`TZID:${timeZone}\r\n`)
+      const offsetAt = vtimezoneOffsets(zone)
+      for (const instant of SAMPLE_INSTANTS) {
+        const written = offsetAt(instant)
+        const real = runtimeOffset(timeZone, instant)
+        if (written !== real) {
+          mismatches.push(`${timeZone} at ${instant.toISOString()}: ${written} written, ${real} real`)
+        }
+      }
+    }
+    expect(mismatches).toEqual([])
+  })
+
+  test('zones whose rules changed after 2018 get their current offsets', () => {
+    const offsets = (timeZone: string, iso: string): number =>
+      vtimezoneOffsets(vtimezoneOf(zoned(timeZone)))(new Date(iso))
+    // Mexico abolished daylight saving in 2022, Kazakhstan unified on +05 in 2024.
+    expect(offsets('America/Mexico_City', '2026-07-01T12:00:00Z')).toBe(-360)
+    expect(offsets('America/Mexico_City', '2026-01-01T12:00:00Z')).toBe(-360)
+    expect(offsets('Asia/Almaty', '2026-07-01T12:00:00Z')).toBe(300)
+    expect(offsets('Etc/GMT-14', '2026-07-01T12:00:00Z')).toBe(840)
+  })
+
+  test('the zones the library gets wrong are corrected', () => {
+    const offsets = (timeZone: string, iso: string): number =>
+      vtimezoneOffsets(vtimezoneOf(zoned(timeZone)))(new Date(iso))
+    // Morocco is +01 outside Ramadan.
+    expect(offsets('Africa/Casablanca', '2026-07-01T12:00:00Z')).toBe(60)
+    expect(offsets('Africa/El_Aaiun', '2026-11-01T12:00:00Z')).toBe(60)
+    // In 2028 the last Friday of March is the 31st; Israel's summer time
+    // starts on the 24th, the Friday before the last Sunday.
+    expect(offsets('Asia/Jerusalem', '2028-03-27T12:00:00Z')).toBe(180)
+    expect(offsets('Asia/Tel_Aviv', '2028-03-27T12:00:00Z')).toBe(180)
+    expect(offsets('Asia/Jerusalem', '2026-03-28T12:00:00Z')).toBe(180)
+  })
+
+  // The upstream defects behind vtimezoneComponent's corrections
+  // (docs/upstream/timezones-ical-library/): when one fails, the library got
+  // that zone right and its correction can go.
+  test('upstream: timezones-ical-library still writes Morocco as UTC+0', () => {
+    expect(tzlib_get_ical_block('Africa/Casablanca')[0]).toContain('TZOFFSETTO:+0000')
+  })
+
+  test('upstream: timezones-ical-library still starts Israeli summer time on the last Friday of March', () => {
+    expect(tzlib_get_ical_block('Asia/Jerusalem')[0]).toContain('BYMONTH=3;BYDAY=-1FR')
   })
 })
+
+// Zones the offset test leaves out, and why.
+const MOROCCO_RAMADAN = 'Morocco moves its clocks back to +00 for Ramadan, a lunar date no yearly RRULE states'
+const PALESTINE_RAMADAN = 'Palestine starts daylight saving after Ramadan, a lunar date no yearly RRULE states'
+// tzdata 2026e made these zones permanent daylight time from November 2026.
+// The library writes that rule back to 1970, so winter 2025 is an hour off,
+// and Bun's ICU tz data predates the change, so the runtime is an hour off
+// from November 2026 on (#1334).
+const CANADA_PERMANENT_DST = 'permanent daylight time since November 2026, which Bun does not know yet'
+const SKIPPED_ZONES: Record<string, string> = {
+  'Africa/Casablanca': MOROCCO_RAMADAN,
+  'Africa/El_Aaiun': MOROCCO_RAMADAN,
+  'America/Edmonton': CANADA_PERMANENT_DST,
+  'America/Inuvik': CANADA_PERMANENT_DST,
+  'America/Vancouver': CANADA_PERMANENT_DST,
+  'America/Winnipeg': CANADA_PERMANENT_DST,
+  'Asia/Gaza': PALESTINE_RAMADAN,
+  'Asia/Hebron': PALESTINE_RAMADAN,
+}
+
+// Noon UTC on every day from 2025 to 2028, so a change in the wrong week shows.
+const SAMPLE_INSTANTS = Array.from(
+  { length: (Date.UTC(2029, 0, 1) - Date.UTC(2025, 0, 1)) / 86_400_000 },
+  (_, day) => new Date(Date.UTC(2025, 0, 1 + day, 12))
+)
+
+const LONG_OFFSET_RE = /^GMT(?:([+-])(\d{2}):(\d{2}))?$/u
+
+const offsetFormats = new Map<string, Intl.DateTimeFormat>()
+
+// The UTC offset in minutes the runtime's tz data gives a zone at an instant.
+const runtimeOffset = (timeZone: string, instant: Date): number => {
+  let format = offsetFormats.get(timeZone)
+  if (!format) {
+    format = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' })
+    offsetFormats.set(timeZone, format)
+  }
+  const name = format.formatToParts(instant).find((part) => part.type === 'timeZoneName')?.value
+  const match = LONG_OFFSET_RE.exec(name ?? '')
+  if (!match) {
+    throw new Error(`no offset for ${timeZone}: ${name}`)
+  }
+  const [, sign, hours = '0', minutes = '0'] = match
+  return (sign === '-' ? -1 : 1) * (Number(hours) * 60 + Number(minutes))
+}
+
+const ICAL_OFFSET_RE = /^([+-])(\d{2})(\d{2})$/u
+const icalOffset = (value: string): number => {
+  const match = ICAL_OFFSET_RE.exec(value)
+  if (!match) {
+    throw new Error(`not a UTC offset: ${value}`)
+  }
+  const [, sign, hours = '0', minutes = '0'] = match
+  return (sign === '-' ? -1 : 1) * (Number(hours) * 60 + Number(minutes))
+}
+
+const OBSERVANCE_RE = /BEGIN:(?:STANDARD|DAYLIGHT)\r\n([\s\S]*?)END:(?:STANDARD|DAYLIGHT)/gu
+
+// What a client that reads only the VTIMEZONE makes of it: the offset in
+// minutes at an instant, from the latest observance onset before it.
+const vtimezoneOffsets = (vtimezone: string): ((instant: Date) => number) => {
+  const onsets: { at: number; offset: number }[] = []
+  for (const [, body = ''] of vtimezone.matchAll(OBSERVANCE_RE)) {
+    const props = new Map(
+      body.split('\r\n').map((line) => [line.slice(0, line.indexOf(':')), line.slice(line.indexOf(':') + 1)])
+    )
+    const from = icalOffset(props.get('TZOFFSETFROM') ?? '')
+    const to = icalOffset(props.get('TZOFFSETTO') ?? '')
+    const dtstart = props.get('DTSTART') ?? ''
+    const rrule = props.get('RRULE')
+    // rrule reads the floating local DTSTART as if it were UTC; the onset's
+    // real instant is that wall time minus the offset in force before it.
+    const locals = rrule
+      ? rrulestr(`DTSTART:${dtstart}Z\nRRULE:${rrule}`).between(new Date('1969-01-01'), new Date('2030-01-01'), true)
+      : [rrulestr(`DTSTART:${dtstart}Z\nRRULE:FREQ=YEARLY;COUNT=1`).all()[0] ?? new Date(0)]
+    for (const local of locals) {
+      onsets.push({ at: local.getTime() - from * 60_000, offset: to })
+    }
+  }
+  onsets.sort((a, b) => a.at - b.at)
+  return (instant) => onsets.findLast((onset) => onset.at <= instant.getTime())?.offset ?? Number.NaN
+}

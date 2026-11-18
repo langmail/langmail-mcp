@@ -3,7 +3,6 @@
 // CRLF line-folding, and date formatting; this module just maps our
 // invite shape onto it.
 
-import { getVtimezoneComponent } from '@touch4it/ical-timezones'
 import ical, {
   ICalAlarmType,
   type ICalAttendeeData,
@@ -12,51 +11,41 @@ import ical, {
   ICalCalendarMethod,
   ICalEventTransparency,
 } from 'ical-generator'
+import { tzlib_get_ical_block } from 'timezones-ical-library'
 
 import { toZonedDate, UTC_TIME_ZONE } from './timezone.ts'
 
-// An `Etc/GMT±N` zone name. The sign is POSIX's, the reverse of the offset:
-// `Etc/GMT-13` is UTC+13.
-const ETC_GMT_RE = /^Etc\/GMT([+-])(\d{1,2})$/u
-
-// A fixed-offset VTIMEZONE for an `Etc/GMT±N` zone: one STANDARD component
-// whose offset never changes. Returns null for any other name.
-const etcGmtVtimezone = (name: string): string | null => {
-  const match = ETC_GMT_RE.exec(name)
-  if (!match) {
-    return null
-  }
-  const [, posixSign, hours = '0'] = match
-  // RFC 5545 §3.3.14 forbids `-0000`, so a zero offset is always `+`.
-  const sign = posixSign === '+' && Number(hours) > 0 ? '-' : '+'
-  const tzname = `${sign}${hours.padStart(2, '0')}`
-  const offset = `${tzname}00`
-  return [
-    'BEGIN:VTIMEZONE',
-    `TZID:${name}`,
-    'BEGIN:STANDARD',
-    'DTSTART:19700101T000000',
-    `TZOFFSETFROM:${offset}`,
-    `TZOFFSETTO:${offset}`,
-    `TZNAME:${tzname}`,
-    'END:STANDARD',
-    'END:VTIMEZONE',
-    '',
-  ].join('\n')
-}
-
 const TZID_LINE_RE = /^TZID:.*$/mu
 
+// Morocco's offset: +01, the library's +00 (docs/upstream/timezones-ical-library/morocco-written-as-utc.md).
+const asMorocco = (block: string): string => block.replaceAll('+0000', '+0100').replace('TZNAME:+00', 'TZNAME:+01')
+
+// The library's blocks that are wrong, by the canonical zone they define, and
+// how to correct them. Each names its file in docs/upstream/timezones-ical-library/.
+const CORRECTIONS: Record<string, (block: string) => string> = {
+  'Africa/Casablanca': asMorocco,
+  'Africa/El_Aaiun': asMorocco,
+  // Israel starts daylight saving on the Friday before the last Sunday of
+  // March (jerusalem-dst-start-last-friday.md).
+  'Asia/Jerusalem': (block) =>
+    block.replace('BYMONTH=3;BYDAY=-1FR', 'BYMONTH=3;BYDAY=FR;BYMONTHDAY=23,24,25,26,27,28,29'),
+}
+
 // The VTIMEZONE for a zone the event names, under that same TZID (RFC 5545
-// §3.6.5). `Etc/GMT±N` zones are written here: @touch4it/ical-timezones lacks
-// Etc/GMT-13 and Etc/GMT-14 and ships the rest with the offset's sign flipped.
-// Every other zone takes the library's definition, renamed to the requested
-// TZID, because the library defines an alias (Asia/Calcutta) under another
-// name (Asia/Kolkata). See
-// docs/upstream/ical-timezones/etc-gmt-zones-have-inverted-offsets.md and
-// docs/upstream/ical-timezones/alias-zones-defined-under-another-tzid.md.
-export const vtimezoneComponent = (name: string): string | null =>
-  etcGmtVtimezone(name) ?? getVtimezoneComponent(name)?.replace(TZID_LINE_RE, `TZID:${name}`) ?? null
+// §3.6.5), from timezones-ical-library. Its rules are the tzdata release in
+// its package.json's `tzdataVersion`, so bump it to pick up a zone's new
+// rules. It writes a zone's current rule back to 1970, so a date before a
+// zone's last change can be an hour off. It defines an alias (Asia/Calcutta)
+// under its canonical name (Asia/Kolkata), so its TZID line is renamed to
+// the requested zone. Returns null for a name the library doesn't know.
+const vtimezoneComponent = (name: string): string | null => {
+  const [block, tzidParam = ''] = tzlib_get_ical_block(name)
+  if (!block) {
+    return null
+  }
+  const correct = CORRECTIONS[tzidParam.replace('TZID=', '')] ?? ((unchanged: string) => unchanged)
+  return `${correct(block).replace(TZID_LINE_RE, `TZID:${name}`)}\r\n`
+}
 
 const RECURRENCE_ID_LINE_RE = /^RECURRENCE-ID(?:;[^:]*)?:.*$/mu
 // The DTSTAMP content line, with whatever params ical-generator attached.
