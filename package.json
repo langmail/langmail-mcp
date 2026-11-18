@@ -30,6 +30,7 @@
     "@langmail/ical": "*",
     "@langmail/jmap": "*",
     "@langmail/logger": "*",
+    "@langmail/utils": "*",
     "@modelcontextprotocol/client": "^2.4.0",
     "@modelcontextprotocol/ext-apps": "~2.0.4",
     "@modelcontextprotocol/server": "^2.4.0",

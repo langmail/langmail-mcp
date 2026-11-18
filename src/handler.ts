@@ -5,6 +5,7 @@
 // wiring; this file owns routing.
 
 import { logger } from '@langmail/logger'
+import { createReadiness, type ReadyResult, readyzResponse } from '@langmail/utils/readiness'
 
 import { type AttachmentDownload } from './attachments/download.ts'
 import { type AttachmentUpload } from './attachments/upload.ts'
@@ -13,13 +14,7 @@ import { MCP_SCOPES } from './auth/scopes.ts'
 import { TokenCache } from './auth/token-cache.ts'
 import { type CalendarFeed } from './calendar-feeds/feed.ts'
 import { type ImageProxy } from './email-render/image-proxy.ts'
-import {
-  authReachable,
-  createReadiness,
-  type ReadyResult,
-  readyzResponse,
-  stalwartReachable,
-} from './health/readiness.ts'
+import { authReachable, stalwartReachable } from './health/readiness.ts'
 import { type ObservabilityStatus, observabilityConfig } from './observability/config.ts'
 
 export interface HandlerConfig {
