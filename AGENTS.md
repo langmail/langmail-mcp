@@ -175,7 +175,10 @@ semantic-release, which computes the version from the commit messages,
 publishes the npm package, tags the release and writes `CHANGELOG.md`. The
 same run builds the hosted image from `Dockerfile`, pushes it to
 `ghcr.io/langmail/langmail-mcp`, and sends its digest to `langmail/platform`,
-which pins it for production.
+which pins it for production. Only a release deploys: `feat`, `fix`, `perf`
+and `refactor` commits release (`.releaserc.json`), while `docs`, `test`,
+`chore` and `ci` commits wait for the next release. Dependabot bumps runtime
+dependencies as `fix(deps)` for that reason.
 
 ## Upstream defects
 

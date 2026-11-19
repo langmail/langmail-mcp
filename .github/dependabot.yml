@@ -5,8 +5,11 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
+    # Runtime dependencies ship in the hosted image and the package, so their
+    # bumps release a patch; development dependencies release nothing.
     commit-message:
-      prefix: "chore"
+      prefix: "fix"
+      prefix-development: "chore"
       include: "scope"
     groups:
       bun-minor-and-patch:

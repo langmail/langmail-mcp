@@ -1,0 +1,270 @@
+name: Release
+
+# Every pull request and push runs the checks. A push to main then runs
+# semantic-release, which publishes langmail-mcp to npm when the commits since
+# the last release call for one, builds the hosted image from the release
+# tag and sends its digest to langmail/platform, which pins it for production.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  DO_NOT_TRACK: "1"
+  BUN_VERSION: "1.4.4"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Lint and type-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run typecheck
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: bun test
+
+  caldav:
+    name: CalDAV integration (Radicale)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-radicale-3
+      # Started before the install and waited for after it, so Radicale boots
+      # while `bun install` runs.
+      - name: Start Radicale
+        run: |
+          pip install 'radicale>=3,<4'
+          mkdir -p "$RUNNER_TEMP/radicale/collections"
+          printf 'test:test\n' > "$RUNNER_TEMP/radicale/users"
+          printf '[server]\nhosts = 127.0.0.1:5232\n[auth]\ntype = htpasswd\nhtpasswd_filename = %s/radicale/users\nhtpasswd_encryption = plain\n[storage]\nfilesystem_folder = %s/radicale/collections\n' "$RUNNER_TEMP" "$RUNNER_TEMP" > "$RUNNER_TEMP/radicale/config"
+          nohup python -m radicale --config "$RUNNER_TEMP/radicale/config" > "$RUNNER_TEMP/radicale/server.log" 2>&1 &
+      - run: bun install --frozen-lockfile
+      - name: Wait for Radicale
+        run: |
+          for _ in $(seq 1 15); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -u test:test http://127.0.0.1:5232/ || true)
+            if [ "$code" = "302" ] || [ "$code" = "207" ] || [ "$code" = "200" ]; then
+              echo "radicale up (HTTP $code)"; exit 0
+            fi
+            sleep 1
+          done
+          echo "radicale did not become ready"; cat "$RUNNER_TEMP/radicale/server.log"; exit 1
+      - run: bun run test:integration
+        env:
+          CALDAV_BASE_URL: http://127.0.0.1:5232
+          CALDAV_USERNAME: test
+          CALDAV_PASSWORD: test
+
+  stalwart:
+    name: Stalwart integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      # `up -d` returns once the container exists, so Stalwart boots while
+      # `bun install` runs.
+      - name: Start Stalwart
+        run: |
+          STALWART_VERSION=$(jq -r .stalwart infra/dev/stalwart/version.json) \
+            docker compose -f infra/dev/stalwart/docker-compose.yml up -d
+      - run: bun install --frozen-lockfile
+      - name: Wait for Stalwart
+        run: |
+          for _ in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9090/jmap/session || true)
+            if [ "$code" = "401" ] || [ "$code" = "200" ]; then echo "stalwart up (HTTP $code)"; exit 0; fi
+            sleep 2
+          done
+          echo "stalwart did not become ready"; docker logs stalwart-dev; exit 1
+      # Finishes first-boot setup and creates the domain the tests provision
+      # their throwaway accounts under.
+      - run: bun run stalwart:setup
+        env:
+          STALWART_ADMIN_URL: http://127.0.0.1:9090
+      - run: bun run test:stalwart
+        env:
+          STALWART_ADMIN_URL: http://127.0.0.1:9090
+          # The dev container's pinned admin, base64("admin:devpassword"), not
+          # a secret (infra/dev/stalwart/docker-compose.yml).
+          STALWART_ADMIN_AUTHORIZATION: "Basic YWRtaW46ZGV2cGFzc3dvcmQ="
+
+  package:
+    name: Package under Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The current LTS, and the lowest version the engines field allows (the
+    # dependencies need require(esm), on by default from 22.12).
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["lts/*", "22.12.0"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+      - run: bun install --frozen-lockfile
+      - name: Self-hosted tests under Node
+        run: bun run test:node
+      - name: Packed tarball starts under Node
+        run: bun run check:package --runtime node
+
+  package-bun:
+    name: Package under Bun
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "lts/*"
+      - run: bun install --frozen-lockfile
+      - name: Packed tarball starts under Bun
+        run: bun run check:package --runtime bun
+
+  tla:
+    name: Send protocol (TLA+)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # ubuntu-latest ships a JDK, which is all TLC needs.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/langmail
+          key: tla-tools-1.7.4
+      - run: bun run spec:check
+
+  release:
+    name: Release
+    needs: [check, test, caldav, stalwart, package, package-bun, tla]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # the release commit, tag and GitHub release
+      issues: write # comments on resolved issues
+      pull-requests: write # comments on released PRs
+      id-token: write # npm trusted publishing (OIDC)
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          # The deploy key is a bypass actor on main's ruleset; GITHUB_TOKEN
+          # cannot push the release commit.
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      # npm 11.5 or later publishes with OIDC; Node 24 ships it.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - run: bun install --frozen-lockfile
+      - name: Release
+        id: release
+        run: |
+          before=$(jq -r .version package.json)
+          bun x semantic-release --repository-url git@github.com:langmail/langmail-mcp.git
+          after=$(jq -r .version package.json)
+          # @semantic-release/npm writes the new version into package.json only
+          # when it releases.
+          if [ "$after" != "$before" ]; then echo "version=$after" >> "$GITHUB_OUTPUT"; fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LEFTHOOK: "0"
+
+  image:
+    name: Hosted image
+    needs: release
+    if: needs.release.outputs.version != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: v${{ needs.release.outputs.version }}
+      - id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          build-args: |
+            COMMIT=${{ steps.commit.outputs.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ghcr.io/langmail/langmail-mcp:${{ needs.release.outputs.version }}
+            ghcr.io/langmail/langmail-mcp:latest
+      # langmail/platform's pin-mcp-image.yml pins the digest in
+      # infra/modules/mcp.nix, and comin rolls it out.
+      - name: Send the digest to langmail/platform
+        env:
+          GH_TOKEN: ${{ secrets.PLATFORM_DISPATCH_TOKEN }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          jq -n --arg digest "$DIGEST" --arg version "$VERSION" \
+            '{event_type: "langmail-mcp-released", client_payload: {digest: $digest, version: $version}}' \
+            | gh api repos/langmail/platform/dispatches --input -

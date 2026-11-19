@@ -53,12 +53,13 @@ whether an agent still picks the right tool.
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/),
 because the release version is computed from them:
 
-- `fix:` releases a patch version.
+- `fix:` and `refactor:` release a patch version, because the hosted server
+  deploys only what is released.
 - `feat:` releases a minor version.
 - `feat!:` or a `BREAKING CHANGE:` footer releases a major version. Use it
   when a tool's name, inputs or outputs change in a way a client notices, or a
   setting is renamed or removed.
-- `docs:`, `test:`, `refactor:`, `chore:` and `ci:` release nothing.
+- `docs:`, `test:`, `chore:` and `ci:` release nothing.
 
 ## Releases
 
