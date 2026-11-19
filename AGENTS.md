@@ -116,6 +116,10 @@ Environment variables (set via `infra/modules/mcp.nix` — the container's
 | `MCP_PUBLIC_URL`      | `http://127.0.0.1:8080`    | full base URL, e.g. `https://mcp.langmail.me`       |
 | `STALWART_PUBLIC_URL` | `https://mail.langmail.me` | JMAP/CalDAV egress — where the bearer is forwarded  |
 | `AUTH_PUBLIC_URL`     | `https://auth.langmail.me` | Better Auth base; issuer = `${AUTH_PUBLIC_URL}/api/auth`, the AS the MCP server advertises + validates bearers against |
+| `AUTH_SERVICE_URL`    | `AUTH_PUBLIC_URL`          | Auth base for its `/internal/*` endpoints            |
+| `AUTH_INTERNAL_TOKEN` | unset                      | Bearer for Auth's internal endpoints: calendar sharing, share feeds, agent activity (`src/auth-internal.ts`). Unset, those are off and the sharing tools are not offered |
 
 The `EnvironmentFile` may be empty on a fresh VM — defaults boot a
-usable server, just with the wrong public URLs.
+usable server, just with the wrong public URLs. The server has no database
+connection: Langmail's own data (calendar shares, the agent-activity row)
+goes through Auth.

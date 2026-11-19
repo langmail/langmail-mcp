@@ -19,9 +19,9 @@ import { createAttachmentDownload } from './attachments/download.ts'
 import { createTicketStore } from './attachments/tickets.ts'
 import { createAttachmentUpload } from './attachments/upload.ts'
 import { createUploadTicketStore } from './attachments/upload-tickets.ts'
+import { internalAuthFromEnv } from './auth-internal.ts'
 import { calendarFeedFromEnv } from './calendar-feeds/live-deps.ts'
 import { makeCalendarShareStore } from './calendar-feeds/shares.ts'
-import { databaseFromEnv } from './database.ts'
 import { createImageProxy, createImageProxyStore } from './email-render/image-proxy.ts'
 import { createRoutes } from './handler.ts'
 import { createMcpHandler } from './mcp/handler.ts'
@@ -52,28 +52,27 @@ const jmapLive = makeJmapLive(STALWART_URL)
 const tickets = createTicketStore()
 const uploadTickets = createUploadTicketStore()
 const imageTokens = createImageProxyStore()
-// What the database serves, and what runs without it: database.ts.
-const db = databaseFromEnv(process.env.DATABASE_URL)
+// Auth's internal endpoints: calendar sharing, the share feeds and the
+// agent-activity record, and what runs without them (auth-internal.ts).
+const internalAuth = internalAuthFromEnv({
+  authInternalToken: process.env.AUTH_INTERNAL_TOKEN,
+  authServiceUrl: (process.env.AUTH_SERVICE_URL ?? AUTH_URL).replace(TRAILING_SLASHES_RE, ''),
+})
 
 const routes = createRoutes({
   attachmentDownload: createAttachmentDownload(jmapLive, tickets),
   attachmentUpload: createAttachmentUpload(jmapLive, uploadTickets),
   authIssuer: AUTH_ISSUER,
-  // Calendar share feeds: the share table, and the owner's Stalwart credential
-  // from Auth's internal endpoint.
-  calendarFeed: calendarFeedFromEnv({
-    authInternalToken: process.env.AUTH_INTERNAL_TOKEN,
-    authServiceUrl: (process.env.AUTH_SERVICE_URL ?? AUTH_URL).replace(TRAILING_SLASHES_RE, ''),
-    db,
-    stalwartUrl: STALWART_URL,
-  }),
+  // Calendar share feeds: the share and the owner's Stalwart credential from
+  // Auth's internal endpoints.
+  calendarFeed: calendarFeedFromEnv(internalAuth, STALWART_URL),
   imageProxy: createImageProxy(imageTokens),
   mcpHandler: createMcpHandler({
-    ...(db ? { calendarShares: makeCalendarShareStore(db) } : {}),
+    ...(internalAuth ? { calendarShares: makeCalendarShareStore(internalAuth) } : {}),
     imageTokens,
     live: jmapLive,
     publicUrl: PUBLIC_URL,
-    recordAgentActivity: agentActivityRecorderFromEnv(db),
+    recordAgentActivity: agentActivityRecorderFromEnv(internalAuth),
     stalwartUrl: STALWART_URL,
     tickets,
     uploadTickets,

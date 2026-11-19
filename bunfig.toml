@@ -1,4 +1,0 @@
-[test]
-# Migrate the test database (TEST_DATABASE_URL) once before the suite runs,
-# for the DB-backed tests in src/activity/.
-preload = ["./src/test-support/preload.ts"]

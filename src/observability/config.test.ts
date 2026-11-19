@@ -27,7 +27,7 @@ describe('observabilityConfig', () => {
       {
         BETTERSTACK_ERRORS_DSN: 'https://tok@host/1',
         BETTERSTACK_SOURCE_TOKEN: undefined,
-        DATABASE_URL: 'postgresql://mcp_activity:secret@db.example.com/langmail',
+        AUTH_INTERNAL_TOKEN: 'internal-token',
       },
       () => observabilityConfig()
     )

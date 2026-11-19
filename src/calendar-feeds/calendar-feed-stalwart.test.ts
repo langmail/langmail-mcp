@@ -1,33 +1,27 @@
-// E2E for the calendar share feed against a REAL Stalwart and Postgres: a
-// throwaway account's calendar is written over CalDAV, two shares of it are
-// rows in the database, and each link is fetched through the MCP server's own
-// routes. The credential lookup through Auth is the only stand-in: it hands
-// back the account's app password, as /internal/stalwart-credential would.
+// E2E for the calendar share feed against a REAL Stalwart: a throwaway
+// account's calendar is written over CalDAV, two shares of it sit in an
+// in-memory store, and each link is fetched through the MCP server's own
+// routes. Auth is the stand-in: the store plays its calendar-share endpoints
+// (their storage is tested in services/auth and packages/database), and the
+// credential lookup hands back the account's app password, as
+// /internal/stalwart-credential would.
 //
-// Skips unless STALWART_ADMIN_URL and TEST_DATABASE_URL are set. Locally,
-// with the dev stack up (process-compose):
-//   STALWART_ADMIN_URL=http://127.0.0.1:9090 \
-//   TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres \
-//   bun test calendar-feed-stalwart
+// Skips unless STALWART_ADMIN_URL is set. Locally, with the dev stack up
+// (process-compose):
+//   STALWART_ADMIN_URL=http://127.0.0.1:9090 bun test calendar-feed-stalwart
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { randomBytes } from 'node:crypto'
-import { eq, inArray } from 'drizzle-orm'
-
-import { closeDatabaseClient, createDatabaseClient, type DatabaseClient } from '@langmail/database'
-import { createCalendarShareFactory, createUserFactory } from '@langmail/database/factories'
-import { calendar_shares, user } from '@langmail/database/schema'
 
 import { type CalDavConfig, discoverAccount, putEvent } from '../caldav/client.ts'
 import { createRoutes } from '../handler.ts'
+import { fakeShareStore } from '../tools/calendar-share-test-fixtures.ts'
 import { shareCalendar } from '../tools/share-calendar.ts'
 import { stopSharingCalendar } from '../tools/stop-sharing-calendar.ts'
 import { createCalendarFeed, hashSecret } from './feed.ts'
 import { makeCalendarFeedLiveDeps } from './live-deps.ts'
-import { makeCalendarShareStore } from './shares.ts'
 
 const ADMIN_URL = process.env.STALWART_ADMIN_URL
-const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL
 const ADMIN_AUTH =
   process.env.STALWART_ADMIN_AUTHORIZATION ?? `Basic ${Buffer.from('admin:devpassword').toString('base64')}`
 const DOMAIN = 'langmail.me'
@@ -110,7 +104,7 @@ const summaries = (feed: string): string[] =>
     .map((l) => l.slice('SUMMARY:'.length))
 const starts = (feed: string): string[] => feed.split('\r\n').filter((l) => l.startsWith('DTSTART'))
 
-describe.skipIf(!(ADMIN_URL && TEST_DATABASE_URL))('calendar share feed against Stalwart', () => {
+describe.skipIf(!ADMIN_URL)('calendar share feed against Stalwart', () => {
   const localPart = `feed-e2e-${Date.now()}`
   const busySecret = newSecret()
   const fullSecret = newSecret()
@@ -119,8 +113,8 @@ describe.skipIf(!(ADMIN_URL && TEST_DATABASE_URL))('calendar share feed against 
   let basic: string
   let calendarUrl: string
   let caldav: CalDavConfig
-  let db: DatabaseClient
-  let userId: string
+  const userId = crypto.randomUUID()
+  const shares = fakeShareStore()
   let fetchFeed: (secret: string) => Promise<string>
 
   beforeAll(async () => {
@@ -153,25 +147,30 @@ describe.skipIf(!(ADMIN_URL && TEST_DATABASE_URL))('calendar share feed against 
       )
     )
 
-    db = createDatabaseClient(TEST_DATABASE_URL as string)
-    const owner = await createUserFactory(db).create()
-    userId = owner.id
-    const shares = createCalendarShareFactory(db)
     // Stored decoded (`@`, where Stalwart's hrefs say `%40`): the lookup must
     // match the calendar however its path is escaped.
     const path = decodeURIComponent(new URL(calendarUrl, ADMIN_URL).pathname)
-    await shares.create({ calendar_url: path, level: 'busy', secret_hash: hashSecret(busySecret), user_id: userId })
-    await shares.create({ calendar_url: path, level: 'full', secret_hash: hashSecret(fullSecret), user_id: userId })
+    for (const [level, secret] of [
+      ['busy', busySecret],
+      ['full', fullSecret],
+    ] as const) {
+      await shares.create(userId, { calendarUrl: path, label: level, level, secretHash: hashSecret(secret) })
+    }
 
     const live = makeCalendarFeedLiveDeps({
       authService: { baseUrl: 'http://unused', internalToken: 'unused' },
-      db,
       stalwartUrl: ADMIN_URL as string,
     })
     const routes = createRoutes({
       authIssuer: 'http://auth.test/api/auth',
       calendarFeed: createCalendarFeed({
         ...live,
+        findShare: (hash) => {
+          const row = shares.rows.find((r) => r.secretHash === hash)
+          return Promise.resolve(
+            row ? { calendarUrl: row.calendarUrl, id: row.id, level: row.level, userId: row.userId } : null
+          )
+        },
         findCredential: (id) =>
           Promise.resolve(id === userId ? { address: `${localPart}@${DOMAIN}`, authorization: basic } : null),
       }),
@@ -188,10 +187,6 @@ describe.skipIf(!(ADMIN_URL && TEST_DATABASE_URL))('calendar share feed against 
   })
 
   afterAll(async () => {
-    if (db) {
-      await db.delete(user).where(inArray(user.id, userId ? [userId] : []))
-      await closeDatabaseClient(db)
-    }
     if (accountId) {
       await adminCall('x:Account/set', { destroy: [accountId] })
     }
@@ -233,7 +228,7 @@ describe.skipIf(!(ADMIN_URL && TEST_DATABASE_URL))('calendar share feed against 
 
   test('a stopped share shows an empty calendar, like an unknown link; the other share keeps serving', async () => {
     const unknown = await fetchFeed(newSecret())
-    await db.delete(calendar_shares).where(eq(calendar_shares.secret_hash, hashSecret(busySecret)))
+    shares.rows = shares.rows.filter((r) => r.secretHash !== hashSecret(busySecret))
     const stopped = await fetchFeed(busySecret)
     expect(stopped).not.toContain('BEGIN:VEVENT')
     expect(stopped).toBe(unknown)
@@ -244,7 +239,7 @@ describe.skipIf(!(ADMIN_URL && TEST_DATABASE_URL))('calendar share feed against 
     const deps = {
       listCalendars: async () => [{ displayName: 'Personal', url: new URL(calendarUrl, ADMIN_URL).href }],
       publicUrl: PUBLIC,
-      shares: makeCalendarShareStore(db),
+      shares,
     }
     const shared = await shareCalendar(deps, {
       args: { calendar: 'Personal', level: 'busy', with: 'Sam' },
@@ -263,30 +258,5 @@ describe.skipIf(!(ADMIN_URL && TEST_DATABASE_URL))('calendar share feed against 
     expect(stopped.isError).toBeUndefined()
     expect(await fetchFeed(secret)).not.toContain('BEGIN:VEVENT')
     expect(summaries(await fetchFeed(fullSecret))).toContain('Dentist')
-  })
-
-  test("the sharing tools change only the caller's shares", async () => {
-    const other = await createUserFactory(db).create()
-    try {
-      const path = new URL(calendarUrl, ADMIN_URL).pathname
-      const theirs = await createCalendarShareFactory(db).create({
-        calendar_url: path,
-        label: 'Sam',
-        level: 'busy',
-        user_id: other.id,
-      })
-      const deps = {
-        listCalendars: async () => [{ displayName: 'Personal', url: new URL(calendarUrl, ADMIN_URL).href }],
-        publicUrl: PUBLIC,
-        shares: makeCalendarShareStore(db),
-      }
-      await shareCalendar(deps, { args: { calendar: 'Personal', level: 'busy', with: 'Sam' }, token: 'unused', userId })
-      await shareCalendar(deps, { args: { calendar: 'Personal', level: 'full', with: 'Sam' }, token: 'unused', userId })
-      await stopSharingCalendar(deps, { args: { with: 'Sam' }, token: 'unused', userId })
-      const [row] = await db.select().from(calendar_shares).where(eq(calendar_shares.id, theirs.id))
-      expect(row?.level).toBe('busy')
-    } finally {
-      await db.delete(user).where(eq(user.id, other.id))
-    }
   })
 })

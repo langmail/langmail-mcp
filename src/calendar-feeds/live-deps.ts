@@ -1,38 +1,25 @@
-// The calendar feed's live dependencies: the share table in Postgres, Auth's
-// internal credential endpoint and Stalwart's CalDAV.
+// The calendar feed's live dependencies: Auth's internal endpoints for the
+// share and the owner's Stalwart credential, and Stalwart's CalDAV.
 
-import { eq } from 'drizzle-orm'
-
-import { type DatabaseClient } from '@langmail/database'
-import { calendar_shares } from '@langmail/database/schema'
 import { type AuthServiceConfig, fetchStalwartCredential } from '@langmail/jmap'
-import { logger } from '@langmail/logger'
 
+import { postInternal } from '../auth-internal.ts'
 import { type CalDavConfig, fetchCalendarList, fetchEvents } from '../caldav/client.ts'
 import { sameCalendarUrl } from '../tools/calendar-lookup.ts'
 import { type CalendarFeed, type CalendarFeedDeps, type CalendarShareRecord, createCalendarFeed } from './feed.ts'
 import { EMPTY_FEED_NAME } from './render.ts'
 import { toShareLevel } from './shares.ts'
 
-const findShareBySecretHash =
-  (db: DatabaseClient) =>
+export const findShareBySecretHash =
+  (auth: AuthServiceConfig) =>
   async (secretHash: string): Promise<CalendarShareRecord | null> => {
-    const [row] = await db
-      .select({
-        calendarUrl: calendar_shares.calendar_url,
-        id: calendar_shares.id,
-        level: calendar_shares.level,
-        userId: calendar_shares.user_id,
-      })
-      .from(calendar_shares)
-      .where(eq(calendar_shares.secret_hash, secretHash))
-      .limit(1)
-    return row ? { ...row, level: toShareLevel(row.level) } : null
+    const res = await postInternal(auth, '/internal/calendar-shares/find', { secretHash })
+    const { share } = (await res.json()) as { share: CalendarShareRecord | null }
+    return share ? { ...share, level: toShareLevel(share.level) } : null
   }
 
 export interface CalendarFeedLiveConfig {
   authService: AuthServiceConfig
-  db: DatabaseClient
   stalwartUrl: string
 }
 
@@ -57,35 +44,14 @@ export const makeCalendarFeedLiveDeps = (cfg: CalendarFeedLiveConfig): CalendarF
       return { name: calendar.displayName || EMPTY_FEED_NAME, objects: objects.map((o) => o.data) }
     },
     findCredential: (userId) => fetchStalwartCredential(userId, cfg.authService),
-    findShare: findShareBySecretHash(cfg.db),
+    findShare: findShareBySecretHash(cfg.authService),
   }
 }
 
-export interface CalendarFeedEnv {
-  // AUTH_INTERNAL_TOKEN, the internal endpoints' shared secret.
-  authInternalToken?: string
-  // Auth's base URL for /internal/stalwart-credential; defaults to its public URL.
-  authServiceUrl: string
-  // The server's database client (database.ts), as `mcp_activity`.
-  db?: DatabaseClient
+// The feed, or undefined (the route 404s) without Auth's internal endpoints
+// (auth-internal.ts already logged why).
+export const calendarFeedFromEnv = (
+  authService: AuthServiceConfig | undefined,
   stalwartUrl: string
-}
-
-// The feed, or undefined (the route 404s) without a database or the token.
-export const calendarFeedFromEnv = (env: CalendarFeedEnv): CalendarFeed | undefined => {
-  if (!env.db) {
-    // database.ts already warned.
-    return
-  }
-  if (!env.authInternalToken) {
-    logger.warn('AUTH_INTERNAL_TOKEN is not set: calendar share feeds are off')
-    return
-  }
-  return createCalendarFeed(
-    makeCalendarFeedLiveDeps({
-      authService: { baseUrl: env.authServiceUrl, internalToken: env.authInternalToken },
-      db: env.db,
-      stalwartUrl: env.stalwartUrl,
-    })
-  )
-}
+): CalendarFeed | undefined =>
+  authService ? createCalendarFeed(makeCalendarFeedLiveDeps({ authService, stalwartUrl })) : undefined

@@ -88,13 +88,13 @@ import { registerUpdateContact } from '../tools/update-contact.ts'
 import { registerUpdateDraft } from '../tools/update-draft.ts'
 import { registerUpdateMailRule } from '../tools/update-mail-rule.ts'
 import { makeLiveDeps as makeUploadAttachmentsDeps, registerUploadAttachments } from '../tools/upload-attachments.ts'
-import { SERVER_INSTRUCTIONS } from './instructions.ts'
+import { SERVER_INSTRUCTIONS, SERVER_INSTRUCTIONS_WITHOUT_SHARING } from './instructions.ts'
 import { instrumentToolLogging } from './tool-logging.ts'
 
 export interface McpHandlerConfig {
   // The calendar shares share_calendar, stop_sharing_calendar and
-  // list_calendars work on; undefined without a database, which turns
-  // sharing off.
+  // list_calendars work on; undefined without Auth's internal endpoints,
+  // which leaves the two sharing tools out.
   calendarShares?: CalendarShareStore
   // Shared with the /image-proxy/:token route: preview_email mints, the
   // route redeems.
@@ -142,7 +142,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     store: makeMailRulesStore(makeLiveSieveIo(jmapLive)),
   }
   // list_calendars and the two sharing tools: the calendars over CalDAV, the
-  // shares in Postgres, and the base URL a share's link is minted under.
+  // shares through Auth, and the base URL a share's link is minted under.
   const calendarSharingDeps = makeLiveCalendarSharingDeps(caldavCfg, cfg.publicUrl, cfg.calendarShares)
   const createCalendarDeps = makeCreateCalendarDeps(caldavCfg)
   const updateCalendarDeps = makeUpdateCalendarDeps(caldavCfg)
@@ -176,7 +176,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
         name: 'langmail-mcp',
         version: '0.1.0',
       },
-      { instructions: SERVER_INSTRUCTIONS }
+      { instructions: cfg.calendarShares ? SERVER_INSTRUCTIONS : SERVER_INSTRUCTIONS_WITHOUT_SHARING }
     )
     // Before any registerTool call — the wrapper only covers later registrations.
     instrumentToolLogging(server, () => cfg.recordAgentActivity(ctx.userId))
@@ -206,18 +206,20 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
       () => ctx.token,
       () => ctx.userId
     )
-    registerShareCalendar(
-      server,
-      calendarSharingDeps,
-      () => ctx.token,
-      () => ctx.userId
-    )
-    registerStopSharingCalendar(
-      server,
-      calendarSharingDeps,
-      () => ctx.token,
-      () => ctx.userId
-    )
+    if (cfg.calendarShares) {
+      registerShareCalendar(
+        server,
+        calendarSharingDeps,
+        () => ctx.token,
+        () => ctx.userId
+      )
+      registerStopSharingCalendar(
+        server,
+        calendarSharingDeps,
+        () => ctx.token,
+        () => ctx.userId
+      )
+    }
     registerCreateCalendar(server, createCalendarDeps, () => ctx.token)
     registerUpdateCalendar(server, updateCalendarDeps, () => ctx.token)
     registerListCalendarEvents(server, listCalendarEventsDeps, () => ctx.token)

@@ -1,49 +1,35 @@
-// Records that a user was active through an agent today: one row per user,
-// UTC day and surface in `user_activity`, which the metric views in the
-// `metrics` schema count (docs/reference/agent-usage-metrics.md). The MCP
-// server calls it after every successful tool call (mcp/tool-logging.ts); the
-// table's primary key and ON CONFLICT DO NOTHING keep repeated calls on one
-// day to one row.
-//
-// Production connects as `mcp_activity`, which may only INSERT into this
-// table (infra/postgres/metrics-access.sql) — so no RETURNING here, and no
-// read of it.
+// Records that a user was active through an agent today: Auth writes one row
+// per user, UTC day and surface into `user_activity`, which the metric views
+// count (docs/reference/agent-usage-metrics.md). The MCP server calls it
+// after every successful tool call (mcp/tool-logging.ts), without awaiting it.
 //
 // A failed write is logged and dropped: losing a day's activity row must not
-// fail the tool call that earned it. The line names only the Postgres error
-// code: drizzle's message quotes the query parameters, the user id among
-// them, and log lines leave the box free of user ids.
+// fail the tool call that earned it. The line names only the status, never
+// the user id.
 
-import { type DatabaseClient } from '@langmail/database'
-import { user_activity } from '@langmail/database/schema'
+import { type AuthServiceConfig } from '@langmail/jmap'
 import { logger } from '@langmail/logger'
+
+import { InternalAuthError, postInternal } from '../auth-internal.ts'
 
 export type RecordAgentActivity = (userId: string) => Promise<void>
 
-// drizzle wraps the driver's error; the `pg` error with its SQLSTATE is the cause.
-const postgresCode = (error: unknown): string | undefined => {
-  const cause = error instanceof Error ? error.cause : undefined
-  const code = (cause as { code?: unknown } | undefined)?.code
-  return typeof code === 'string' ? code : undefined
-}
-
-const utcDay = (now: Date): string => now.toISOString().slice(0, 10)
+const AGENT_ACTIVITY_PATH = '/internal/agent-activity'
 
 export const makeAgentActivityRecorder =
-  (db: DatabaseClient, now: () => Date = () => new Date()): RecordAgentActivity =>
+  (auth: AuthServiceConfig): RecordAgentActivity =>
   async (userId) => {
     try {
-      await db
-        .insert(user_activity)
-        .values({ day: utcDay(now()), surface: 'mcp', user_id: userId })
-        .onConflictDoNothing()
+      await postInternal(auth, AGENT_ACTIVITY_PATH, { userId })
     } catch (error) {
-      logger.error({ pgCode: postgresCode(error) }, 'mcp agent activity not recorded')
+      logger.error(
+        { status: error instanceof InternalAuthError ? error.status : undefined },
+        'mcp agent activity not recorded'
+      )
     }
   }
 
-// Without a database the server still serves every tool, it just records
-// nothing — so an image deployed before its credential is in mcp.env keeps
-// working. database.ts warns why the metrics stay empty.
-export const agentActivityRecorderFromEnv = (db: DatabaseClient | undefined): RecordAgentActivity =>
-  db ? makeAgentActivityRecorder(db) : async () => undefined
+// Without Auth's endpoints the server records nothing (auth-internal.ts
+// already logged why).
+export const agentActivityRecorderFromEnv = (auth: AuthServiceConfig | undefined): RecordAgentActivity =>
+  auth ? makeAgentActivityRecorder(auth) : async () => undefined

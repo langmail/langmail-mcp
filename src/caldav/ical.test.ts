@@ -410,7 +410,9 @@ describe('VTIMEZONE for every zone written', () => {
       }
     }
     expect(mismatches).toEqual([])
-  })
+    // Every zone the runtime knows, four years each: about 2 s alone, past bun's
+    // 5 s default when CI tests ten packages at once.
+  }, 30_000)
 
   test('zones whose rules changed after 2018 get their current offsets', () => {
     const offsets = (timeZone: string, iso: string): number =>

@@ -1,11 +1,11 @@
 // An in-memory calendar share store and sharing deps for the sharing tools'
-// unit tests. Rows are built with the database factory, then kept in the
-// store's own shape.
+// unit tests, with rows in the store's own shape. The server has no database
+// package, so rows are built here rather than with its factories.
 
-import { calendarShareFactory } from '@langmail/database/factories'
+import { randomBytes } from 'node:crypto'
 
 import { type CalendarSummary } from '../caldav/types.ts'
-import { type CalendarShare, type CalendarShareStore, toShareLevel } from '../calendar-feeds/shares.ts'
+import { type CalendarShare, type CalendarShareStore } from '../calendar-feeds/shares.ts'
 import { type CalendarSharingDeps, calendarPath } from './calendar-share-common.ts'
 
 export const USER_ID = 'user-1'
@@ -20,7 +20,7 @@ export const FAMILY: CalendarSummary = {
   url: 'https://mail.example.com/dav/cal/ana%40example.com/family/',
 }
 
-interface StoredShare extends CalendarShare {
+export interface StoredShare extends CalendarShare {
   secretHash: string
   userId: string
 }
@@ -29,23 +29,20 @@ export interface FakeShareStore extends CalendarShareStore {
   rows: StoredShare[]
 }
 
-// A share row as calendar_shares holds it.
-export const shareRow = (calendar: CalendarSummary, label: string, level: 'busy' | 'full', userId = USER_ID) => {
-  const row = calendarShareFactory.build({
-    calendar_url: calendarPath(calendar.url),
-    label,
-    level,
-    user_id: userId,
-  })
-  return {
-    calendarUrl: row.calendar_url,
-    id: row.id,
-    label: row.label,
-    level: toShareLevel(row.level),
-    secretHash: row.secret_hash,
-    userId: row.user_id,
-  }
-}
+// A share row as Auth holds it.
+export const shareRow = (
+  calendar: CalendarSummary,
+  label: string,
+  level: 'busy' | 'full',
+  userId = USER_ID
+): StoredShare => ({
+  calendarUrl: calendarPath(calendar.url),
+  id: crypto.randomUUID(),
+  label,
+  level,
+  secretHash: randomBytes(32).toString('hex'),
+  userId,
+})
 
 export const fakeShareStore = (rows: StoredShare[] = []): FakeShareStore => {
   const store: FakeShareStore = {

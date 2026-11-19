@@ -12,7 +12,7 @@ export interface CalendarSharingDeps {
   listCalendars: (token: string) => Promise<CalendarSummary[]>
   // Base URL the share links are minted under (the feed route's host).
   publicUrl: string
-  // Undefined when the server has no database: sharing is off.
+  // Undefined without Auth's internal endpoints: sharing is off.
   shares?: CalendarShareStore
 }
 

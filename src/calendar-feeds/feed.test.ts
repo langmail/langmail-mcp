@@ -1,7 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test'
 
-import { calendarShareFactory } from '@langmail/database/factories'
-
 import { type CalendarFeedDeps, type CalendarShareRecord, createCalendarFeed, hashSecret } from './feed.ts'
 
 const SECRET = 'A'.repeat(43)
@@ -16,10 +14,12 @@ const OBJECT = [
   'END:VCALENDAR',
 ].join('\r\n')
 
-const shareRecord = (level: 'busy' | 'full' = 'busy'): CalendarShareRecord => {
-  const row = calendarShareFactory.build({ level, secret_hash: hashSecret(SECRET) })
-  return { calendarUrl: row.calendar_url, id: row.id, level, userId: row.user_id }
-}
+const shareRecord = (level: 'busy' | 'full' = 'busy'): CalendarShareRecord => ({
+  calendarUrl: '/dav/cal/owner%40example.com/default/',
+  id: crypto.randomUUID(),
+  level,
+  userId: crypto.randomUUID(),
+})
 
 const deps = (overrides: Partial<CalendarFeedDeps> = {}): CalendarFeedDeps => ({
   fetchCalendar: () => Promise.resolve({ name: 'Personal', objects: [OBJECT] }),
