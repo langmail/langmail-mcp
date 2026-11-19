@@ -32,6 +32,7 @@ describe('updateDraft', () => {
     expect(creates[0]?.draft.text).toBe('Corrected numbers.')
     // The replacement carries the stable id, so `d1` keeps resolving to it.
     expect(creates[0]?.keywords).toContain('$draftid:d1')
+    expect(creates[0]?.staysInDrafts).toBe(true)
     expect(text).toContain('draftId is unchanged')
     expect(text).toContain('still unsent')
     expect(text).toContain('draftId: d1')

@@ -70,6 +70,7 @@ const DOMAIN = 'langmail.me'
 const TOKEN = 'e2e-basic-auth' // ignored — the deps pin Basic auth (see header)
 
 const USING = ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail']
+const APPLE_DRAFT_HEADER = 'header:X-Uniform-Type-Identifier:asText'
 
 // An invented correspondent at a reserved domain (AGENTS.md: no real people,
 // and the address provably cannot resolve).
@@ -158,6 +159,22 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
       throw new Error(`Email/import failed: ${JSON.stringify(json)}`)
     }
     return created.id
+  }
+
+  // The X-Uniform-Type-Identifier header as Stalwart stored it, null when absent.
+  const appleDraftHeader = async (id: string): Promise<string | null> => {
+    const res = await fetch(apiUrl, {
+      body: JSON.stringify({
+        methodCalls: [['Email/get', { accountId, ids: [id], properties: [APPLE_DRAFT_HEADER] }, '0']],
+        using: USING,
+      }),
+      headers: { authorization, 'content-type': 'application/json' },
+      method: 'POST',
+    })
+    const json = (await res.json()) as {
+      methodResponses: [string, { list?: Record<string, string | null>[] }, string][]
+    }
+    return json.methodResponses[0]?.[1]?.list?.[0]?.[APPLE_DRAFT_HEADER] ?? null
   }
 
   const idsIn = (mailboxId: string): Promise<string[]> => emailQuery({ ...ctx(), filters: { mailboxId }, limit: 50 })
@@ -317,6 +334,8 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
     expect(record?.references).toEqual([`original-${run}@example.org`])
     expect(record?.to?.[0]?.email).toBe(CORRESPONDENT_ADDRESS)
     expect(await idsIn(draftsId)).toContain(replyEmailId)
+    // Apple Mail opens it as its own, editable draft only with this header.
+    expect(await appleDraftHeader(replyEmailId)).toBe('com.apple.mail-draft')
 
     // Stalwart threaded the reply onto the original conversation.
     const [original] = await emailGetDetail({ ...ctx(), ids: [originalId], maxBodyValueBytes: 1 })
@@ -354,6 +373,7 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
     expect(record?.subject).toBe('Re: Quarterly numbers (final)')
     // The body and the threading survived an edit that named neither.
     expect(record?.inReplyTo).toEqual([`original-${run}@example.org`])
+    expect(await appleDraftHeader(current ?? '')).toBe('com.apple.mail-draft')
 
     const read = await getDraft(deps, { args: getDraftInput.parse({ draftId: replyDraftId }), token: TOKEN })
     expect(read.content[0]?.text).toContain('Re: Quarterly numbers (final)')
@@ -593,6 +613,8 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
     expect(record?.keywords?.$draft).toBeUndefined()
     expect(record?.inReplyTo).toEqual([`original-${run}@example.org`])
     expect(record?.subject).toBe('Re: Quarterly numbers')
+    // Staged only to be sent at once, so the delivered mail carries no draft header.
+    expect(await appleDraftHeader(messageId)).toBeNull()
   })
 
   test('reply_to_message refuses replyAll combined with explicit recipients, sending nothing', async () => {

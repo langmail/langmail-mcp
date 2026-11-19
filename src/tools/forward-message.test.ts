@@ -65,6 +65,7 @@ describe('forwardMessage', () => {
     expect(draft?.html).toContain('<b>March</b>')
     expect(draft?.attachments?.map((file) => file.blobId)).toEqual(['bPdf'])
     expect(creates[0]?.keywords).toEqual(['$draftforwardof:e1'])
+    expect(creates[0]?.staysInDrafts).toBeUndefined()
 
     expect(submissions).toHaveLength(1)
     expect(text).toContain('Forward sent.')

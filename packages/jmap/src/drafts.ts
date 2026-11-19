@@ -60,6 +60,16 @@ export const DRAFT_FORWARD_OF_KEYWORD_PREFIX = '$draftforwardof:'
 // count it towards the Drafts folder's unread badge.
 const SEEN_KEYWORD = '$seen'
 
+// The header Apple Mail writes on drafts it saves itself. Apple Mail opens a
+// message in Drafts as an editable draft, and retires it from Drafts once sent,
+// only when it carries this; without it, the message opens read-only and
+// Cmd+Shift+D is Send Again, which sends a copy and leaves the draft behind.
+// Written only on a draft that waits for a person (`staysInDrafts`), since a
+// header, unlike a keyword, rides along on the sent mail. A marked draft later
+// sent with send_draft keeps it; mail clients ignore it outside Drafts.
+const APPLE_MAIL_DRAFT_HEADER = 'header:X-Uniform-Type-Identifier:asText'
+const APPLE_MAIL_DRAFT_TYPE = 'com.apple.mail-draft'
+
 // Client-chosen creation ids. Only ever one create and one destroy per call,
 // so fixed ids are enough and keep the response lookup readable.
 const CREATE_ID = 'draft'
@@ -171,6 +181,10 @@ export interface DraftCreateParams extends JmapCall {
   // Draft this one replaces. Destroyed only after the new one exists — see the
   // header. Omit for a fresh draft.
   replaces?: string
+  // The draft waits in Drafts for a person to send, possibly from another mail
+  // client, so it carries Apple Mail's draft header (`APPLE_MAIL_DRAFT_HEADER`).
+  // Off for a draft staged only to be sent in the same call.
+  staysInDrafts?: boolean
 }
 
 export interface DraftCreateResult {
@@ -198,6 +212,9 @@ const draftProperties = (p: DraftCreateParams): Record<string, unknown> => {
       ...Object.fromEntries((p.keywords ?? []).map((keyword) => [keyword, true])),
     },
     mailboxIds: { [p.mailboxId]: true },
+  }
+  if (p.staysInDrafts) {
+    props[APPLE_MAIL_DRAFT_HEADER] = APPLE_MAIL_DRAFT_TYPE
   }
   // Empty recipient lists are omitted, not sent as `[]`: every draft is written
   // by a create (an edit included — see the header), so "no cc" and "cc

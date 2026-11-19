@@ -70,6 +70,8 @@ describe('replyToMessage', () => {
     expect(draft?.subject).toBe('Re: Quarterly numbers')
     expect(draft?.inReplyTo).toEqual(['orig@example.org'])
     expect(draft?.from).toEqual([{ email: TEST_PRINCIPAL, name: 'Dana Okonjo' }])
+    // Staged only to be sent now: no Apple Mail draft header on delivered mail.
+    expect(creates[0]?.staysInDrafts).toBeUndefined()
 
     expect(submissions).toHaveLength(1)
     expect(submissions[0]?.emailId).toBe('dNew1')

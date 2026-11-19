@@ -376,6 +376,7 @@ export const createDraft = async (
       draft,
       mailboxId: mailboxes.drafts,
       keywords: [...composed.keywords, stableDraftIdKeyword(draftId)],
+      staysInDrafts: true,
     })
   } catch (error) {
     const refusal = draftRefusalReason(error, draft)

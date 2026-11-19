@@ -50,6 +50,8 @@ describe('createDraft', () => {
     const draftId = DRAFT_ID_RE.exec(text)?.[1] ?? ''
     expect(draftId).not.toBe('dNew1')
     expect(creates[0]?.keywords).toEqual([`$draftid:${draftId}`])
+    // It waits in Drafts for a person, so Apple Mail must open it as its own draft.
+    expect(creates[0]?.staysInDrafts).toBe(true)
     expect(text).toContain('to: Nadia Bram <nadia@example.org>')
     expect(text).toContain('body (text): Here they are.')
   })
@@ -88,6 +90,7 @@ describe('createDraft', () => {
         '> Can you send the numbers?\n'
     )
     expect(creates[1]?.draft.text).toBe('Here they are.')
+    expect(creates[0]?.staysInDrafts).toBe(true)
   })
 
   test('records the message a reply answers, so update_draft can quote it again', async () => {
@@ -367,6 +370,7 @@ describe('createDraft with forwardOf', () => {
     expect(draft?.html).toContain('Rent for March')
     expect(draft?.attachments?.map((file) => file.blobId)).toEqual(['bPdf'])
     expect(creates[0]?.keywords).toContain('$draftforwardof:e1')
+    expect(creates[0]?.staysInDrafts).toBe(true)
     expect(text).toContain('Nothing has been sent')
   })
 

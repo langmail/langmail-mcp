@@ -191,6 +191,20 @@ describe('draftCreate', () => {
     )
   })
 
+  test('marks a draft that stays in Drafts with the header Apple Mail keys its own drafts on', async () => {
+    const created: Record<string, unknown>[] = []
+    const f = mock((_url: string, init?: RequestInit) => {
+      created.push(JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1].create.draft)
+      return Promise.resolve(jmapResponse([['Email/set', { created: { draft: { id: 'd1' } } }, '0']]))
+    })
+    const params = { ...call, draft: { from: [{ email: 'me@example.com' }], text: 'hi' }, mailboxId: 'mbDrafts' }
+    await withFetch(f, () => draftCreate({ ...params, staysInDrafts: true }))
+    await withFetch(f, () => draftCreate(params))
+    expect(created[0]?.['header:X-Uniform-Type-Identifier:asText']).toBe('com.apple.mail-draft')
+    // A draft staged only to be sent at once gets none, so delivered mail carries none.
+    expect(Object.keys(created[1] ?? {}).filter((key) => key.startsWith('header:'))).toEqual([])
+  })
+
   test('carries the threading headers as bare message ids', async () => {
     const f = mock((_url: string, init?: RequestInit) => {
       const draft = JSON.parse((init?.body as string) ?? '{}').methodCalls[0][1].create.draft

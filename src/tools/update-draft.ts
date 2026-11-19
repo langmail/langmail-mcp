@@ -784,6 +784,7 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
       mailboxId: mailboxes.drafts,
       keywords: revisionKeywords(record, { draftId, forwardOf, replyOriginal: resolvedOriginal.id }),
       replaces: record.id,
+      staysInDrafts: true,
     })
   } catch (error) {
     const refusal = draftRefusalReason(error, merged)
