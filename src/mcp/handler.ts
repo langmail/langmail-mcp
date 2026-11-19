@@ -201,7 +201,8 @@ export const createMcpServerFactory = (cfg: McpHandlerConfig): ((ctx: ServerCont
     const server = new McpServer(
       {
         name: 'langmail-mcp',
-        version: '0.1.0',
+        // The langmail-mcp package version; scripts/check-package.ts holds the two equal.
+        version: '0.2.0',
       },
       { instructions }
     )

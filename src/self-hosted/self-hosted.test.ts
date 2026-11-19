@@ -4,11 +4,22 @@
 // to show it talks to STALWART_URL and nothing else: no Better Auth, no Auth
 // service, no langmail.me.
 
-import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test'
+import assert from 'node:assert/strict'
 import { PassThrough } from 'node:stream'
+import { after, afterEach, before, describe, test } from 'node:test'
+import { setTimeout as sleep } from 'node:timers/promises'
 
 import { SELF_HOSTED_INSTRUCTIONS } from '../mcp/instructions.ts'
+import {
+  type FakeStalwart,
+  fakeSessionBody,
+  startFakeStalwart,
+  startJsonServer,
+} from '../test-support/fake-stalwart.ts'
 import { startSelfHosted } from './main.ts'
+
+// node:test, not bun:test: CI runs this file under Node as well as Bun
+// (scripts/test-node.ts), since the langmail-mcp package runs under both.
 
 const USERNAME = 'alice'
 const PASSWORD = 'app pass:word'
@@ -17,71 +28,17 @@ const MCP_TOKEN = 'operator-secret'
 const TYPE_FILTER_WORDING_RE = /classif|email type|by type|keywords/iu
 const COLLECTED_BOOK_WORDING_RE = /mail headers|collected/iu
 
-// --- fake Stalwart ---------------------------------------------------------
-
-interface JmapCall {
-  args: Record<string, unknown>
-  name: string
-}
-
-const jmapCalls: JmapCall[] = []
-let stalwart: ReturnType<typeof Bun.serve>
+let stalwart: FakeStalwart
 let stalwartUrl: string
-
-const sessionBody = (base: string) => ({
-  apiUrl: `${base}/jmap/`,
-  capabilities: {},
-  downloadUrl: `${base}/jmap/download/{accountId}/{blobId}/{name}?accept={type}`,
-  primaryAccounts: {
-    'urn:ietf:params:jmap:contacts': 'acct',
-    'urn:ietf:params:jmap:mail': 'acct',
-    'urn:ietf:params:jmap:submission': 'acct',
-  },
-  uploadUrl: `${base}/jmap/upload/{accountId}/`,
-  username: 'alice@example.com',
-})
-
-// Every method answers "nothing here", which is enough for a search to run.
-const emptyResponse = (args: Record<string, unknown>) => ({
-  accountId: args.accountId,
-  ids: [],
-  list: [],
-  notFound: [],
-  position: 0,
-  total: 0,
-})
 
 // --- outbound recording ----------------------------------------------------
 
 const originalFetch = globalThis.fetch
 const outbound: string[] = []
 
-beforeAll(() => {
-  stalwart = Bun.serve({
-    fetch: async (req) => {
-      if (req.headers.get('authorization') !== BASIC) {
-        return new Response('unauthorized', { status: 401 })
-      }
-      const { pathname } = new URL(req.url)
-      if (pathname === '/.well-known/jmap') {
-        return Response.json(sessionBody(stalwartUrl))
-      }
-      if (pathname === '/jmap/' && req.method === 'POST') {
-        const body = (await req.json()) as { methodCalls: [string, Record<string, unknown>, string][] }
-        return Response.json({
-          methodResponses: body.methodCalls.map(([name, args, id]) => {
-            jmapCalls.push({ args, name })
-            return [name, emptyResponse(args), id]
-          }),
-          sessionState: 's',
-        })
-      }
-      return new Response('not found', { status: 404 })
-    },
-    hostname: '127.0.0.1',
-    port: 0,
-  })
-  stalwartUrl = `http://127.0.0.1:${stalwart.port}`
+before(async () => {
+  stalwart = await startFakeStalwart({ password: PASSWORD, username: USERNAME })
+  stalwartUrl = stalwart.url
   // The process's own requests go through this; the test talks to the MCP
   // server with originalFetch, so only the server's traffic is recorded.
   globalThis.fetch = Object.assign(
@@ -93,9 +50,9 @@ beforeAll(() => {
   )
 })
 
-afterAll(async () => {
+after(async () => {
   globalThis.fetch = originalFetch
-  await stalwart.stop(true)
+  await stalwart.stop()
 })
 
 const stops: (() => Promise<void>)[] = []
@@ -150,7 +107,7 @@ interface ListedTool {
 describe('self-hosted over http', () => {
   test('serves the mailbox with only the Stalwart settings, and requests nothing but STALWART_URL', async () => {
     outbound.length = 0
-    jmapCalls.length = 0
+    stalwart.jmapCalls.length = 0
     const { listenUrl } = await startHttp()
 
     const init = await rpc(listenUrl, 'initialize', {
@@ -158,39 +115,41 @@ describe('self-hosted over http', () => {
       clientInfo: { name: 'self-hosted-test', version: '0' },
       protocolVersion: '2025-06-18',
     })
-    expect(init.instructions).toBe(SELF_HOSTED_INSTRUCTIONS)
+    assert.equal(init.instructions, SELF_HOSTED_INSTRUCTIONS)
 
     const { tools } = (await rpc(listenUrl, 'tools/list', {})) as { tools: ListedTool[] }
     const names = new Set(tools.map((tool) => tool.name))
-    expect(names.has('search_emails')).toBe(true)
-    expect(names.has('list_calendars')).toBe(true)
-    expect(names.has('search_contacts')).toBe(true)
-    expect(names.has('share_calendar')).toBe(false)
-    expect(names.has('stop_sharing_calendar')).toBe(false)
+    assert.ok(names.has('search_emails'))
+    assert.ok(names.has('list_calendars'))
+    assert.ok(names.has('search_contacts'))
+    assert.ok(!names.has('share_calendar'))
+    assert.ok(!names.has('stop_sharing_calendar'))
 
     const search = tools.find((tool) => tool.name === 'search_emails')
-    expect(search?.inputSchema.properties.todo).toBeDefined()
-    expect(search?.inputSchema.properties.keywords).toBeUndefined()
+    assert.notEqual(search?.inputSchema.properties.todo, undefined)
+    assert.equal(search?.inputSchema.properties.keywords, undefined)
     const searchText = JSON.stringify(search)
-    expect(searchText).not.toMatch(TYPE_FILTER_WORDING_RE)
+    assert.doesNotMatch(searchText, TYPE_FILTER_WORDING_RE)
 
     const contactsText = JSON.stringify(tools.filter((tool) => tool.name.includes('contact')))
-    expect(contactsText).not.toMatch(COLLECTED_BOOK_WORDING_RE)
+    assert.doesNotMatch(contactsText, COLLECTED_BOOK_WORDING_RE)
     // Self-hosted merge_contacts keeps no interaction history, so delete_contact
     // must not promise it.
     const deleteContact = tools.find((tool) => tool.name === 'delete_contact')
-    expect(deleteContact?.description).toContain(
-      'merge_contacts, which keeps its email addresses, phone numbers, postal addresses and notes.'
+    assert.ok(
+      deleteContact?.description.includes(
+        'merge_contacts, which keeps its email addresses, phone numbers, postal addresses and notes.'
+      )
     )
-    expect(deleteContact?.description).not.toContain('history')
+    assert.ok(!deleteContact?.description.includes('history'))
 
     const result = (await rpc(listenUrl, 'tools/call', { arguments: { todo: true }, name: 'search_emails' })) as {
       content: { text: string }[]
       isError?: boolean
     }
-    expect(result.isError).toBeFalsy()
-    const query = jmapCalls.find((call) => call.name === 'Email/query')
-    expect(JSON.stringify(query?.args.filter)).toContain('$label:todo')
+    assert.ok(!result.isError)
+    const query = stalwart.jmapCalls.find((call) => call.name === 'Email/query')
+    assert.ok(JSON.stringify(query?.args.filter).includes('$label:todo'))
 
     // A contacts tool too, over the JMAP contacts account.
     const contacts = (await rpc(listenUrl, 'tools/call', {
@@ -199,11 +158,14 @@ describe('self-hosted over http', () => {
     })) as {
       isError?: boolean
     }
-    expect(contacts.isError).toBeFalsy()
-    expect(jmapCalls.some((call) => call.name.startsWith('ContactCard/'))).toBe(true)
+    assert.ok(!contacts.isError)
+    assert.ok(stalwart.jmapCalls.some((call) => call.name.startsWith('ContactCard/')))
 
-    expect(outbound.length).toBeGreaterThan(0)
-    expect(outbound.filter((url) => new URL(url).origin !== stalwartUrl)).toEqual([])
+    assert.ok(outbound.length > 0)
+    assert.deepEqual(
+      outbound.filter((url) => new URL(url).origin !== stalwartUrl),
+      []
+    )
   })
 
   test('/mcp needs the operator bearer, and there is no OAuth discovery or feed route', async () => {
@@ -216,46 +178,42 @@ describe('self-hosted over http', () => {
       })
 
     const none = await post()
-    expect(none.status).toBe(401)
-    expect(none.headers.get('www-authenticate')).toBe('Bearer realm="mcp"')
-    expect((await post('Bearer wrong')).status).toBe(401)
-    expect((await post(BASIC)).status).toBe(401)
+    assert.equal(none.status, 401)
+    assert.equal(none.headers.get('www-authenticate'), 'Bearer realm="mcp"')
+    assert.equal((await post('Bearer wrong')).status, 401)
+    assert.equal((await post(BASIC)).status, 401)
 
     for (const path of [
       '/.well-known/oauth-protected-resource',
       '/.well-known/oauth-authorization-server',
       '/calendar-feeds/abc.ics',
     ]) {
-      expect((await originalFetch(`${listenUrl}${path}`)).status).toBe(404)
+      assert.equal((await originalFetch(`${listenUrl}${path}`)).status, 404)
     }
-    expect((await originalFetch(`${listenUrl}/healthz`)).status).toBe(200)
+    assert.equal((await originalFetch(`${listenUrl}/healthz`)).status, 200)
   })
 })
 
 describe('self-hosted startup checks', () => {
   test('wrong credentials stop the start, naming the URL and username Stalwart rejected', async () => {
     const result = await startSelfHosted({ argv: [], env: env({ STALWART_PASSWORD: 'wrong' }) })
-    expect(result.ok).toBe(false)
+    assert.equal(result.ok, false)
     const message = result.ok ? '' : result.message
-    expect(message).toContain(stalwartUrl)
-    expect(message).toContain('"alice"')
+    assert.ok(message.includes(stalwartUrl), message)
+    assert.ok(message.includes('"alice"'), message)
   })
 
   test('a server that advertises its API on another host stops the start', async () => {
-    const elsewhere = Bun.serve({
-      fetch: () => Response.json(sessionBody('https://mail.example.com')),
-      hostname: '127.0.0.1',
-      port: 0,
-    })
+    const elsewhere = await startJsonServer(fakeSessionBody('https://mail.example.com'))
     try {
       const result = await startSelfHosted({
         argv: [],
         env: env({ STALWART_URL: `http://127.0.0.1:${elsewhere.port}` }),
       })
-      expect(result.ok).toBe(false)
-      expect(result.ok ? '' : result.message).toContain('https://mail.example.com/jmap/')
+      assert.equal(result.ok, false)
+      assert.ok((result.ok ? '' : result.message).includes('https://mail.example.com/jmap/'))
     } finally {
-      await elsewhere.stop(true)
+      await elsewhere.stop()
     }
   })
 })
@@ -278,7 +236,7 @@ describe('self-hosted over stdio', () => {
       throw new Error(result.message)
     }
     stops.push(result.started.stop)
-    expect(result.started.transport).toBe('stdio')
+    assert.equal(result.started.transport, 'stdio')
 
     const lines: Record<string, unknown>[] = []
     stdout.on('data', (chunk: Buffer) => {
@@ -293,7 +251,7 @@ describe('self-hosted over stdio', () => {
         if (found) {
           return found as { result: Record<string, unknown> }
         }
-        await Bun.sleep(10)
+        await sleep(10)
       }
       throw new Error(`no answer to ${id}`)
     }
@@ -304,22 +262,22 @@ describe('self-hosted over stdio', () => {
       method: 'initialize',
       params: { capabilities: {}, clientInfo: { name: 't', version: '0' }, protocolVersion: '2025-06-18' },
     })
-    expect((await answer(1)).result.instructions).toBe(SELF_HOSTED_INSTRUCTIONS)
+    assert.equal((await answer(1)).result.instructions, SELF_HOSTED_INSTRUCTIONS)
     send({ jsonrpc: '2.0', method: 'notifications/initialized' })
     send({ id: 2, jsonrpc: '2.0', method: 'tools/list', params: {} })
     const { tools } = (await answer(2)).result as { tools: { name: string }[] }
-    expect(tools.some((tool) => tool.name === 'get_email')).toBe(true)
-    expect(tools.some((tool) => tool.name === 'share_calendar')).toBe(false)
+    assert.ok(tools.some((tool) => tool.name === 'get_email'))
+    assert.ok(!tools.some((tool) => tool.name === 'share_calendar'))
 
     // The ticket routes still listen, for the links download_attachment mints.
-    expect((await originalFetch(`${result.started.listenUrl}/healthz`)).status).toBe(200)
+    assert.equal((await originalFetch(`${result.started.listenUrl}/healthz`)).status, 200)
 
     // The client closing stdin stops the listener, so the process can exit.
     stdin.end()
     for (let i = 0; i < 100 && !closed; i++) {
-      await Bun.sleep(10)
+      await sleep(10)
     }
-    expect(closed).toBe(true)
-    expect(originalFetch(`${result.started.listenUrl}/healthz`)).rejects.toThrow()
+    assert.ok(closed)
+    await assert.rejects(originalFetch(`${result.started.listenUrl}/healthz`))
   })
 })

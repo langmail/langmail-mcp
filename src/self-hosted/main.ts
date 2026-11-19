@@ -23,6 +23,7 @@ import { createMcpHandler, createMcpServerFactory, type McpHandlerConfig, type S
 import { describeError } from '../observability/errors.ts'
 import { checkStalwartCredentials } from './check-credentials.ts'
 import { basicAuthorization, defaultPublicUrl, parseSelfHostedConfig, type SelfHostedConfig } from './config.ts'
+import { type Listener, listen } from './listen.ts'
 import { createSelfHostedRoutes } from './routes.ts'
 
 export interface StartOptions {
@@ -45,22 +46,16 @@ export interface Started {
   transport: SelfHostedConfig['transport']
 }
 
-export type StartResult = { ok: true; started: Started } | { message: string; ok: false }
+export type StartResult = { ok: true; started: Started } | { help?: true; message: string; ok: false }
 
-const listen = (host: string, port: number, fetchHandler: (req: Request) => Promise<Response>) =>
-  Bun.serve({
-    // As in index.ts: an exception escaping a handler is logged, not lost.
-    error: (error: Error): Response => {
-      logger.error(describeError(error), 'mcp unhandled request error')
-      return new Response(JSON.stringify({ error: 'internal_error' }), {
-        headers: { 'content-type': 'application/json' },
-        status: 500,
-      })
-    },
-    fetch: fetchHandler,
-    hostname: host,
-    port,
+// As in index.ts: an exception escaping a handler is logged, not lost.
+const internalError = (error: unknown): Response => {
+  logger.error(describeError(error), 'mcp unhandled request error')
+  return new Response(JSON.stringify({ error: 'internal_error' }), {
+    headers: { 'content-type': 'application/json' },
+    status: 500,
   })
+}
 
 export const startSelfHosted = async (opts: StartOptions): Promise<StartResult> => {
   const parsed = parseSelfHostedConfig(opts.argv, opts.env)
@@ -110,16 +105,16 @@ export const startSelfHosted = async (opts: StartOptions): Promise<StartResult> 
         }
       : {}),
   })
-  let server: ReturnType<typeof listen>
+  let server: Listener
   try {
-    server = listen(config.host, config.port ?? 0, routes)
+    server = await listen({ fetch: routes, host: config.host, onError: internalError, port: config.port ?? 0 })
   } catch (error) {
     return {
       message: `Could not listen on ${config.host}:${config.port ?? 0} (${error instanceof Error ? error.message : String(error)}). Check MCP_HOST (--host) and MCP_PORT (--port).`,
       ok: false,
     }
   }
-  const port = server.port ?? config.port ?? 0
+  const { port } = server
   const publicUrl = config.publicUrl ?? defaultPublicUrl(config.host, port)
 
   const mcpConfig: McpHandlerConfig = {
@@ -146,7 +141,7 @@ export const startSelfHosted = async (opts: StartOptions): Promise<StartResult> 
     // The client closing stdin ends the session: stop the listener too.
     mcpServer.server.onclose = () => {
       closeStdio = undefined
-      server.stop(true).then(
+      server.stop().then(
         () => opts.onStdioClosed?.(),
         () => opts.onStdioClosed?.()
       )
@@ -166,7 +161,7 @@ export const startSelfHosted = async (opts: StartOptions): Promise<StartResult> 
       publicUrl,
       stop: async () => {
         await closeStdio?.()
-        await server.stop(true)
+        await server.stop()
       },
       transport: config.transport,
     },
@@ -183,6 +178,10 @@ export const run = async (): Promise<void> => {
     onStdioClosed: () => process.exit(0),
   })
   if (!result.ok) {
+    if (result.help) {
+      process.stdout.write(result.message)
+      process.exit(0)
+    }
     process.stderr.write(`${result.message}\n`)
     process.exit(2)
   }

@@ -22,11 +22,40 @@ CalDAV/iMIP defects this service works around → `docs/upstream/stalwart/`
 Read the matching issue file before changing a workaround; each has a
 "Drop workaround when" clause.
 
-## Runtime: Bun only, no Node fallback
+## Runtime: Bun for the hosted image, Node or Bun for the package
 
-This service is **Bun-only**. It ships as a container image (`oven/bun`
-base) that runs the TypeScript from source; the target VM does not
-install Node and never will.
+The **hosted server** is Bun-only. It ships as a container image (`oven/bun`
+base) that runs the TypeScript from source; the target VM does not install
+Node and never will. `src/index.ts` may use Bun APIs (`Bun.serve`).
+
+The **self-hosted server** (`src/self-hosted.ts`) also ships as the
+`langmail-mcp` npm package, which runs under Node (`engines`: 22.12 or later,
+not 23) and Bun:
+`npx langmail-mcp`, or `bunx --bun langmail-mcp`. Code it reaches calls no
+Bun API at runtime and imports no workspace package:
+
+- `bun run build:package` (`scripts/build-package.ts`, also `npm pack`'s
+  `prepack`) bundles `src/self-hosted.ts` for Node into `dist/`, with npm
+  dependencies external. It swaps two modules: `email-render/viewer-build.ts`
+  becomes the viewer HTML it built, so there is no `Bun.build` at runtime,
+  and `runs-from-source.ts` says false, so the logger writes no repo log
+  file. It fails when the bundle mentions a Bun API or `@langmail/*`.
+- The HTTP listener is `src/self-hosted/listen.ts` on `node:http`, under both
+  runtimes, in place of `Bun.serve`.
+- Import a CommonJS package (`langmail`, `rrule`) by its default export:
+  Node does not see its named exports from ESM.
+- `bun run test:node` (`scripts/test-node.ts`) bundles the self-hosted tests
+  the same way and runs them with `node --test`; they use `node:test` and
+  `node:assert`, which `bun test` runs too. `bun run check:package [--runtime
+  node|bun]` (`scripts/check-package.ts`) packs the package, installs the
+  tarball into an empty project and starts the bin over stdio and HTTP
+  against a fake Stalwart. CI runs both under the Node LTS and 22.12 in
+  `.github/workflows/test-mcp-package.yml`.
+- Nothing publishes the package from this repository (`private: true`);
+  publishing starts with the move to `langmail/langmail-mcp`
+  (https://github.com/langmail/platform/issues/1349).
+
+Commands:
 
 - `bun install` — installs into `node_modules/`; writes `bun.lock`.
 - `bun run dev` — local dev server on `127.0.0.1:8090` (the `MCP_PORT` set by
@@ -61,9 +90,10 @@ CALDAV_BASE_URL=http://127.0.0.1:5232 CALDAV_USERNAME=test CALDAV_PASSWORD=test 
   bun run test:integration
 ```
 
-Do not add a `node` or `npm` script anywhere. If a dependency is
-node-only and won't run under Bun, find another or write the call
-inline.
+Scripts run under Bun (`bun run …`); `node` appears only where a script
+checks the package under Node (`test-node.ts`, `check-package.ts`). If a
+dependency is node-only and won't run under Bun, find another or write the
+call inline.
 
 ## Build + deploy: container image, pinned by digest
 
@@ -114,7 +144,7 @@ Load the `mcp-tool-design` skill before adding or changing a tool.
 
 ## Self-hosted mode
 
-`src/self-hosted.ts` (`bun run start:self-hosted`) runs the same tools against
+`src/self-hosted.ts` (`bun run start:self-hosted`, or `npx langmail-mcp` from the package) runs the same tools against
 someone's own Stalwart with `STALWART_URL`, `STALWART_USERNAME` and
 `STALWART_PASSWORD`, over stdio by default or Streamable HTTP behind
 `MCP_AUTH_TOKEN`, with no Better Auth and no Auth service. Settings, startup

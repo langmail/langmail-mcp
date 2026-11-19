@@ -10,7 +10,9 @@
 // fails.
 
 import { type McpServer } from '@modelcontextprotocol/server'
-import { preprocessWithOptions } from 'langmail'
+// A default import: langmail is a CommonJS (napi) module, and Node does not
+// find its named exports from ESM; the langmail-mcp package runs under Node.
+import langmail from 'langmail'
 import { z } from 'zod'
 
 import {
@@ -97,7 +99,7 @@ const cleanedBody = async (
   }
   try {
     const raw = await deps.downloadRawMessage({ ...p, blobId: email.blobId })
-    const processed = preprocessWithOptions(Buffer.from(raw), {
+    const processed = langmail.preprocessWithOptions(Buffer.from(raw), {
       maxBodyLength: MAX_CLEAN_BODY_CHARS,
       stripQuotes: false,
       stripSignature: false,

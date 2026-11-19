@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@langmail/mcp",
+      "name": "langmail-mcp",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.0.4",
         "zod": "^4.0.0",

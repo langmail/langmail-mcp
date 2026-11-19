@@ -11,7 +11,7 @@ WORKDIR /app
 # Create non-root user for security
 RUN useradd -m -u 1001 appuser
 
-# Copy pruned workspace (expects: turbo prune --scope=@langmail/mcp --docker)
+# Copy pruned workspace (expects: turbo prune --scope=langmail-mcp --docker)
 COPY --chown=appuser:appuser out/json/ ./
 
 # Install dependencies (skip prepare script - lefthook needs .git)
@@ -21,7 +21,7 @@ RUN bun install --ci --ignore-scripts
 COPY --chown=appuser:appuser out/full/ ./
 
 # Type-check mcp and build its workspace dependencies using Turborepo
-RUN bunx turbo build --filter=@langmail/mcp
+RUN bunx turbo build --filter=langmail-mcp
 
 # Set working directory to the mcp service
 WORKDIR /app/services/mcp

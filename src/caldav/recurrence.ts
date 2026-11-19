@@ -5,7 +5,9 @@
 // string that ical-generator serializes onto the VEVENT (see ical.ts).
 
 import { TZDate } from '@date-fns/tz'
-import { rrulestr } from 'rrule'
+// A default import: rrule's main entry is CommonJS, and Node does not find its
+// named exports from ESM; the langmail-mcp package runs under Node.
+import rruleLib from 'rrule'
 import { z } from 'zod'
 
 import { parseWallClockInZone } from '../ical/index.ts'
@@ -247,7 +249,7 @@ export const isSeriesOccurrence = (
 ): boolean => {
   if (!timeZone) {
     const at = new Date(recurrenceId)
-    return rrulestr(`DTSTART:${toIcalUtc(masterStart)}\nRRULE:${rrule}`).between(at, at, true).length > 0
+    return rruleLib.rrulestr(`DTSTART:${toIcalUtc(masterStart)}\nRRULE:${rrule}`).between(at, at, true).length > 0
   }
   // The wall-clock reduction below keeps whole seconds only, so a sub-second
   // instant would otherwise match the occurrence it merely falls near. Read the
@@ -261,7 +263,7 @@ export const isSeriesOccurrence = (
     return false
   }
   const at = new Date(`${toWallClockIso(instant, timeZone)}Z`)
-  return rrulestr(`DTSTART:${toIcalFloating(masterStart)}\nRRULE:${rule}`).between(at, at, true).length > 0
+  return rruleLib.rrulestr(`DTSTART:${toIcalFloating(masterStart)}\nRRULE:${rule}`).between(at, at, true).length > 0
 }
 
 // A day either side of the wall-clock bounds a zoned expansion reads: more than
@@ -285,12 +287,13 @@ export const seriesOccurrences = (
   // Stops the walk after `limit` occurrences rather than expanding the range.
   const underLimit = (_at: Date, index: number): boolean => index < limit
   if (!timeZone) {
-    return rrulestr(`DTSTART:${toIcalUtc(masterStart)}\nRRULE:${rrule}`).between(from, to, true, underLimit)
+    return rruleLib.rrulestr(`DTSTART:${toIcalUtc(masterStart)}\nRRULE:${rrule}`).between(from, to, true, underLimit)
   }
   const { rule, until } = splitUtcUntil(rrule)
   const wallFrom = new Date(Date.parse(`${toWallClockIso(from, timeZone)}Z`) - WALL_CLOCK_MARGIN_MS)
   const wallTo = new Date(Date.parse(`${toWallClockIso(to, timeZone)}Z`) + WALL_CLOCK_MARGIN_MS)
-  return rrulestr(`DTSTART:${toIcalFloating(masterStart)}\nRRULE:${rule}`)
+  return rruleLib
+    .rrulestr(`DTSTART:${toIcalFloating(masterStart)}\nRRULE:${rule}`)
     .between(wallFrom, wallTo, true, underLimit)
     .map((wall) => new Date(parseWallClockInZone(wall.toISOString().slice(0, 19), timeZone).getTime()))
     .filter((at) => at >= from && at <= to && !(until && at > until))

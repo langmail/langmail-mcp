@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import pino from 'pino'
 
+import { runsFromSource } from '../runs-from-source.ts'
 import { createLogtailStream } from './logtail-stream'
 import { resolveLevel } from './resolve-level'
 
@@ -40,7 +41,9 @@ if (process.env.NODE_ENV === 'production') {
   if (token) {
     streams.push({ level, stream: createLogtailStream(token, process.env.BETTERSTACK_ENDPOINT) })
   }
-} else {
+} else if (runsFromSource) {
+  // The repo's logs/ directory: only from source, since from the langmail-mcp
+  // package this path would land outside the install.
   // Bun inlines process.env.NODE_ENV at build time, so a compiled binary built
   // without NODE_ENV=production bakes in this dev branch. Guard the /logs setup
   // so such a binary (read-only fs) degrades to stdout-only instead of crashing

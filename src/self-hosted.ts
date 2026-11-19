@@ -1,4 +1,5 @@
-// Entrypoint of the self-hosted MCP server: `bun run start:self-hosted`, or
+// Entrypoint of the self-hosted MCP server, and the langmail-mcp package's bin
+// once bundled (scripts/build-package.ts). From source: `bun run start:self-hosted`, or
 // `bun --no-env-file src/self-hosted.ts`. Without --no-env-file, Bun loads the
 // repo's services/mcp/.env.development, whose MCP_PUBLIC_URL points the
 // minted attachment links at the hosted dev server. Settings and what this mode leaves out:

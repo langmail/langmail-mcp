@@ -26,7 +26,8 @@ export interface SelfHostedConfig {
   username: string
 }
 
-export type ParseResult = { config: SelfHostedConfig; ok: true } | { message: string; ok: false }
+// help: --help (-h) was given; message is the help text, for stdout.
+export type ParseResult = { config: SelfHostedConfig; ok: true } | { help?: true; message: string; ok: false }
 
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_HTTP_PORT = 8080
@@ -60,9 +61,51 @@ const MCP_AUTH_TOKEN: Setting = {
 const describe = (s: Setting): string => `  ${s.env}${s.flag ? ` (${s.flag})` : ''}: ${s.what}`
 
 const USAGE = [
-  'Usage: bun --no-env-file src/self-hosted.ts [--transport stdio|http] [--stalwart-url URL] [--username NAME] [--email ADDRESS]',
+  'Usage: langmail-mcp [--transport stdio|http] [--stalwart-url URL] [--username NAME] [--email ADDRESS]',
   '         [--host HOST] [--port PORT] [--public-url URL]',
   'Secrets come from the environment only: STALWART_PASSWORD, and MCP_AUTH_TOKEN for http.',
+  'langmail-mcp --help lists every setting.',
+].join('\n')
+
+// Every setting, for --help: the ones above and those the logger and error
+// tracking read (logger/, observability/).
+const HELP_SETTINGS: Setting[] = [
+  STALWART_URL,
+  STALWART_USERNAME,
+  STALWART_PASSWORD,
+  {
+    env: 'STALWART_EMAIL',
+    flag: '--email',
+    what: 'the address to send mail as; default: the login Stalwart reports. Needed when the login is not an email address and the account has several sending identities',
+  },
+  { env: 'MCP_TRANSPORT', flag: '--transport', what: 'stdio (default) or http (Streamable HTTP)' },
+  { env: 'MCP_HOST', flag: '--host', what: `where the HTTP listener binds; default ${DEFAULT_HOST}` },
+  {
+    env: 'MCP_PORT',
+    flag: '--port',
+    what: `the HTTP listener's port; default ${DEFAULT_HTTP_PORT} for http, a free port for stdio (attachment and image links)`,
+  },
+  {
+    env: 'MCP_PUBLIC_URL',
+    flag: '--public-url',
+    what: 'base URL attachment and image links are minted under; default http://<host>:<port>',
+  },
+  MCP_AUTH_TOKEN,
+  { env: 'LOG_LEVEL', what: 'fatal, error, warn, info (default), debug or trace; logs go to stderr' },
+  { env: 'NODE_ENV', what: 'production turns on the Better Stack settings below; otherwise nothing is sent' },
+  { env: 'BETTERSTACK_SOURCE_TOKEN', what: 'ships logs to Better Stack' },
+  { env: 'BETTERSTACK_ENDPOINT', what: 'the Better Stack logs ingest URL for BETTERSTACK_SOURCE_TOKEN' },
+  { env: 'BETTERSTACK_ERRORS_DSN', what: 'sends errors to Better Stack error tracking' },
+]
+
+export const HELP = [
+  "langmail-mcp: Langmail's MCP server for your own Stalwart mailbox, over stdio or Streamable HTTP.",
+  '',
+  USAGE,
+  '',
+  'Settings (environment variable, flag in parentheses; a flag wins over its variable):',
+  ...HELP_SETTINGS.map(describe),
+  '',
 ].join('\n')
 
 const nonEmpty = (value: string | undefined): string | undefined => {
@@ -89,13 +132,14 @@ const isHttpUrl = (raw: string): boolean => {
   }
 }
 
-type Flags = Record<string, string | undefined>
+type Flags = Record<string, boolean | string | undefined>
 
 const readFlags = (argv: string[]): { flags: Flags } | { message: string } => {
   try {
     const { values } = parseArgs({
       args: argv,
       options: {
+        help: { short: 'h', type: 'boolean' },
         host: { type: 'string' },
         port: { type: 'string' },
         'public-url': { type: 'string' },
@@ -113,8 +157,8 @@ const readFlags = (argv: string[]): { flags: Flags } | { message: string } => {
 }
 
 // The flag when given, else the variable; blank counts as unset.
-const pick = (flag: string | undefined, variable: string | undefined): string | undefined =>
-  nonEmpty(flag) ?? nonEmpty(variable)
+const pick = (flag: boolean | string | undefined, variable: string | undefined): string | undefined =>
+  (typeof flag === 'string' ? nonEmpty(flag) : undefined) ?? nonEmpty(variable)
 
 interface Raw {
   authToken?: string
@@ -170,6 +214,9 @@ export const parseSelfHostedConfig = (argv: string[], env: Record<string, string
   const read = readFlags(argv)
   if ('message' in read) {
     return { message: read.message, ok: false }
+  }
+  if (read.flags.help) {
+    return { help: true, message: HELP, ok: false }
   }
   const raw = readRaw(read.flags, env)
 
