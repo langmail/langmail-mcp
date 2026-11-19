@@ -1,9 +1,0 @@
-{
-	"mcpServers": {
-		"langmail": {
-			"type": "stdio",
-			"command": "node",
-			"args": ["--env-file=.env", "dist/index.js"]
-		}
-	}
-}
