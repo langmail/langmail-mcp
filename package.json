@@ -1,8 +1,29 @@
 {
   "name": "langmail-mcp",
   "version": "0.2.0",
-  "private": true,
   "description": "Langmail's MCP server for your own Stalwart mailbox: mail, calendar and contacts for an AI agent, over stdio or Streamable HTTP",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "stalwart",
+    "jmap",
+    "caldav",
+    "carddav",
+    "email",
+    "calendar",
+    "contacts",
+    "agent"
+  ],
+  "homepage": "https://github.com/langmail/langmail-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/langmail/langmail-mcp/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/langmail/langmail-mcp.git"
+  },
+  "license": "MIT",
+  "author": "Dominik Grusemann",
   "type": "module",
   "bin": {
     "langmail-mcp": "dist/langmail-mcp.js"
@@ -13,21 +34,19 @@
   "scripts": {
     "build": "tsc --noEmit && tsc --noEmit -p src/email-render/viewer",
     "build:package": "bun run scripts/build-package.ts",
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
     "check:package": "bun run scripts/check-package.ts",
     "dev": "bun run src/index.ts",
     "measure:tool-size": "bun run scripts/measure-indexed-size.ts",
     "prepack": "bun run build:package",
-    "smoke": "bun run scripts/smoke.ts",
     "smoke:agent-apple-mail-draft": "bun run scripts/smoke-agent-apple-mail-draft.ts",
-    "smoke:agent-calendar-share": "bun run scripts/smoke-agent-calendar-share.ts",
     "smoke:agent-contact-from-mail": "bun run scripts/smoke-agent-contact-from-mail.ts",
-    "smoke:agent-contact-large-book": "bun run scripts/smoke-agent-contact-large-book.ts",
     "smoke:agent-contact-role": "bun run scripts/smoke-agent-contact-role.ts",
     "smoke:agent-contact-role-record": "bun run scripts/smoke-agent-contact-role-record.ts",
     "smoke:agent-forward": "bun run scripts/smoke-agent-forward.ts",
     "smoke:agent-preview": "bun run scripts/smoke-agent-preview.ts",
     "smoke:agent-self-hosted": "bun run scripts/smoke-agent-self-hosted.ts",
-    "smoke:agent-type-filter": "bun run scripts/smoke-agent-type-filter.ts",
     "smoke:agent-windows-zone": "bun run scripts/smoke-agent-windows-zone.ts",
     "spec:check": "./spec/check.sh",
     "start": "NODE_ENV=production bun src/index.ts",
@@ -55,11 +74,19 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
     "@happy-dom/global-registrator": "^21.0.4",
     "@modelcontextprotocol/client": "^2.4.0",
+    "@semantic-release/changelog": "^7.0.0",
+    "@semantic-release/git": "^11.0.1",
     "@types/bun": "^1.3.3",
     "@types/sanitize-html": "^2.16.2",
-    "typescript": "^7.0.2"
+    "lefthook": "^2.2.2",
+    "semantic-release": "^25.0.3",
+    "typescript": "^7.0.2",
+    "ultracite": "7.12.4"
   },
   "engines": {
     "node": "^22.12.0 || >=24"
