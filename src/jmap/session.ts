@@ -25,10 +25,16 @@ export class JmapError extends Error {
 
 const TRAILING_SLASHES_RE = /\/+$/u
 
-// Build a Bearer Authorization header from a raw OAuth token. Every JMAP
-// wrapper takes the *full* header value, so Basic credentials (the agent's
-// stalwart-credential seam) and OAuth bearers (MCP) share one seam.
-export const bearerAuthorization = (token: string): string => `Bearer ${token}`
+// Build the Authorization header for a per-request Stalwart credential. Every
+// JMAP wrapper takes the *full* header value, so Basic credentials (the agent's
+// stalwart-credential seam) and OAuth bearers (MCP) share one seam. The
+// hosted MCP passes a raw OAuth token, which becomes a Bearer header; the
+// self-hosted mode (src/self-hosted/) passes a ready `Basic …` header, which
+// goes through unchanged. A hosted client cannot reach the pass-through: its
+// bearer is checked at Better Auth's userinfo first, which rejects `Basic …`.
+const BASIC_RE = /^Basic /u
+export const bearerAuthorization = (credential: string): string =>
+  BASIC_RE.test(credential) ? credential : `Bearer ${credential}`
 
 export const fetchSession = async (stalwartBase: string, authorization: string): Promise<JmapSession> => {
   const url = `${stalwartBase.replace(TRAILING_SLASHES_RE, '')}/.well-known/jmap`

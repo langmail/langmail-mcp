@@ -25,6 +25,7 @@ import {
 } from 'tsdav'
 
 import { parseEvents } from '../ical/index.ts'
+import { bearerAuthorization } from '../jmap/index.ts'
 import { type CalendarObject, type CalendarSummary, type DiscoveredAccount } from './types.ts'
 
 class CalDavError extends Error {
@@ -68,7 +69,7 @@ const CALDAV_TIMEOUT_MS = 30_000
 const deadline = (): RequestInit => ({ signal: AbortSignal.timeout(CALDAV_TIMEOUT_MS) })
 
 const authHeaders = (cfg: CalDavConfig, credential: string): Record<string, string> =>
-  cfg.authHeaders ? cfg.authHeaders(credential) : { authorization: `Bearer ${credential}` }
+  cfg.authHeaders ? cfg.authHeaders(credential) : { authorization: bearerAuthorization(credential) }
 
 // CalDAV collection URLs are canonically trailing-slashed; tsdav resolves
 // object URLs via `new URL(filename, url)`, which silently drops the last

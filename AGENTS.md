@@ -112,6 +112,22 @@ Load the `mcp-tool-design` skill before adding or changing a tool.
   `../../docs/reference/security/authentication.md` for the identity model and
   why we don't gate on `aud` or `scope`.
 
+## Self-hosted mode
+
+`src/self-hosted.ts` (`bun run start:self-hosted`) runs the same tools against
+someone's own Stalwart with `STALWART_URL`, `STALWART_USERNAME` and
+`STALWART_PASSWORD`, over stdio by default or Streamable HTTP behind
+`MCP_AUTH_TOKEN`, with no Better Auth and no Auth service. Settings, startup
+checks and what it leaves out: `../../docs/reference/mcp-self-hosted.md`.
+
+- The mode is `McpHandlerConfig.mode` (`src/mode.ts`), set by the entrypoint.
+  A tool whose wording or schema differs takes a `mode` argument that
+  defaults to `hosted`; today `search_emails` and the contact tools.
+- `src/mcp/tool-surface.test.ts` pins the hosted tool surface. A diff there is
+  a hosted change: regenerate the snapshot only when it is meant.
+- Over stdio, stdout is the protocol: log through `logger`, which the
+  entrypoint points at stderr, never `console.log` or `process.stdout`.
+
 ## Configuration
 
 Environment variables (set via `infra/modules/mcp.nix` — the container's

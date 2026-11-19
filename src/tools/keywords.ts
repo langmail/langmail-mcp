@@ -51,3 +51,7 @@ export const KEYWORDS_DESCRIPTION = `Filter by classified email type; multiple v
 // Enum values are already lowercase slugs and are used verbatim as suffixes.
 export const keywordToJmapKeyword = (value: string): string =>
   value === TODO_VALUE ? toLabelKeyword(value) : toTypeKeyword(value)
+
+// The keyword mark_emails sets for `todo: true`; search_emails filters on it
+// with keywords: ["todo"] (hosted) or todo: true (self-hosted).
+export const TODO_KEYWORD = keywordToJmapKeyword(TODO_VALUE)

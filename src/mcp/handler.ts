@@ -22,6 +22,7 @@ import { createSendGuard } from '../drafts/send-guard.ts'
 import { type ImageProxyStore } from '../email-render/image-proxy.ts'
 import { registerEmailViewerResource } from '../email-render/viewer-resource.ts'
 import { type JmapLive } from '../jmap/index.ts'
+import { type ServerMode } from '../mode.ts'
 import { makeLiveApplyIo, makeMailRulesApplier } from '../rules/apply.ts'
 import { makeLiveSieveIo, makeMailRulesStore } from '../rules/store.ts'
 import { registerArchiveEmails } from '../tools/archive-emails.ts'
@@ -87,7 +88,7 @@ import { registerUpdateContact } from '../tools/update-contact.ts'
 import { registerUpdateDraft } from '../tools/update-draft.ts'
 import { registerUpdateMailRule } from '../tools/update-mail-rule.ts'
 import { makeLiveDeps as makeUploadAttachmentsDeps, registerUploadAttachments } from '../tools/upload-attachments.ts'
-import { SERVER_INSTRUCTIONS, SERVER_INSTRUCTIONS_WITHOUT_SHARING } from './instructions.ts'
+import { SELF_HOSTED_INSTRUCTIONS, SERVER_INSTRUCTIONS, SERVER_INSTRUCTIONS_WITHOUT_SHARING } from './instructions.ts'
 import { instrumentToolLogging } from './tool-logging.ts'
 
 export interface McpHandlerConfig {
@@ -101,9 +102,15 @@ export interface McpHandlerConfig {
   // Shared with the /attachments/:token route (handler.ts) so a bearer's
   // JMAP session is resolved once, not once per surface.
   live: JmapLive
+  // Hosted when left out. Self-hosted (src/self-hosted/) leaves out calendar
+  // sharing, the agent-activity record and the attendee write-through into a
+  // Collected address book, and words search_emails and the contact tools for
+  // mail nobody classified (see mode.ts).
+  mode?: ServerMode
   // Base URL the download_attachment tool mints links under.
   publicUrl: string
   // Called after each successful tool call, with the caller's user id.
+  // Ignored in self-hosted mode, which records no activity.
   recordAgentActivity: RecordAgentActivity
   stalwartUrl: string
   // Shared with the /attachments/:token route: the tool mints, the route redeems.
@@ -113,7 +120,19 @@ export interface McpHandlerConfig {
   uploadTickets: UploadTicketStore
 }
 
-export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: AuthContext) => Promise<Response>) => {
+// The credential and identity one MCP server acts with: the hosted server
+// builds it per request from the validated bearer (AuthContext); the
+// self-hosted one builds it once from its settings.
+export type ServerContext = Pick<AuthContext, 'principal' | 'token' | 'userId'>
+
+// Builds a fresh McpServer with the whole tool surface for one context. The
+// deps behind it (JMAP session cache, replay cache, send guard) are built once
+// and shared by every server the factory makes.
+export const createMcpServerFactory = (cfg: McpHandlerConfig): ((ctx: ServerContext) => McpServer) => {
+  const mode = cfg.mode ?? 'hosted'
+  const selfHosted = mode === 'self-hosted'
+  const calendarShares = selfHosted ? undefined : cfg.calendarShares
+  const recordAgentActivity: RecordAgentActivity = selfHosted ? () => Promise.resolve() : cfg.recordAgentActivity
   const jmapLive = cfg.live
   const searchEmailsDeps = makeSearchEmailsDeps(jmapLive)
   const getEmailDeps = makeGetEmailDeps(jmapLive)
@@ -142,14 +161,16 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   }
   // list_calendars and the two sharing tools: the calendars over CalDAV, the
   // shares through Auth, and the base URL a share's link is minted under.
-  const calendarSharingDeps = makeLiveCalendarSharingDeps(caldavCfg, cfg.publicUrl, cfg.calendarShares)
+  const calendarSharingDeps = makeLiveCalendarSharingDeps(caldavCfg, cfg.publicUrl, calendarShares)
   const createCalendarDeps = makeCreateCalendarDeps(caldavCfg)
   const updateCalendarDeps = makeUpdateCalendarDeps(caldavCfg)
   const listCalendarEventsDeps = makeListCalendarEventsDeps(caldavCfg)
   // Contact write-through: scheduling actions upsert their attendees into
   // the collected address book (the Robin case) — shared across the three
-  // event tools so they fold through one code path.
-  const collectAttendees = makeAttendeeWriteThrough(jmapLive)
+  // event tools so they fold through one code path. Off self-hosted: it would
+  // create a "Collected" book in someone's own Stalwart that their phone then
+  // syncs.
+  const collectAttendees = selfHosted ? undefined : makeAttendeeWriteThrough(jmapLive)
   const createCalendarEventDeps = makeCreateCalendarEventDeps(caldavCfg, resolveTimeZone, collectAttendees)
   const updateCalendarEventDeps = makeUpdateCalendarEventDeps(caldavCfg, resolveTimeZone, collectAttendees)
   const deleteCalendarEventDeps = makeDeleteCalendarEventDeps(caldavCfg)
@@ -169,17 +190,24 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
   // before the first call answers can't deliver a second copy.
   const sendGuard = createSendGuard()
 
-  return async (req, ctx) => {
+  let instructions = SERVER_INSTRUCTIONS_WITHOUT_SHARING
+  if (selfHosted) {
+    instructions = SELF_HOSTED_INSTRUCTIONS
+  } else if (calendarShares) {
+    instructions = SERVER_INSTRUCTIONS
+  }
+
+  return (ctx) => {
     const server = new McpServer(
       {
         name: 'langmail-mcp',
         version: '0.1.0',
       },
-      { instructions: cfg.calendarShares ? SERVER_INSTRUCTIONS : SERVER_INSTRUCTIONS_WITHOUT_SHARING }
+      { instructions }
     )
     // Before any registerTool call — the wrapper only covers later registrations.
-    instrumentToolLogging(server, () => cfg.recordAgentActivity(ctx.userId))
-    registerSearchEmails(server, searchEmailsDeps, () => ctx.token)
+    instrumentToolLogging(server, () => recordAgentActivity(ctx.userId))
+    registerSearchEmails(server, searchEmailsDeps, () => ctx.token, mode)
     registerGetEmail(server, getEmailDeps, () => ctx.token)
     registerPreviewEmail(server, previewEmailDeps, () => ctx.token)
     // The tool's UI template (SEP-1865). Registering it also turns on the
@@ -205,7 +233,7 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
       () => ctx.token,
       () => ctx.userId
     )
-    if (cfg.calendarShares) {
+    if (calendarShares) {
       registerShareCalendar(
         server,
         calendarSharingDeps,
@@ -227,16 +255,16 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
     registerDeleteCalendarEvent(server, deleteCalendarEventDeps, () => ctx.token)
     registerMoveCalendarEvents(server, moveCalendarEventsDeps, () => ctx.token)
     registerRespondToEvent(server, respondToEventDeps, () => ctx.token)
-    registerSearchContacts(server, searchContactsDeps, () => ctx.token)
+    registerSearchContacts(server, searchContactsDeps, () => ctx.token, mode)
     // Reads through the write bundle (query + get) plus the account zone the
     // calendar tools share, so "today" is the user's day.
     registerListUpcomingBirthdays(server, { ...contactWriteDeps, resolveTimeZone }, () => ctx.token)
-    registerCreateContact(server, contactWriteDeps, () => ctx.token)
+    registerCreateContact(server, contactWriteDeps, () => ctx.token, mode)
     registerUpdateContact(server, contactWriteDeps, () => ctx.token)
-    registerDeleteContact(server, contactWriteDeps, () => ctx.token)
+    registerDeleteContact(server, contactWriteDeps, () => ctx.token, mode)
     // Writes through the write bundle, then renders the result with the read
     // side's subject and title lookups.
-    registerMergeContacts(server, { ...searchContactsDeps, ...contactWriteDeps }, () => ctx.token)
+    registerMergeContacts(server, { ...searchContactsDeps, ...contactWriteDeps }, () => ctx.token, mode)
     registerCreateDraft(
       server,
       draftDeps,
@@ -283,6 +311,14 @@ export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: Au
       () => ctx.token,
       () => ctx.principal
     )
+    return server
+  }
+}
+
+export const createMcpHandler = (cfg: McpHandlerConfig): ((req: Request, ctx: AuthContext) => Promise<Response>) => {
+  const buildServer = createMcpServerFactory(cfg)
+  return async (req, ctx) => {
+    const server = buildServer(ctx)
 
     // Stateless mode (sessionIdGenerator omitted). Each request stands
     // alone — initialize, tool call, and shutdown happen within the

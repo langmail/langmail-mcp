@@ -17,6 +17,7 @@ import { z } from 'zod'
 
 import { mergeCards } from '../contacts/index.ts'
 import { type ContactCard } from '../jmap/index.ts'
+import { type ServerMode } from '../mode.ts'
 import { ACCOUNT_DESTRUCTIVE } from './annotations.ts'
 import { type ContactWriteDeps, collectedBookIdOf, contactCtx, contactIdSchema, readBack } from './contact-common.ts'
 import { renderContact } from './contact-format.ts'
@@ -157,17 +158,27 @@ export const mergeContacts = async (
 
 // --- MCP registration ----------------------------------------------------
 
-export const registerMergeContacts = (server: McpServer, deps: MergeContactsDeps, getToken: () => string): void => {
+export const registerMergeContacts = (
+  server: McpServer,
+  deps: MergeContactsDeps,
+  getToken: () => string,
+  mode: ServerMode = 'hosted'
+): void => {
   server.registerTool(
     'merge_contacts',
     {
       annotations: ACCOUNT_DESTRUCTIVE,
       description:
-        'Merge duplicate contacts — the same person or organization collected under several addresses — ' +
-        'into the one to keep, and delete the others. The kept contact gains every email address, phone ' +
-        'number, postal address and note of the merged ones and their interaction history; its name, ' +
+        (mode === 'hosted'
+          ? 'Merge duplicate contacts — the same person or organization collected under several addresses — ' +
+            'into the one to keep, and delete the others. The kept contact gains every email address, phone ' +
+            'number, postal address and note of the merged ones and their interaction history; its name, '
+          : 'Merge duplicate contacts, the same person or organization stored under several addresses, ' +
+            'into the one to keep, and delete the others. The kept contact gains every email address, phone ' +
+            'number, postal address and note of the merged ones; its name, ') +
         'organization, birthday and preferred address stay unless it has none, and every value that does ' +
-        'not fit is listed as a conflict. Later mail from any merged address updates the kept contact. ' +
+        'not fit is listed as a conflict. ' +
+        (mode === 'hosted' ? 'Later mail from any merged address updates the kept contact. ' : '') +
         'Returns the merged contact in the detailed search_contacts format plus the full details of the ' +
         'removed contacts, which is what undoing it by hand needs. Find the ids with search_contacts; to ' +
         'move a single address between two contacts that are different people, use update_contact instead, ' +

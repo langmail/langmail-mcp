@@ -14,6 +14,7 @@ import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { sourceOf } from '../contacts/index.ts'
+import { type ServerMode } from '../mode.ts'
 import { ACCOUNT_DESTRUCTIVE } from './annotations.ts'
 import { type ContactWriteDeps, collectedBookIdOf, contactCtx, contactIdSchema } from './contact-common.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
@@ -60,15 +61,27 @@ export const deleteContact = async (
 
 // --- MCP registration ----------------------------------------------------
 
-export const registerDeleteContact = (server: McpServer, deps: ContactWriteDeps, getToken: () => string): void => {
+// What deleting a contact the hosted server collected from mail means; a
+// self-hosted server collects nothing, so it has no such sentence.
+const COLLECTED_NOTE =
+  'A contact derived from mail headers or calendar attendees is only ' +
+  'removed until the next message from that person recreates it — '
+
+export const registerDeleteContact = (
+  server: McpServer,
+  deps: ContactWriteDeps,
+  getToken: () => string,
+  mode: ServerMode = 'hosted'
+): void => {
   server.registerTool(
     'delete_contact',
     {
       annotations: ACCOUNT_DESTRUCTIVE,
       description:
         'Delete a contact by id, removing it from the account and from every device syncing ' +
-        'the address book. A contact derived from mail headers or calendar attendees is only ' +
-        'removed until the next message from that person recreates it — to drop one field ' +
+        'the address book. ' +
+        (mode === 'hosted' ? COLLECTED_NOTE : '') +
+        (mode === 'hosted' ? 'to drop one field ' : 'To drop one field ') +
         'instead of the whole record, use update_contact; if it duplicates another contact of the same ' +
         'person or organization, use merge_contacts, which keeps its addresses, notes and history. ' +
         'Find the id with search_contacts.',

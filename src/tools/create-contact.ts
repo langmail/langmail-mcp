@@ -36,6 +36,7 @@ import {
   type ContactCardEmail,
   type ContactCardPhone,
 } from '../jmap/index.ts'
+import { type ServerMode } from '../mode.ts'
 import { ACCOUNT_WRITE } from './annotations.ts'
 import {
   birthdaySchema,
@@ -181,14 +182,21 @@ export const createContact = async (
 
 // --- MCP registration ----------------------------------------------------
 
-export const registerCreateContact = (server: McpServer, deps: ContactWriteDeps, getToken: () => string): void => {
+export const registerCreateContact = (
+  server: McpServer,
+  deps: ContactWriteDeps,
+  getToken: () => string,
+  mode: ServerMode = 'hosted'
+): void => {
   server.registerTool(
     'create_contact',
     {
       annotations: ACCOUNT_WRITE,
       description:
         'Create a contact in the user’s address book — a person the address book does not ' +
-        'yet know, typically because they have never sent mail or shared a calendar event. ' +
+        (mode === 'hosted'
+          ? 'yet know, typically because they have never sent mail or shared a calendar event. '
+          : 'yet know. ') +
         'Holds a name plus optional email addresses, phone numbers, structured postal ' +
         'addresses, an organization, a birthday, a note, and roles: what the person is to the user ' +
         '("lawyer"), stored only when the user said or confirmed it. Search with search_contacts first: if the ' +

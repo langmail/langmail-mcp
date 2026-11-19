@@ -45,6 +45,7 @@ import {
   emailGet,
   type JmapLive,
 } from '../jmap/index.ts'
+import { type ServerMode } from '../mode.ts'
 import { READ_ONLY } from './annotations.ts'
 import { birthdayLine, profileLines, rolesLine } from './contact-format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
@@ -105,6 +106,8 @@ export interface SearchContactsDeps {
 
 export interface SearchContactsContext {
   args: SearchContactsArgs
+  // Words the no-match text for the server it runs on; hosted when left out.
+  mode?: ServerMode
   token: string
 }
 
@@ -236,8 +239,14 @@ const roleHint =
 
 // `capped` is true when the sweep stopped at CARD_CAP, where a match may be
 // out of sight.
-const emptyResultText = (query: string, capped: boolean): string =>
-  `No contact matched "${query}" in the collected address book (built from mail headers and calendar attendees) or the personal address books${capped ? '' : ', and no contact has it as a role'}. ` +
+// Self-hosted, nothing builds a collected book: every book is the user's own.
+const searchedBooks = (mode: ServerMode): string =>
+  mode === 'hosted'
+    ? 'the collected address book (built from mail headers and calendar attendees) or the personal address books'
+    : 'any address book'
+
+const emptyResultText = (query: string, capped: boolean, mode: ServerMode): string =>
+  `No contact matched "${query}" in ${searchedBooks(mode)}${capped ? '' : ', and no contact has it as a role'}. ` +
   'If you know part of the address or the organization, search for that instead. ' +
   `${roleHint} ` +
   "If the person has only contacted the user via LinkedIn or another platform, no email address exists in this account's data."
@@ -428,7 +437,7 @@ export const searchContacts = async (deps: SearchContactsDeps, ctx: SearchContac
     ? `\n\nOnly the first ${CARD_CAP} cards of the address books were searched; a contact past them may be missing.`
     : ''
   if (matched.length === 0) {
-    return textResult(`${emptyResultText(query, sweep.capped)}${capNote}`)
+    return textResult(`${emptyResultText(query, sweep.capped, ctx.mode ?? 'hosted')}${capNote}`)
   }
 
   // The people the user named this way come first: a role is the user's own
@@ -518,7 +527,8 @@ export const registerSearchContacts = (
   server: McpServer,
   deps: SearchContactsDeps,
   // Bearer threaded per request — see mcp/handler.ts.
-  getToken: () => string
+  getToken: () => string,
+  mode: ServerMode = 'hosted'
 ): void => {
   server.registerTool(
     'search_contacts',
@@ -527,15 +537,22 @@ export const registerSearchContacts = (
       description:
         "Resolve a person's name, partial name, email address, organization, or what " +
         'they are to the user ("my lawyer", "my landlord") to known contacts. People ' +
-        'holding that role come first, the rest are ranked by interaction recency and frequency. Sources ' +
-        'include the collected address book maintained from mail headers (both ' +
-        'directions, including Sent) and calendar attendees and organizers, plus ' +
-        "the user's personal address books, and contacts written with " +
-        'create_contact. Use this before creating events or drafting mail when only ' +
+        (mode === 'hosted'
+          ? 'holding that role come first, the rest are ranked by interaction recency and frequency. '
+          : 'holding that role come first. ') +
+        (mode === 'hosted'
+          ? 'Sources ' +
+            'include the collected address book maintained from mail headers (both ' +
+            'directions, including Sent) and calendar attendees and organizers, plus ' +
+            "the user's personal address books, and contacts written with " +
+            'create_contact. '
+          : "Sources are every address book in the user's account, including contacts written with create_contact. ") +
+        'Use this before creating events or drafting mail when only ' +
         'a name is known, and before create_contact or update_contact to get the ' +
         'contact_id. Returns for each contact its roles, one or more addresses with a ' +
-        'confidence level, the birthday when one is stored, and recent ' +
-        'interactions; the detailed format adds phone numbers, postal addresses ' +
+        'confidence level, the birthday when one is stored' +
+        (mode === 'hosted' ? ', and recent interactions' : '') +
+        '; the detailed format adds phone numbers, postal addresses ' +
         'and the note. Do not use it to enumerate all contacts; a query is ' +
         'required, and for "whose birthday is coming up" use ' +
         'list_upcoming_birthdays instead. If several plausible people match, ' +
@@ -544,6 +561,6 @@ export const registerSearchContacts = (
       inputSchema: z.object(searchContactsShape),
       title: 'Search contacts',
     },
-    (args) => searchContacts(deps, { args: searchContactsInput.parse(args), token: getToken() })
+    (args) => searchContacts(deps, { args: searchContactsInput.parse(args), mode, token: getToken() })
   )
 }

@@ -13,6 +13,7 @@ import {
   searchEmails,
   searchEmailsInput,
   searchFingerprint,
+  selfHostedSearchEmailsInput,
 } from './search-emails.ts'
 
 // Distinguishes per-hit "matched: X/N terms" lines from the "N message(s)
@@ -966,5 +967,35 @@ describe('searchEmails paging', () => {
 
   test('a cursor alone is not a filter', () => {
     expect(searchEmailsInput.safeParse({ cursor: 'v1.abc' }).success).toBe(false)
+  })
+})
+
+describe('self-hosted todo filter', () => {
+  test('maps todo onto a required or excluded $label:todo, the keyword mark_emails sets', async () => {
+    for (const todo of [true, false]) {
+      let seen: EmailQueryParams | undefined
+      await searchEmails(
+        fakeDeps({
+          onQuery: (p) => {
+            seen = p
+          },
+        }),
+        { args: { limit: 20, todo }, token: 'tok' }
+      )
+      expect(seen?.filters).toEqual({ keywordStates: { '$label:todo': todo } })
+    }
+  })
+
+  test('todo alone is enough of a filter; the schema has no type filter', () => {
+    expect(selfHostedSearchEmailsInput.safeParse({ todo: true }).success).toBe(true)
+    expect(selfHostedSearchEmailsInput.safeParse({}).success).toBe(false)
+    const withKeywords = selfHostedSearchEmailsInput.safeParse({ keywords: ['ticket'], query: 'x' })
+    expect(withKeywords.success && 'keywords' in withKeywords.data).toBe(false)
+  })
+
+  test('a cursor from a todo search does not continue the same search without it', () => {
+    expect(searchFingerprint({ limit: 20, query: 'x', todo: true })).not.toBe(
+      searchFingerprint({ limit: 20, query: 'x' })
+    )
   })
 })

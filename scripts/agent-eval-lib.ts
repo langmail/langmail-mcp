@@ -14,6 +14,12 @@
 //     http://127.0.0.1:8090/mcp); unset, the agent uses `.mcp.json` at the repo
 //     root, i.e. the deployed server. See docs/guides/local-development.md
 //     § Agent trajectory evals.
+//
+// Against the self-hosted server (src/self-hosted.ts), no Langmail account
+// takes part: set AGENT_EVAL_STALWART_USERNAME and
+// AGENT_EVAL_STALWART_PASSWORD (the same account the server signs in with),
+// AGENT_EVAL_MCP_TOKEN (its MCP_AUTH_TOKEN), STALWART_PUBLIC_URL and
+// AGENT_EVAL_MCP_URL, and leave MCP_ACCESS_TOKEN unset.
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -51,7 +57,24 @@ const TRAILING_SLASHES_RE = /\/+$/u
 // Read at module load, like the pre-split scripts did: an eval without its
 // env should die before it seeds anything.
 const stalwart = requireEnv('STALWART_PUBLIC_URL').replace(TRAILING_SLASHES_RE, '')
-const token = requireEnv('MCP_ACCESS_TOKEN')
+
+// The fixtures are seeded with the same account the agent reads. Hosted, that
+// is the Langmail OAuth token for both Stalwart and the MCP server;
+// self-hosted, an app password for Stalwart and the operator's bearer for the
+// MCP server.
+const selfHostedUser = process.env.AGENT_EVAL_STALWART_USERNAME
+const credentials = (): { mcp: string; stalwart: string } => {
+  if (selfHostedUser) {
+    const password = requireEnv('AGENT_EVAL_STALWART_PASSWORD')
+    return {
+      mcp: `Bearer ${requireEnv('AGENT_EVAL_MCP_TOKEN')}`,
+      stalwart: `Basic ${Buffer.from(`${selfHostedUser}:${password}`, 'utf8').toString('base64')}`,
+    }
+  }
+  const token = requireEnv('MCP_ACCESS_TOKEN')
+  return { mcp: `Bearer ${token}`, stalwart: `Bearer ${token}` }
+}
+const auth = credentials()
 
 const LOCAL_HOST_RE = /^(127\.0\.0\.1|localhost|\[::1\]|[a-z0-9-]+\.langmail\.test)$/u
 const isLocal = (url: string): boolean => {
@@ -66,6 +89,12 @@ const isLocal = (url: string): boolean => {
 // STALWART_PUBLIC_URL would seed and delete fixtures in a real mailbox while
 // the agent talks to the local server. Checked here, before anything is seeded.
 const evalMcpUrl = process.env.AGENT_EVAL_MCP_URL
+if (selfHostedUser && !evalMcpUrl) {
+  process.stderr.write(
+    '✗ AGENT_EVAL_STALWART_USERNAME needs AGENT_EVAL_MCP_URL: the deployed server is not self-hosted\n'
+  )
+  process.exit(2)
+}
 if (evalMcpUrl && !(isLocal(evalMcpUrl) && isLocal(stalwart))) {
   process.stderr.write(
     '✗ with AGENT_EVAL_MCP_URL set, it and STALWART_PUBLIC_URL must be loopback or *.langmail.test ' +
@@ -96,7 +125,7 @@ export interface JmapResponse {
 export const jmapCall = async (session: Session, methodCalls: unknown[]): Promise<JmapResponse> => {
   const res = await fetch(session.apiUrl, {
     body: JSON.stringify({ methodCalls, using: JMAP_USING }),
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    headers: { authorization: auth.stalwart, 'content-type': 'application/json' },
     method: 'POST',
   })
   if (!res.ok) {
@@ -106,7 +135,7 @@ export const jmapCall = async (session: Session, methodCalls: unknown[]): Promis
 }
 
 export const openSession = async (): Promise<Session> => {
-  const res = await fetch(`${stalwart}/.well-known/jmap`, { headers: { authorization: `Bearer ${token}` } })
+  const res = await fetch(`${stalwart}/.well-known/jmap`, { headers: { authorization: auth.stalwart } })
   if (!res.ok) {
     throw new Error(`jmap session discovery failed: HTTP ${res.status}`)
   }
@@ -230,7 +259,7 @@ export const seed = async (session: Session, mailboxId: string, to: string, f: F
     session.uploadUrl.replace('{accountId}', session.accountId).replace('{type}', 'message/rfc822'),
     {
       body: rfc822(f, to),
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'message/rfc822' },
+      headers: { authorization: auth.stalwart, 'content-type': 'message/rfc822' },
       method: 'POST',
     }
   )
@@ -288,7 +317,7 @@ export interface Contacts {
 const contactsCall = async (c: Pick<Contacts, 'apiUrl'>, methodCalls: unknown[]): Promise<JmapResponse> => {
   const res = await fetch(c.apiUrl, {
     body: JSON.stringify({ methodCalls, using: CONTACTS_USING }),
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    headers: { authorization: auth.stalwart, 'content-type': 'application/json' },
     method: 'POST',
   })
   if (!res.ok) {
@@ -299,7 +328,7 @@ const contactsCall = async (c: Pick<Contacts, 'apiUrl'>, methodCalls: unknown[])
 
 // The account's default address book, where the user's own contacts live.
 export const openContacts = async (session: Session): Promise<Contacts> => {
-  const res = await fetch(`${stalwart}/.well-known/jmap`, { headers: { authorization: `Bearer ${token}` } })
+  const res = await fetch(`${stalwart}/.well-known/jmap`, { headers: { authorization: auth.stalwart } })
   const body = (await res.json()) as { primaryAccounts?: Record<string, string> }
   const accountId = body.primaryAccounts?.['urn:ietf:params:jmap:contacts']
   if (!accountId) {
@@ -462,7 +491,7 @@ const mcpConfig = (): { cleanup: () => void; path: string; toolPrefix: string } 
   }
   const dir = mkdtempSync(join(tmpdir(), 'agent-eval-mcp-'))
   const path = join(dir, 'mcp.json')
-  const servers = { [LOCAL_SERVER]: { headers: { Authorization: `Bearer ${token}` }, type: 'http', url } }
+  const servers = { [LOCAL_SERVER]: { headers: { Authorization: auth.mcp }, type: 'http', url } }
   writeFileSync(path, JSON.stringify({ mcpServers: servers }), { mode: 0o600 })
   return { cleanup: () => rmSync(dir, { force: true, recursive: true }), path, toolPrefix: LOCAL_TOOL }
 }

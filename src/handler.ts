@@ -61,7 +61,7 @@ const UPLOADS_PREFIX = '/attachments/uploads/'
 // Anything but a clean GET (download) or PUT (upload) of a single token
 // segment is a plain 404 — indistinguishable from an unknown/expired token,
 // on purpose.
-const attachmentsRoute = (
+export const attachmentsRoute = (
   req: Request,
   pathname: string,
   download?: AttachmentDownload,
@@ -84,7 +84,7 @@ const attachmentsRoute = (
   return Promise.resolve(new Response('not found\n', { status: 404 }))
 }
 
-const imageProxyRoute = (req: Request, pathname: string, proxy?: ImageProxy): Promise<Response> => {
+export const imageProxyRoute = (req: Request, pathname: string, proxy?: ImageProxy): Promise<Response> => {
   const token = pathname.slice('/image-proxy/'.length)
   if (req.method === 'GET' && proxy && token && !token.includes('/')) {
     return proxy(token)

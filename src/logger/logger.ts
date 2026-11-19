@@ -25,9 +25,14 @@ const level = resolveLevel(process.env.LOG_LEVEL)
 // this app's logging volume. The Logtail stream remains async (it batches over
 // the network and flushes on beforeExit).
 
+// MCP_LOG_STDERR is set by the self-hosted MCP entrypoint
+// (services/mcp/src/self-hosted.ts) before this module loads: over stdio,
+// stdout carries the protocol and a log line there would break it.
+const consoleFd = process.env.MCP_LOG_STDERR ? 2 : 1
+
 const streams: pino.StreamEntry[] = [
   // stdout — captured by journald (prod) or piped to pino-pretty (dev).
-  { level, stream: pino.destination({ dest: 1, sync: true }) },
+  { level, stream: pino.destination({ dest: consoleFd, sync: true }) },
 ]
 
 if (process.env.NODE_ENV === 'production') {
