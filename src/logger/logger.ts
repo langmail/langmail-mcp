@@ -42,14 +42,16 @@ if (process.env.NODE_ENV === 'production') {
     streams.push({ level, stream: createLogtailStream(token, process.env.BETTERSTACK_ENDPOINT) })
   }
 } else if (runsFromSource) {
-  // The repo's logs/ directory: only from source, since from the langmail-mcp
-  // package this path would land outside the install.
+  // LOG_DIR, else this repository's logs/ directory: only from source, since
+  // from the langmail-mcp package the default would land outside the install.
+  // langmail/platform's local stack sets LOG_DIR to its own logs/.
   // Bun inlines process.env.NODE_ENV at build time, so a compiled binary built
   // without NODE_ENV=production bakes in this dev branch. Guard the /logs setup
   // so such a binary (read-only fs) degrades to stdout-only instead of crashing
   // on import.
   try {
-    const logFilePath = path.resolve(import.meta.dirname, `../../../../logs/${serviceName}.log`)
+    const logDir = process.env.LOG_DIR || path.resolve(import.meta.dirname, '../../logs')
+    const logFilePath = path.join(logDir, `${serviceName}.log`)
     fs.mkdirSync(path.dirname(logFilePath), { recursive: true })
     fs.writeFileSync(logFilePath, '', { flag: 'w' })
     streams.push({ level, stream: pino.destination({ dest: logFilePath, sync: true }) })

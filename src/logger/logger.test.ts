@@ -15,7 +15,7 @@ const LOGGER_MODULE = path.resolve(import.meta.dir, 'logger.ts')
 
 // Duplicates the relative depth in logger.ts (`../../../../logs` from src/logger/) —
 // keep the two in sync if that path ever changes.
-const LOGS_DIR = path.resolve(import.meta.dir, '../../../../logs')
+const LOGS_DIR = path.resolve(import.meta.dir, '../../logs')
 
 interface RunResult {
   stderr: string
@@ -67,6 +67,7 @@ const run = (options: RunOptions): RunResult => {
       NODE_ENV: options.nodeEnv ?? '',
       SERVICE_NAME: options.serviceName,
       LOG_LEVEL: options.logLevel ?? '',
+      LOG_DIR: '',
       BETTERSTACK_SOURCE_TOKEN: options.token ?? '',
       BETTERSTACK_ENDPOINT: options.endpoint ?? '',
     },
