@@ -12,7 +12,7 @@ import {
 } from '../contacts/index.ts'
 import { type ContactCard } from '../jmap/index.ts'
 import { fakeBook } from './contact-test-fixtures.ts'
-import { type SearchContactsDeps, searchContacts, searchContactsInput } from './search-contacts.ts'
+import { peopleInMail, type SearchContactsDeps, searchContacts, searchContactsInput } from './search-contacts.ts'
 
 const DAY_MS = 86_400_000
 const ALEX_ACTIVE_FIRST = /^5 person\(s\) matched:\n\n1\. Alex Active\n/u
@@ -75,6 +75,7 @@ const makeDeps = (cards: ContactCard[], over: Partial<SearchContactsDeps> = {}):
   contactCardPage: pagesOf(cards),
   emailGet: (p) =>
     Promise.resolve(p.ids.map((id) => ({ id, subject: id === 'mail-1' ? 'Northwind onboarding' : 'Follow-up' }))),
+  emailHeadersMatching: () => Promise.resolve([]),
   fetchEventTitles: (_token, uids) => Promise.resolve(new Map(uids.map((uid) => [uid, 'Lunch — Kai & Robin']))),
   resolveAccountId: () => Promise.resolve('acct'),
   resolveMailAccountId: () => Promise.resolve('acct'),
@@ -554,5 +555,144 @@ describe('searchContacts — roles', () => {
       expect(text).toContain('person(s) matched')
       expect(text).not.toContain('were searched')
     }
+  })
+})
+
+describe('searchContacts — self-hosted mail fallback', () => {
+  const user = { email: 'alice@example.org', name: 'Alice' }
+  const robinMail = [
+    {
+      cc: [],
+      from: [{ email: 'robin@fairweather-law.example', name: 'Robin Fairweather' }],
+      id: 'm2',
+      receivedAt: daysAgo(3),
+      to: [user],
+    },
+    {
+      cc: [{ email: 'clerk@fairweather-law.example', name: 'Clerk' }],
+      from: [{ email: 'robin@fairweather-law.example', name: 'Robin F.' }],
+      id: 'm1',
+      receivedAt: daysAgo(10),
+      to: [user],
+    },
+  ]
+
+  test('no card matches: the people in the mail headers come back, marked as not saved', async () => {
+    const calls: { limit: number; query: string }[] = []
+    const deps = makeDeps([], {
+      emailHeadersMatching: (p) => {
+        calls.push({ limit: p.limit, query: p.query })
+        return Promise.resolve(robinMail)
+      },
+    })
+    const result = await searchContacts(deps, {
+      args: args({ query: 'Robin Fairweather' }),
+      mode: 'self-hosted',
+      token: 'tok',
+    })
+    const text = result.content[0]?.text ?? ''
+    expect(calls).toEqual([{ limit: 50, query: 'robin fairweather' }])
+    expect(text).toContain('No contact matched "Robin Fairweather" in any address book')
+    expect(text).toContain('1 person(s) found in the From, To and Cc')
+    expect(text).toContain('1. Robin Fairweather')
+    expect(text).toContain('address: robin@fairweather-law.example')
+    expect(text).toContain('not saved as a contact')
+    expect(text).toContain('last_seen: 3 days ago (2 messages)')
+    // The clerk and the user were on the same messages but do not match.
+    expect(text).not.toContain('clerk@')
+    expect(text).not.toContain('alice@')
+    expect(text).toContain('create_contact')
+  })
+
+  test('neither cards nor mail match: the result says both were searched and keeps the role hint', async () => {
+    const result = await searchContacts(makeDeps([]), {
+      args: args({ query: 'my lawyer' }),
+      mode: 'self-hosted',
+      token: 'tok',
+    })
+    const text = result.content[0]?.text ?? ''
+    expect(text).toContain('No contact matched "my lawyer" in any address book')
+    expect(text).toContain('No one in the From, To or Cc of the newest 50 matching messages')
+    expect(text).toContain('search for that instead')
+    expect(text).toContain('find them with search_emails')
+  })
+
+  test('a role query that matches mail by address says no one holds the role', async () => {
+    const deps = makeDeps([], {
+      emailHeadersMatching: () =>
+        Promise.resolve([
+          { from: [{ email: 'info@lawyerhouse.example', name: 'Info' }], id: 'm1', receivedAt: daysAgo(1) },
+        ]),
+    })
+    const text =
+      (await searchContacts(deps, { args: args({ query: 'my lawyer' }), mode: 'self-hosted', token: 'tok' })).content[0]
+        ?.text ?? ''
+    expect(text).toContain('address: info@lawyerhouse.example')
+    expect(text).toContain('None of them has "lawyer" as a role')
+  })
+
+  test('a mail error falls back to the plain no-match text', async () => {
+    const deps = makeDeps([], { emailHeadersMatching: () => Promise.reject(new Error('boom')) })
+    const text =
+      (await searchContacts(deps, { args: args({ query: 'robin' }), mode: 'self-hosted', token: 'tok' })).content[0]
+        ?.text ?? ''
+    expect(text).toContain('No contact matched "robin" in any address book')
+    expect(text).not.toContain('From, To or Cc')
+  })
+
+  test('a card match skips the mail search', async () => {
+    let called = false
+    const deps = makeDeps([robinCard()], {
+      emailHeadersMatching: () => {
+        called = true
+        return Promise.resolve(robinMail)
+      },
+    })
+    const text =
+      (await searchContacts(deps, { args: args(), mode: 'self-hosted', token: 'tok' })).content[0]?.text ?? ''
+    expect(text).toContain('1 person(s) matched')
+    expect(called).toBe(false)
+  })
+
+  test('hosted never searches the mail', async () => {
+    let called = false
+    const deps = makeDeps([], {
+      emailHeadersMatching: () => {
+        called = true
+        return Promise.resolve(robinMail)
+      },
+    })
+    const text = (await searchContacts(deps, { args: args(), token: 'tok' })).content[0]?.text ?? ''
+    expect(text).toContain('No contact matched "robin" in the collected address book')
+    expect(called).toBe(false)
+  })
+
+  test('more people than the limit: the top ones by last seen, with a note', async () => {
+    const many = Array.from({ length: 4 }, (_, i) => ({
+      from: [{ email: `robin${i}@example.org`, name: `Robin ${i}` }],
+      id: `m${i}`,
+      receivedAt: daysAgo(i + 1),
+    }))
+    const deps = makeDeps([], { emailHeadersMatching: () => Promise.resolve(many) })
+    const text =
+      (await searchContacts(deps, { args: args({ limit: 2 }), mode: 'self-hosted', token: 'tok' })).content[0]?.text ??
+      ''
+    expect(text).toContain('1. Robin 0')
+    expect(text).toContain('2. Robin 1')
+    expect(text).not.toContain('Robin 2')
+    expect(text).toContain('Showing 2 of 4 people found in mail')
+  })
+
+  test('peopleInMail matches every word against name or address, newest name first', () => {
+    const people = peopleInMail(robinMail, 'robin fairweather-law')
+    expect(people).toEqual([
+      {
+        address: 'robin@fairweather-law.example',
+        lastSeen: robinMail[0]?.receivedAt ?? '',
+        messages: 2,
+        name: 'Robin Fairweather',
+      },
+    ])
+    expect(peopleInMail(robinMail, 'nobody')).toEqual([])
   })
 })

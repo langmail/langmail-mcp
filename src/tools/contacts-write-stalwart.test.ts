@@ -151,6 +151,7 @@ live('contact write tools against live Stalwart — author, read back, correct, 
       contactCardGet: (p) => contactCardGet(pin(p)),
       contactCardPage: (p) => contactCardPage(pin(p)),
       emailGet: (p) => emailGet(pin(p)),
+      emailHeadersMatching: () => Promise.resolve([]),
       // No calendar seeding in this file — an authored contact has no
       // interactions to hydrate.
       fetchEventTitles: () => Promise.resolve(new Map()),

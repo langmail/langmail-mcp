@@ -41,10 +41,14 @@ import {
   contactCardGet,
   contactCardPage,
   type EmailGetParams,
+  type EmailHeaderRecord,
+  type EmailHeadersMatchingParams,
   type EmailRecord,
   emailGet,
+  emailHeadersMatching,
   type JmapLive,
 } from '../jmap/index.ts'
+import { logger } from '../logger/index.ts'
 import { type ServerMode } from '../mode.ts'
 import { READ_ONLY } from './annotations.ts'
 import { birthdayLine, profileLines, rolesLine } from './contact-format.ts'
@@ -92,6 +96,9 @@ export interface SearchContactsDeps {
   contactCardGet: (p: ContactCardGetParams) => Promise<ContactCard[]>
   contactCardPage: (p: ContactCardPageParams) => Promise<ContactCardPage>
   emailGet: (p: EmailGetParams) => Promise<EmailRecord[]>
+  // The From, To and Cc of the newest messages whose headers match, newest
+  // first. Self-hosted only: the fallback when no card matches.
+  emailHeadersMatching: (p: EmailHeadersMatchingParams) => Promise<EmailHeaderRecord[]>
   // Titles for the named event UIDs, resolved in ONE pass over the
   // principal's calendars — a per-UID lookup would re-discover the CalDAV
   // account and re-read whole collections for every interaction line.
@@ -245,11 +252,125 @@ const searchedBooks = (mode: ServerMode): string =>
     ? 'the collected address book (built from mail headers and calendar attendees) or the personal address books'
     : 'any address book'
 
-const emptyResultText = (query: string, capped: boolean, mode: ServerMode): string =>
+// Self-hosted, nothing fills an address book from mail, so a person the user
+// has only exchanged mail with has no card. When no card matches, the search
+// reads the From, To and Cc of the newest messages whose headers match, and
+// returns the people there, marked as not saved. Nothing is written.
+const MAIL_MESSAGES = 50
+
+// `searchedMail` is true when the mail headers were searched too and turned
+// up no one.
+const emptyResultText = (query: string, capped: boolean, mode: ServerMode, searchedMail = false): string =>
   `No contact matched "${query}" in ${searchedBooks(mode)}${capped ? '' : ', and no contact has it as a role'}. ` +
+  (searchedMail
+    ? `No one in the From, To or Cc of the newest ${MAIL_MESSAGES} matching messages in the mailbox matched it either. `
+    : '') +
   'If you know part of the address or the organization, search for that instead. ' +
   `${roleHint} ` +
   "If the person has only contacted the user via LinkedIn or another platform, no email address exists in this account's data."
+
+// --- Self-hosted fallback: people found in mail headers -------------------
+
+interface MailPerson {
+  address: string
+  lastSeen: string
+  messages: number
+  name?: string
+}
+
+// Every word of the query must be in the person's name or address: a message
+// matched by its headers also names everyone else on it.
+const matchesPerson = (entry: { email: string; name?: string | null }, words: string[]): boolean => {
+  const text = `${entry.name ?? ''} ${entry.email}`.toLowerCase()
+  return words.every((w) => text.includes(w))
+}
+
+const SPACES = /\s+/u
+
+// Counts one sighting of `entry` on a message received at `date`.
+const sight = (people: Map<string, MailPerson>, entry: { email: string; name?: string | null }, date: string): void => {
+  const key = entry.email.toLowerCase()
+  const name = entry.name?.trim() || undefined
+  const known = people.get(key)
+  if (!known) {
+    people.set(key, { address: entry.email, lastSeen: date, messages: 1, ...(name ? { name } : {}) })
+    return
+  }
+  known.messages += 1
+  // The newest message's display name wins.
+  if (date > known.lastSeen) {
+    known.lastSeen = date
+    known.name = name ?? known.name
+  } else {
+    known.name ??= name
+  }
+}
+
+// The distinct people in `messages` that match `query`, last seen first.
+export const peopleInMail = (messages: EmailHeaderRecord[], query: string): MailPerson[] => {
+  const words = withoutMy(query).split(SPACES).filter(Boolean)
+  const people = new Map<string, MailPerson>()
+  for (const message of messages) {
+    const entries = [...(message.from ?? []), ...(message.to ?? []), ...(message.cc ?? [])]
+    for (const entry of entries.filter((e) => e.email && matchesPerson(e, words))) {
+      sight(people, entry, message.receivedAt ?? '')
+    }
+  }
+  return [...people.values()].sort((a, b) => b.lastSeen.localeCompare(a.lastSeen))
+}
+
+const mailPersonBlock = (person: MailPerson, now: Date, index: number): string =>
+  [
+    `${index + 1}. ${person.name ?? person.address}`,
+    '   contact_id: (none, not saved as a contact)',
+    `   address: ${person.address}`,
+    '   source: found in mail headers (From, To, Cc), not in any address book',
+    `   last_seen: ${person.lastSeen ? relativeAge(person.lastSeen, now) : 'unknown date'} (${person.messages} message${person.messages === 1 ? '' : 's'})`,
+  ].join('\n')
+
+// The fallback's result, or undefined when no one in the mail matches or the
+// mail cannot be read (the search then answers as if it had no fallback).
+const searchMailHeaders = async (
+  deps: Pick<SearchContactsDeps, 'emailHeadersMatching' | 'resolveMailAccountId'>,
+  authorization: string,
+  query: string
+): Promise<MailPerson[] | undefined> => {
+  try {
+    const accountId = await deps.resolveMailAccountId(authorization)
+    const messages = await deps.emailHeadersMatching({
+      accountId,
+      apiUrl: '',
+      authorization,
+      limit: MAIL_MESSAGES,
+      query: withoutMy(query),
+    })
+    return peopleInMail(messages, query)
+  } catch (err) {
+    // No query or address in the log: they are the user's correspondents.
+    logger.warn({ err }, 'search_contacts: the mail-header fallback failed')
+    return undefined
+  }
+}
+
+const mailResultText = (query: string, people: MailPerson[], total: number, capped: boolean): string => {
+  const now = new Date()
+  const blocks = people.map((p, i) => mailPersonBlock(p, now, i))
+  const more =
+    total > people.length
+      ? `\n\nShowing ${people.length} of ${total} people found in mail: narrow the query (add a surname or part of the address) to disambiguate.`
+      : ''
+  return (
+    `No contact matched "${query}" in any address book${capped ? '' : ', and no contact has it as a role'}. ` +
+    `${people.length} person(s) found in the From, To and Cc of the newest matching messages in the mailbox, ` +
+    'none of them saved as a contact:\n\n' +
+    `${blocks.join('\n\n')}${more}\n\n` +
+    (isRolePhrase(query)
+      ? `None of them has "${withoutMy(query)}" as a role: they matched by name or address only. ${roleHint} `
+      : '') +
+    'Tell the user the address was found in their mail and is not saved as a contact. ' +
+    'To save one, use create_contact (with `roles` when the user says what the person is to them).'
+  )
+}
 
 // "my lawyer" is matched as "lawyer" everywhere, so a domain like
 // `smithlawyer.example` still turns up, flagged by the note below.
@@ -436,8 +557,16 @@ export const searchContacts = async (deps: SearchContactsDeps, ctx: SearchContac
   const capNote = sweep.capped
     ? `\n\nOnly the first ${CARD_CAP} cards of the address books were searched; a contact past them may be missing.`
     : ''
+  const mode = ctx.mode ?? 'hosted'
+  if (matched.length === 0 && mode === 'self-hosted') {
+    const people = await searchMailHeaders(deps, authorization, query)
+    if (people && people.length > 0) {
+      return textResult(`${mailResultText(query, people.slice(0, args.limit), people.length, sweep.capped)}${capNote}`)
+    }
+    return textResult(`${emptyResultText(query, sweep.capped, mode, people !== undefined)}${capNote}`)
+  }
   if (matched.length === 0) {
-    return textResult(`${emptyResultText(query, sweep.capped, ctx.mode ?? 'hosted')}${capNote}`)
+    return textResult(`${emptyResultText(query, sweep.capped, mode)}${capNote}`)
   }
 
   // The people the user named this way come first: a role is the user's own
@@ -492,6 +621,8 @@ export const makeLiveDeps = (live: JmapLive, caldav: CalDavConfig): SearchContac
   contactCardGet: async (p) => contactCardGet({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   contactCardPage: async (p) => contactCardPage({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   emailGet: async (p) => emailGet({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
+  emailHeadersMatching: async (p) =>
+    emailHeadersMatching({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   fetchEventTitles: async (token, uids) => {
     // One discovery and at most one read per calendar, default first,
     // stopping as soon as every UID is resolved — the whole point of the
@@ -546,7 +677,9 @@ export const registerSearchContacts = (
             'directions, including Sent) and calendar attendees and organizers, plus ' +
             "the user's personal address books, and contacts written with " +
             'create_contact. '
-          : "Sources are every address book in the user's account, including contacts written with create_contact. ") +
+          : "Sources are every address book in the user's account, including contacts written with create_contact, " +
+            'plus, when no contact matches, the people in the From, To and Cc of the newest matching mail, ' +
+            'returned marked as not saved as a contact. ') +
         'Use this before creating events or drafting mail when only ' +
         'a name is known, and before create_contact or update_contact to get the ' +
         'contact_id. Returns for each contact its roles, one or more addresses with a ' +

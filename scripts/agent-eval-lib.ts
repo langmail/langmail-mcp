@@ -185,6 +185,8 @@ export interface FixtureAttachment {
 export interface Fixture {
   attachments?: FixtureAttachment[]
   body: string
+  // A Cc header, e.g. `Sam <sam@example.org>`.
+  cc?: string
   // Defaults to text/plain; the preview eval seeds text/html bodies.
   contentType?: string
   // Seeds a staged draft (`$draft`) instead of received mail.
@@ -204,6 +206,7 @@ const rfc822 = (f: Fixture, to: string): string => {
   const headers = [
     `From: ${f.from}`,
     `To: ${to}`,
+    ...(f.cc ? [`Cc: ${f.cc}`] : []),
     `Subject: ${f.subject}`,
     `Message-ID: <${crypto.randomUUID()}@langmail-eval.example>`,
     `Date: ${f.receivedAt.toUTCString()}`,
@@ -414,6 +417,8 @@ export interface Trajectory {
   // The agent's final answer alone, for evals that judge what the user reads.
   finalText: string
   resultText: string
+  // The `claude -p` session, for a follow-up request with `runAgent`'s `resume`.
+  sessionId?: string
   toolUses: ToolUse[]
 }
 
@@ -429,6 +434,7 @@ interface StreamBlock {
 interface StreamEvent {
   message?: { content?: StreamBlock[] }
   result?: string
+  session_id?: string
 }
 
 const parseEvent = (line: string): StreamEvent | null => {
@@ -463,6 +469,9 @@ const parseTrajectory = (stdout: string): Trajectory => {
     for (const block of event.message?.content ?? []) {
       collectBlock(block, trajectory)
     }
+    if (typeof event.session_id === 'string') {
+      trajectory.sessionId = event.session_id
+    }
     if (typeof event.result === 'string') {
       trajectory.finalText = event.result
       trajectory.resultText += `${event.result}\n`
@@ -496,7 +505,9 @@ const mcpConfig = (): { cleanup: () => void; path: string; toolPrefix: string } 
   return { cleanup: () => rmSync(dir, { force: true, recursive: true }), path, toolPrefix: LOCAL_TOOL }
 }
 
-export const runAgent = (prompt: string): Trajectory => {
+// `resume`: the sessionId of an earlier run, to send `prompt` as the next
+// message of that conversation.
+export const runAgent = (prompt: string, opts: { resume?: string } = {}): Trajectory => {
   const config = mcpConfig()
   try {
     const proc = Bun.spawnSync(
@@ -514,6 +525,7 @@ export const runAgent = (prompt: string): Trajectory => {
         '--output-format',
         'stream-json',
         '--verbose',
+        ...(opts.resume ? ['--resume', opts.resume] : []),
       ],
       {
         cwd: new URL('../../..', import.meta.url).pathname,

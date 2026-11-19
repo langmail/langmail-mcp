@@ -9,6 +9,7 @@
     "smoke": "bun run scripts/smoke.ts",
     "smoke:agent-apple-mail-draft": "bun run scripts/smoke-agent-apple-mail-draft.ts",
     "smoke:agent-calendar-share": "bun run scripts/smoke-agent-calendar-share.ts",
+    "smoke:agent-contact-from-mail": "bun run scripts/smoke-agent-contact-from-mail.ts",
     "smoke:agent-contact-large-book": "bun run scripts/smoke-agent-contact-large-book.ts",
     "smoke:agent-contact-role": "bun run scripts/smoke-agent-contact-role.ts",
     "smoke:agent-contact-role-record": "bun run scripts/smoke-agent-contact-role-record.ts",

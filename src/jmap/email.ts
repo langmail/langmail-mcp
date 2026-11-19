@@ -7,6 +7,7 @@ import { buildEmailSetPatch, type EmailSetChanges } from './patch.ts'
 import { jmapCall as call, type JmapCall, methodResponse } from './request.ts'
 import { JmapError } from './session.ts'
 import {
+  type EmailAddress,
   type EmailDetailRecord,
   type EmailRecord,
   type EmailUnsubscribeRecord,
@@ -314,6 +315,61 @@ export const emailQueryTotal = async (p: EmailQueryTotalParams): Promise<number>
     throw new Error('Email/query returned no total despite calculateTotal')
   }
   return out.total
+}
+
+// --- Email/query + Email/get (header addresses) ------------------------------
+
+// The address headers of one message, for finding people in mail.
+export interface EmailHeaderRecord {
+  cc?: EmailAddress[] | null
+  from?: EmailAddress[] | null
+  id: string
+  receivedAt?: string | null
+  to?: EmailAddress[] | null
+}
+
+export interface EmailHeadersMatchingParams extends JmapCall {
+  accountId: string
+  limit: number
+  // Matched by the server against the From, To and Cc headers (names and
+  // addresses), OR'd.
+  query: string
+}
+
+// The From, To and Cc of the newest messages whose From, To or Cc match
+// `query`, outside Junk and Trash: a spammer using a matching display name is
+// not a person the user wrote with. The Email/get reads the query's ids by
+// back-reference.
+export const emailHeadersMatching = async (p: EmailHeadersMatchingParams): Promise<EmailHeaderRecord[]> => {
+  const skipped = (await fetchMailboxes(p)).filter((m) => m.role === 'junk' || m.role === 'trash').map((m) => m.id)
+  const headers = { conditions: [{ from: p.query }, { to: p.query }, { cc: p.query }], operator: 'OR' }
+  const resp = await call(p, {
+    methodCalls: [
+      [
+        'Email/query',
+        {
+          accountId: p.accountId,
+          calculateTotal: false,
+          filter:
+            skipped.length > 0 ? { conditions: [headers, { inMailboxOtherThan: skipped }], operator: 'AND' } : headers,
+          limit: p.limit,
+          sort: [{ isAscending: false, property: 'receivedAt' }],
+        },
+        '0',
+      ],
+      [
+        'Email/get',
+        {
+          '#ids': { name: 'Email/query', path: '/ids', resultOf: '0' },
+          accountId: p.accountId,
+          properties: ['id', 'from', 'to', 'cc', 'receivedAt'],
+        },
+        '1',
+      ],
+    ],
+    using: USING,
+  })
+  return methodResponse<{ list?: EmailHeaderRecord[] }>(resp, 'Email/get', '1').list ?? []
 }
 
 // --- Email/get (lightweight) ---------------------------------------------

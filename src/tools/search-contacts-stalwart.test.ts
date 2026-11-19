@@ -38,6 +38,8 @@ import {
   contactCardPage,
   contactCardQuery,
   emailGet,
+  emailHeadersMatching,
+  mailboxIdByRole,
   makeJmapLive,
 } from '../jmap/index.ts'
 import { untilIndexed } from '../search-index-test-wait.ts'
@@ -99,7 +101,7 @@ live('search_contacts against live Stalwart — collect from mail + calendar, th
   let searchDeps: SearchContactsDeps
   let selfAddresses: Set<string>
 
-  const importEmail = async (raw: string): Promise<string> => {
+  const importEmail = async (raw: string, mailboxId?: string): Promise<string> => {
     const uploadRes = await fetch(uploadUrl.replace('{accountId}', accountId).replace('{type}', 'message/rfc822'), {
       body: raw,
       headers: { authorization, 'content-type': 'message/rfc822' },
@@ -110,7 +112,11 @@ live('search_contacts against live Stalwart — collect from mail + calendar, th
     const importRes = await fetch(apiUrl, {
       body: JSON.stringify({
         methodCalls: [
-          ['Email/import', { accountId, emails: { i0: { blobId, mailboxIds: { [inboxId]: true }, receivedAt } } }, '0'],
+          [
+            'Email/import',
+            { accountId, emails: { i0: { blobId, mailboxIds: { [mailboxId ?? inboxId]: true }, receivedAt } } },
+            '0',
+          ],
         ],
         using: USING,
       }),
@@ -247,6 +253,7 @@ live('search_contacts against live Stalwart — collect from mail + calendar, th
       contactCardGet: (p) => contactCardGet({ ...p, apiUrl, authorization }),
       contactCardPage: (p) => contactCardPage({ ...p, apiUrl, authorization }),
       emailGet: (p) => emailGet({ ...p, apiUrl, authorization }),
+      emailHeadersMatching: (p) => emailHeadersMatching({ ...p, apiUrl, authorization }),
       fetchEventTitles: async (_token, uids) => {
         const wanted = new Set(uids)
         const titles = new Map<string, string>()
@@ -443,6 +450,55 @@ live('search_contacts against live Stalwart — collect from mail + calendar, th
     expect(result.isError).toBeUndefined()
     expect(result.content[0]?.text).toContain('No contact matched')
   })
+
+  test('self-hosted: a person with no card is found in the mail headers, marked as not saved', async () => {
+    for (const n of [1, 2]) {
+      await importEmail(
+        [
+          'From: Quinn Larkspur <quinn@larkspur-law.example>',
+          `To: ${address}`,
+          'Cc: Office <office@larkspur-law.example>',
+          `Subject: Your case, part ${n}`,
+          `Message-ID: <quinn-${n}-${run}@mcp-contacts-e2e>`,
+          'Date: Tue, 21 Jul 2026 10:00:00 +0000',
+          '',
+          'Please find the documents attached.',
+        ].join('\r\n')
+      )
+    }
+    // The same name from a spammer, in Junk: not a person the user wrote with.
+    const junkId = await mailboxIdByRole({ ...ctx, role: 'junk' })
+    expect(junkId).not.toBeNull()
+    await importEmail(
+      [
+        'From: Quinn Larkspur <quinn@spam-larkspur.example>',
+        `To: ${address}`,
+        'Subject: You won',
+        `Message-ID: <quinn-spam-${run}@mcp-contacts-e2e>`,
+        'Date: Tue, 21 Jul 2026 10:00:00 +0000',
+        '',
+        'Claim your prize.',
+      ].join('\r\n'),
+      junkId ?? undefined
+    )
+    // The header index catches up shortly after an import.
+    let text = ''
+    for (let attempt = 0; attempt < 10 && !text.includes('quinn@larkspur-law.example'); attempt += 1) {
+      await Bun.sleep(300)
+      const result = await searchContacts(searchDeps, {
+        args: searchContactsInput.parse({ query: 'Quinn Larkspur' }),
+        mode: 'self-hosted',
+        token: TOKEN,
+      })
+      text = result.content[0]?.text ?? ''
+    }
+    expect(text).toContain('No contact matched "Quinn Larkspur" in any address book')
+    expect(text).toContain('1 person(s) found in the From, To and Cc')
+    expect(text).toContain('address: quinn@larkspur-law.example')
+    expect(text).toContain('(2 messages)')
+    expect(text).not.toContain('office@larkspur-law.example')
+    expect(text).not.toContain('spam-larkspur')
+  }, 15_000)
 
   // Last, because it fills the book with 300 cards. Stalwart's query cannot
   // match a role (docs/upstream/stalwart/contact-query-cannot-match-titles.md),
