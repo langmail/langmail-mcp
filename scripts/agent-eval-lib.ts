@@ -497,10 +497,11 @@ let lastToolCalls: number | null = null
 
 // The MCP config for `claude -p`. With AGENT_EVAL_MCP_URL a temporary config
 // names that server `langmail-eval` and sends the eval's own bearer; otherwise
-// the repo's `.mcp.json` (deployed server, `langmail`). Not `langmail`: Claude
-// Code caches a server that answered 401 as needs-auth by name, so an
-// unauthorized deployed `langmail` in the operator's session would make it
-// skip the local one (if the eval sees no tools after an expired token, clear
+// the `.mcp.json` in the directory the eval runs from, which in
+// langmail/platform's root names the deployed server `langmail`. The local
+// server is not named `langmail`: Claude Code caches a server that answered
+// 401 as needs-auth by name, so an unauthorized deployed `langmail` in the
+// operator's session would make it skip the local one (if the eval sees no tools after an expired token, clear
 // `~/.claude/mcp-needs-auth-cache.json`). runAgent maps the tools back to
 // `mcp__langmail__*`.
 const mcpConfig = (): { cleanup: () => void; path: string; toolPrefix: string } => {
@@ -538,7 +539,6 @@ export const runAgent = (prompt: string, opts: { resume?: string } = {}): Trajec
         ...(opts.resume ? ['--resume', opts.resume] : []),
       ],
       {
-        cwd: new URL('../../..', import.meta.url).pathname,
         // Belt and braces with --strict-mcp-config: no claude.ai connectors.
         env: { ...process.env, ENABLE_CLAUDEAI_MCP_SERVERS: 'false' },
         stderr: 'inherit',
