@@ -83,7 +83,10 @@ export const registerDeleteContact = (
         (mode === 'hosted' ? COLLECTED_NOTE : '') +
         (mode === 'hosted' ? 'to drop one field ' : 'To drop one field ') +
         'instead of the whole record, use update_contact; if it duplicates another contact of the same ' +
-        'person or organization, use merge_contacts, which keeps its addresses, notes and history. ' +
+        'person or organization, use merge_contacts, which keeps ' +
+        (mode === 'hosted'
+          ? 'its addresses, notes and history. '
+          : 'its email addresses, phone numbers, postal addresses and notes. ') +
         'Find the id with search_contacts.',
       inputSchema: z.object(deleteContactShape),
       title: 'Delete contact',

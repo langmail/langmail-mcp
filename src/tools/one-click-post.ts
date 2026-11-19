@@ -267,7 +267,7 @@ export const postOneClick = async (url: string, sendHop: SendHop): Promise<OneCl
       // Past the first hop the POST already reached the sender: a refused or
       // failed redirect does not mean nothing was sent.
       if (hop > 0 && step.kind !== 'response') {
-        const reason = step.kind === 'refused' ? `${step.reason}, so Langmail did not follow it` : step.reason
+        const reason = step.kind === 'refused' ? `${step.reason}, so the redirect was not followed` : step.reason
         return { kind: 'failed', reachedSender: true, reason }
       }
       return step

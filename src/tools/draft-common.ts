@@ -749,7 +749,7 @@ const attachmentLines = (attachments: DraftAttachment[], unreferencable: string[
     ...unreferencable.map(
       (name, index) =>
         `  ${attachments.length + index + 1}. ${name} — no blobId, so this file cannot be re-attached: it will ` +
-        'be sent with the draft, but an edit here cannot carry it across. Edit the draft in Langmail to change it.'
+        'be sent with the draft, but an edit here cannot carry it across. To change it, the user edits the draft in their mail app.'
     ),
   ]
 }

@@ -273,6 +273,8 @@ describe('updateDraft', () => {
     expect(result.isError).toBe(true)
     expect(text).toContain('scan.pdf')
     expect(text).toContain('left unchanged')
+    expect(text).toContain('or ask the user to edit it in their mail app')
+    expect(text).not.toContain('Langmail')
     expect(creates).toEqual([])
   })
 

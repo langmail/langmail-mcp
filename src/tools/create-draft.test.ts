@@ -45,6 +45,9 @@ describe('createDraft', () => {
     expect(creates[0]?.draft.text).toBe('Here they are.')
 
     expect(text).toContain('Nothing has been sent')
+    // The self-hosted server serves a mailbox with no Langmail account.
+    expect(text).toContain('Drafts folder for the user to review and send from their mail app')
+    expect(text).not.toContain('Langmail')
     // The draftId is a token the draft carries as a keyword, not its JMAP id.
     const draftId = DRAFT_ID_RE.exec(text)?.[1] ?? ''
     expect(draftId).not.toBe('dNew1')

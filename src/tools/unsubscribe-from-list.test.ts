@@ -122,6 +122,8 @@ describe('unsubscribeFromList', () => {
     expect(hops).toHaveLength(1)
     expect(txt).toContain('reached news.example.com/unsubscribe, but did not finish')
     expect(txt).toContain('Whether the sender acted on it is unknown')
+    expect(txt).toContain('so the redirect was not followed')
+    expect(txt).not.toContain('Langmail')
     expect(txt).not.toContain('Nothing was sent')
   })
 
@@ -182,6 +184,8 @@ describe('unsubscribeFromList', () => {
     expect(txt).toContain('only an unsubscribe address, no link. Nothing was sent.')
     expect(txt).toContain('To: off@shop.example')
     expect(txt).toContain('Subject: Remove me')
+    expect(txt).toContain('(this tool does not send it)')
+    expect(txt).not.toContain('Langmail')
   })
 
   test('http link: not called, returned with the mailto', async () => {
@@ -196,6 +200,8 @@ describe('unsubscribeFromList', () => {
     expect(txt).toContain('only a plain http link, not https')
     expect(txt).toContain('http://lists.example.org/options/news')
     expect(txt).toContain('To: news-request@lists.example.org')
+    expect(txt).toContain('so this tool did not call it. Nothing was sent.')
+    expect(txt).not.toContain('Langmail')
   })
 
   test('https without the Post header: not called, returned with the mailto', async () => {
@@ -205,6 +211,8 @@ describe('unsubscribeFromList', () => {
     expect(txt).toContain('does not offer one-click unsubscribe')
     expect(txt).toContain(LINK)
     expect(txt).toContain('To: leave@news.example.com')
+    expect(txt).toContain('so this tool did not call the link. Nothing was sent.')
+    expect(txt).not.toContain('Langmail')
   })
 
   test('no header: no automatic way, plus the footer link when the body shows one', async () => {

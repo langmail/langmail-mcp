@@ -76,6 +76,13 @@ const credentials = (): { mcp: string; stalwart: string } => {
 }
 const auth = credentials()
 
+// CalDAV access as the same account, for evals that seed calendar objects:
+// the config sends the eval's own Stalwart credential, so pass `token: ''`.
+export const calDav = {
+  cfg: { authHeaders: () => ({ authorization: auth.stalwart }), serverUrl: stalwart },
+  token: '',
+}
+
 const LOCAL_HOST_RE = /^(127\.0\.0\.1|localhost|\[::1\]|[a-z0-9-]+\.langmail\.test)$/u
 const isLocal = (url: string): boolean => {
   try {
@@ -192,6 +199,8 @@ export interface Fixture {
   // Seeds a staged draft (`$draft`) instead of received mail.
   draft?: boolean
   from: string
+  // Extra header lines, such as `List-Unsubscribe: <https://…>`.
+  headers?: string[]
   // Makes the message multipart/alternative: `body` is the text/plain part and
   // this the text/html part, the way Apple Mail stages a draft.
   htmlAlternative?: string
@@ -210,6 +219,7 @@ const rfc822 = (f: Fixture, to: string): string => {
     `Subject: ${f.subject}`,
     `Message-ID: <${crypto.randomUUID()}@langmail-eval.example>`,
     `Date: ${f.receivedAt.toUTCString()}`,
+    ...(f.headers ?? []),
   ]
   const bodyType = `${f.contentType ?? 'text/plain'}; charset=utf-8`
   if (f.htmlAlternative !== undefined) {

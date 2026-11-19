@@ -108,7 +108,7 @@ const manualOptions = (parsed: ListUnsubscribe): string[] => {
   }
   if (parsed.mailto.length > 0) {
     lines.push(
-      'Unsubscribe address — the user can send this mail from their own account (Langmail does not send it):',
+      'Unsubscribe address — the user can send this mail from their own account (this tool does not send it):',
       ...parsed.mailto.map(formatMailto)
     )
   }
@@ -144,10 +144,10 @@ const outcomeLines = (url: string, outcome: OneClickOutcome): string[] => {
 
 const noOneClickReason = (parsed: ListUnsubscribe): string => {
   if (parsed.https.length > 0) {
-    return 'The sender does not offer one-click unsubscribe (RFC 8058), so Langmail did not call the link. Nothing was sent.'
+    return 'The sender does not offer one-click unsubscribe (RFC 8058), so this tool did not call the link. Nothing was sent.'
   }
   if (parsed.http.length > 0) {
-    return 'The sender offers only a plain http link, not https, so Langmail did not call it. Nothing was sent.'
+    return 'The sender offers only a plain http link, not https, so this tool did not call it. Nothing was sent.'
   }
   return 'The sender offers only an unsubscribe address, no link. Nothing was sent.'
 }

@@ -87,6 +87,8 @@ describe('getDraft', () => {
     expect(text).toContain('attachments (1):')
     expect(text).toContain('scan.pdf')
     expect(text).toContain('cannot be re-attached')
+    expect(text).toContain('the user edits the draft in their mail app')
+    expect(text).not.toContain('Langmail')
   })
 
   test('counts referencable and unreferencable files together', async () => {

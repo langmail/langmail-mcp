@@ -137,7 +137,7 @@ describe('postOneClick', () => {
     expect(await postOneClick('https://a.example.com/u', hop)).toEqual({
       kind: 'failed',
       reachedSender: true,
-      reason: 'the sender redirected to a non-https address (http:), so Langmail did not follow it',
+      reason: 'the sender redirected to a non-https address (http:), so the redirect was not followed',
     })
   })
 
@@ -149,7 +149,7 @@ describe('postOneClick', () => {
     expect(await postOneClick('https://a.example.com/u', hop)).toEqual({
       kind: 'failed',
       reachedSender: true,
-      reason: 'internal.example.com resolves to a private or internal address, so Langmail did not follow it',
+      reason: 'internal.example.com resolves to a private or internal address, so the redirect was not followed',
     })
   })
 

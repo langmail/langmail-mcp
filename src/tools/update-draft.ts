@@ -246,8 +246,8 @@ const loadEditableDraft = async (
       error: errorResult(
         `Draft ${args.draftId} carries a file this tool cannot carry across an edit ` +
           `(${unreferencable.join(', ')}), so it was left unchanged. Editing rewrites the message and destroys ` +
-          'the original, which would lose the file for good. Edit it in Langmail, or pass `attachments` ' +
-          'explicitly to say what the edited draft should carry.'
+          'the original, which would lose the file for good. Pass `attachments` explicitly to say what the edited ' +
+          'draft should carry, or ask the user to edit it in their mail app.'
       ),
     }
   }

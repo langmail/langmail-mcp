@@ -5,13 +5,15 @@
 // occurrence at 10:00 Berlin time and the moved one at 14:00.
 //
 // The series is seeded through CalDAV into the default calendar and deleted on
-// exit. Run per docs/guides/local-development.md § Agent trajectory evals.
+// exit. Run per docs/guides/local-development.md § Agent trajectory evals,
+// against the hosted or the self-hosted server.
 
 import { deleteEvent, discoverAccount, fetchEvents, findEventObject, putEvent } from '../src/caldav/client.ts'
-import { DAY_MS, fail, log, runAgent, runEval } from './agent-eval-lib.ts'
+import { calDav, DAY_MS, fail, log, runAgent, runEval } from './agent-eval-lib.ts'
 
-const cfg = { serverUrl: process.env.STALWART_PUBLIC_URL ?? '' }
-const token = process.env.MCP_ACCESS_TOKEN ?? ''
+// The eval library's credentials: a Langmail token hosted, the Stalwart app
+// password self-hosted.
+const { cfg, token } = calDav
 const UID = `outlook-${crypto.randomUUID()}@example.com`
 const TITLE = 'Vendor sync'
 const ZONE = 'W. Europe Standard Time'

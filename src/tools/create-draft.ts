@@ -386,8 +386,8 @@ export const createDraft = async (
   }
 
   const summary =
-    'Draft staged in Drafts. Nothing has been sent — send it with send_draft, or leave it for the user ' +
-    `to review and send in Langmail.\ndraftId: ${draftId}\n${formatDraft(draft, { threadId: created.threadId })}` +
+    'Draft staged in Drafts. Nothing has been sent — send it with send_draft, or leave it in the Drafts ' +
+    `folder for the user to review and send from their mail app.\ndraftId: ${draftId}\n${formatDraft(draft, { threadId: created.threadId })}` +
     (composed.quoteNote ? `\n${composed.quoteNote}` : '')
   if (args.idempotencyKey) {
     replays.record(TOOL_NAME, principal, args.idempotencyKey, summary)
@@ -411,8 +411,8 @@ export const registerCreateDraft = (
       annotations: ACCOUNT_WRITE,
       description:
         'Write, compose or draft an email and stage it in the user’s Drafts folder without sending it. ' +
-        'Nothing leaves the mailbox: the draft shows up in Langmail for the user to review, edit, and ' +
-        'send. To draft a reply, pass `inReplyTo` with a message id from search_emails or get_thread — ' +
+        'Nothing leaves the mailbox: the draft waits in the Drafts folder for the user to review, edit, and ' +
+        'send from their mail app. To draft a reply, pass `inReplyTo` with a message id from search_emails or get_thread — ' +
         'the recipients, the "Re:" subject, and the threading headers are derived from that message, so ' +
         'the reply lands in the right conversation. Recipients accept a bare address or the ' +
         '"Name <address>" form search_contacts returns. Sends from the account’s own address unless ' +

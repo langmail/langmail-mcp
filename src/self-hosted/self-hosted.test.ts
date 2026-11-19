@@ -176,6 +176,13 @@ describe('self-hosted over http', () => {
 
     const contactsText = JSON.stringify(tools.filter((tool) => tool.name.includes('contact')))
     expect(contactsText).not.toMatch(COLLECTED_BOOK_WORDING_RE)
+    // Self-hosted merge_contacts keeps no interaction history, so delete_contact
+    // must not promise it.
+    const deleteContact = tools.find((tool) => tool.name === 'delete_contact')
+    expect(deleteContact?.description).toContain(
+      'merge_contacts, which keeps its email addresses, phone numbers, postal addresses and notes.'
+    )
+    expect(deleteContact?.description).not.toContain('history')
 
     const result = (await rpc(listenUrl, 'tools/call', { arguments: { todo: true }, name: 'search_emails' })) as {
       content: { text: string }[]

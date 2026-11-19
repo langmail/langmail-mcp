@@ -151,6 +151,15 @@ describe('self-hosted server instructions', () => {
     expect(SELF_HOSTED_INSTRUCTIONS.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS_LENGTH)
   })
 
+  // The self-hosted server serves someone's own Stalwart with no Langmail
+  // account, so no tool may send the user to Langmail or name it as the actor.
+  test('no tool description or input schema names Langmail', async () => {
+    const result = (await rpc('tools/list', {}, 'selfHosted')) as { tools: { name: string }[] }
+    expect(result.tools.length).toBeGreaterThan(0)
+    const naming = result.tools.filter((tool) => JSON.stringify(tool).includes('Langmail')).map((tool) => tool.name)
+    expect(naming).toEqual([])
+  })
+
   test('do not mention a type filter or classified types', () => {
     expect(SELF_HOSTED_INSTRUCTIONS).not.toMatch(TYPE_FILTER_WORDING_RE)
     expect(SELF_HOSTED_INSTRUCTIONS).not.toMatch(COLLECTED_BOOK_WORDING_RE)
