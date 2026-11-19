@@ -49,6 +49,7 @@
     "smoke:agent-self-hosted": "bun run scripts/smoke-agent-self-hosted.ts",
     "smoke:agent-windows-zone": "bun run scripts/smoke-agent-windows-zone.ts",
     "spec:check": "./spec/check.sh",
+    "stalwart:setup": "bun run infra/dev/stalwart/setup.ts",
     "start": "NODE_ENV=production bun src/index.ts",
     "start:self-hosted": "bun --no-env-file src/self-hosted.ts",
     "test": "bun test",

@@ -10,7 +10,7 @@
 // Skips unless STALWART_ADMIN_URL is set, so a normal `bun test` run stays
 // hermetic. Run locally against the shared dev compose
 // (infra/dev/stalwart/docker-compose.yml, domain bootstrapped by
-// `services/auth bun run stalwart:setup`):
+// `bun run stalwart:setup`):
 //   STALWART_ADMIN_URL=http://127.0.0.1:9090 bun test stalwart-all-day-event
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
@@ -108,7 +108,7 @@ live('all-day events and reminders against live Stalwart', () => {
     const domainQuery = await adminCall('x:Domain/query', { filter: { name: DOMAIN } })
     const domainId = (domainQuery.ids as string[] | undefined)?.[0]
     if (!domainId) {
-      throw new Error(`domain ${DOMAIN} missing — run services/auth's stalwart:setup first`)
+      throw new Error(`domain ${DOMAIN} missing — run 'bun run stalwart:setup' first`)
     }
     const created = await adminCall('x:Account/set', {
       create: { a1: { '@type': 'User', domainId, name: localPart, roles: { '@type': 'User' } } },

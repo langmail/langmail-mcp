@@ -1,0 +1,41 @@
+# Stalwart for the tests that need its own behaviour (`bun run test:stalwart`)
+# and for the agent evals (docs/evals.md). Disposable:
+# `docker compose -f infra/dev/stalwart/docker-compose.yml down -v` removes the
+# container and its volumes.
+#
+# Stalwart's HTTP, JMAP and admin listener is container port 8080, mapped to
+# 9090 on the host. STALWART_RECOVERY_ADMIN pins the admin, so the Basic auth
+# header is always base64("admin:devpassword").
+#
+# STALWART_HOSTNAME and STALWART_PUBLIC_URL are read on first boot. PUBLIC_URL
+# makes the JMAP session advertise absolute apiUrl, downloadUrl and uploadUrl,
+# which the MCP server calls as advertised.
+#
+# The image keeps its config in /etc/stalwart and its data in
+# /var/lib/stalwart; both are named volumes, so the setup survives a container
+# recreate.
+#
+# The version comes from infra/dev/stalwart/version.json, which follows the
+# release Langmail runs in production. From the repository root:
+#   STALWART_VERSION=$(jq -r .stalwart infra/dev/stalwart/version.json) \
+#     docker compose -f infra/dev/stalwart/docker-compose.yml up -d
+#   bun run stalwart:setup
+# It fails without STALWART_VERSION, so the tests cannot drift to `latest`.
+services:
+  stalwart:
+    image: "stalwartlabs/stalwart:v${STALWART_VERSION:?set STALWART_VERSION from infra/dev/stalwart/version.json, see the header}"
+    container_name: stalwart-dev
+    restart: unless-stopped
+    ports:
+      - "9090:8080"
+    environment:
+      STALWART_RECOVERY_ADMIN: "admin:devpassword"
+      STALWART_HOSTNAME: "127.0.0.1"
+      STALWART_PUBLIC_URL: "http://127.0.0.1:9090"
+    volumes:
+      - stalwart-dev-v1-etc:/etc/stalwart
+      - stalwart-dev-v1-data:/var/lib/stalwart
+
+volumes:
+  stalwart-dev-v1-etc:
+  stalwart-dev-v1-data:

@@ -22,7 +22,7 @@
 // Skips unless STALWART_ADMIN_URL is set, so a normal `bun test` run stays
 // hermetic. Run locally against the shared dev compose
 // (infra/dev/stalwart/docker-compose.yml, domain bootstrapped by
-// `services/auth bun run stalwart:setup`):
+// `bun run stalwart:setup`):
 //   STALWART_ADMIN_URL=http://127.0.0.1:9090 bun test stalwart-reply-unmodified-instance
 //
 // NB: live test files only run in CI when they are listed in the `test:stalwart`
@@ -353,7 +353,7 @@ live('iTIP REPLY for one instance of a recurring series (upstream regression gua
     const domainQuery = await adminCall('x:Domain/query', { filter: { name: DOMAIN } })
     const domainId = (domainQuery.ids as string[] | undefined)?.[0]
     if (!domainId) {
-      throw new Error(`domain ${DOMAIN} missing — run services/auth's stalwart:setup first`)
+      throw new Error(`domain ${DOMAIN} missing — run 'bun run stalwart:setup' first`)
     }
     org = await provision(`mcp-reply-org-${run}`, domainId, ids)
     attA = await provision(`mcp-reply-a-${run}`, domainId, ids)

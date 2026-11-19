@@ -48,7 +48,7 @@ const provisionAccount = async (localPart: string): Promise<{ basic: string; id:
   const domainQuery = await adminCall('x:Domain/query', { filter: { name: DOMAIN } })
   const domainId = (domainQuery.ids as string[] | undefined)?.[0]
   if (!domainId) {
-    throw new Error(`domain ${DOMAIN} missing — run services/auth's stalwart:setup first`)
+    throw new Error(`domain ${DOMAIN} missing — run 'bun run stalwart:setup' first`)
   }
   const created = await adminCall('x:Account/set', {
     create: { a1: { '@type': 'User', domainId, name: localPart, roles: { '@type': 'User' } } },

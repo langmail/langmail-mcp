@@ -19,7 +19,7 @@
 // Skips unless STALWART_ADMIN_URL is set, so a normal `bun test` run stays
 // hermetic. Run locally against the shared dev compose
 // (infra/dev/stalwart/docker-compose.yml, domain bootstrapped by
-// `services/auth bun run stalwart:setup`):
+// `bun run stalwart:setup`):
 //   STALWART_ADMIN_URL=http://127.0.0.1:9090 bun test attachments-stalwart
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
@@ -203,7 +203,7 @@ live('attachments against live Stalwart — metadata, capability URL, blob strea
     const domainQuery = await adminCall('x:Domain/query', { filter: { name: DOMAIN } })
     const domainId = (domainQuery.ids as string[] | undefined)?.[0]
     if (!domainId) {
-      throw new Error(`domain ${DOMAIN} missing — run services/auth's stalwart:setup first`)
+      throw new Error(`domain ${DOMAIN} missing — run 'bun run stalwart:setup' first`)
     }
 
     // Throwaway account + app password (the Basic credential over HTTP).

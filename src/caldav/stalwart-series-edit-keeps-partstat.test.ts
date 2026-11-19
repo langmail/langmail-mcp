@@ -17,7 +17,7 @@
 // Skips unless STALWART_ADMIN_URL is set, so a normal `bun test` run stays
 // hermetic. Run locally against the shared dev compose
 // (infra/dev/stalwart/docker-compose.yml, domain bootstrapped by
-// `services/auth bun run stalwart:setup`):
+// `bun run stalwart:setup`):
 //   STALWART_ADMIN_URL=http://127.0.0.1:9090 bun test stalwart-series-edit-keeps-partstat
 //
 // NB: live test files only run in CI when they are listed in the `test:stalwart`
@@ -169,7 +169,7 @@ live('update_calendar_event keeps attendee replies against live Stalwart (#837)'
     const domainQuery = await adminCall('x:Domain/query', { filter: { name: DOMAIN } })
     const domainId = (domainQuery.ids as string[] | undefined)?.[0]
     if (!domainId) {
-      throw new Error(`domain ${DOMAIN} missing — run services/auth's stalwart:setup first`)
+      throw new Error(`domain ${DOMAIN} missing — run 'bun run stalwart:setup' first`)
     }
     org = await provision(`mcp-kp-org-${run}`, domainId, ids)
     guest = await provision(`mcp-kp-guest-${run}`, domainId, ids)
