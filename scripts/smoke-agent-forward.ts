@@ -13,7 +13,7 @@
 //
 // Everything seeded, staged or sent is deleted again on exit, so re-runs stay
 // clean. Slow + non-deterministic; run it by hand per
-// docs/guides/local-development.md § Agent trajectory evals.
+// docs/evals.md.
 
 import { readFileSync } from 'node:fs'
 

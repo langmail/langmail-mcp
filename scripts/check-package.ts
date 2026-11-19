@@ -1,6 +1,6 @@
 // Checks the langmail-mcp npm package the way someone installs it:
 // `bun run check:package [--runtime node|bun]` (node by default; CI runs it
-// in .github/workflows/test-mcp-package.yml).
+// in .github/workflows/release.yml).
 //
 // 1. `npm pack` (whose prepack builds dist/) and `npm install` of the tarball
 //    into an empty project in a temporary directory: no workspace, no

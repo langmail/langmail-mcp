@@ -1,5 +1,5 @@
 // Runs the self-hosted mode's tests under Node, as CI does
-// (.github/workflows/test-mcp-package.yml): `bun run test:node`.
+// (.github/workflows/release.yml): `bun run test:node`.
 //
 // Node cannot run this source as it is (extensionless imports, TypeScript), so
 // the test files are bundled the way the langmail-mcp package is

@@ -8,12 +8,12 @@
 // Requires:
 //   - `claude` CLI on PATH
 //   - MCP_ACCESS_TOKEN, STALWART_PUBLIC_URL
-//     (deployed: source <(./infra/scripts/obtain-mcp-tokens.sh);
-//      local dev account: services/auth `bun run dev:eval-token`)
+//     (from langmail/platform, for the hosted server: deployed,
+//      source <(./infra/scripts/obtain-mcp-tokens.sh); local dev account,
+//      services/auth `bun run dev:eval-token`)
 //   - AGENT_EVAL_MCP_URL to drive a local MCP server (e.g.
 //     http://127.0.0.1:8090/mcp); unset, the agent uses `.mcp.json` at the repo
-//     root, i.e. the deployed server. See docs/guides/local-development.md
-//     § Agent trajectory evals.
+//     root, i.e. the deployed server. See docs/evals.md.
 //
 // Against the self-hosted server (src/self-hosted.ts), no Langmail account
 // takes part: set AGENT_EVAL_STALWART_USERNAME and

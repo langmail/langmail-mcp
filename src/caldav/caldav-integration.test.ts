@@ -9,7 +9,7 @@
 //
 // They skip unless CALDAV_BASE_URL / _USERNAME / _PASSWORD are set, so the
 // normal `bun test` run stays hermetic. CI sets them; see the caldav job in
-// .github/workflows/test.yml. Run locally with:
+// .github/workflows/release.yml. Run locally with:
 //   CALDAV_BASE_URL=http://127.0.0.1:5232 CALDAV_USERNAME=test \
 //   CALDAV_PASSWORD=test bun test caldav-integration
 

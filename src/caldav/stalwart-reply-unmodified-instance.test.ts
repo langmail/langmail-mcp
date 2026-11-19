@@ -26,7 +26,7 @@
 //   STALWART_ADMIN_URL=http://127.0.0.1:9090 bun test stalwart-reply-unmodified-instance
 //
 // NB: live test files only run in CI when they are listed in the `test:stalwart`
-// script in services/mcp/package.json — an unlisted file silently never runs.
+// script in package.json — an unlisted file silently never runs.
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 

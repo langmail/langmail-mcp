@@ -12,7 +12,7 @@
 // of noise. Judge wording changes on `text`; use `total` only to compare
 // tools with similar field counts.
 //
-// Run from the repo root: bun services/mcp/scripts/measure-indexed-size.ts
+// Run from the repo root: bun scripts/measure-indexed-size.ts
 //
 // Baseline on 2026-07-28 (before the fix): update_calendar_event totalled
 // 8,047 chars (text 4,974) vs. delete_calendar_event's 1,673 (text 1,087)

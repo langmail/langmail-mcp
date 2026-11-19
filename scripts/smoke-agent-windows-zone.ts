@@ -5,7 +5,7 @@
 // occurrence at 10:00 Berlin time and the moved one at 14:00.
 //
 // The series is seeded through CalDAV into the default calendar and deleted on
-// exit. Run per docs/guides/local-development.md § Agent trajectory evals,
+// exit. Run per docs/evals.md,
 // against the hosted or the self-hosted server.
 
 import { deleteEvent, discoverAccount, fetchEvents, findEventObject, putEvent } from '../src/caldav/client.ts'

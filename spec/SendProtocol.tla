@@ -1,7 +1,7 @@
 --------------------------- MODULE SendProtocol ---------------------------
 (***************************************************************************)
 (* The duplicate-send protocol behind the MCP tools `send_draft` and       *)
-(* `reply_to_message` (services/mcp/src/tools/send-draft.ts,               *)
+(* `reply_to_message` (src/tools/send-draft.ts,                            *)
 (* reply-to-message.ts, drafts/send-guard.ts, drafts/idempotency.ts).      *)
 (*                                                                         *)
 (* A client *request* is one intention: "send draft d" or "reply to m".    *)
@@ -13,7 +13,7 @@
 (* between two such awaits.                                                *)
 (*                                                                         *)
 (* The server is Stalwart's EmailSubmission/set with onSuccessUpdateEmail  *)
-(* (services/mcp/src/jmap/submission.ts). Worst case throughout: it may    *)
+(* (src/jmap/submission.ts). Worst case throughout: it may                 *)
 (* refuse any submission, it delivers a message whether or not it is       *)
 (* still a draft (RFC 8621 does not require $draft), the follow-up patch   *)
 (* that clears $draft may fail, and any answer may be lost. A request may  *)

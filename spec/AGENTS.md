@@ -2,9 +2,9 @@
 
 `SendProtocol.tla` is a TLA+ model of what stops `send_draft` and
 `reply_to_message` from sending a message twice. Run `bun run spec:check`
-from `services/mcp` to check it with TLC. You need Java 11+, and the first run
+from the repository root to check it with TLC. You need Java 11+, and the first run
 downloads a pinned `tla2tools.jar`. CI runs the same script
-(`.github/workflows/tla.yml`).
+(`.github/workflows/release.yml`).
 
 ## What it models
 

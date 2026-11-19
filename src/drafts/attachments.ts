@@ -18,7 +18,7 @@
 // blobId (attachments/upload.ts), so a 10 MB PDF never passes through the model.
 //
 // There is deliberately no `path`. The MCP server is a remote HTTP service
-// (services/mcp/src/index.ts — there is no stdio transport), so the agent's
+// (src/index.ts — there is no stdio transport), so the agent's
 // filesystem and the server's are different machines and a path would either
 // name nothing or, worse, name one of the server's own files. `unnamedEntry`
 // says so in as many words rather than letting the call fail as a shrug, and

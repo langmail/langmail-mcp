@@ -27,7 +27,7 @@ const level = resolveLevel(process.env.LOG_LEVEL)
 // the network and flushes on beforeExit).
 
 // MCP_LOG_STDERR is set by the self-hosted MCP entrypoint
-// (services/mcp/src/self-hosted.ts) before this module loads: over stdio,
+// (src/self-hosted.ts) before this module loads: over stdio,
 // stdout carries the protocol and a log line there would break it.
 const consoleFd = process.env.MCP_LOG_STDERR ? 2 : 1
 

@@ -13,7 +13,7 @@
 // not the role resolved the person.
 //
 // Everything seeded, and the draft the agent stages, is deleted on exit.
-// Run per docs/guides/local-development.md § Agent trajectory evals.
+// Run per docs/evals.md.
 
 import {
   allCards,

@@ -4,7 +4,7 @@
 // existing card, with no second card for Robin.
 //
 // Everything seeded is deleted on exit.
-// Run per docs/guides/local-development.md § Agent trajectory evals.
+// Run per docs/evals.md.
 
 import {
   allCards,

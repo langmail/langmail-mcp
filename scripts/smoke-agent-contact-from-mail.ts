@@ -10,7 +10,7 @@
 // everyone on a matching message would show two people.
 //
 // Run against the self-hosted server on the dev Stalwart, per
-// docs/guides/local-development.md § Agent trajectory evals, self-hosted:
+// docs/evals.md:
 //
 //   AGENT_EVAL_MCP_URL=http://127.0.0.1:8095/mcp AGENT_EVAL_MCP_TOKEN=… \
 //   AGENT_EVAL_STALWART_USERNAME=… AGENT_EVAL_STALWART_PASSWORD=… \
