@@ -141,7 +141,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
       - run: bun install --frozen-lockfile
@@ -159,7 +159,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "lts/*"
       - run: bun install --frozen-lockfile
@@ -206,7 +206,7 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
       # npm 11.5 or later publishes with OIDC; Node 24 ships it.
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
       - run: bun install --frozen-lockfile
