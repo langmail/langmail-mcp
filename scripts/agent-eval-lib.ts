@@ -12,8 +12,8 @@
 //      source <(./infra/scripts/obtain-mcp-tokens.sh); local dev account,
 //      services/auth `bun run dev:eval-token`)
 //   - AGENT_EVAL_MCP_URL to drive a local MCP server (e.g.
-//     http://127.0.0.1:8090/mcp); unset, the agent uses `.mcp.json` at the repo
-//     root, i.e. the deployed server. See docs/evals.md.
+//     http://127.0.0.1:8090/mcp); unset, the agent uses the `langmail` server
+//     in the `.mcp.json` of the directory it runs in. See docs/evals.md.
 //
 // Against the self-hosted server (src/self-hosted.ts), no Langmail account
 // takes part: set AGENT_EVAL_STALWART_USERNAME and
@@ -497,8 +497,8 @@ let lastToolCalls: number | null = null
 
 // The MCP config for `claude -p`. With AGENT_EVAL_MCP_URL a temporary config
 // names that server `langmail-eval` and sends the eval's own bearer; otherwise
-// the `.mcp.json` in the directory the eval runs from, which in
-// langmail/platform's root names the deployed server `langmail`. The local
+// the `langmail` server in the `.mcp.json` of the directory the eval runs
+// from (langmail/platform#1379: its root no longer has one). The local
 // server is not named `langmail`: Claude Code caches a server that answered
 // 401 as needs-auth by name, so an unauthorized deployed `langmail` in the
 // operator's session would make it skip the local one (if the eval sees no tools after an expired token, clear
