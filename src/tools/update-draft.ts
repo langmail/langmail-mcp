@@ -56,9 +56,9 @@ import {
   unreferencableAttachments,
 } from './draft-common.ts'
 import { carriesForwardBlock, forwardedBody, originalAsAttachment } from './forward-quote.ts'
+import { htmlToText } from './html-to-text.ts'
 import {
   carriesQuoteOf,
-  htmlToText,
   quoteWithheldFrom,
   quoteWithheldNote,
   type ReplyBody,

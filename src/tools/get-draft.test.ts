@@ -5,7 +5,7 @@ import { type EmailComposeGetParams } from '@langmail/jmap'
 
 import { READ_ONLY } from './annotations.ts'
 import { type DraftToolDeps, MAX_DRAFT_BODY_VALUE_BYTES } from './draft-common.ts'
-import { type DraftDepsOptions, draftDeps, stagedDraft } from './draft-test-fixtures.ts'
+import { appleMailDraft, type DraftDepsOptions, draftDeps, stagedDraft } from './draft-test-fixtures.ts'
 import { getDraft, getDraftInput, registerGetDraft } from './get-draft.ts'
 import { type ToolResult } from './result.ts'
 
@@ -54,6 +54,14 @@ describe('getDraft', () => {
     expect(text).toContain('bcc: quiet@example.org')
     expect(text).toContain('subject: Quarterly numbers')
     expect(text).toContain('body (text): Here they are.')
+  })
+
+  test('shows the words of a draft written in Apple Mail, not an empty body', async () => {
+    const { text } = await run({ draftId: 'd1' }, { records: { d1: appleMailDraft() } })
+    expect(text).toContain(
+      'body (text + html, text part blank, shown from html): Hi Sam, the contract is attached, see you Monday.'
+    )
+    expect(text).not.toContain('(empty)')
   })
 
   test('lists every attached file with the blobId a later call needs', async () => {

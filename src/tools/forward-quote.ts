@@ -17,11 +17,11 @@ import { type DraftAttachment, type EmailComposeRecord, type EmailDraft } from '
 
 import { attachmentsFromRecord, draftFromRecord } from './draft-common.ts'
 import { formatAddressList } from './format.ts'
+import { htmlToText } from './html-to-text.ts'
 import {
   escapeHtml,
   fitted,
   formatAttributionDate,
-  htmlToText,
   MAX_REPLY_PART_CHARS,
   nonBlank,
   partTruncated,

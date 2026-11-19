@@ -180,6 +180,17 @@ export const stagedDraft = (overrides: Partial<EmailComposeRecord> = {}): EmailC
   ...overrides,
 })
 
+// A draft as Apple Mail stages it: multipart/alternative with an empty
+// text/plain part and the whole message in text/html.
+export const APPLE_MAIL_HTML = '<div>Hi Sam,</div><div>the contract is attached, see you Monday.</div>'
+export const appleMailDraft = (overrides: Partial<EmailComposeRecord> = {}): EmailComposeRecord =>
+  stagedDraft({
+    bodyValues: { '1': { value: '' }, '2': { value: APPLE_MAIL_HTML } },
+    htmlBody: [{ partId: '2', type: 'text/html' }],
+    to: [{ email: 'sam@example.com' }],
+    ...overrides,
+  })
+
 // A door a test opens by hand. Awaiting `passed` inside a fake dep pins a call at
 // that await, so a test can run a second call past it and choose exactly how the
 // two interleave — which is how the duplicate sends `spec/SendProtocol.tla`

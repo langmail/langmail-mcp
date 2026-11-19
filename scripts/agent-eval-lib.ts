@@ -123,7 +123,9 @@ export const openSession = async (): Promise<Session> => {
   return { accountId, apiUrl: body.apiUrl, username: body.username, uploadUrl: body.uploadUrl }
 }
 
-export const inboxId = async (session: Session): Promise<string> => {
+export const inboxId = (session: Session): Promise<string> => mailboxIdByRole(session, 'inbox')
+
+export const mailboxIdByRole = async (session: Session, role: string): Promise<string> => {
   const json = await jmapCall(session, [
     ['Mailbox/query', { accountId: session.accountId }, '0'],
     [
@@ -137,11 +139,11 @@ export const inboxId = async (session: Session): Promise<string> => {
     ],
   ])
   const list = json.methodResponses?.[1]?.[1]?.list as { id: string; role?: string }[] | undefined
-  const inbox = list?.find((m) => m.role?.toLowerCase() === 'inbox')
-  if (!inbox) {
-    throw new Error('account has no Inbox mailbox')
+  const mailbox = list?.find((m) => m.role?.toLowerCase() === role)
+  if (!mailbox) {
+    throw new Error(`account has no ${role} mailbox`)
   }
-  return inbox.id
+  return mailbox.id
 }
 
 // A file the fixture carries, as a multipart/mixed part.
@@ -156,7 +158,12 @@ export interface Fixture {
   body: string
   // Defaults to text/plain; the preview eval seeds text/html bodies.
   contentType?: string
+  // Seeds a staged draft (`$draft`) instead of received mail.
+  draft?: boolean
   from: string
+  // Makes the message multipart/alternative: `body` is the text/plain part and
+  // this the text/html part, the way Apple Mail stages a draft.
+  htmlAlternative?: string
   receivedAt: Date
   subject: string
   typeKeyword?: string
@@ -173,6 +180,25 @@ const rfc822 = (f: Fixture, to: string): string => {
     `Date: ${f.receivedAt.toUTCString()}`,
   ]
   const bodyType = `${f.contentType ?? 'text/plain'}; charset=utf-8`
+  if (f.htmlAlternative !== undefined) {
+    const boundary = `alt-${crypto.randomUUID()}`
+    return [
+      ...headers,
+      'MIME-Version: 1.0',
+      `Content-Type: multipart/alternative; boundary="${boundary}"`,
+      '',
+      `--${boundary}`,
+      `Content-Type: ${bodyType}`,
+      '',
+      f.body,
+      `--${boundary}`,
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      f.htmlAlternative,
+      `--${boundary}--`,
+      '',
+    ].join('\r\n')
+  }
   if (!f.attachments?.length) {
     return [...headers, `Content-Type: ${bodyType}`, '', f.body].join('\r\n')
   }
@@ -221,7 +247,11 @@ export const seed = async (session: Session, mailboxId: string, to: string, f: F
         emails: {
           i0: {
             blobId,
-            keywords: { $seen: true, ...(f.typeKeyword ? { [f.typeKeyword]: true } : {}) },
+            keywords: {
+              $seen: true,
+              ...(f.draft ? { $draft: true } : {}),
+              ...(f.typeKeyword ? { [f.typeKeyword]: true } : {}),
+            },
             mailboxIds: { [mailboxId]: true },
             receivedAt: f.receivedAt.toISOString(),
           },

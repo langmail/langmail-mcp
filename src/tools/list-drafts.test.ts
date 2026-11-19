@@ -5,7 +5,14 @@ import { type DraftListParams } from '@langmail/jmap'
 
 import { READ_ONLY } from './annotations.ts'
 import { type DraftToolDeps } from './draft-common.ts'
-import { type DraftDepsOptions, draftDeps, receivedMessage, stagedDraft } from './draft-test-fixtures.ts'
+import {
+  APPLE_MAIL_HTML,
+  appleMailDraft,
+  type DraftDepsOptions,
+  draftDeps,
+  receivedMessage,
+  stagedDraft,
+} from './draft-test-fixtures.ts'
 import { listDrafts, listDraftsInput, registerListDrafts } from './list-drafts.ts'
 import { type ToolResult } from './result.ts'
 
@@ -64,6 +71,26 @@ describe('listDrafts', () => {
     expect(text).toContain('   body (text): Here they are.')
   })
 
+  test('shows the words of a draft written in Apple Mail, not an empty body', async () => {
+    const { text } = await run({}, { records: { d1: appleMailDraft() } })
+    expect(text).toContain(
+      '   body (text + html, text part blank, shown from html): Hi Sam, the contract is attached, see you Monday.'
+    )
+    expect(text).not.toContain('(empty)')
+  })
+
+  test('reads past a long Apple Mail style block to the words', async () => {
+    // Apple Mail's head and style rules run close to 2000 octets; a read cut
+    // inside <style> would flatten to nothing.
+    const style = `<style>${'p.p1 {margin: 0.0px 0.0px 0.0px 0.0px; font: 13.0px Helvetica} '.repeat(60)}</style>`
+    const html = `<html><head>${style}</head><body>${APPLE_MAIL_HTML}</body></html>`
+    const draft = appleMailDraft({ bodyValues: { '1': { value: '' }, '2': { value: html } } })
+    const lists: DraftListParams[] = []
+    const { text } = await run({}, {}, recordingDeps({ records: { d1: draft } }, lists))
+    expect(text).toContain('Hi Sam, the contract is attached, see you Monday.')
+    expect(lists[0]?.maxBodyValueBytes).toBeGreaterThan(html.length)
+  })
+
   test('shows bcc and attachments, the parts of a draft no other listing reveals', async () => {
     const staged = stagedDraft({
       attachments: [{ blobId: 'Ginvoice', name: 'invoice.pdf', size: 2048, type: 'application/pdf' }],
@@ -117,7 +144,7 @@ describe('listDrafts', () => {
       excludeMailboxId: 'mbTrash',
       limit: 5,
       mailboxId: 'mbDrafts',
-      maxBodyValueBytes: 2000,
+      maxBodyValueBytes: 20_000,
       text: 'invoice',
     })
   })

@@ -55,6 +55,7 @@ import {
 } from '@langmail/jmap'
 
 import { formatAddressList, formatSize } from './format.ts'
+import { htmlToText } from './html-to-text.ts'
 
 // The read-back budget for a draft's body values, in *octets* (RFC 8621 §4.2) —
 // four times the 100_000-*character* cap the composition tools accept, because a
@@ -645,9 +646,27 @@ export const draftLabelKeywords = (record: EmailComposeRecord): string[] =>
 
 // --- formatting ------------------------------------------------------------
 
-const bodyKind = (draft: EmailDraft): string => {
+// Apple Mail stages a draft as multipart/alternative with an empty text/plain
+// part and the whole message in text/html. Read the stored text alone and that
+// draft looks empty, so a blank text part falls back to the html, flattened to
+// its words, and the body line says so. Display only: `draftFromRecord` keeps
+// `text: ''`, so a rewrite of the draft keeps both parts as they were.
+const previewSource = (draft: EmailDraft): { from: 'text' | 'html'; body: string } => {
+  if (draft.text?.trim()) {
+    return { from: 'text', body: draft.text }
+  }
+  const words = htmlToText(draft.html ?? '')
+  if (draft.text !== undefined && !words) {
+    return { from: 'text', body: draft.text }
+  }
+  return { from: 'html', body: words }
+}
+
+type PreviewSource = ReturnType<typeof previewSource>
+
+const bodyKind = (draft: EmailDraft, source: PreviewSource): string => {
   if (draft.text !== undefined && draft.html !== undefined) {
-    return 'text + html'
+    return source.from === 'html' ? 'text + html, text part blank, shown from html' : 'text + html'
   }
   if (draft.html !== undefined) {
     return 'html'
@@ -655,10 +674,12 @@ const bodyKind = (draft: EmailDraft): string => {
   return 'text'
 }
 
-const bodyPreview = (draft: EmailDraft): string => {
-  const flat = (draft.text ?? draft.html ?? '').replace(/\s+/gu, ' ').trim()
+const bodyPreview = (draft: EmailDraft, source: PreviewSource): string => {
+  const flat = source.body.replace(/\s+/gu, ' ').trim()
   if (!flat) {
-    return '(empty)'
+    // An html part with markup but no words (an inline image, an empty link)
+    // is not an empty draft, and must not read as one.
+    return source.from === 'html' && draft.html?.trim() ? '(no text; the html part holds only markup)' : '(empty)'
   }
   return flat.length > BODY_PREVIEW_CHARS ? `${flat.slice(0, BODY_PREVIEW_CHARS)}…` : flat
 }
@@ -698,7 +719,8 @@ export const formatDraft = (draft: EmailDraft, opts: DraftFormatOptions = {}): s
   if (draft.inReplyTo && draft.inReplyTo.length > 0) {
     lines.push('threading: In-Reply-To/References set — this message continues an existing conversation')
   }
-  lines.push(`body (${bodyKind(draft)}): ${bodyPreview(draft)}`)
+  const source = previewSource(draft)
+  lines.push(`body (${bodyKind(draft, source)}): ${bodyPreview(draft, source)}`)
   lines.push(...attachmentLines(draft.attachments ?? [], opts.unreferencable ?? []))
   return lines.join('\n')
 }

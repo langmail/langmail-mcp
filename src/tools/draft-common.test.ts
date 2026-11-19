@@ -15,7 +15,7 @@ import {
   replyThreading,
   resolveIdentity,
 } from './draft-common.ts'
-import { draftDeps, stagedDraft } from './draft-test-fixtures.ts'
+import { APPLE_MAIL_HTML, appleMailDraft, draftDeps, stagedDraft } from './draft-test-fixtures.ts'
 
 describe('parseAddress', () => {
   test('accepts a bare address', () => {
@@ -318,10 +318,40 @@ describe('formatDraft', () => {
 
   test('names the empty and html-only cases rather than showing a blank line', () => {
     expect(formatDraft({ from: [{ email: 'user@langmail.me' }], text: '' })).toContain('body (text): (empty)')
-    expect(formatDraft({ from: [{ email: 'user@langmail.me' }], html: '<p>hi</p>' })).toContain(
-      'body (html): <p>hi</p>'
-    )
+    expect(formatDraft({ from: [{ email: 'user@langmail.me' }], html: '<p>hi</p>' })).toContain('body (html): hi')
     expect(formatDraft({ from: [{ email: 'user@langmail.me' }], text: 'hi' })).toContain('to: (none)')
+  })
+})
+
+describe('formatDraft body preview', () => {
+  const from = [{ email: 'user@langmail.me' }]
+
+  test('shows the html words when the text part is blank, and says where they came from', () => {
+    for (const text of ['', '  \n ']) {
+      expect(formatDraft({ from, html: APPLE_MAIL_HTML, text })).toContain(
+        'body (text + html, text part blank, shown from html): Hi Sam, the contract is attached, see you Monday.'
+      )
+    }
+  })
+
+  test('keeps showing real plain text over the html', () => {
+    expect(formatDraft({ from, html: '<p>rich</p>', text: 'plain' })).toContain('body (text + html): plain')
+  })
+
+  test('still says empty when both parts are blank', () => {
+    expect(formatDraft({ from, html: '<div> </div>', text: '' })).toContain('body (text + html): (empty)')
+  })
+
+  test('says an html part with no words holds only markup, not that the draft is empty', () => {
+    expect(formatDraft({ from, html: '<div><img src="cid:logo"></div>' })).toContain(
+      'body (html): (no text; the html part holds only markup)'
+    )
+  })
+
+  test('leaves the stored draft alone: the text part reads back blank', () => {
+    const draft = draftFromRecord(appleMailDraft())
+    expect(draft.text).toBe('')
+    expect(draft.html).toBe(APPLE_MAIL_HTML)
   })
 })
 

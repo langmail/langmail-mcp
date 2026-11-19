@@ -23,10 +23,13 @@ import {
 } from './draft-common.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
-// The body budget per listed draft, in octets: four times the 500-character
-// preview `formatDraft` prints, since a character can cost four octets in
-// UTF-8. A listing never re-stages a body, so a truncated read is harmless here.
-const LIST_BODY_VALUE_BYTES = 2000
+// The body budget per listed draft, in octets. A text part needs four times the
+// 500-character preview `formatDraft` prints (a character can cost four octets
+// in UTF-8), but a draft whose text part is blank is previewed from its html,
+// and markup spends most of the budget: an Apple Mail head with its style block
+// runs close to 2000 octets, and a read cut inside `<style>` flattens to nothing.
+// A listing never re-stages a body, so a truncated read is harmless otherwise.
+const LIST_BODY_VALUE_BYTES = 20_000
 
 const MAX_LIST_LIMIT = 50
 
