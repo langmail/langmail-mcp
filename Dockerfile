@@ -1,4 +1,6 @@
-FROM oven/bun:1.4.4-slim AS base
+# The hosted server's image: runs src/index.ts from source under Bun. The
+# self-hosted server ships as the npm package instead (docs/self-hosted.md).
+FROM oven/bun:1.4.4-slim
 
 ARG DO_NOT_TRACK=1
 ENV DO_NOT_TRACK=$DO_NOT_TRACK
@@ -11,27 +13,24 @@ WORKDIR /app
 # Create non-root user for security
 RUN useradd -m -u 1001 appuser
 
-# Copy pruned workspace (expects: turbo prune --scope=langmail-mcp --docker)
-COPY --chown=appuser:appuser out/json/ ./
+COPY --chown=appuser:appuser package.json bun.lock ./
 
-# Install dependencies (skip prepare script - lefthook needs .git)
-# Note: includes devDependencies needed for build (TypeScript, etc)
-RUN bun install --ci --ignore-scripts
+# --ignore-scripts: no lifecycle script is needed in the image. Includes the
+# devDependencies, because the build step below type-checks with TypeScript.
+RUN bun install --frozen-lockfile --ignore-scripts
 
-COPY --chown=appuser:appuser out/full/ ./
+COPY --chown=appuser:appuser tsconfig.json ./
+COPY --chown=appuser:appuser src ./src
 
-# Type-check mcp and build its workspace dependencies using Turborepo
-RUN bunx turbo build --filter=langmail-mcp
-
-# Set working directory to the mcp service
-WORKDIR /app/services/mcp
+# Type-check, as the monorepo's turbo build did before the move
+RUN bun run build
 
 # Switch to non-root user
 USER appuser
 
-# Last in the final stage on purpose: COMMIT changes on every deploy, and an
-# ARG's value invalidates every layer below it. Kept here, the apt/install/build
-# layers above stay cache-valid and only this metadata layer is rewritten.
+# Last on purpose: COMMIT changes on every release, and an ARG's value
+# invalidates every layer below it. Kept here, the layers above stay
+# cache-valid and only this metadata layer is rewritten.
 ARG COMMIT
 ENV APP_REVISION=$COMMIT
 
