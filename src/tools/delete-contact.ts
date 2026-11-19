@@ -13,8 +13,7 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
-import { sourceOf } from '@langmail/contacts'
-
+import { sourceOf } from '../contacts/index.ts'
 import { ACCOUNT_DESTRUCTIVE } from './annotations.ts'
 import { type ContactWriteDeps, collectedBookIdOf, contactCtx, contactIdSchema } from './contact-common.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'

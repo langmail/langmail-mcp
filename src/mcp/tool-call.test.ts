@@ -1,11 +1,10 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 
-import { makeJmapLive } from '@langmail/jmap'
-import { logger } from '@langmail/logger'
-
 import { createTicketStore } from '../attachments/tickets.ts'
 import { createUploadTicketStore } from '../attachments/upload-tickets.ts'
 import { createImageProxyStore } from '../email-render/image-proxy.ts'
+import { makeJmapLive } from '../jmap/index.ts'
+import { logger } from '../logger/index.ts'
 import { createMcpHandler } from './handler.ts'
 
 const handle = createMcpHandler({

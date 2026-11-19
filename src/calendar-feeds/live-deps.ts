@@ -1,10 +1,9 @@
 // The calendar feed's live dependencies: Auth's internal endpoints for the
 // share and the owner's Stalwart credential, and Stalwart's CalDAV.
 
-import { type AuthServiceConfig, fetchStalwartCredential } from '@langmail/jmap'
-
 import { postInternal } from '../auth-internal.ts'
 import { type CalDavConfig, fetchCalendarList, fetchEvents } from '../caldav/client.ts'
+import { type AuthServiceConfig, fetchStalwartCredential } from '../jmap/index.ts'
 import { sameCalendarUrl } from '../tools/calendar-lookup.ts'
 import { type CalendarFeed, type CalendarFeedDeps, type CalendarShareRecord, createCalendarFeed } from './feed.ts'
 import { EMPTY_FEED_NAME } from './render.ts'

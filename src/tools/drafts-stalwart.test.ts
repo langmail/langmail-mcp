@@ -31,6 +31,8 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 
+import { createIdempotencyStore } from '../drafts/idempotency.ts'
+import { createSendGuard } from '../drafts/send-guard.ts'
 import {
   blobDownload,
   blobUpload,
@@ -48,10 +50,7 @@ import {
   mailboxIdByRole,
   makeJmapLive,
   threadMessageFind,
-} from '@langmail/jmap'
-
-import { createIdempotencyStore } from '../drafts/idempotency.ts'
-import { createSendGuard } from '../drafts/send-guard.ts'
+} from '../jmap/index.ts'
 import { untilIndexed } from '../search-index-test-wait.ts'
 import { createDraft, createDraftInput } from './create-draft.ts'
 import { deleteDraft, deleteDraftInput } from './delete-draft.ts'

@@ -12,10 +12,9 @@
 
 import { randomBytes } from 'node:crypto'
 
-import { type AuthServiceConfig } from '@langmail/jmap'
-import { logger } from '@langmail/logger'
-
 import { InternalAuthError, postInternal } from '../auth-internal.ts'
+import { type AuthServiceConfig } from '../jmap/index.ts'
+import { logger } from '../logger/index.ts'
 import { hashSecret } from './feed.ts'
 import { type ShareLevel } from './render.ts'
 

@@ -13,10 +13,9 @@ import { randomUUID } from 'node:crypto'
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
-import { bearerAuthorization, type DraftCreateResult, type EmailDraft } from '@langmail/jmap'
-
 import { attachmentsSchema, resolveAttachments } from '../drafts/attachments.ts'
 import { type IdempotencyStore } from '../drafts/idempotency.ts'
+import { bearerAuthorization, type DraftCreateResult, type EmailDraft } from '../jmap/index.ts'
 import { ACCOUNT_WRITE } from './annotations.ts'
 import {
   countRecipients,

@@ -7,7 +7,7 @@
 //
 // Two things guard a duplicate send. The structural one needs no cooperation
 // from the client: a successful submission moves the message out of Drafts and
-// clears `$draft` in the same round-trip (see @langmail/jmap `submission.ts`),
+// clears `$draft` in the same round-trip (see src/jmap `submission.ts`),
 // so a second call finds a message that is no longer a draft and refuses. The
 // cooperative one is `idempotencyKey`, which replays the first call's answer
 // when the client retries a call whose response it never saw. Both are checked
@@ -23,11 +23,10 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
-import { bearerAuthorization, type EmailComposeRecord, type EmailDraft, JmapError } from '@langmail/jmap'
-import { logger } from '@langmail/logger'
-
 import { type IdempotencyStore } from '../drafts/idempotency.ts'
 import { holdSend, reservationRefusal, type SendGuard, type SendHold, type SendSubject } from '../drafts/send-guard.ts'
+import { bearerAuthorization, type EmailComposeRecord, type EmailDraft, JmapError } from '../jmap/index.ts'
+import { logger } from '../logger/index.ts'
 import { describeError } from '../observability/errors.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import {

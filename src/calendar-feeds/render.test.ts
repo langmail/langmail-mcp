@@ -1,8 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
-import { parseEvents } from '@langmail/ical'
-
 import { agendaWindow, windowEntries } from '../caldav/agenda.ts'
+import { parseEvents } from '../ical/index.ts'
 import { EMPTY_FEED_NAME, renderEmptyFeed, renderFeed, type ShareLevel } from './render.ts'
 
 const OWNER = 'owner@example.com'

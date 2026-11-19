@@ -11,8 +11,6 @@
 
 import { McpServer, WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server'
 
-import { type JmapLive } from '@langmail/jmap'
-
 import { type RecordAgentActivity } from '../activity/record-agent-activity.ts'
 import { type TicketStore } from '../attachments/tickets.ts'
 import { type UploadTicketStore } from '../attachments/upload-tickets.ts'
@@ -23,6 +21,7 @@ import { createIdempotencyStore } from '../drafts/idempotency.ts'
 import { createSendGuard } from '../drafts/send-guard.ts'
 import { type ImageProxyStore } from '../email-render/image-proxy.ts'
 import { registerEmailViewerResource } from '../email-render/viewer-resource.ts'
+import { type JmapLive } from '../jmap/index.ts'
 import { makeLiveApplyIo, makeMailRulesApplier } from '../rules/apply.ts'
 import { makeLiveSieveIo, makeMailRulesStore } from '../rules/store.ts'
 import { registerArchiveEmails } from '../tools/archive-emails.ts'

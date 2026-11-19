@@ -1,11 +1,10 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 
-import { parseEvents } from '@langmail/ical'
-import { logger } from '@langmail/logger'
-
 import { type FetchEventParams, type UpdateEventParams } from '../caldav/client.ts'
 import { buildInvite, maxSequence } from '../caldav/ical.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
+import { parseEvents } from '../ical/index.ts'
+import { logger } from '../logger/index.ts'
 import {
   mergeAttendees,
   type UpdateCalendarEventArgs,

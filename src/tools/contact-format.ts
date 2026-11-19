@@ -17,8 +17,8 @@ import {
   readPostalAddresses,
   readRoles,
   sourceOf,
-} from '@langmail/contacts'
-import { type ContactCard } from '@langmail/jmap'
+} from '../contacts/index.ts'
+import { type ContactCard } from '../jmap/index.ts'
 
 // Indented so a multi-line note stays visually attached to its contact
 // block, which is how the whole search_contacts output is shaped.

@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type BlobUploadParams } from '@langmail/jmap'
-
+import { type BlobUploadParams } from '../jmap/index.ts'
 import {
   attachmentsSchema,
   decodedByteLength,

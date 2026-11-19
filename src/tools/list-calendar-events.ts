@@ -10,8 +10,6 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
-import { type ParsedEvent, parseEvents } from '@langmail/ical'
-
 import { type AgendaEntry, agendaWindow, storedEntries, windowEntries } from '../caldav/agenda.ts'
 import { describeAlarm } from '../caldav/alarm.ts'
 import {
@@ -22,6 +20,7 @@ import {
   resolveCalendarUrl,
 } from '../caldav/client.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
+import { type ParsedEvent, parseEvents } from '../ical/index.ts'
 import { READ_ONLY } from './annotations.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 

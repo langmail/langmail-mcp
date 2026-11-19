@@ -29,14 +29,13 @@ import {
   USER_NOTE_KEY,
   userNoteEntry,
   withRoles,
-} from '@langmail/contacts'
+} from '../contacts/index.ts'
 import {
   type ContactCardAddress,
   type ContactCardDraft,
   type ContactCardEmail,
   type ContactCardPhone,
-} from '@langmail/jmap'
-
+} from '../jmap/index.ts'
 import { ACCOUNT_WRITE } from './annotations.ts'
 import {
   birthdaySchema,

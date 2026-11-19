@@ -8,8 +8,7 @@ import { TZDate } from '@date-fns/tz'
 import { rrulestr } from 'rrule'
 import { z } from 'zod'
 
-import { parseWallClockInZone } from '@langmail/ical'
-
+import { parseWallClockInZone } from '../ical/index.ts'
 import { dateOnlyToInstant, isDateOnly, isValidTimeZone, toWallClockIso } from './timezone.ts'
 
 // RFC 5545 FREQ values we expose. Lowercase in the structured form for the

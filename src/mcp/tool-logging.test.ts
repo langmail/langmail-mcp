@@ -1,8 +1,7 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 import { type McpServer } from '@modelcontextprotocol/server'
 
-import { logger } from '@langmail/logger'
-
+import { logger } from '../logger/index.ts'
 import { instrumentToolLogging } from './tool-logging.ts'
 
 type Registered = (args: unknown, ctx: unknown) => Promise<unknown>

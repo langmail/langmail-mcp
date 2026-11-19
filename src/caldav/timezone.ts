@@ -1,10 +1,10 @@
 import { TZDate } from '@date-fns/tz'
 import { z } from 'zod'
 
-// The wall-clock parser lives in @langmail/ical, where the VEVENT parser
+// The wall-clock parser lives in src/ical, where the VEVENT parser
 // consumes it — this module keeps the zod input schemas that validate tool
-// arguments, which are the service's concern, not the package's.
-import { DATE_TIME_RE, ianaTimeZone, parseWallClockInZone } from '@langmail/ical'
+// arguments, which are the tools' concern, not the parser's.
+import { DATE_TIME_RE, ianaTimeZone, parseWallClockInZone } from '../ical/index.ts'
 
 const OFFSET_RE = /(?:Z|[+-]\d{2}:\d{2})$/iu
 

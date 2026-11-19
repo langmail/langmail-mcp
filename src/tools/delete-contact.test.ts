@@ -1,8 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { type McpServer } from '@modelcontextprotocol/server'
 
-import { COLLECTED_BOOK_NAME, COLLECTED_NOTE_KEY, collectedNoteEntry } from '@langmail/contacts'
-
+import { COLLECTED_BOOK_NAME, COLLECTED_NOTE_KEY, collectedNoteEntry } from '../contacts/index.ts'
 import { ACCOUNT_DESTRUCTIVE } from './annotations.ts'
 import { derivedCard, fakeBook } from './contact-test-fixtures.ts'
 import { deleteContact, deleteContactInput, registerDeleteContact } from './delete-contact.ts'

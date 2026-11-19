@@ -1,7 +1,7 @@
 // A stand-in for Auth's internal endpoints: records each request and answers
 // with what the test hands it.
 
-import { type AuthServiceConfig } from '@langmail/jmap'
+import { type AuthServiceConfig } from '../jmap/index.ts'
 
 export interface StubRequest {
   authorization: string | null

@@ -18,11 +18,10 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
-import { bearerAuthorization, type EmailComposeRecord, type EmailDraft } from '@langmail/jmap'
-import { logger } from '@langmail/logger'
-
 import { type IdempotencyStore } from '../drafts/idempotency.ts'
 import { FORWARD_TOOL, holdSend, reservationRefusal, type SendGuard, type SendHold } from '../drafts/send-guard.ts'
+import { bearerAuthorization, type EmailComposeRecord, type EmailDraft } from '../jmap/index.ts'
+import { logger } from '../logger/index.ts'
 import { describeError } from '../observability/errors.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import {

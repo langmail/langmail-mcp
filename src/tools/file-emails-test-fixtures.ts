@@ -2,8 +2,7 @@
 // targeted patch and every wholesale replacement so a test can assert the
 // exact write.
 
-import { type EmailSetChanges, roleForPlaceName } from '@langmail/jmap'
-
+import { type EmailSetChanges, roleForPlaceName } from '../jmap/index.ts'
 import { type FileEmailsDeps, type PlaceIds } from './file-emails-common.ts'
 
 export interface RecordedPatch {

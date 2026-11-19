@@ -1,10 +1,9 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 
-import { logger } from '@langmail/logger'
-
 import { TokenCache } from './auth/token-cache.ts'
 import { createCalendarFeed } from './calendar-feeds/feed.ts'
 import { createRoutes } from './handler.ts'
+import { logger } from './logger/index.ts'
 
 const PUBLIC = 'https://mcp.example.com'
 

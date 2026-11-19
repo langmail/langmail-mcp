@@ -1,9 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { type McpServer } from '@modelcontextprotocol/server'
 
-import { type EmailComposeRecord } from '@langmail/jmap'
-
 import { createSendGuard } from '../drafts/send-guard.ts'
+import { type EmailComposeRecord } from '../jmap/index.ts'
 import { ACCOUNT_DESTRUCTIVE } from './annotations.ts'
 import { deleteDraft, deleteDraftInput, registerDeleteDraft } from './delete-draft.ts'
 import { type DraftDepsOptions, draftDeps, stagedDraft, TEST_PRINCIPAL } from './draft-test-fixtures.ts'

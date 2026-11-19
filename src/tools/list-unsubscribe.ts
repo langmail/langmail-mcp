@@ -4,7 +4,7 @@
 // without the header — a visible footer link. No IO here; the tool and the
 // guarded HTTP client live in unsubscribe-from-list.ts and one-click-post.ts.
 
-import { type EmailUnsubscribeRecord } from '@langmail/jmap'
+import { type EmailUnsubscribeRecord } from '../jmap/index.ts'
 
 export interface MailtoTarget {
   address: string

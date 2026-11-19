@@ -7,8 +7,8 @@
 // it serves every mail, calendar and contact tool, without the sharing tools,
 // share feeds or activity rows.
 
-import { type AuthServiceConfig } from '@langmail/jmap'
-import { logger } from '@langmail/logger'
+import { type AuthServiceConfig } from './jmap/index.ts'
+import { logger } from './logger/index.ts'
 
 const TIMEOUT_MS = 5000
 

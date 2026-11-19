@@ -7,7 +7,7 @@
 // during rule evaluation).
 //
 // The JMAP wire calls live behind the `ApplyIo` seam so the engine is
-// unit-testable; `makeLiveApplyIo` wires the real @langmail/jmap calls.
+// unit-testable; `makeLiveApplyIo` wires the real src/jmap calls.
 
 import {
   accountIdForMail,
@@ -25,8 +25,7 @@ import {
   roleForPlaceName,
   threadsExpandEmailIds,
   toLabelKeyword,
-} from '@langmail/jmap'
-
+} from '../jmap/index.ts'
 import { type MailRule, type MailRuleAction, tagToKeywordSuffix } from './rule.ts'
 
 // Backfills touching more matches than this require the client to re-call

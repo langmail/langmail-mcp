@@ -10,8 +10,7 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
-import { roleForPlaceName } from '@langmail/jmap'
-
+import { roleForPlaceName } from '../jmap/index.ts'
 import { ACCOUNT_WRITE } from './annotations.ts'
 import { dedupedIds, type FileEmailsDeps, formatBatchResult, idsShape } from './file-emails-common.ts'
 import { errorResult, type ToolResult } from './result.ts'

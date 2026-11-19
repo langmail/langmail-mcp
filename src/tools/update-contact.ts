@@ -31,9 +31,13 @@ import {
   withBirthday,
   withPreferredEmail,
   withRoles,
-} from '@langmail/contacts'
-import { type ContactCard, type ContactCardAddress, type ContactCardEmail, type ContactCardPhone } from '@langmail/jmap'
-
+} from '../contacts/index.ts'
+import {
+  type ContactCard,
+  type ContactCardAddress,
+  type ContactCardEmail,
+  type ContactCardPhone,
+} from '../jmap/index.ts'
 import { ACCOUNT_WRITE } from './annotations.ts'
 import {
   birthdaySchema,

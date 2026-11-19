@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type ContactCard, type ContactCardAnniversary } from '@langmail/jmap'
-
+import { type ContactCard, type ContactCardAnniversary } from '../jmap/index.ts'
 import { derivedCard } from './contact-test-fixtures.ts'
 import {
   CARD_CAP,

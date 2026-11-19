@@ -3,7 +3,7 @@
 //
 // The candidate set is fetch-all-and-filter: unfiltered ContactCard/query
 // pages of PAGE_SIZE ids, one ContactCard/get per page, then the pure date
-// logic in @langmail/contacts on every card. No server-side filter exists for
+// logic in src/contacts on every card. No server-side filter exists for
 // an anniversary month, and no index is worth building for address books of
 // the size this prototype sees. It must page, since an unsorted first page
 // silently drops the rest. The cap is stated in the output when it is hit.
@@ -18,6 +18,8 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
+import { type AccountTimeZoneResolver } from '../caldav/account-settings.ts'
+import { UTC_TIME_ZONE } from '../caldav/timezone.ts'
 import {
   type Birthday,
   bestAddress,
@@ -29,16 +31,13 @@ import {
   parseCalendarDate,
   readBirthday,
   todayIn,
-} from '@langmail/contacts'
+} from '../contacts/index.ts'
 import {
   bearerAuthorization,
   type ContactCard,
   type ContactCardGetParams,
   type ContactCardQueryParams,
-} from '@langmail/jmap'
-
-import { type AccountTimeZoneResolver } from '../caldav/account-settings.ts'
-import { UTC_TIME_ZONE } from '../caldav/timezone.ts'
+} from '../jmap/index.ts'
 import { READ_ONLY } from './annotations.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 

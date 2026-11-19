@@ -1,8 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { type McpServer } from '@modelcontextprotocol/server'
 
-import { type EmailComposeGetParams } from '@langmail/jmap'
-
+import { type EmailComposeGetParams } from '../jmap/index.ts'
 import { READ_ONLY } from './annotations.ts'
 import { type DraftToolDeps, MAX_DRAFT_BODY_VALUE_BYTES } from './draft-common.ts'
 import { appleMailDraft, type DraftDepsOptions, draftDeps, stagedDraft } from './draft-test-fixtures.ts'

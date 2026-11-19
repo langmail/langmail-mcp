@@ -3,9 +3,8 @@
 // (create → read back → patch → read back), so each test asserts on stored
 // state rather than on the shape of the patch it happened to produce.
 
-import { COLLECTED_NOTE_KEY, collectedNoteEntry } from '@langmail/contacts'
-import { type AddressBookRecord, type ContactCard, type ContactCardDraft } from '@langmail/jmap'
-
+import { COLLECTED_NOTE_KEY, collectedNoteEntry } from '../contacts/index.ts'
+import { type AddressBookRecord, type ContactCard, type ContactCardDraft } from '../jmap/index.ts'
 import { type ContactWriteDeps } from './contact-common.ts'
 
 export interface FakeBook {

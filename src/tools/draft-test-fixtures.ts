@@ -16,8 +16,7 @@ import {
   type EmailSubmissionCreateParams,
   type EmailSubmissionResult,
   type IdentityRecord,
-} from '@langmail/jmap'
-
+} from '../jmap/index.ts'
 import { type ComposeMailboxes, type DraftToolDeps } from './draft-common.ts'
 
 export const TEST_PRINCIPAL = 'user@langmail.me'

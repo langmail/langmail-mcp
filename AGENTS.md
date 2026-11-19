@@ -91,11 +91,19 @@ Load the `mcp-tool-design` skill before adding or changing a tool.
   function that `src/mcp/handler.ts` calls with the `McpServer`.
 - The public tool reference is `apps/docs/reference/mcp/<tool>.mdx`; update
   it in the same PR that changes a tool's behaviour or schema.
-- JMAP wire shape lives in the shared `@langmail/jmap` package (typed
-  `fetch` wrappers: `Email/query`, `Email/get`, `Email/set`,
-  `Email/changes`, mailbox lookup). It was extracted from `src/jmap/`
-  once the email-agent became the second consumer (ADR 0004, Phase 1).
-  Add new JMAP methods there, not in this service.
+- The server imports no workspace package, so it can build outside this
+  repository. JMAP wire shape lives in `src/jmap/`, the
+  iCalendar parser in `src/ical/`, contact collection in `src/contacts/`,
+  logging in `src/logger/` and the readiness runner in
+  `src/health/readiness-runner.ts`. `src/jmap/` and `src/contacts/` are
+  copies of `packages/jmap` and `packages/contacts`, which the email-agent
+  uses; a change to the collection rules goes into both copies, and
+  `packages/contacts/src/mcp-collection-parity.test.ts` fails when they
+  differ. `src/tools/email-types.ts` copies the taxonomy in
+  `packages/agents`, held equal by
+  `packages/agents/src/mcp-email-type-parity.test.ts` (ADR 0010). The
+  `src/jmap/` and `src/logger/` copies have no such guard: each side's own
+  tests cover its copy, and the two may drift.
 - Auth principal comes from `GET /oauth2/userinfo` against **Better Auth**
   (the OpenID Provider — same IdP as the web app) with the client's bearer;
   the principal is the `email` claim (the user's `username@langmail.me` mailbox

@@ -10,8 +10,7 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
-import { bearerAuthorization, type EmailComposeRecord } from '@langmail/jmap'
-
+import { bearerAuthorization, type EmailComposeRecord } from '../jmap/index.ts'
 import { READ_ONLY } from './annotations.ts'
 import {
   type DraftToolDeps,

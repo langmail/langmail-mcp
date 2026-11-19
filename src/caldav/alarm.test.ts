@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type ParsedAlarm } from '@langmail/ical'
-
+import { type ParsedAlarm } from '../ical/index.ts'
 import { describeAlarm, describeReminder, MAX_REMINDER_MINUTES } from './alarm.ts'
 
 // A stored VALARM as ical-parse hands it over: the TRIGGER value plus its raw

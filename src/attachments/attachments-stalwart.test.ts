@@ -24,6 +24,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 
+import { createRoutes, type Routes } from '../handler.ts'
 import {
   blobDownload,
   emailGet,
@@ -34,9 +35,7 @@ import {
   mailboxCreate,
   mailboxIdByRole,
   makeJmapLive,
-} from '@langmail/jmap'
-
-import { createRoutes, type Routes } from '../handler.ts'
+} from '../jmap/index.ts'
 import { untilIndexed } from '../search-index-test-wait.ts'
 import { type DownloadAttachmentDeps, downloadAttachment } from '../tools/download-attachment.ts'
 import { downloadEmail } from '../tools/download-email.ts'

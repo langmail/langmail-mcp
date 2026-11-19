@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type EmailSetChanges } from '@langmail/jmap'
-
+import { type EmailSetChanges } from '../jmap/index.ts'
 import { type ApplyIo, buildChanges, makeMailRulesApplier, ruleFilter, skippedActionTypes } from './apply.ts'
 import { type MailRule } from './rule.ts'
 

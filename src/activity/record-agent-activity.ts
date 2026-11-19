@@ -7,10 +7,9 @@
 // fail the tool call that earned it. The line names only the status, never
 // the user id.
 
-import { type AuthServiceConfig } from '@langmail/jmap'
-import { logger } from '@langmail/logger'
-
 import { InternalAuthError, postInternal } from '../auth-internal.ts'
+import { type AuthServiceConfig } from '../jmap/index.ts'
+import { logger } from '../logger/index.ts'
 
 export type RecordAgentActivity = (userId: string) => Promise<void>
 

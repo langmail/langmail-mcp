@@ -6,10 +6,10 @@
 // scheduled. Failures are logged, never surfaced: a contact upsert must
 // not fail a scheduling action.
 
-import { collectContacts, liveCollectionDeps, observationsFromEvent } from '@langmail/contacts'
-import { type ParsedAttendee } from '@langmail/ical'
-import { accountIdForContacts, bearerAuthorization, type JmapLive } from '@langmail/jmap'
-import { logger } from '@langmail/logger'
+import { collectContacts, liveCollectionDeps, observationsFromEvent } from '../contacts/index.ts'
+import { type ParsedAttendee } from '../ical/index.ts'
+import { accountIdForContacts, bearerAuthorization, type JmapLive } from '../jmap/index.ts'
+import { logger } from '../logger/index.ts'
 
 export interface AttendeeWriteThroughInput {
   attendees: ParsedAttendee[]

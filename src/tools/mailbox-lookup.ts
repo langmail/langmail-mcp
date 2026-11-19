@@ -6,7 +6,7 @@
 // (Stalwart calls the sent mailbox "Sent Items") reads as "those messages
 // were never synced". Never creates.
 
-import { type MailboxIdByNameParams, mailboxIdByNameOrRole, mailboxNames } from '@langmail/jmap'
+import { type MailboxIdByNameParams, mailboxIdByNameOrRole, mailboxNames } from '../jmap/index.ts'
 
 export interface MailboxLookup {
   // Empty on a hit — the listing is only fetched when there's an error to write.

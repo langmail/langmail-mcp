@@ -13,8 +13,7 @@ import {
   type JmapLive,
   type ThreadEmailIdsParams,
   threadEmailIds,
-} from '@langmail/jmap'
-
+} from '../jmap/index.ts'
 import { READ_ONLY } from './annotations.ts'
 import { formatEmailLine, orderById } from './format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'

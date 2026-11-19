@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type BlobUploadParams, type DraftCreateParams } from '@langmail/jmap'
-
+import { type BlobUploadParams, type DraftCreateParams } from '../jmap/index.ts'
 import {
   type DraftDepsOptions,
   draftDeps,

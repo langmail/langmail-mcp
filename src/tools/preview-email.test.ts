@@ -1,8 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test'
 
-import { type EmailDetailRecord } from '@langmail/jmap'
-
 import { EMAIL_VIEWER_RESOURCE_URI, PREVIEW_META_KEY } from '../email-render/meta.ts'
+import { type EmailDetailRecord } from '../jmap/index.ts'
 import { type PreviewEmailDeps, previewEmail, registerPreviewEmail } from './preview-email.ts'
 
 const PUBLIC = 'https://mcp.example.org'

@@ -1,9 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { type McpServer } from '@modelcontextprotocol/server'
 
-import { type EmailDetailRecord, type EmailGetDetailParams } from '@langmail/jmap'
-
 import { type TicketInput } from '../attachments/tickets.ts'
+import { type EmailDetailRecord, type EmailGetDetailParams } from '../jmap/index.ts'
 import { READ_ONLY } from './annotations.ts'
 import { downloadEmail, downloadEmailInput, registerDownloadEmail } from './download-email.ts'
 

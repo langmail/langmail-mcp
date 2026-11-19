@@ -26,8 +26,7 @@ import {
   mailboxIdByNameOrRole,
   mailboxIdsByRoles,
   makeJmapLive,
-} from '@langmail/jmap'
-
+} from '../jmap/index.ts'
 import { archiveEmails } from './archive-emails.ts'
 import { type FileEmailsDeps } from './file-emails-common.ts'
 import { lookupMailbox } from './mailbox-lookup.ts'

@@ -2,7 +2,7 @@
 // minutes before the start. Writing goes through buildInvite (InviteAlarm);
 // this module renders them for tool output.
 
-import { icalDateToIso, type ParsedAlarm } from '@langmail/ical'
+import { icalDateToIso, type ParsedAlarm } from '../ical/index.ts'
 
 const MINUTES_PER_HOUR = 60
 const MINUTES_PER_DAY = 1440

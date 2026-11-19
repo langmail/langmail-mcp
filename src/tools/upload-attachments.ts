@@ -14,8 +14,6 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
-import { bearerAuthorization, type JmapLive } from '@langmail/jmap'
-
 import { attachEntry, UNREFERENCED_BLOB_TTL_MINUTES } from '../attachments/upload.ts'
 import {
   UPLOAD_TICKET_TTL_MINUTES,
@@ -23,6 +21,7 @@ import {
   type UploadTicketStore,
 } from '../attachments/upload-tickets.ts'
 import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, mimeTypeFor } from '../drafts/attachments.ts'
+import { bearerAuthorization, type JmapLive } from '../jmap/index.ts'
 import { ACCOUNT_WRITE } from './annotations.ts'
 import { formatSize } from './format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'

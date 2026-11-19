@@ -1,8 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type BlobUploadParams, type DraftCreateParams, type EmailSubmissionCreateParams } from '@langmail/jmap'
-
 import { createIdempotencyStore } from '../drafts/idempotency.ts'
+import { type BlobUploadParams, type DraftCreateParams, type EmailSubmissionCreateParams } from '../jmap/index.ts'
 import { createDraft, createDraftInput } from './create-draft.ts'
 import { type DraftDepsOptions, draftDeps, receivedMessage, TEST_PRINCIPAL } from './draft-test-fixtures.ts'
 

@@ -1,8 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { type McpServer } from '@modelcontextprotocol/server'
 
-import { type EmailUnsubscribeRecord } from '@langmail/jmap'
-
+import { type EmailUnsubscribeRecord } from '../jmap/index.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import { BlockedAddressError, type HopResponse, type SendHop } from './one-click-post.ts'
 import { registerUnsubscribeFromList, type UnsubscribeDeps, unsubscribeFromList } from './unsubscribe-from-list.ts'

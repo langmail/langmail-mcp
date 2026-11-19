@@ -5,9 +5,8 @@
 // Logging deliberately carries only status/size — never tokens or
 // filenames (REVIEW.md: no PII in logs).
 
-import { blobDownload, JmapError, type JmapLive } from '@langmail/jmap'
-import { logger } from '@langmail/logger'
-
+import { blobDownload, JmapError, type JmapLive } from '../jmap/index.ts'
+import { logger } from '../logger/index.ts'
 import { type TicketStore } from './tickets.ts'
 
 export type AttachmentDownload = (token: string) => Promise<Response>

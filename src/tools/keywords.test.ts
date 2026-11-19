@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { EMAIL_TYPE_VALUES } from '@langmail/agents'
-
+import { EMAIL_TYPE_VALUES } from './email-types.ts'
 import { KEYWORD_VALUES, KEYWORDS_DESCRIPTION, keywordToJmapKeyword } from './keywords.ts'
 
 const SLUG_RE = /^[a-z][a-z0-9_]*$/u

@@ -1,4 +1,4 @@
-import { JmapError } from '@langmail/jmap'
+import { JmapError } from '../jmap/index.ts'
 
 // A log-safe description of a failed JMAP call. JmapError messages are
 // status-only; anything else is reduced to its name so a fetch-level error

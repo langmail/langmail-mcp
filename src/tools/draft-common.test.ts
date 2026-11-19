@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type EmailComposeRecord, type EmailDraft, type IdentityRecord, JmapError } from '@langmail/jmap'
-
+import { type EmailComposeRecord, type EmailDraft, type IdentityRecord, JmapError } from '../jmap/index.ts'
 import {
   attachmentsFromRecord,
   draftFromRecord,

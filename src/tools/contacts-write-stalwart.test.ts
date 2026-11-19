@@ -32,7 +32,7 @@ import {
   readCollected,
   readPostalAddresses,
   sourceOf,
-} from '@langmail/contacts'
+} from '../contacts/index.ts'
 import {
   addressBookCreate,
   addressBookList,
@@ -45,8 +45,7 @@ import {
   contactCardUpdate,
   emailGet,
   makeJmapLive,
-} from '@langmail/jmap'
-
+} from '../jmap/index.ts'
 import { untilIndexed } from '../search-index-test-wait.ts'
 import { type ContactWriteDeps } from './contact-common.ts'
 import { createContact, createContactInput } from './create-contact.ts'

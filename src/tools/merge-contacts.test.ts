@@ -1,8 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
-import { bestAddress, COLLECTED_NOTE_KEY, collectedNoteEntry, readCollected, readNote } from '@langmail/contacts'
-import { type ContactCard } from '@langmail/jmap'
-
+import { bestAddress, COLLECTED_NOTE_KEY, collectedNoteEntry, readCollected, readNote } from '../contacts/index.ts'
+import { type ContactCard } from '../jmap/index.ts'
 import { derivedCard, fakeBook } from './contact-test-fixtures.ts'
 import { mergeContacts, mergeContactsInput } from './merge-contacts.ts'
 

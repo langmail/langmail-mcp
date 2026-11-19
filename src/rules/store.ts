@@ -4,7 +4,7 @@
 // ManageSieve client sees exactly what the MCP wrote.
 //
 // The JMAP wire calls live behind the `SieveIo` seam so the store logic is
-// unit-testable; `makeLiveSieveIo` wires the real @langmail/jmap calls.
+// unit-testable; `makeLiveSieveIo` wires the real src/jmap calls.
 
 import {
   accountIdForSieve,
@@ -15,8 +15,7 @@ import {
   sieveScriptCreate,
   sieveScriptList,
   sieveScriptUpdate,
-} from '@langmail/jmap'
-
+} from '../jmap/index.ts'
 import { generateSieveScript, type MailRule, parseSieveScript, RULES_SCRIPT_NAME } from './rule.ts'
 
 export interface SieveIo {

@@ -5,7 +5,7 @@
 
 import { z } from 'zod'
 
-import { COLLECTED_BOOK_NAME, normalizeAddress } from '@langmail/contacts'
+import { COLLECTED_BOOK_NAME, normalizeAddress } from '../contacts/index.ts'
 import {
   type AddressBookRecord,
   accountIdForContacts,
@@ -27,7 +27,7 @@ import {
   contactCardQuery,
   contactCardUpdate,
   type JmapLive,
-} from '@langmail/jmap'
+} from '../jmap/index.ts'
 
 export interface ContactWriteDeps {
   addressBookCreate: (p: { accountId: string; apiUrl: string; authorization: string; name: string }) => Promise<string>

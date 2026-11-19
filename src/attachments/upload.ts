@@ -10,10 +10,9 @@
 // Logging carries only status/size — never tokens or filenames (REVIEW.md: no
 // PII in logs).
 
-import { blobUpload, type JmapLive } from '@langmail/jmap'
-import { logger } from '@langmail/logger'
-
 import { MAX_ATTACHMENT_BYTES } from '../drafts/attachments.ts'
+import { blobUpload, type JmapLive } from '../jmap/index.ts'
+import { logger } from '../logger/index.ts'
 import { describeError } from '../observability/errors.ts'
 import { type UploadTicketStore } from './upload-tickets.ts'
 

@@ -29,8 +29,6 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
-import { parseEvents } from '@langmail/ical'
-
 import {
   type CalDavConfig,
   type DeleteEventParams,
@@ -45,6 +43,7 @@ import {
 import { spliceOccurrenceCancellation } from '../caldav/occurrence.ts'
 import { isSeriesOccurrence, resolveRecurrenceId, seriesTimeZone } from '../caldav/recurrence.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
+import { parseEvents } from '../ical/index.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import { eventUidSchema } from './create-calendar-event.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'

@@ -22,9 +22,8 @@ import {
   emailGetUnsubscribe,
   type JmapLive,
   mailboxIdsByRoles,
-} from '@langmail/jmap'
-import { logger } from '@langmail/logger'
-
+} from '../jmap/index.ts'
+import { logger } from '../logger/index.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import { emailTags } from './format.ts'
 import {

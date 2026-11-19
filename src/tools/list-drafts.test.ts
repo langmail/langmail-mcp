@@ -1,8 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { type McpServer } from '@modelcontextprotocol/server'
 
-import { type DraftListParams } from '@langmail/jmap'
-
+import { type DraftListParams } from '../jmap/index.ts'
 import { READ_ONLY } from './annotations.ts'
 import { type DraftToolDeps } from './draft-common.ts'
 import {

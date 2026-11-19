@@ -1,8 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test'
 
-import { type JmapLive } from '@langmail/jmap'
-
 import { MAX_ATTACHMENT_BYTES } from '../drafts/attachments.ts'
+import { type JmapLive } from '../jmap/index.ts'
 import { createAttachmentUpload } from './upload.ts'
 import { createUploadTicketStore, type UploadTicketInput } from './upload-tickets.ts'
 

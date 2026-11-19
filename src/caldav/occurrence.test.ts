@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { parseEvents } from '@langmail/ical'
-
+import { parseEvents } from '../ical/index.ts'
 import { buildInvite } from './ical.ts'
 import {
   carryStoredProperties,

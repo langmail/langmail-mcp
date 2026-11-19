@@ -29,9 +29,8 @@ import {
   emailQueryPerTerm,
   emailQueryTotal,
   type JmapLive,
-} from '@langmail/jmap'
-import { logger } from '@langmail/logger'
-
+} from '../jmap/index.ts'
+import { logger } from '../logger/index.ts'
 import { READ_ONLY } from './annotations.ts'
 import { errorDetail } from './error-detail.ts'
 import { formatEmailLine, orderById } from './format.ts'

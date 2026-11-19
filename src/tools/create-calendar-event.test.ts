@@ -1,9 +1,8 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 
-import { logger } from '@langmail/logger'
-
 import { type PutEventParams } from '../caldav/client.ts'
 import { type DiscoveredAccount } from '../caldav/types.ts'
+import { logger } from '../logger/index.ts'
 import {
   type CreateCalendarEventArgs,
   createCalendarEvent,

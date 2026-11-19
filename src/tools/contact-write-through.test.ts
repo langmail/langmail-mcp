@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type JmapLive } from '@langmail/jmap'
-
+import { type JmapLive } from '../jmap/index.ts'
 import { makeAttendeeWriteThrough } from './contact-write-through.ts'
 
 const input = {

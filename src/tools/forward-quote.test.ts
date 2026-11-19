@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type EmailComposeRecord } from '@langmail/jmap'
-
+import { type EmailComposeRecord } from '../jmap/index.ts'
 import { receivedMessage } from './draft-test-fixtures.ts'
 import { FORWARD_MARKER, forwardDraft, forwardedBody, forwardReferences, forwardSubject } from './forward-quote.ts'
 

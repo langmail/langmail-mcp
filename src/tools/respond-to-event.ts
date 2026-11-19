@@ -13,8 +13,6 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
-import { parseEvents } from '@langmail/ical'
-
 import {
   type CalDavConfig,
   discoverAccount,
@@ -26,6 +24,7 @@ import {
 } from '../caldav/client.ts'
 import { type Partstat, setAttendeePartstat } from '../caldav/rsvp.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
+import { parseEvents } from '../ical/index.ts'
 import { OUTWARD_WRITE } from './annotations.ts'
 import { type AttendeeWriteThrough } from './contact-write-through.ts'
 import { eventUidSchema } from './create-calendar-event.ts'

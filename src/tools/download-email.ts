@@ -8,15 +8,14 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
+import { TICKET_TTL_HOURS, type TicketInput, type TicketStore } from '../attachments/tickets.ts'
 import {
   bearerAuthorization,
   type EmailDetailRecord,
   type EmailGetDetailParams,
   emailGetDetail,
   type JmapLive,
-} from '@langmail/jmap'
-
-import { TICKET_TTL_HOURS, type TicketInput, type TicketStore } from '../attachments/tickets.ts'
+} from '../jmap/index.ts'
 import { READ_ONLY } from './annotations.ts'
 import { formatSize, shellSafeFilename } from './format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'

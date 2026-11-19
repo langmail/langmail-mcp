@@ -27,8 +27,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 
-import { parseEvents } from '@langmail/ical'
-
+import { parseEvents } from '../ical/index.ts'
 import { deleteCalendarEvent, makeLiveDeps } from '../tools/delete-calendar-event.ts'
 import { type CalDavConfig, discoverAccount, fetchEvent, putEvent } from './client.ts'
 import { buildInvite } from './ical.ts'

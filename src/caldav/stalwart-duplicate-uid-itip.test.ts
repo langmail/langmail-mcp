@@ -15,8 +15,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 
-import { parseEvents } from '@langmail/ical'
-
+import { parseEvents } from '../ical/index.ts'
 import { type CalDavConfig, createCalendar, discoverAccount, fetchEvent, fetchEvents, putEvent } from './client.ts'
 
 const ADMIN_URL = process.env.STALWART_ADMIN_URL

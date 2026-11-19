@@ -18,7 +18,7 @@
 
 import { z } from 'zod'
 
-import { toLabelKeyword } from '@langmail/jmap'
+import { toLabelKeyword } from '../jmap/index.ts'
 
 // The name of the managed script in the user's Sieve script list. Scripts
 // under any other name (e.g. hand-written via ManageSieve) are never

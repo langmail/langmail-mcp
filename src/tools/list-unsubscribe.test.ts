@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type EmailUnsubscribeRecord } from '@langmail/jmap'
-
+import { type EmailUnsubscribeRecord } from '../jmap/index.ts'
 import {
   deliveredTo,
   describeUrl,

@@ -18,6 +18,8 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 
+import { type CalDavConfig, discoverAccount, fetchEvents, putEvent } from '../caldav/client.ts'
+import { buildInvite } from '../caldav/ical.ts'
 import {
   COLLECTED_BOOK_NAME,
   collectContacts,
@@ -27,8 +29,8 @@ import {
   readCollected,
   toCardAddress,
   toCardPhone,
-} from '@langmail/contacts'
-import { parseEvents } from '@langmail/ical'
+} from '../contacts/index.ts'
+import { parseEvents } from '../ical/index.ts'
 import {
   addressBookList,
   contactCardCreate,
@@ -37,10 +39,7 @@ import {
   contactCardQuery,
   emailGet,
   makeJmapLive,
-} from '@langmail/jmap'
-
-import { type CalDavConfig, discoverAccount, fetchEvents, putEvent } from '../caldav/client.ts'
-import { buildInvite } from '../caldav/ical.ts'
+} from '../jmap/index.ts'
 import { untilIndexed } from '../search-index-test-wait.ts'
 import { type SearchContactsDeps, searchContacts, searchContactsInput } from './search-contacts.ts'
 

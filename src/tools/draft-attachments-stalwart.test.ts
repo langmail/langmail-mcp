@@ -33,6 +33,11 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 
+import { createAttachmentUpload } from '../attachments/upload.ts'
+import { createUploadTicketStore } from '../attachments/upload-tickets.ts'
+import { MAX_ATTACHMENT_BYTES } from '../drafts/attachments.ts'
+import { createIdempotencyStore } from '../drafts/idempotency.ts'
+import { createSendGuard } from '../drafts/send-guard.ts'
 import {
   blobDownload,
   blobUpload,
@@ -51,13 +56,7 @@ import {
   mailboxIdByRole,
   makeJmapLive,
   threadMessageFind,
-} from '@langmail/jmap'
-
-import { createAttachmentUpload } from '../attachments/upload.ts'
-import { createUploadTicketStore } from '../attachments/upload-tickets.ts'
-import { MAX_ATTACHMENT_BYTES } from '../drafts/attachments.ts'
-import { createIdempotencyStore } from '../drafts/idempotency.ts'
-import { createSendGuard } from '../drafts/send-guard.ts'
+} from '../jmap/index.ts'
 import { createDraft, createDraftInput } from './create-draft.ts'
 import { attachmentsFromRecord, type DraftToolDeps } from './draft-common.ts'
 import { forwardMessage, forwardMessageInput } from './forward-message.ts'

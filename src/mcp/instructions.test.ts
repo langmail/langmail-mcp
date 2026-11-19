@@ -1,10 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 
-import { makeJmapLive } from '@langmail/jmap'
-
 import { createTicketStore } from '../attachments/tickets.ts'
 import { createUploadTicketStore } from '../attachments/upload-tickets.ts'
 import { createImageProxyStore } from '../email-render/image-proxy.ts'
+import { makeJmapLive } from '../jmap/index.ts'
 import { fakeShareStore } from '../tools/calendar-share-test-fixtures.ts'
 import { createMcpHandler } from './handler.ts'
 import { SERVER_INSTRUCTIONS, SERVER_INSTRUCTIONS_WITHOUT_SHARING } from './instructions.ts'

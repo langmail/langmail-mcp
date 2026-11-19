@@ -7,8 +7,7 @@ import {
   type EmailRecord,
   LABEL_KEYWORD_PREFIX,
   TYPE_KEYWORD_PREFIX,
-} from '@langmail/jmap'
-
+} from '../jmap/index.ts'
 import { FLAGGED_KEYWORD, SEEN_KEYWORD } from './keywords.ts'
 
 const LIST_ATTACHMENT_LIMIT = 5

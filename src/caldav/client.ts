@@ -1,6 +1,6 @@
 // Thin glue over `tsdav`: RFC 6764 discovery + calendar listing + event
 // PUT, each authenticated with the request's bearer. A fresh, stateless
-// call per request — same model as the JMAP wrappers in @langmail/jmap.
+// call per request — same model as the JMAP wrappers in src/jmap.
 //
 // The transport details (well-known redirect to /dav/cal, principal ->
 // calendar-home-set -> calendars) live inside tsdav; we only thread the
@@ -24,8 +24,7 @@ import {
   updateCalendarObject,
 } from 'tsdav'
 
-import { parseEvents } from '@langmail/ical'
-
+import { parseEvents } from '../ical/index.ts'
 import { type CalendarObject, type CalendarSummary, type DiscoveredAccount } from './types.ts'
 
 class CalDavError extends Error {
@@ -51,7 +50,7 @@ const MAILTO_RE = /^mailto:/iu
 // A 2xx code in a status line like "HTTP/1.1 200 OK" (padded, so "HTTP/1.1 200" matches too).
 const SUCCESS_STATUS_LINE_RE = / 2\d\d /u
 
-// Same order as the JMAP deadline (@langmail/jmap timeout.ts): enough for a
+// Same order as the JMAP deadline (src/jmap timeout.ts): enough for a
 // legitimately slow REPORT over a large calendar, short enough that a stalled
 // Stalwart becomes a logged error instead of a request nginx holds for an hour.
 const CALDAV_TIMEOUT_MS = 30_000

@@ -1,13 +1,12 @@
 import { describe, expect, mock, test } from 'bun:test'
 
-import { type JmapLive } from '@langmail/jmap'
-
 import { createAttachmentDownload } from './attachments/download.ts'
 import { createTicketStore } from './attachments/tickets.ts'
 import { createAttachmentUpload } from './attachments/upload.ts'
 import { createUploadTicketStore } from './attachments/upload-tickets.ts'
 import { TokenCache } from './auth/token-cache.ts'
 import { createRoutes } from './handler.ts'
+import { type JmapLive } from './jmap/index.ts'
 
 const STALWART = 'https://mail.example.com'
 const AUTH = 'https://auth.example.com/api/auth'

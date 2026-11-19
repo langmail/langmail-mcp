@@ -20,7 +20,7 @@
 import { lookup } from 'node:dns/promises'
 import { BlockList, isIPv4, isIPv6 } from 'node:net'
 
-import { logger } from '@langmail/logger'
+import { logger } from '../logger/index.ts'
 
 // A day, not minutes: these URLs are embedded in a rendered preview the user
 // re-opens from conversation scrollback — a short TTL turns every image into

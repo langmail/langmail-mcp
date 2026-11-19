@@ -16,8 +16,7 @@
 import { beforeAll, describe, expect, test } from 'bun:test'
 import { createCalendarObject } from 'tsdav'
 
-import { parseEvents } from '@langmail/ical'
-
+import { parseEvents } from '../ical/index.ts'
 import { deleteCalendarEvent, makeLiveDeps as makeDeleteDeps } from '../tools/delete-calendar-event.ts'
 import { listCalendarEvents, makeLiveDeps as makeListDeps } from '../tools/list-calendar-events.ts'
 import { makeLiveDeps as makeRespondDeps, respondToEvent } from '../tools/respond-to-event.ts'

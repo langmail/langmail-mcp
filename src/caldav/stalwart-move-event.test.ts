@@ -35,8 +35,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { davRequest } from 'tsdav'
 
-import { parseEvents } from '@langmail/ical'
-
+import { parseEvents } from '../ical/index.ts'
 import { makeLiveDeps, moveCalendarEvents, moveCalendarEventsInput } from '../tools/move-calendar-events.ts'
 import { type CalDavConfig, createCalendar, discoverAccount, fetchEvent, fetchEvents, putEvent } from './client.ts'
 

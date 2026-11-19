@@ -12,7 +12,7 @@
 // Presence only, never the value. A boolean says "log shipping is configured",
 // which is configuration state, not a secret.
 
-import { logger } from '@langmail/logger'
+import { logger } from '../logger/index.ts'
 
 interface ObservabilityConfig {
   // AUTH_INTERNAL_TOKEN — the agent-activity record behind the usage metrics,

@@ -29,8 +29,6 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
-import { type ParsedAttendee, type ParsedEvent, parseEvents } from '@langmail/ical'
-
 import { type AccountTimeZoneResolver, makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
 import { describeReminder, MAX_REMINDER_MINUTES } from '../caldav/alarm.ts'
 import {
@@ -67,6 +65,7 @@ import {
   UTC_TIME_ZONE,
 } from '../caldav/timezone.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
+import { type ParsedAttendee, type ParsedEvent, parseEvents } from '../ical/index.ts'
 import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import { type AttendeeWriteThrough } from './contact-write-through.ts'
 import { createCalendarEventInput, eventUidSchema } from './create-calendar-event.ts'

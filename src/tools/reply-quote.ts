@@ -16,9 +16,8 @@
 
 import sanitizeHtml from 'sanitize-html'
 
-import { type EmailComposeRecord } from '@langmail/jmap'
-
 import { DATA_IMAGE_RE } from '../email-render/sanitize.ts'
+import { type EmailComposeRecord } from '../jmap/index.ts'
 import { draftFromRecord, MAX_DRAFT_BODY_VALUE_BYTES, type ParsedRecipients } from './draft-common.ts'
 import { htmlToText, NON_TEXT_TAGS } from './html-to-text.ts'
 

@@ -24,13 +24,13 @@
 // says so in as many words rather than letting the call fail as a shrug, and
 // names the upload tool as the remedy.
 //
-// Inline parts (`cid`) are not exposed here yet. @langmail/jmap models them
+// Inline parts (`cid`) are not exposed here yet. src/jmap models them
 // (`DraftAttachment.cid`), so an HTML body referencing a generated chart is a
 // schema addition rather than a redesign; nothing needs one today.
 
 import { z } from 'zod'
 
-import { type BlobUploadParams, type DraftAttachment } from '@langmail/jmap'
+import { type BlobUploadParams, type DraftAttachment } from '../jmap/index.ts'
 
 // Ceiling on the bytes one call *uploads*, checked before anything is sent.
 // 25 MB is what a receiving MTA typically accepts (and what Gmail's own

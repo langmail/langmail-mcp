@@ -1,13 +1,13 @@
 // The searchable keyword vocabulary. Derived from the classification taxonomy
-// in @langmail/agents (not from the agent set) so a value means the same thing
+// in `email-types.ts` (not from the agent set) so a value means the same thing
 // for every user: agent labels are per-user configurable and coarser than the
 // taxonomy — one agent writes `$label:receipt` for both `receipt` and `order`
 // mail, and one writes `$label:notification` for `notification`,
 // `security_alert`, and `terms`. Exposed to the model as a z.enum on
 // search_emails; mapped to JMAP keywords server-side.
 
-import { EMAIL_TYPE_VALUES, EMAIL_TYPES } from '@langmail/agents'
-import { toLabelKeyword, toTypeKeyword } from '@langmail/jmap'
+import { toLabelKeyword, toTypeKeyword } from '../jmap/index.ts'
+import { EMAIL_TYPE_VALUES, EMAIL_TYPES } from './email-types.ts'
 
 // RFC 8621 §4.1.1 system keywords: "has been read" and "flagged for urgent or
 // special attention" — the keyword Gmail's STARRED and the mail-rule flag

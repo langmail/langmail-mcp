@@ -16,6 +16,10 @@ import { registerAppTool } from '@modelcontextprotocol/ext-apps/server'
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
+import { type TicketInput, type TicketStore } from '../attachments/tickets.ts'
+import { type ImageProxyStore, isProxyableImageUrl } from '../email-render/image-proxy.ts'
+import { EMAIL_VIEWER_RESOURCE_URI, PREVIEW_META_KEY } from '../email-render/meta.ts'
+import { sanitizeEmailHtml } from '../email-render/sanitize.ts'
 import {
   bearerAuthorization,
   blobDownload,
@@ -23,13 +27,8 @@ import {
   type EmailGetDetailParams,
   emailGetDetail,
   type JmapLive,
-} from '@langmail/jmap'
-import { logger } from '@langmail/logger'
-
-import { type TicketInput, type TicketStore } from '../attachments/tickets.ts'
-import { type ImageProxyStore, isProxyableImageUrl } from '../email-render/image-proxy.ts'
-import { EMAIL_VIEWER_RESOURCE_URI, PREVIEW_META_KEY } from '../email-render/meta.ts'
-import { sanitizeEmailHtml } from '../email-render/sanitize.ts'
+} from '../jmap/index.ts'
+import { logger } from '../logger/index.ts'
 import { READ_ONLY } from './annotations.ts'
 import { emailTags, formatAddressList, isInlinePart } from './format.ts'
 import { bodyText, MAX_BODY_VALUE_BYTES } from './get-email.ts'

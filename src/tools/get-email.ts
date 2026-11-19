@@ -20,9 +20,8 @@ import {
   type EmailGetDetailParams,
   emailGetDetail,
   type JmapLive,
-} from '@langmail/jmap'
-import { logger } from '@langmail/logger'
-
+} from '../jmap/index.ts'
+import { logger } from '../logger/index.ts'
 import { READ_ONLY } from './annotations.ts'
 import { errorDetail } from './error-detail.ts'
 import { emailTags, formatAddressList, formatAttachmentLine } from './format.ts'

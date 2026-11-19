@@ -12,8 +12,7 @@
 // Pure string in/out (no live server), so the merge is unit-testable — the same
 // shape as rsvp.ts and ical-parse.ts.
 
-import { icalDateToIso, parseWallClockInZone } from '@langmail/ical'
-
+import { icalDateToIso, parseWallClockInZone } from '../ical/index.ts'
 import { foldLine, maxSequence } from './ical.ts'
 import { toIcalUtc } from './recurrence.ts'
 import { toWallClockIso, toZonedDate } from './timezone.ts'

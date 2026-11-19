@@ -1,11 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 
-import { parseEvents } from '@langmail/ical'
-
+import { parseEvents } from '../ical/index.ts'
 import { buildInvite } from './ical.ts'
 
 // Writer↔parser fidelity: buildInvite (ical-generator, this service) must
-// stay parseable by @langmail/ical's read-side parser — the pure-fixture
+// stay parseable by src/ical's read-side parser — the pure-fixture
 // tests live in the package, this roundtrip pins the real writer's output.
 describe('buildInvite → parseEvents roundtrip', () => {
   test('a built invite parses back with uid, title, times, attendees, and organizer intact', () => {

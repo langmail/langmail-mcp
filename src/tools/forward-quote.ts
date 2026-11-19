@@ -13,8 +13,7 @@
 // goes along as a `message/rfc822` attachment, by its own blobId, so the
 // recipient loses nothing.
 
-import { type DraftAttachment, type EmailComposeRecord, type EmailDraft } from '@langmail/jmap'
-
+import { type DraftAttachment, type EmailComposeRecord, type EmailDraft } from '../jmap/index.ts'
 import { attachmentsFromRecord, draftFromRecord } from './draft-common.ts'
 import { formatAddressList } from './format.ts'
 import { htmlToText } from './html-to-text.ts'

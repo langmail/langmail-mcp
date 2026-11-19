@@ -16,8 +16,7 @@ import {
   emailSetMany,
   type JmapLive,
   mailboxIdsByRoles,
-} from '@langmail/jmap'
-
+} from '../jmap/index.ts'
 import { lookupMailbox, type MailboxLookup } from './mailbox-lookup.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 

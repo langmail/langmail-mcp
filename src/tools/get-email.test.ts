@@ -1,9 +1,8 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 import { type McpServer } from '@modelcontextprotocol/server'
 
-import { type EmailDetailRecord, JmapError, type JmapLive, type JmapSession } from '@langmail/jmap'
-import { logger } from '@langmail/logger'
-
+import { type EmailDetailRecord, JmapError, type JmapLive, type JmapSession } from '../jmap/index.ts'
+import { logger } from '../logger/index.ts'
 import { READ_ONLY } from './annotations.ts'
 import {
   type GetEmailDeps,

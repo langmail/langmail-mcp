@@ -1,7 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test'
 
-import { type JmapLive } from '@langmail/jmap'
-
+import { type JmapLive } from '../jmap/index.ts'
 import { createAttachmentDownload } from './download.ts'
 import { createTicketStore, type TicketInput } from './tickets.ts'
 

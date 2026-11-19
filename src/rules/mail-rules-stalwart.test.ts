@@ -30,8 +30,7 @@ import {
   mailboxIdByRole,
   makeJmapLive,
   sieveScriptList,
-} from '@langmail/jmap'
-
+} from '../jmap/index.ts'
 import { untilIndexed } from '../search-index-test-wait.ts'
 import { createMailRule, createMailRuleInput } from '../tools/create-mail-rule.ts'
 import { deleteMailRule } from '../tools/delete-mail-rule.ts'

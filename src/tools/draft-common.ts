@@ -52,8 +52,7 @@ import {
   mailboxIdsByRoles,
   type ThreadMessageFindParams,
   threadMessageFind,
-} from '@langmail/jmap'
-
+} from '../jmap/index.ts'
 import { formatAddressList, formatSize } from './format.ts'
 import { htmlToText } from './html-to-text.ts'
 
@@ -491,7 +490,7 @@ export const unreferencableAttachments = (record: EmailComposeRecord): string[] 
 
 // Read a stored draft back into the composable shape, so update_draft can merge
 // changes onto it and re-create the message (RFC 8621 makes an Email's content
-// immutable — see @langmail/jmap drafts.ts).
+// immutable — see src/jmap drafts.ts).
 export const draftFromRecord = (record: EmailComposeRecord): EmailDraft => {
   const text = bodyOfType(record, record.textBody, 'text/plain')
   const html = bodyOfType(record, record.htmlBody, 'text/html')
@@ -530,7 +529,7 @@ const keywordSuffix = (record: EmailComposeRecord, prefix: string): string | nul
 }
 
 // The id a draft is known by on this surface: a random token create_draft mints
-// and every revision carries as a `$draftid:` keyword (see @langmail/jmap
+// and every revision carries as a `$draftid:` keyword (see src/jmap
 // drafts.ts). A token, not the first revision's JMAP id: Stalwart may hand a
 // freed id out again, and a stale keyword naming it would then resolve another
 // draft's id to this one. Null for a draft staged by another client, which gets
@@ -544,7 +543,7 @@ export const stableDraftId = (record: EmailComposeRecord): string | null =>
 export const stableDraftIdKeyword = (draftId: string): string => `${DRAFT_ID_KEYWORD_PREFIX}${draftId}`
 
 // The keyword create_draft puts on a reply, naming the message it answers — see
-// @langmail/jmap drafts.ts for why the In-Reply-To header is not enough.
+// src/jmap drafts.ts for why the In-Reply-To header is not enough.
 export const replyOriginalKeyword = (originalId: string): string => `${DRAFT_REPLY_TO_KEYWORD_PREFIX}${originalId}`
 
 // The JMAP id of the message a reply draft answers, when create_draft recorded it.
@@ -552,7 +551,7 @@ export const replyOriginalId = (record: EmailComposeRecord): string | null =>
   keywordSuffix(record, DRAFT_REPLY_TO_KEYWORD_PREFIX)
 
 // The keyword a staged forward carries, naming the message it forwards — see
-// @langmail/jmap drafts.ts.
+// src/jmap drafts.ts.
 export const forwardOriginalKeyword = (originalId: string): string => `${DRAFT_FORWARD_OF_KEYWORD_PREFIX}${originalId}`
 
 // The JMAP id of the message a forward draft forwards, when it was staged here.

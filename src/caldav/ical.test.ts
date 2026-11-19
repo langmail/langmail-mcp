@@ -2,8 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { rrulestr } from 'rrule'
 import { tzlib_get_ical_block } from 'timezones-ical-library'
 
-import { ianaTimeZone, WINDOWS_ZONES } from '@langmail/ical'
-
+import { ianaTimeZone, WINDOWS_ZONES } from '../ical/index.ts'
 import { buildInvite, maxSequence, parseSequence } from './ical.ts'
 
 // RFC 5545 folds long lines at 75 octets with a CRLF + space; undo that

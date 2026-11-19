@@ -13,9 +13,8 @@
 // caller falls through to UTC. Failing open keeps event creation working even if
 // this read breaks — the only cost is the historical UTC rendering.
 
-import { accountIdForMail, bearerAuthorization, fetchSession, jmapTimeoutSignal } from '@langmail/jmap'
-import { logger } from '@langmail/logger'
-
+import { accountIdForMail, bearerAuthorization, fetchSession, jmapTimeoutSignal } from '../jmap/index.ts'
+import { logger } from '../logger/index.ts'
 import { isValidTimeZone } from './timezone.ts'
 
 export interface AccountSettingsConfig {

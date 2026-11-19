@@ -1,7 +1,7 @@
 // The reachability probes MCP's /readyz runs. The runner that times them out
-// and caches a ready result is shared with auth in `@langmail/utils/readiness`.
+// and caches a ready result is `readiness-runner.ts`, a copy of the one auth uses.
 
-import { type Check } from '@langmail/utils/readiness'
+import { type Check } from './readiness-runner.ts'
 
 const TRAILING_SLASHES_RE = /\/+$/u
 

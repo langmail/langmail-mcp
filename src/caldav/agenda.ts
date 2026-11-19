@@ -14,8 +14,7 @@
 //
 // Pure in/out over parsed events, like recurrence.ts.
 
-import { type ParsedEvent, parseWallClockInZone } from '@langmail/ical'
-
+import { type ParsedEvent, parseWallClockInZone } from '../ical/index.ts'
 import { durationSeconds } from './alarm.ts'
 import { seriesOccurrences } from './recurrence.ts'
 import { isValidTimeZone, toWallClockIso } from './timezone.ts'

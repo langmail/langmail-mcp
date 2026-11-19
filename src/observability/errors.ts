@@ -1,7 +1,7 @@
 // Turns a thrown value into the few fields an error log line may carry.
 //
 // Every line this service logs at `error` level is forwarded off-box twice:
-// to Better Stack Log Management (@langmail/logger) and, via pinoIntegration,
+// to Better Stack Log Management (src/logger) and, via pinoIntegration,
 // to Better Stack Error Tracking. Upstream error bodies routinely embed the
 // mailbox address that produced them (JMAP/CalDAV echo the principal, tool
 // results quote event content), and REVIEW.md forbids shipping either. So the

@@ -9,7 +9,7 @@
 //
 // The two failure outcomes are not the same severity, and the split matters
 // because `error` is the level pinoIntegration forwards to Better Stack Error
-// Tracking (see @langmail/logger's initErrorTracking):
+// Tracking (see src/logger's initErrorTracking):
 //
 //   tool_error — the tool returned `isError: true`. That is the MCP contract
 //     for answering the calling model in-band: "no such thread", "query must
@@ -32,8 +32,7 @@
 
 import { type McpServer, type RegisteredTool } from '@modelcontextprotocol/server'
 
-import { logger } from '@langmail/logger'
-
+import { logger } from '../logger/index.ts'
 import { describeError } from '../observability/errors.ts'
 
 // `registerTool` is overloaded (schema objects, and a deprecated raw-shape

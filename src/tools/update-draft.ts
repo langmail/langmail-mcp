@@ -2,7 +2,7 @@
 //
 // The draft id does not change. RFC 8621 makes an Email's content immutable
 // (only `keywords` and `mailboxIds` can be patched), so editing a draft means
-// writing a new message and destroying the old one — see @langmail/jmap
+// writing a new message and destroying the old one — see src/jmap
 // `drafts.ts`. The JMAP id therefore changes on every edit, but the replacement
 // carries the draft's stable id as a `$draftid:` keyword (`stableDraftId` in
 // draft-common.ts), so the id create_draft handed out keeps resolving to the
@@ -22,15 +22,14 @@ import { randomUUID } from 'node:crypto'
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
+import { attachmentsSchema, resolveAttachments } from '../drafts/attachments.ts'
 import {
   bearerAuthorization,
   type DraftAttachment,
   type DraftCreateResult,
   type EmailComposeRecord,
   type EmailDraft,
-} from '@langmail/jmap'
-
-import { attachmentsSchema, resolveAttachments } from '../drafts/attachments.ts'
+} from '../jmap/index.ts'
 import { ACCOUNT_DESTRUCTIVE } from './annotations.ts'
 import {
   bodyTruncated,
@@ -791,7 +790,7 @@ export const updateDraft = async (deps: DraftToolDeps, ctx: UpdateDraftContext):
     if (refusal === null) {
       throw error
     }
-    // The destroy only runs once the replacement exists (@langmail/jmap
+    // The destroy only runs once the replacement exists (src/jmap
     // drafts.ts), so a refused create leaves the original exactly as it was.
     return errorResult(`${refusal} Draft ${args.draftId} was left unchanged.`)
   }

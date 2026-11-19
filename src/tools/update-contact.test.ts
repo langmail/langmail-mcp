@@ -12,9 +12,8 @@ import {
   sourceOf,
   toCardAddress,
   toCardPhone,
-} from '@langmail/contacts'
-import { type ContactCard } from '@langmail/jmap'
-
+} from '../contacts/index.ts'
+import { type ContactCard } from '../jmap/index.ts'
 import { derivedCard, fakeBook } from './contact-test-fixtures.ts'
 import { updateContact, updateContactInput } from './update-contact.ts'
 

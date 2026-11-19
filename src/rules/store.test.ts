@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 
-import { type JmapLive, type JmapSession, type SieveScriptRecord } from '@langmail/jmap'
-
+import { type JmapLive, type JmapSession, type SieveScriptRecord } from '../jmap/index.ts'
 import { generateSieveScript, type MailRule, RULES_SCRIPT_NAME } from './rule.ts'
 import { makeLiveSieveIo, makeMailRulesStore, type SieveIo } from './store.ts'
 

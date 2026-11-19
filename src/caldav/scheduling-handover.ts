@@ -1,6 +1,6 @@
 // Outbound-scheduling audit trail shared by the calendar write tools.
 
-import { hashEmail, logger } from '@langmail/logger'
+import { hashEmail, logger } from '../logger/index.ts'
 
 // Audit line for the accepted PUT: the iMIP fan-out it triggers is otherwise
 // unobservable (Stalwart archives nothing outbound), so record enough to answer

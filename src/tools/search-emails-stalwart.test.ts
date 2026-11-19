@@ -42,8 +42,7 @@ import {
   emailQueryTotal,
   mailboxIdByNameOrRole,
   makeJmapLive,
-} from '@langmail/jmap'
-
+} from '../jmap/index.ts'
 import { type SearchEmailsDeps, searchEmails } from './search-emails.ts'
 
 const ADMIN_URL = process.env.STALWART_ADMIN_URL

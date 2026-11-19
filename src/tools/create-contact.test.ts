@@ -8,8 +8,7 @@ import {
   readPostalAddresses,
   readRoles,
   sourceOf,
-} from '@langmail/contacts'
-
+} from '../contacts/index.ts'
 import { derivedCard, fakeBook } from './contact-test-fixtures.ts'
 import { createContact, createContactInput } from './create-contact.ts'
 

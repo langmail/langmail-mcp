@@ -7,12 +7,10 @@
 // See spec/02-mcp.md for the design; spec/03 §MCP RS auth model for
 // why we trust /auth/userinfo rather than verifying JWTs locally.
 
-import { logger } from '@langmail/logger'
-import { initErrorTracking } from '@langmail/logger/error-tracking'
+import { initErrorTracking } from './logger/error-tracking.ts'
+import { logger } from './logger/index.ts'
 
 initErrorTracking('mcp')
-
-import { makeJmapLive } from '@langmail/jmap'
 
 import { agentActivityRecorderFromEnv } from './activity/record-agent-activity.ts'
 import { createAttachmentDownload } from './attachments/download.ts'
@@ -24,6 +22,7 @@ import { calendarFeedFromEnv } from './calendar-feeds/live-deps.ts'
 import { makeCalendarShareStore } from './calendar-feeds/shares.ts'
 import { createImageProxy, createImageProxyStore } from './email-render/image-proxy.ts'
 import { createRoutes } from './handler.ts'
+import { makeJmapLive } from './jmap/index.ts'
 import { createMcpHandler } from './mcp/handler.ts'
 import { logObservabilityConfig } from './observability/config.ts'
 import { describeError } from './observability/errors.ts'

@@ -1,16 +1,15 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 
+import { createIdempotencyStore } from '../drafts/idempotency.ts'
+import { createSendGuard } from '../drafts/send-guard.ts'
 import {
   type DraftCreateParams,
   type EmailComposeRecord,
   type EmailSetParams,
   type EmailSubmissionCreateParams,
   JmapError,
-} from '@langmail/jmap'
-import { logger } from '@langmail/logger'
-
-import { createIdempotencyStore } from '../drafts/idempotency.ts'
-import { createSendGuard } from '../drafts/send-guard.ts'
+} from '../jmap/index.ts'
+import { logger } from '../logger/index.ts'
 import { type DraftDepsOptions, draftDeps, receivedMessage, TEST_PRINCIPAL } from './draft-test-fixtures.ts'
 import { forwardMessage, forwardMessageInput } from './forward-message.ts'
 

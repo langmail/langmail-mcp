@@ -17,9 +17,8 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
-import { bearerAuthorization } from '@langmail/jmap'
-
 import { holdSend, type SendGuard, type SendHold, type SendReservation } from '../drafts/send-guard.ts'
+import { bearerAuthorization } from '../jmap/index.ts'
 import { ACCOUNT_DESTRUCTIVE } from './annotations.ts'
 import { type DraftToolDeps, isDraft, loadDraft, stableDraftId } from './draft-common.ts'
 import { formatAddressList } from './format.ts'

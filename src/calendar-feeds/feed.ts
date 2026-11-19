@@ -15,10 +15,9 @@
 
 import { createHash } from 'node:crypto'
 
-import { parseEvents } from '@langmail/ical'
-import { logger } from '@langmail/logger'
-
 import { agendaWindow, windowEntries } from '../caldav/agenda.ts'
+import { parseEvents } from '../ical/index.ts'
+import { logger } from '../logger/index.ts'
 import { describeError } from '../observability/errors.ts'
 import { renderEmptyFeed, renderFeed, type ShareLevel } from './render.ts'
 

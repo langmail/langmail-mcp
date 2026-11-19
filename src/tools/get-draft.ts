@@ -9,8 +9,7 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
-import { bearerAuthorization } from '@langmail/jmap'
-
+import { bearerAuthorization } from '../jmap/index.ts'
 import { READ_ONLY } from './annotations.ts'
 import {
   type DraftToolDeps,

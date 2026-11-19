@@ -1,7 +1,7 @@
 // search_contacts tool — resolves a name, partial name, address, or
 // organization to known contacts from the collected address book (built by
 // the email-agent and the calendar tools) plus any personal address books,
-// ranked by the read-time scoring in @langmail/contacts. Judgments
+// ranked by the read-time scoring in src/contacts. Judgments
 // (relationship label, ranking, relative ages) are computed here, tool-side;
 // what the caller gets raw is the concrete recent-interaction list, hydrated
 // from the content-free record ids stored on the card.
@@ -9,6 +9,7 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
+import { type CalDavConfig, discoverAccount, fetchEvents } from '../caldav/client.ts'
 import {
   type AddressCandidate,
   addressCandidates,
@@ -26,8 +27,8 @@ import {
   relativeAge,
   SHOWN_INTERACTIONS,
   sourceOf,
-} from '@langmail/contacts'
-import { parseEvents } from '@langmail/ical'
+} from '../contacts/index.ts'
+import { parseEvents } from '../ical/index.ts'
 import {
   type AddressBookRecord,
   accountIdForContacts,
@@ -43,9 +44,7 @@ import {
   type EmailRecord,
   emailGet,
   type JmapLive,
-} from '@langmail/jmap'
-
-import { type CalDavConfig, discoverAccount, fetchEvents } from '../caldav/client.ts'
+} from '../jmap/index.ts'
 import { READ_ONLY } from './annotations.ts'
 import { birthdayLine, profileLines, rolesLine } from './contact-format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'

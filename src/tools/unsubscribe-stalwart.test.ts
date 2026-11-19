@@ -12,8 +12,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 
-import { emailGetUnsubscribe, mailboxCreate, mailboxIdsByRoles, makeJmapLive } from '@langmail/jmap'
-
+import { emailGetUnsubscribe, mailboxCreate, mailboxIdsByRoles, makeJmapLive } from '../jmap/index.ts'
 import { type SendHop } from './one-click-post.ts'
 import { type UnsubscribeDeps, unsubscribeFromList } from './unsubscribe-from-list.ts'
 

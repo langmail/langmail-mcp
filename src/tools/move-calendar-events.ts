@@ -16,9 +16,6 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
-import { parseEvents } from '@langmail/ical'
-import { logger } from '@langmail/logger'
-
 import {
   type CalDavConfig,
   fetchCalendarList,
@@ -29,6 +26,8 @@ import {
   withTrailingSlash,
 } from '../caldav/client.ts'
 import { type CalendarObject, type CalendarSummary } from '../caldav/types.ts'
+import { parseEvents } from '../ical/index.ts'
+import { logger } from '../logger/index.ts'
 import { describeError } from '../observability/errors.ts'
 import { ACCOUNT_WRITE } from './annotations.ts'
 import { calendarLabel, resolveCalendar, sameCalendarUrl } from './calendar-lookup.ts'

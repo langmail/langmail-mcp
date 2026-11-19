@@ -15,9 +15,8 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
-import { mergeCards } from '@langmail/contacts'
-import { type ContactCard } from '@langmail/jmap'
-
+import { mergeCards } from '../contacts/index.ts'
+import { type ContactCard } from '../jmap/index.ts'
 import { ACCOUNT_DESTRUCTIVE } from './annotations.ts'
 import { type ContactWriteDeps, collectedBookIdOf, contactCtx, contactIdSchema, readBack } from './contact-common.ts'
 import { renderContact } from './contact-format.ts'

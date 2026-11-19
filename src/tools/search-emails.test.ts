@@ -5,8 +5,7 @@ import {
   type EmailQueryPerTermParams,
   type EmailQueryTotalParams,
   type EmailRecord,
-} from '@langmail/jmap'
-
+} from '../jmap/index.ts'
 import {
   decodeCursor,
   encodeCursor,

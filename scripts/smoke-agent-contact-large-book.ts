@@ -13,8 +13,7 @@
 // Every card seeded, and any draft the agent stages, is deleted on exit.
 // Run per docs/guides/local-development.md § Agent trajectory evals.
 
-import { COLLECTED_NOTE_KEY, collectedNoteEntry, toCardAddress } from '@langmail/contacts'
-
+import { COLLECTED_NOTE_KEY, collectedNoteEntry, toCardAddress } from '../src/contacts/index.ts'
 import {
   allCards,
   type Contacts,
