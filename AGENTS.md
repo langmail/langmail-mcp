@@ -29,7 +29,9 @@ base) that runs the TypeScript from source; the target VM does not
 install Node and never will.
 
 - `bun install` — installs into `node_modules/`; writes `bun.lock`.
-- `bun run dev` — local dev server on `127.0.0.1:8080`.
+- `bun run dev` — local dev server on `127.0.0.1:8090` (the `MCP_PORT` set by
+  `process-compose.yaml`; `8080` is the default when `MCP_PORT` is unset, but
+  `apps/web` takes it).
 - `bun run build` — `tsc --noEmit` type check (the turbo "build" gate;
   the container runs from source, so there is no compile/bundle step).
 - `bun run start` — production entrypoint (`NODE_ENV=production bun
