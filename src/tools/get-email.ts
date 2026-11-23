@@ -29,6 +29,7 @@ import { logger } from '../logger/index.ts'
 import { READ_ONLY } from './annotations.ts'
 import { errorDetail } from './error-detail.ts'
 import { emailFolders, emailTags, formatAddressList, formatAttachmentLine } from './format.ts'
+import { mailboxesOrNone } from './mailbox-lookup.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 // Cap the body we pull back so a huge newsletter can't blow the token budget;
@@ -136,7 +137,7 @@ export const getEmail = async (deps: GetEmailDeps, ctx: GetEmailContext): Promis
       ids: [args.id],
       maxBodyValueBytes: MAX_BODY_VALUE_BYTES,
     }),
-    deps.mailboxList({ accountId, authorization }),
+    mailboxesOrNone(deps.mailboxList({ accountId, authorization })),
   ])
   if (!email) {
     return errorResult(`Email not found: ${args.id}`)

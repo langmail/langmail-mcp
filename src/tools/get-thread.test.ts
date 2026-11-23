@@ -21,6 +21,19 @@ describe('getThreadInput schema', () => {
 })
 
 describe('getThread', () => {
+  test('a failed mailbox listing costs only the folders line', async () => {
+    const result = await getThread(
+      {
+        ...deps({ emails: [{ id: 'e1', mailboxIds: { 'mb-inbox': true }, subject: 'Hi' }], ids: ['e1'] }),
+        mailboxList: () => Promise.reject(new Error('Mailbox/get failed')),
+      },
+      { args: { id: 'e1' }, token: 'tok' }
+    )
+    expect(result.isError).toBeUndefined()
+    expect(result.content[0]?.text).toContain('1. Hi')
+    expect(result.content[0]?.text).not.toContain('folders:')
+  })
+
   test("names each message's folders, so a reply in Sent reads apart from the Inbox", async () => {
     const result = await getThread(
       {

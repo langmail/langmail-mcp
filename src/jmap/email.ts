@@ -39,7 +39,8 @@ const EMAIL_PROPERTIES = [
 // Richer properties for get_email and the poller's analysis input:
 // recipients, the text body parts, the RFC 5322 Message-ID list, the
 // raw-message blob handle (blobId/size) for langmail preprocessing, and
-// mailboxIds so the poller can tell sent mail by its Sent membership.
+// mailboxIds so the poller can tell sent mail by its Sent membership and
+// get_email can name the message's folders.
 const EMAIL_DETAIL_PROPERTIES = [
   'id',
   'blobId',
@@ -810,7 +811,7 @@ export interface MailboxIdsByRolesParams extends JmapCall {
 }
 
 // Resolve several special-use roles from one mailbox listing — the archive
-// move needs both inbox and archive, and one round-trip beats two.
+// patch needs archive, inbox, junk and trash, and one round-trip beats four.
 export const mailboxIdsByRoles = async (p: MailboxIdsByRolesParams): Promise<Record<string, string | null>> => {
   const mailboxes = await mailboxList(p)
   return Object.fromEntries(

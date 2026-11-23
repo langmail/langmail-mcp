@@ -22,10 +22,10 @@ export interface FakeFileEmailsDeps extends FileEmailsDeps {
 
 const PLACES: PlaceIds = { archive: 'mb-archive', inbox: 'mb-inbox', junk: 'mb-junk', trash: 'mb-trash' }
 
-// The place roles the fixture knows; the live resolver also maps Sent, Drafts,
-// and Junk by role, which fall through to the name lookup here.
+// The place roles the fixture knows; the live resolver also maps Sent and
+// Drafts by role, which fall through to the name lookup here.
 const isPlaceRole = (role: string | undefined): role is keyof PlaceIds =>
-  role === 'archive' || role === 'inbox' || role === 'trash'
+  role === 'archive' || role === 'inbox' || role === 'junk' || role === 'trash'
 
 // `folders` maps user-facing names (case-insensitive) to ids; `places`
 // overrides the role lookup; `missing` ids are reported notFound by Email/set.

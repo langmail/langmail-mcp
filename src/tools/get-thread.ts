@@ -18,6 +18,7 @@ import {
 } from '../jmap/index.ts'
 import { READ_ONLY } from './annotations.ts'
 import { formatEmailLine, orderById } from './format.ts'
+import { mailboxesOrNone } from './mailbox-lookup.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 const getThreadShape = {
@@ -52,7 +53,7 @@ export const getThread = async (deps: GetThreadDeps, ctx: GetThreadContext): Pro
 
   const [list, mailboxes] = await Promise.all([
     deps.emailGet({ accountId, apiUrl: '', authorization, ids }),
-    deps.mailboxList({ accountId, authorization }),
+    mailboxesOrNone(deps.mailboxList({ accountId, authorization })),
   ])
   // Restore Thread/get's chronological (oldest-first) order and mark the
   // message the caller asked about.
@@ -79,7 +80,7 @@ export const registerGetThread = (server: McpServer, deps: GetThreadDeps, getTok
       annotations: READ_ONLY,
       description:
         'List every message in the same thread as a given message id, oldest-first ' +
-        'with id, subject, sender, date, folders (Inbox, Archive, Sent, Junk, Trash, or the name of any other folder), tags, flags (unread, starred; a message without "unread" has been read), a body snippet, and attachment ' +
+        'with id, subject, sender, date, folders (Inbox, Archive, Sent, Drafts, Junk, Trash, or the name of any other folder), tags, flags (unread, starred; a message without "unread" has been read), a body snippet, and attachment ' +
         'metadata including blobId. Use get_email for full bodies and recipients; ' +
         'call download_attachment directly from a hit when the attachment blobId is present. ' +
         'Listing a thread does not mark its messages read; use mark_emails for that. ' +

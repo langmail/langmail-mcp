@@ -45,7 +45,7 @@ import {
   SEEN_KEYWORD,
   TODO_KEYWORD,
 } from './keywords.ts'
-import { lookupMailbox, type MailboxLookup } from './mailbox-lookup.ts'
+import { lookupMailbox, type MailboxLookup, mailboxesOrNone } from './mailbox-lookup.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 // The largest page a caller can ask for; the per-term ranking bound and the
@@ -686,7 +686,7 @@ export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsCont
   // it degrades to "at least".
   const [list, mailboxes, total] = await Promise.all([
     deps.emailGet({ accountId, apiUrl: '', authorization, ids }),
-    deps.mailboxList({ accountId, authorization }),
+    mailboxesOrNone(deps.mailboxList({ accountId, authorization })),
     more
       ? countRemaining(call, base, terms, cursor, slices, ctx.countDeadlineMs ?? COUNT_DEADLINE_MS)
       : Promise.resolve<MatchTotal>({ kind: 'complete' }),
@@ -735,7 +735,7 @@ const DESCRIPTION_RESULTS =
   'as spam: leave it there unless the user says it is not spam. Returns ' +
   'matching messages, headed by how many of the total matches are shown (e.g. ' +
   '"20 of 213") — multi-term queries list messages matching every term first, then partial ' +
-  'matches ranked by how many terms they hold; otherwise newest-first — with id, subject, sender, date, folders (Inbox, Archive, Sent, Junk, Trash, or the name of any other folder), tags, flags (unread, ' +
+  'matches ranked by how many terms they hold; otherwise newest-first — with id, subject, sender, date, folders (Inbox, Archive, Sent, Drafts, Junk, Trash, or the name of any other folder), tags, flags (unread, ' +
   'starred; a hit without "unread" has been read), a ' +
   'body snippet, and attachment metadata including blobId. Use get_email ' +
   'for full bodies and recipients; call download_attachment directly from ' +
