@@ -29,6 +29,8 @@ import {
   emailQueryPerTerm,
   emailQueryTotal,
   type JmapLive,
+  type MailboxRecord,
+  mailboxList,
 } from '../jmap/index.ts'
 import { logger } from '../logger/index.ts'
 import { type ServerMode } from '../mode.ts'
@@ -396,6 +398,8 @@ export interface SearchEmailsDeps {
   emailQuery: (p: EmailQueryParams) => Promise<string[]>
   emailQueryPerTerm: (p: EmailQueryPerTermParams) => Promise<string[][]>
   emailQueryTotal: (p: EmailQueryTotalParams) => Promise<number>
+  // The account's mailboxes, which name the folders each hit is in.
+  mailboxList: (p: { accountId: string; authorization: string }) => Promise<MailboxRecord[]>
   resolveAccountId: (authorization: string) => Promise<string>
   resolveMailbox: (authorization: string, name: string) => Promise<MailboxLookup>
 }
@@ -570,8 +574,14 @@ const countRemaining = (
   return countWithin(total, deadlineMs, slices[0]?.stillMatching ?? 0)
 }
 
-const renderLine = (e: EmailRecord, i: number, matched: number | undefined, termCount: number): string => {
-  const line = formatEmailLine(i + 1, e)
+const renderLine = (
+  e: EmailRecord,
+  i: number,
+  matched: number | undefined,
+  termCount: number,
+  mailboxes: MailboxRecord[]
+): string => {
+  const line = formatEmailLine(i + 1, e, mailboxes)
   return matched === undefined ? line : `${line}\n   matched: ${matched}/${termCount} terms`
 }
 
@@ -583,7 +593,8 @@ const renderSlices = async (
   base: EmailQueryFilters,
   terms: string[],
   slices: TierSlice[],
-  list: EmailRecord[]
+  list: EmailRecord[],
+  mailboxes: MailboxRecord[]
 ): Promise<{ last?: { newestFirst: EmailRecord[]; tier: Tier }; lines: string[] }> => {
   const lines: string[] = []
   let last: { newestFirst: EmailRecord[]; tier: Tier } | undefined
@@ -604,11 +615,13 @@ const renderSlices = async (
       // Every hit in this tier holds at least one term, even if a per-term
       // list overflowed its limit.
       lines.push(
-        ...ranked.map((e, i) => renderLine(e, lines.length + i, Math.max(1, counts.get(e.id) ?? 0), terms.length))
+        ...ranked.map((e, i) =>
+          renderLine(e, lines.length + i, Math.max(1, counts.get(e.id) ?? 0), terms.length, mailboxes)
+        )
       )
     } else {
       const matched = slice.tier === 'all' ? terms.length : undefined
-      lines.push(...newestFirst.map((e, i) => renderLine(e, lines.length + i, matched, terms.length)))
+      lines.push(...newestFirst.map((e, i) => renderLine(e, lines.length + i, matched, terms.length, mailboxes)))
     }
   }
   return last ? { last, lines } : { lines }
@@ -671,14 +684,15 @@ export const searchEmails = async (deps: SearchEmailsDeps, ctx: SearchEmailsCont
   // Only a page with more behind it pays for the server-side count. A count
   // that fails or is slow must not cost the caller the page it already has —
   // it degrades to "at least".
-  const [list, total] = await Promise.all([
+  const [list, mailboxes, total] = await Promise.all([
     deps.emailGet({ accountId, apiUrl: '', authorization, ids }),
+    deps.mailboxList({ accountId, authorization }),
     more
       ? countRemaining(call, base, terms, cursor, slices, ctx.countDeadlineMs ?? COUNT_DEADLINE_MS)
       : Promise.resolve<MatchTotal>({ kind: 'complete' }),
   ])
 
-  const { last, lines } = await renderSlices(call, base, terms, slices, list)
+  const { last, lines } = await renderSlices(call, base, terms, slices, list, mailboxes)
   if (!last) {
     return noMatches(cursor)
   }
@@ -703,6 +717,7 @@ export const makeLiveDeps = (live: JmapLive): SearchEmailsDeps => ({
   emailQuery: async (p) => emailQuery({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   emailQueryPerTerm: async (p) => emailQueryPerTerm({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   emailQueryTotal: async (p) => emailQueryTotal({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
+  mailboxList: async (p) => mailboxList({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   resolveAccountId: live.resolveAccountId,
   resolveMailbox: async (authorization, name) => {
     const s = await live.getSession(authorization)
@@ -716,10 +731,11 @@ export const makeLiveDeps = (live: JmapLive): SearchEmailsDeps => ({
 // type filter (hosted) or the to-do filter (self-hosted).
 const DESCRIPTION_RESULTS =
   'For "what have I not read yet" use read: false without mailbox — new mail is not only in the ' +
-  'Inbox, and a date window misses older unhandled mail. Returns ' +
+  'Inbox, and a date window misses older unhandled mail. A hit in Junk is mail the server filtered ' +
+  'as spam: leave it there unless the user says it is not spam. Returns ' +
   'matching messages, headed by how many of the total matches are shown (e.g. ' +
   '"20 of 213") — multi-term queries list messages matching every term first, then partial ' +
-  'matches ranked by how many terms they hold; otherwise newest-first — with id, subject, sender, date, tags, flags (unread, ' +
+  'matches ranked by how many terms they hold; otherwise newest-first — with id, subject, sender, date, folders (Inbox, Archive, Sent, Junk, Trash, or the name of any other folder), tags, flags (unread, ' +
   'starred; a hit without "unread" has been read), a ' +
   'body snippet, and attachment metadata including blobId. Use get_email ' +
   'for full bodies and recipients; call download_attachment directly from ' +

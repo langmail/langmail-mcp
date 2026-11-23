@@ -22,11 +22,13 @@ import {
   type EmailGetDetailParams,
   emailGetDetail,
   type JmapLive,
+  type MailboxRecord,
+  mailboxList,
 } from '../jmap/index.ts'
 import { logger } from '../logger/index.ts'
 import { READ_ONLY } from './annotations.ts'
 import { errorDetail } from './error-detail.ts'
-import { emailTags, formatAddressList, formatAttachmentLine } from './format.ts'
+import { emailFolders, emailTags, formatAddressList, formatAttachmentLine } from './format.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 // Cap the body we pull back so a huge newsletter can't blow the token budget;
@@ -60,6 +62,8 @@ export interface RawMessageParams {
 export interface GetEmailDeps {
   downloadRawMessage: (p: RawMessageParams) => Promise<Uint8Array>
   emailGetDetail: (p: EmailGetDetailParams) => Promise<EmailDetailRecord[]>
+  // The account's mailboxes, which name the folders the message is in.
+  mailboxList: (p: { accountId: string; authorization: string }) => Promise<MailboxRecord[]>
   resolveAccountId: (authorization: string) => Promise<string>
 }
 
@@ -124,13 +128,16 @@ export const getEmail = async (deps: GetEmailDeps, ctx: GetEmailContext): Promis
   const { token, args } = ctx
   const authorization = bearerAuthorization(token)
   const accountId = await deps.resolveAccountId(authorization)
-  const [email] = await deps.emailGetDetail({
-    accountId,
-    apiUrl: '',
-    authorization,
-    ids: [args.id],
-    maxBodyValueBytes: MAX_BODY_VALUE_BYTES,
-  })
+  const [[email], mailboxes] = await Promise.all([
+    deps.emailGetDetail({
+      accountId,
+      apiUrl: '',
+      authorization,
+      ids: [args.id],
+      maxBodyValueBytes: MAX_BODY_VALUE_BYTES,
+    }),
+    deps.mailboxList({ accountId, authorization }),
+  ])
   if (!email) {
     return errorResult(`Email not found: ${args.id}`)
   }
@@ -145,6 +152,10 @@ export const getEmail = async (deps: GetEmailDeps, ctx: GetEmailContext): Promis
     header.push(`Cc: ${cc}`)
   }
   header.push(`Date: ${email.receivedAt ?? ''}`)
+  const folders = emailFolders(email, mailboxes)
+  if (folders.length > 0) {
+    header.push(`Folders: ${folders.join(', ')}`)
+  }
   const tags = emailTags(email)
   if (tags.length > 0) {
     header.push(`Tags: ${tags.join(', ')}`)
@@ -169,6 +180,7 @@ export const makeLiveDeps = (live: JmapLive): GetEmailDeps => ({
     return new Uint8Array(await res.arrayBuffer())
   },
   emailGetDetail: async (p) => emailGetDetail({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
+  mailboxList: async (p) => mailboxList({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   resolveAccountId: live.resolveAccountId,
 })
 
@@ -180,7 +192,7 @@ export const registerGetEmail = (server: McpServer, deps: GetEmailDeps, getToken
     {
       annotations: READ_ONLY,
       description:
-        "Fetch a single message's recipients and body by id. The body is " +
+        "Fetch a single message's recipients, folders and body by id. The body is " +
         'rendered as readable text/markdown regardless of how the sender ' +
         'formatted it (HTML newsletters and invoices come back as clean ' +
         'markdown, not raw HTML). Use the ' +

@@ -45,6 +45,7 @@ export type IdsArgs = z.infer<typeof idsInput>
 export interface PlaceIds {
   archive: string | null
   inbox: string | null
+  junk: string | null
   trash: string | null
 }
 
@@ -54,9 +55,9 @@ export interface FileEmailsDeps {
   // A user-facing folder name → id, through the lookup search_emails uses
   // (place names by role, else exact name). Never creates.
   resolveMailbox: (token: string, name: string) => Promise<MailboxLookup>
-  // Inbox/Archive/Trash by RFC 8621 role from one mailbox listing.
+  // Inbox/Archive/Junk/Trash by RFC 8621 role from one mailbox listing.
   resolvePlaces: (token: string) => Promise<PlaceIds>
-  // Targeted add/drop of named mailboxes or keywords (archive: +Archive −Inbox; mark: ±$seen/$flagged/$label:todo).
+  // Targeted add/drop of named mailboxes or keywords (archive: +Archive −Inbox −Junk −Trash; mark: ±$seen/$flagged/$label:todo).
   updateEmails: (token: string, ids: string[], changes: EmailSetChanges) => Promise<EmailSetManyResult>
 }
 
@@ -77,6 +78,14 @@ export const formatBatchResult = (verb: string, result: EmailSetManyResult, suff
   return textResult(text)
 }
 
+// The role lookup's answer as PlaceIds; a role the account lacks is null.
+export const placeIds = (byRole: Record<string, string | null>): PlaceIds => ({
+  archive: byRole.archive ?? null,
+  inbox: byRole.inbox ?? null,
+  junk: byRole.junk ?? null,
+  trash: byRole.trash ?? null,
+})
+
 // --- live-deps wiring ----------------------------------------------------
 
 export const makeLiveDeps = (live: JmapLive): FileEmailsDeps => {
@@ -93,8 +102,7 @@ export const makeLiveDeps = (live: JmapLive): FileEmailsDeps => {
     resolveMailbox: async (token, name) => lookupMailbox(await ctx(token), name),
     resolvePlaces: async (token) => {
       const c = await ctx(token)
-      const byRole = await mailboxIdsByRoles({ ...c, roles: ['archive', 'inbox', 'trash'] })
-      return { archive: byRole.archive ?? null, inbox: byRole.inbox ?? null, trash: byRole.trash ?? null }
+      return placeIds(await mailboxIdsByRoles({ ...c, roles: ['archive', 'inbox', 'junk', 'trash'] }))
     },
     updateEmails: async (token, ids, changes) => {
       const c = await ctx(token)

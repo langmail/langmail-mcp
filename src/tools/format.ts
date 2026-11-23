@@ -6,6 +6,8 @@ import {
   type EmailBodyPart,
   type EmailRecord,
   LABEL_KEYWORD_PREFIX,
+  type MailboxRecord,
+  PLACES_IN_ORDER,
   TYPE_KEYWORD_PREFIX,
 } from '../jmap/index.ts'
 import { FLAGGED_KEYWORD, SEEN_KEYWORD } from './keywords.ts'
@@ -42,6 +44,35 @@ export const emailTags = (e: EmailRecord): string[] => {
 export const emailFlags = (e: EmailRecord): string[] => {
   const keywords = e.keywords ?? {}
   return [...(keywords[SEEN_KEYWORD] ? [] : ['unread']), ...(keywords[FLAGGED_KEYWORD] ? ['starred'] : [])]
+}
+
+// The folders a message is in, by the names the `mailbox` arguments accept: a
+// mailbox with a place role (Inbox, Archive, Sent, Drafts, Junk, Trash) under
+// its place name whatever the server calls it, any other under its own name.
+// Places come first in a fixed order, then user folders by name, so the same
+// message always reads the same. A mailbox id missing from the listing
+// (deleted between the two reads) is left out rather than shown as an id.
+export const emailFolders = (
+  e: { mailboxIds?: Record<string, boolean> | null },
+  mailboxes: MailboxRecord[]
+): string[] => {
+  const byId = new Map(mailboxes.map((m) => [m.id, m]))
+  const roles = new Set<string>()
+  const others: string[] = []
+  for (const [id, member] of Object.entries(e.mailboxIds ?? {})) {
+    const mailbox = member ? byId.get(id) : undefined
+    if (!mailbox) {
+      continue
+    }
+    const role = mailbox.role?.toLowerCase()
+    if (role && PLACES_IN_ORDER.some((p) => p.role === role)) {
+      roles.add(role)
+    } else {
+      others.push(mailbox.name)
+    }
+  }
+  const places = PLACES_IN_ORDER.filter((p) => roles.has(p.role)).map((p) => p.name)
+  return [...places, ...others.sort((a, b) => a.localeCompare(b))]
 }
 
 // Email/get doesn't guarantee list order; reorder fetched records to match a
@@ -92,7 +123,13 @@ const formatListAttachmentLines = (e: EmailRecord): string[] => {
   return lines
 }
 
-export const formatEmailLine = (idx: number, e: EmailRecord, opts: EmailLineOptions = {}): string => {
+// `mailboxes` is the account's mailbox listing, which names the hit's folders.
+export const formatEmailLine = (
+  idx: number,
+  e: EmailRecord,
+  mailboxes: MailboxRecord[],
+  opts: EmailLineOptions = {}
+): string => {
   const marker = opts.requested ? '  ← requested' : ''
   const lines = [
     `${idx}. ${e.subject ?? '(no subject)'}${marker}`,
@@ -100,6 +137,10 @@ export const formatEmailLine = (idx: number, e: EmailRecord, opts: EmailLineOpti
     `   from: ${formatAddressList(e.from) || '(unknown sender)'}`,
     `   date: ${e.receivedAt ?? ''}`,
   ]
+  const folders = emailFolders(e, mailboxes)
+  if (folders.length > 0) {
+    lines.push(`   folders: ${folders.join(', ')}`)
+  }
   const tags = emailTags(e)
   if (tags.length > 0) {
     lines.push(`   tags: ${tags.join(', ')}`)

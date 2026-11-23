@@ -22,7 +22,7 @@ const CALENDAR_WITHOUT_SHARING =
 const HOSTED_INTRO =
   'Langmail is the user’s own email, calendar and contacts account, plus the mail rules that file their incoming mail. Every tool acts on that one account.'
 const HOSTED_MAIL =
-  '- Mail: search_emails finds messages (read: false finds everything not read yet, in every folder); read one with get_email or a whole conversation with get_thread. preview_email shows one to the user as a rendered document (tickets, invoices).'
+  '- Mail: search_emails finds messages (read: false finds everything not read yet, in every folder; each hit names its folders). A hit in Junk is mail the server filtered as spam: leave it there unless the user says it is not spam. Read one with get_email or a whole conversation with get_thread. preview_email shows one to the user as a rendered document (tickets, invoices).'
 
 // Self-hosted: the user's own Stalwart, no sharing, and no classified types.
 // The to-do flag is the one label there is, so the mail line says where to
@@ -30,7 +30,7 @@ const HOSTED_MAIL =
 const SELF_HOSTED_INTRO =
   'These tools reach the user’s own email, calendar and contacts account on their mail server, plus the mail rules that file their incoming mail. Every tool acts on that one account.'
 const SELF_HOSTED_MAIL =
-  '- Mail: search_emails finds messages (read: false finds everything not read yet, in every folder; todo: true finds the to-do list); read one with get_email or a whole conversation with get_thread. Transactional mail is titled after what it is about (a ticket after its route, an invoice after its vendor), so search for those words with a date window. preview_email shows one to the user as a rendered document (tickets, invoices).'
+  '- Mail: search_emails finds messages (read: false finds everything not read yet, in every folder; todo: true finds the to-do list; each hit names its folders). A hit in Junk is mail the server filtered as spam: leave it there unless the user says it is not spam. Read one with get_email or a whole conversation with get_thread. Transactional mail is titled after what it is about (a ticket after its route, an invoice after its vendor), so search for those words with a date window. preview_email shows one to the user as a rendered document (tickets, invoices).'
 
 const instructions = (intro: string, mailLine: string, calendarLine: string): string =>
   [
@@ -49,7 +49,7 @@ const instructions = (intro: string, mailLine: string, calendarLine: string): st
     '',
     'Side effects to know:',
     '- Reading mail never marks it read. Use mark_emails when the user wants it marked read, flagged as a to-do, or starred.',
-    '- archive_emails takes mail out of the inbox and keeps it; trash_emails moves it to Trash, where it stays recoverable; move_emails files it into a named folder.',
+    '- archive_emails takes mail out of the Inbox, Junk and Trash and keeps it; trash_emails moves it to Trash, where it stays recoverable; move_emails files it into a named folder.',
     '- Creating, updating or deleting an event the user organizes notifies its attendees (create and update accept notify: "none"); move_calendar_events only moves events between calendars and notifies nobody. respond_to_event replies to an invitation the user received.',
     '',
     'Confirm first: delivering mail (reply_to_message, forward_message, send_draft), unsubscribing the user from a mailing list (unsubscribe_from_list) and changing or cancelling a meeting other people are invited to (update_calendar_event, delete_calendar_event) cannot be undone. Confirm with the user who it reaches and what it says (for an unsubscribe: which sender) first, unless they have already asked for exactly that.',

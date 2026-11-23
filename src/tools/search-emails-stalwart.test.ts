@@ -41,6 +41,7 @@ import {
   emailQueryPerTerm,
   emailQueryTotal,
   mailboxIdByNameOrRole,
+  mailboxList,
   makeJmapLive,
 } from '../jmap/index.ts'
 import { type SearchEmailsDeps, searchEmails } from './search-emails.ts'
@@ -288,6 +289,7 @@ live('search_emails filters and paging against live Stalwart', () => {
       emailQuery: (p) => emailQuery({ ...p, apiUrl, authorization }),
       emailQueryPerTerm: (p) => emailQueryPerTerm({ ...p, apiUrl, authorization }),
       emailQueryTotal: (p) => emailQueryTotal({ ...p, apiUrl, authorization }),
+      mailboxList: (p) => mailboxList({ ...p, apiUrl, authorization }),
       resolveAccountId: () => Promise.resolve(accountId),
       resolveMailbox: async (_authorization, name) => ({
         available: [],

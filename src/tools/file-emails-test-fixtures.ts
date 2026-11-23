@@ -20,7 +20,7 @@ export interface FakeFileEmailsDeps extends FileEmailsDeps {
   replacements: RecordedReplacement[]
 }
 
-const PLACES: PlaceIds = { archive: 'mb-archive', inbox: 'mb-inbox', trash: 'mb-trash' }
+const PLACES: PlaceIds = { archive: 'mb-archive', inbox: 'mb-inbox', junk: 'mb-junk', trash: 'mb-trash' }
 
 // The place roles the fixture knows; the live resolver also maps Sent, Drafts,
 // and Junk by role, which fall through to the name lookup here.

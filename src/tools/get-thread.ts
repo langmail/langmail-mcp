@@ -11,6 +11,8 @@ import {
   type EmailRecord,
   emailGet,
   type JmapLive,
+  type MailboxRecord,
+  mailboxList,
   type ThreadEmailIdsParams,
   threadEmailIds,
 } from '../jmap/index.ts'
@@ -28,6 +30,8 @@ export type GetThreadArgs = z.infer<typeof getThreadInput>
 
 export interface GetThreadDeps {
   emailGet: (p: EmailGetParams) => Promise<EmailRecord[]>
+  // The account's mailboxes, which name the folders each message is in.
+  mailboxList: (p: { accountId: string; authorization: string }) => Promise<MailboxRecord[]>
   resolveAccountId: (authorization: string) => Promise<string>
   threadEmailIds: (p: ThreadEmailIdsParams) => Promise<string[]>
 }
@@ -46,11 +50,14 @@ export const getThread = async (deps: GetThreadDeps, ctx: GetThreadContext): Pro
     return errorResult(`Thread not found for message: ${args.id}`)
   }
 
-  const list = await deps.emailGet({ accountId, apiUrl: '', authorization, ids })
+  const [list, mailboxes] = await Promise.all([
+    deps.emailGet({ accountId, apiUrl: '', authorization, ids }),
+    deps.mailboxList({ accountId, authorization }),
+  ])
   // Restore Thread/get's chronological (oldest-first) order and mark the
   // message the caller asked about.
   const ordered = orderById(ids, list)
-  const lines = ordered.map((e, i) => formatEmailLine(i + 1, e, { requested: e.id === args.id }))
+  const lines = ordered.map((e, i) => formatEmailLine(i + 1, e, mailboxes, { requested: e.id === args.id }))
   return textResult(`${ordered.length} message(s) in thread:\n\n${lines.join('\n\n')}`)
 }
 
@@ -58,6 +65,7 @@ export const getThread = async (deps: GetThreadDeps, ctx: GetThreadContext): Pro
 
 export const makeLiveDeps = (live: JmapLive): GetThreadDeps => ({
   emailGet: async (p) => emailGet({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
+  mailboxList: async (p) => mailboxList({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
   resolveAccountId: live.resolveAccountId,
   threadEmailIds: async (p) => threadEmailIds({ ...p, apiUrl: (await live.getSession(p.authorization)).apiUrl }),
 })
@@ -71,7 +79,7 @@ export const registerGetThread = (server: McpServer, deps: GetThreadDeps, getTok
       annotations: READ_ONLY,
       description:
         'List every message in the same thread as a given message id, oldest-first ' +
-        'with id, subject, sender, date, tags, flags (unread, starred; a message without "unread" has been read), a body snippet, and attachment ' +
+        'with id, subject, sender, date, folders (Inbox, Archive, Sent, Junk, Trash, or the name of any other folder), tags, flags (unread, starred; a message without "unread" has been read), a body snippet, and attachment ' +
         'metadata including blobId. Use get_email for full bodies and recipients; ' +
         'call download_attachment directly from a hit when the attachment blobId is present. ' +
         'Listing a thread does not mark its messages read; use mark_emails for that. ' +
