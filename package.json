@@ -47,6 +47,7 @@
     "smoke:agent-forward": "bun run scripts/smoke-agent-forward.ts",
     "smoke:agent-preview": "bun run scripts/smoke-agent-preview.ts",
     "smoke:agent-self-hosted": "bun run scripts/smoke-agent-self-hosted.ts",
+    "smoke:agent-triage-junk": "bun run scripts/smoke-agent-triage-junk.ts",
     "smoke:agent-windows-zone": "bun run scripts/smoke-agent-windows-zone.ts",
     "spec:check": "./spec/check.sh",
     "stalwart:setup": "bun run infra/dev/stalwart/setup.ts",

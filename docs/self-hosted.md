@@ -164,8 +164,9 @@ unsubscribe the sender offers no one-click for, where the answer must not send
 the user to Langmail. The evals that need no hosted-only feature run the same
 way: `smoke-agent-forward`, `smoke-agent-preview`,
 `smoke-agent-apple-mail-draft`, `smoke-agent-contact-role`,
-`smoke-agent-contact-role-record` and `smoke-agent-windows-zone`, which seeds
-its series over CalDAV with the eval library's credentials. The evals that
+`smoke-agent-contact-role-record`, `smoke-agent-triage-junk` and
+`smoke-agent-windows-zone`,
+which seeds its series over CalDAV with the eval library's credentials. The evals that
 need a hosted-only feature test the hosted setup and live in
 `langmail/platform`: the OAuth smoke test, calendar sharing, classified types
 and collected contact history.
