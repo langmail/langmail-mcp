@@ -147,6 +147,7 @@ describe('shareCalendar with an email address', () => {
       expect(body).toContain(step)
     }
     expect(body).toContain('every few hours, sometimes only once a day')
+    expect(body).toContain('You see titles, times, locations, notes and guests')
     expect(body).toContain('do not pass the link on')
     // The email has the steps, so the answer leaves them out.
     expect(answer).not.toContain('How Sam adds it')
@@ -172,7 +173,7 @@ describe('shareCalendar with an email address', () => {
     const body = draft?.text ?? ''
     expect(body).toStartWith('Hallo Alex, hier mein Kalender.\n\nDana Okonjo teilt den Kalender „Family“ mit dir.')
     expect(body).toContain('wann Dana Okonjo beschäftigt ist')
-    for (const step of ['Weitere Kalender → + → Per URL', 'Neues Kalenderabonnement', 'Aus dem Internet abonnieren']) {
+    for (const step of ['Weitere Kalender → + → Per URL', 'Neues Kalenderabonnement', 'Aus dem Web abonnieren']) {
       expect(body).toContain(step)
     }
     expect(rec.submissions).toHaveLength(1)
@@ -277,7 +278,9 @@ describe('shareCalendar with an email address', () => {
       ctx({ calendar: 'Personal', email: SAM, level: 'busy' as const, with: 'Sam' })
     )
     const answer = text(result)
-    expect(result.isError).toBe(true)
+    // The share stands, so the answer is not an error: a retry would only
+    // meet the existing share, which cannot show the link again.
+    expect(result.isError).toBeUndefined()
     expect(answer.split('\n')[0]).toContain(`refused to send the email to ${SAM}`)
     expect(answer.split('\n')[0]).toContain('draft dNew1')
     expect(answer).toContain('send_draft')
@@ -298,6 +301,36 @@ describe('shareCalendar with an email address', () => {
     const first = answer.split('\n')[0] ?? ''
     expect(first).toContain('may already have gone out')
     expect(first).toContain('Do NOT send it again')
+    expect(answer).toMatch(LINK_RE)
+    expect(answer).toContain('How Sam adds it')
+    expect(store.rows).toHaveLength(1)
+  })
+
+  test('after a lost answer, a repeated share and a send of the staged draft are both refused', async () => {
+    const store = fakeShareStore()
+    const rec = { ...recorded(), submitError: new Error('socket hang up') }
+    const send = sendDeps(rec)
+    const args = { calendar: 'Personal', email: SAM, level: 'busy' as const, with: 'Sam' }
+    await shareCalendar(sharingDeps(store), send, ctx(args))
+    store.rows = []
+    const again = await shareCalendar(sharingDeps(store), send, ctx(args))
+    expect(again.isError).toBe(true)
+    expect(text(again)).toContain('nothing was shared or sent again')
+    expect(send.guard.reserve(TEST_PRINCIPAL, { key: 'dNew1', tool: 'send_draft' })).toEqual({ state: 'unknown' })
+    expect(rec.submissions).toHaveLength(1)
+  })
+
+  test('when the email cannot be composed, the share stays and the answer gives the link and the steps', async () => {
+    const store = fakeShareStore()
+    const send = sendDeps()
+    send.drafts.draftCreate = () => Promise.reject(new Error('timeout'))
+    const result = await shareCalendar(
+      sharingDeps(store),
+      send,
+      ctx({ calendar: 'Personal', email: SAM, level: 'full' as const, with: 'Sam' })
+    )
+    const answer = text(result)
+    expect(answer.split('\n')[0]).toContain(`the email to ${SAM} was not sent`)
     expect(answer).toMatch(LINK_RE)
     expect(answer).toContain('How Sam adds it')
     expect(store.rows).toHaveLength(1)

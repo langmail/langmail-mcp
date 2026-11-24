@@ -45,7 +45,7 @@ const TEMPLATES: Record<ShareEmailLanguage, Template> = {
     google: '- Google Kalender (am Computer): Weitere Kalender → + → Per URL, dann den Link einfügen.',
     intro: (sender, calendar) => `${sender} teilt den Kalender „${calendar}“ mit dir.`,
     link: 'Link zum Kalender:',
-    outlook: '- Outlook: Kalender hinzufügen → Aus dem Internet abonnieren, dann den Link einfügen.',
+    outlook: '- Outlook: Kalender hinzufügen → Aus dem Web abonnieren, dann den Link einfügen.',
     refresh:
       'Wie oft der Kalender aktualisiert wird, bestimmt deine Kalender-App: Google Kalender holt Änderungen alle ' +
       'paar Stunden, manchmal nur einmal am Tag; Apple Kalender und Outlook alle paar Stunden oder so oft, wie du ' +

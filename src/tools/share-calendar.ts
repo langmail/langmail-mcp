@@ -63,7 +63,7 @@ const shareCalendarShape = {
     .max(100)
     .describe(
       'Who the calendar is shared with, as the user names them: "Sam", "my partner". A label for the ' +
-        'share, never an address. Sharing the same calendar again with the same label (ignoring case) ' +
+        'share, never an address: for a person named only by address, use their name or the part before @. Sharing the same calendar again with the same label (ignoring case) ' +
         'changes that share’s level.'
     ),
   email: z
@@ -93,7 +93,7 @@ const shareCalendarShape = {
     .enum(['de', 'en'])
     .optional()
     .describe(
-      'Only with `email`: the language of the email, the one the user writes to this person in. Defaults to "en".'
+      'Only with `email`: the language of the email, the one the user writes to this person in; when that is unknown, the one the user is writing to you in. Defaults to "en".'
     ),
 }
 
@@ -148,6 +148,10 @@ const linkAndSteps = (person: string, link: string): string[] => [
 // What a share call reserves while it may send: the calendar and the person as
 // the caller named them, which a retry repeats. Two calls for the same share
 // at once would both find no share yet, so both would create one and email it.
+// The calendar as typed, not as resolved: resolving reads, and the
+// reservation comes before any read. Two concurrent calls that name one
+// calendar differently (its name and its URL) are not caught; a retry repeats
+// the same arguments, so it is.
 const shareSubject = (args: ShareCalendarArgs) => ({
   key: `${args.calendar.trim().toLowerCase()}\n${args.with.trim().toLowerCase()}`,
   tool: TOOL_NAME,
@@ -324,7 +328,7 @@ const emailLink = async (drafts: DraftToolDeps, p: EmailLinkParams): Promise<Too
   const person = args.with
   const address = mailing.to.email
   const notSent = (first: string): ToolResult =>
-    errorResult([first, '', p.shared, '', ...linkAndSteps(person, p.link)].join('\n'))
+    textResult([first, '', p.shared, '', ...linkAndSteps(person, p.link)].join('\n'))
   const sender = setup.identity.address.name || setup.identity.address.email
   const email = shareEmail({
     calendar: p.calendar,
@@ -349,7 +353,7 @@ const emailLink = async (drafts: DraftToolDeps, p: EmailLinkParams): Promise<Too
     logger.error({ ...describeError(error), tool: TOOL_NAME }, 'share email could not be staged')
     const detail = error instanceof Error ? error.message : 'unknown error'
     return notSent(
-      `The calendar was shared, but the email to ${address} was not sent: it could not be composed (${detail}). ` +
+      `The calendar was shared, but the email to ${address} was not sent: it could not be composed (${detail}). If list_drafts shows a draft to ${address} anyway, delete it. ` +
         `Pass the link and the steps below on to ${person}.`
     )
   }
@@ -359,7 +363,7 @@ const emailLink = async (drafts: DraftToolDeps, p: EmailLinkParams): Promise<Too
       `The calendar was shared, but the email to ${address} was not sent: ${reservationRefusal(
         sendDraftSubject(staged.id),
         clash
-      )} The email is staged as draft ${staged.id}.`
+      )} The email is staged as draft ${staged.id}: ask the user before sending it with send_draft.`
     )
   }
   let outcome: string
@@ -423,7 +427,7 @@ export const registerShareCalendar = (
         'you found with search_contacts first). Without `email`, nothing is sent and the result has the link ' +
         'and the steps for the user to pass on: relay all of it, with the note that the person’s app decides ' +
         'how often it refreshes. The link is shown only in this result (and in the email, when sent). Sharing ' +
-        'the same calendar with the same person again changes the level, keeps their link and sends nothing. ' +
+        'the same calendar again with the same `with` label changes the level, keeps their link and sends nothing. ' +
         'To see who can see which calendar use list_calendars; to stop a share use stop_sharing_calendar.',
       inputSchema: z.object(shareCalendarShape),
       title: 'Share calendar',
