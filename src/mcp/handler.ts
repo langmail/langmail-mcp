@@ -238,8 +238,10 @@ export const createMcpServerFactory = (cfg: McpHandlerConfig): ((ctx: ServerCont
       registerShareCalendar(
         server,
         calendarSharingDeps,
+        { drafts: draftDeps, guard: sendGuard },
         () => ctx.token,
-        () => ctx.userId
+        () => ctx.userId,
+        () => ctx.principal
       )
       registerStopSharingCalendar(
         server,

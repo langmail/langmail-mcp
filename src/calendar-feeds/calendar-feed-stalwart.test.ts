@@ -15,7 +15,8 @@ import { randomBytes } from 'node:crypto'
 
 import { type CalDavConfig, discoverAccount, putEvent } from '../caldav/client.ts'
 import { createRoutes } from '../handler.ts'
-import { fakeShareStore } from '../tools/calendar-share-test-fixtures.ts'
+import { fakeShareStore, sendDeps } from '../tools/calendar-share-test-fixtures.ts'
+import { TEST_PRINCIPAL } from '../tools/draft-test-fixtures.ts'
 import { shareCalendar } from '../tools/share-calendar.ts'
 import { stopSharingCalendar } from '../tools/stop-sharing-calendar.ts'
 import { createCalendarFeed, hashSecret } from './feed.ts'
@@ -241,8 +242,9 @@ describe.skipIf(!ADMIN_URL)('calendar share feed against Stalwart', () => {
       publicUrl: PUBLIC,
       shares,
     }
-    const shared = await shareCalendar(deps, {
+    const shared = await shareCalendar(deps, sendDeps(), {
       args: { calendar: 'Personal', level: 'busy', with: 'Sam' },
+      principal: TEST_PRINCIPAL,
       token: 'unused',
       userId,
     })
@@ -251,7 +253,12 @@ describe.skipIf(!ADMIN_URL)('calendar share feed against Stalwart', () => {
     expect(summaries(await fetchFeed(secret))).toContain('Busy')
     expect(await fetchFeed(secret)).not.toContain('Dentist')
 
-    await shareCalendar(deps, { args: { calendar: 'Personal', level: 'full', with: 'sam' }, token: 'unused', userId })
+    await shareCalendar(deps, sendDeps(), {
+      args: { calendar: 'Personal', level: 'full', with: 'sam' },
+      principal: TEST_PRINCIPAL,
+      token: 'unused',
+      userId,
+    })
     expect(summaries(await fetchFeed(secret))).toContain('Dentist')
 
     const stopped = await stopSharingCalendar(deps, { args: { with: 'Sam' }, token: 'unused', userId })
