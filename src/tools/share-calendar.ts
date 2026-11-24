@@ -76,8 +76,9 @@ const shareCalendarShape = {
       'The person’s email address, bare or as "Name <address>" (the form search_contacts gives). With it, ' +
         'the link and how to add it are emailed to this address from the user’s own address, immediately. ' +
         'Pass it only when the user typed this address or confirmed it; one found with search_contacts ' +
-        '(for "my partner") needs the user’s yes first. Leave it out when the user passes the link on ' +
-        'themselves, such as by text message.'
+        '(for "my partner") needs the user’s yes first: ask only whether that address is right, since ' +
+        'sharing with someone means they get the link. Leave it out only when the user says they pass the ' +
+        'link on themselves, such as by text message.'
     ),
   note: z
     .string()
