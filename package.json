@@ -1,6 +1,6 @@
 {
   "name": "langmail-mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Langmail's MCP server for your own Stalwart mailbox: mail, calendar and contacts for an AI agent, over stdio or Streamable HTTP",
   "keywords": [
     "mcp",

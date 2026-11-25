@@ -1,3 +1,10 @@
+## [0.2.1](https://github.com/langmail/langmail-mcp/compare/v0.2.0...v0.2.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **tools:** archive takes mail out of Junk and Trash, and every message names its folders ([#11](https://github.com/langmail/langmail-mcp/issues/11)) ([535e870](https://github.com/langmail/langmail-mcp/commit/535e87095c36c2c4f2aa9563235f76b645b35c9c)), closes [langmail/platform#1403](https://github.com/langmail/platform/issues/1403)
+
 # [0.2.0](https://github.com/langmail/langmail-mcp/compare/v0.1.1...v0.2.0) (2026-11-19)
 
 
