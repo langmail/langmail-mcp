@@ -48,6 +48,7 @@ import {
   identityGet,
   mailboxCreate,
   mailboxIdByRole,
+  mailboxList,
   makeJmapLive,
   threadMessageFind,
 } from '../jmap/index.ts'
@@ -278,6 +279,7 @@ live('composition tools against live Stalwart — draft, edit, send, reply', () 
         return new Uint8Array(await blob.arrayBuffer())
       },
       emailGetDetail: (p) => emailGetDetail({ ...p, apiUrl, authorization }),
+      mailboxList: (p) => mailboxList({ ...p, apiUrl, authorization }),
       resolveAccountId: () => Promise.resolve(accountId),
     }
   })

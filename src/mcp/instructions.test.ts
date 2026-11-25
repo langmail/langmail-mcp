@@ -151,6 +151,12 @@ describe('self-hosted server instructions', () => {
     expect(SELF_HOSTED_INSTRUCTIONS.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS_LENGTH)
   })
 
+  test('tell the agent to leave mail in Junk alone, as the hosted ones do', () => {
+    for (const text of [SELF_HOSTED_INSTRUCTIONS, SERVER_INSTRUCTIONS]) {
+      expect(text).toContain('A hit in Junk is mail the server filtered as spam')
+    }
+  })
+
   // The self-hosted server serves someone's own Stalwart with no Langmail
   // account, so no tool may send the user to Langmail or name it as the actor.
   test('no tool description or input schema names Langmail', async () => {

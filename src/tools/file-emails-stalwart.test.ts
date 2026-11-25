@@ -1,8 +1,8 @@
 // E2E for archive_emails / move_emails / trash_emails / mark_emails against a
 // REAL Stalwart.
 // The unit tests prove each tool builds the right patch against fake deps;
-// this proves the patch does what we claim on the wire: archive leaves Inbox
-// and lands in Archive, move replaces the folder set, trash lands in Trash,
+// this proves the patch does what we claim on the wire: archive leaves Inbox,
+// Junk and Trash and lands in Archive while Sent stays, move replaces the folder set, trash lands in Trash,
 // mark flips $seen without moving the message, and a stale id is reported
 // rather than thrown.
 //
@@ -28,7 +28,7 @@ import {
   makeJmapLive,
 } from '../jmap/index.ts'
 import { archiveEmails } from './archive-emails.ts'
-import { type FileEmailsDeps } from './file-emails-common.ts'
+import { type FileEmailsDeps, placeIds } from './file-emails-common.ts'
 import { lookupMailbox } from './mailbox-lookup.ts'
 import { markEmails } from './mark-emails.ts'
 import { moveEmails } from './move-emails.ts'
@@ -79,13 +79,17 @@ live('filing tools against live Stalwart', () => {
   let archiveId: string
   let projectsId: string
   let trashId: string
+  let junkId: string
+  let sentId: string
   let deps: FileEmailsDeps
 
-  // Import one message straight into the Inbox and return its id.
+  // Import one message straight into the Inbox (or the given mailboxes) and
+  // return its id.
   const importEmail = async (opts: {
     body: string
     from: string
     keywords: Record<string, boolean>
+    mailboxIds?: string[]
     receivedAt: Date
     subject: string
   }): Promise<string> => {
@@ -119,7 +123,7 @@ live('filing tools against live Stalwart', () => {
                 i0: {
                   blobId,
                   keywords: opts.keywords,
-                  mailboxIds: { [inboxId]: true },
+                  mailboxIds: Object.fromEntries((opts.mailboxIds ?? [inboxId]).map((id) => [id, true])),
                   receivedAt: opts.receivedAt.toISOString(),
                 },
               },
@@ -194,10 +198,12 @@ live('filing tools against live Stalwart', () => {
     // so the test does.
     archiveId = await mailboxCreate({ ...call, name: 'Archive', role: 'archive' })
     projectsId = await mailboxCreate({ ...call, name: 'Projects' })
-    const roles = await mailboxIdsByRoles({ ...call, roles: ['trash'] })
-    if (!roles.trash) {
-      throw new Error('no trash mailbox on the throwaway account')
+    const roles = await mailboxIdsByRoles({ ...call, roles: ['junk', 'sent', 'trash'] })
+    if (!(roles.junk && roles.sent && roles.trash)) {
+      throw new Error(`a stock mailbox is missing on the throwaway account: ${JSON.stringify(roles)}`)
     }
+    junkId = roles.junk
+    sentId = roles.sent
     trashId = roles.trash
 
     // Live deps with the Basic credential pinned (the tools wrap tokens as
@@ -205,10 +211,8 @@ live('filing tools against live Stalwart', () => {
     deps = {
       replaceMailboxes: (_token, ids, mailboxId) => emailSetMailboxes({ ...call, ids, mailboxId }),
       resolveMailbox: (_token, name) => lookupMailbox(call, name),
-      resolvePlaces: async () => {
-        const byRole = await mailboxIdsByRoles({ ...call, roles: ['archive', 'inbox', 'trash'] })
-        return { archive: byRole.archive ?? null, inbox: byRole.inbox ?? null, trash: byRole.trash ?? null }
-      },
+      resolvePlaces: async () =>
+        placeIds(await mailboxIdsByRoles({ ...call, roles: ['archive', 'inbox', 'junk', 'trash'] })),
       updateEmails: (_token, ids, changes) => emailSetMany({ ...call, changes, ids }),
     }
   })
@@ -236,6 +240,46 @@ live('filing tools against live Stalwart', () => {
     expect(result.isError).toBeUndefined()
     expect(result.content[0]?.text).toBe('Archived 1 message(s).')
     expect(await mailboxesOf(id)).toEqual([archiveId])
+  })
+
+  test('archive_emails takes a Junk-only message out of Junk: it ends in Archive only', async () => {
+    const id = await importEmail({
+      body: 'You have won a prize.',
+      from: 'Prize Desk <prize@example.net>',
+      keywords: {},
+      mailboxIds: [junkId],
+      receivedAt: new Date(run),
+      subject: 'Claim your prize',
+    })
+    const result = await archiveEmails(deps, { args: { ids: [id] }, token: TOKEN })
+    expect(result.content[0]?.text).toBe('Archived 1 message(s).')
+    expect(await mailboxesOf(id)).toEqual([archiveId])
+  })
+
+  test('archive_emails takes a Trash-only message out of Trash', async () => {
+    const id = await importEmail({
+      body: 'Deleted by mistake.',
+      from: 'Ada Example <ada@example.com>',
+      keywords: {},
+      mailboxIds: [trashId],
+      receivedAt: new Date(run),
+      subject: 'Restore me',
+    })
+    await archiveEmails(deps, { args: { ids: [id] }, token: TOKEN })
+    expect(await mailboxesOf(id)).toEqual([archiveId])
+  })
+
+  test('archive_emails keeps Sent and user folders: Inbox + Sent + Projects → Archive + Sent + Projects', async () => {
+    const id = await importEmail({
+      body: 'My own reply, delivered back to me.',
+      from: `Me <${address}>`,
+      keywords: { $seen: true },
+      mailboxIds: [inboxId, sentId, projectsId],
+      receivedAt: new Date(run),
+      subject: 'Re: kickoff',
+    })
+    await archiveEmails(deps, { args: { ids: [id] }, token: TOKEN })
+    expect(await mailboxesOf(id)).toEqual([archiveId, projectsId, sentId].sort())
   })
 
   test('move_emails replaces the folder set with the destination', async () => {

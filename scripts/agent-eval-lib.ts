@@ -207,6 +207,8 @@ export interface Fixture {
   receivedAt: Date
   subject: string
   typeKeyword?: string
+  // Seeds the message unread; fixtures are read unless they say so.
+  unread?: boolean
 }
 
 const BASE64_LINE_RE = /.{1,76}/gu
@@ -290,7 +292,7 @@ export const seed = async (session: Session, mailboxId: string, to: string, f: F
           i0: {
             blobId,
             keywords: {
-              $seen: true,
+              ...(f.unread ? {} : { $seen: true }),
               ...(f.draft ? { $draft: true } : {}),
               ...(f.typeKeyword ? { [f.typeKeyword]: true } : {}),
             },

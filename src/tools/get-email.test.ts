@@ -19,6 +19,7 @@ import { type ToolResult } from './result.ts'
 const deps = (emails: EmailDetailRecord[], downloadRawMessage?: (p: RawMessageParams) => Promise<Uint8Array>) => ({
   downloadRawMessage: downloadRawMessage ?? (() => Promise.reject(new Error('unexpected raw download'))),
   emailGetDetail: () => Promise.resolve(emails),
+  mailboxList: () => Promise.resolve([]),
   resolveAccountId: () => Promise.resolve('acct'),
 })
 
@@ -50,6 +51,17 @@ describe('getEmailInput schema', () => {
 })
 
 describe('getEmail', () => {
+  test('names the folders the message is in after the date', async () => {
+    const result = await getEmail(
+      {
+        ...deps([{ id: 'e1', mailboxIds: { 'mb-junk': true }, receivedAt: '2026-06-01T00:00:00Z', subject: 'Prize' }]),
+        mailboxList: () => Promise.resolve([{ id: 'mb-junk', name: 'Junk Mail', role: 'junk' }]),
+      },
+      { args: { id: 'e1' }, token: 'tok' }
+    )
+    expect(result.content[0]?.text).toContain('Date: 2026-06-01T00:00:00Z\nFolders: Junk')
+  })
+
   test('renders subject, recipients, tags, and the text body', async () => {
     const result = await getEmail(
       deps([
@@ -577,6 +589,7 @@ describe('registerGetEmail', () => {
     ])
     const withCapture: GetEmailDeps = {
       ...base,
+      mailboxList: () => Promise.resolve([]),
       resolveAccountId: (authorization) => {
         seen.push(authorization)
         return Promise.resolve('acct')
@@ -609,6 +622,7 @@ describe('registerGetEmail', () => {
           details += 1
           return Promise.resolve([])
         },
+        mailboxList: () => Promise.resolve([]),
         resolveAccountId: () => Promise.resolve('acct'),
       },
       () => {
