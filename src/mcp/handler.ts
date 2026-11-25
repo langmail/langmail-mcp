@@ -11,6 +11,7 @@
 
 import { McpServer, WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server'
 
+import packageJson from '../../package.json' with { type: 'json' }
 import { type RecordAgentActivity } from '../activity/record-agent-activity.ts'
 import { type TicketStore } from '../attachments/tickets.ts'
 import { type UploadTicketStore } from '../attachments/upload-tickets.ts'
@@ -201,8 +202,8 @@ export const createMcpServerFactory = (cfg: McpHandlerConfig): ((ctx: ServerCont
     const server = new McpServer(
       {
         name: 'langmail-mcp',
-        // The langmail-mcp package version; scripts/check-package.ts holds the two equal.
-        version: '0.2.0',
+        // semantic-release bumps package.json; the package bundle inlines it.
+        version: packageJson.version,
       },
       { instructions }
     )
