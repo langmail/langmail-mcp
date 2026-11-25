@@ -17,11 +17,12 @@ Langmail's MCP server. One codebase runs two ways:
 
 What `WORKFLOW.md` and the shared skills need to know about this repository.
 
-- **Issues:** GitHub issues here are for reports from outside. Langmail's own
-  planned work on the server, follow-ups included, is filed in
-  `langmail/platform`, and commit messages from before the move cite those
-  issues as `langmail/platform#123`. A defect in Stalwart or another dependency is a file under
-  `docs/upstream/` (Upstream defects).
+- **Issues:** GitHub issues in `langmail/langmail-mcp` are for reports from
+  outside. Langmail's own planned work on the server, follow-ups included,
+  is filed in `langmail/platform`, and commit messages from before the move
+  cite those issues as `langmail/platform#123`. A defect in Stalwart or
+  another dependency is a file under `docs/upstream/` (Upstream defects). An
+  agent run in this repository files its follow-ups here.
 - **Priorities:** No list here: every issue is for now until the maintainer
   says otherwise.
 - **Scope:** No backwards compatibility inside the code: break internal APIs
@@ -37,10 +38,15 @@ What `WORKFLOW.md` and the shared skills need to know about this repository.
 - **Verify:** The checks in `CONTRIBUTING.md` (Checks) that the change
   touches, which CI runs too; a change to a tool's name, description, schema
   or result also needs an agent eval before and after (`docs/evals.md`).
+  A session that cannot run it, such as a routine with no `claude` login,
+  leaves its box unticked and lists `- [ ] before merge: the maintainer runs
+  the agent eval` under the PR's Deploy.
 - **Ship:** A change to a tool's behavior or schema also needs its public
   reference in `langmail/platform` updated once production runs the
-  release, so file a `langmail/platform` issue for it (Adding or changing
-  tools).
+  release (Adding or changing tools). A session that can reach
+  `langmail/platform` files an issue there for it; otherwise the PR's Deploy
+  lists `- [ ] after merge: file the tool reference update in
+  langmail/platform`.
 - **Release:** Release and deploy, below. Nobody acts, except that a breaking
   change publishes a major version, so its PR's Deploy section lists
   `- [ ] before merge: the maintainer approves the major release`.
@@ -134,7 +140,8 @@ call inline.
 
 ## Adding or changing tools
 
-Load the `mcp-tool-design` skill before adding or changing a tool.
+Load the `mcp-tool-design` skill before adding or changing a tool. This
+repository's own conventions for tools are in `docs/tool-conventions.md`.
 
 - One file per tool under `src/tools/`, exporting a `register<Tool>`
   function that `src/mcp/handler.ts` calls with the `McpServer`.

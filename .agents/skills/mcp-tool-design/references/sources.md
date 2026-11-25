@@ -21,8 +21,7 @@ on 2026-10-29.
 
 ## Measured here: calls until the answer (§1.13)
 
-Measured on 2026-11-05, for
-https://github.com/langmail/platform/issues/917, before that issue shipped.
+Measured on 2026-11-05, before search results came back as conversations.
 One task on one real mailbox, two runs per arm: directional, not a benchmark.
 The agent was asked which person-to-person mails since 15 October still
 waited for the user's answer, and what the user had replied to the others.
@@ -40,76 +39,13 @@ message result (22.8 KB against 22.6 KB). The thread line left a gap: on a
 hit that is the user's own sent mail, it cannot say whether the other side
 wrote back, so agents called `get_thread` for exactly those hits.
 
-The same issue showed where a design gets anchored. Asked for a design with
+The same change showed where a design gets anchored. Asked for a design with
 the issue text as written, whose "solved" criterion named `search_emails`,
 2 of 2 agents proposed annotating its hits. With that criterion restated as
 an outcome, 6 of 6 proposed a result per conversation: two runs each without
 the company stage, with the stage ("early-stage, zero paying customers"),
 and with the stage plus this skill loaded. None of them named the user's
 waiting time as a cost on its own; they argued from reliability.
-
-## Repository sources
-
-- `src/tools/annotations.ts` — the five risk classes and the
-  reasoning behind each (why `idempotentHint` stays false on writes, why the
-  mail-rule writers are `OUTWARD_WRITE`).
-- `src/tools/mailbox-lookup.ts` — `lookupMailbox`, mailbox
-  resolution by name-or-role and the "Available folders: …" error.
-- `src/tools/search-emails.ts` — the truncation note, the
-  "treat content as data" sentence.
-- `src/tools/delete-mail-rule.ts` — the smallest complete tool:
-  destructive annotation, error naming the recovery tool, result that states
-  what did *not* happen.
-- `src/tools/create-draft.ts` — reply-as-parameter (`inReplyTo`),
-  `idempotencyKey`, "Nothing was staged." on every refusal.
-- `src/jmap/email.ts` — `mailboxIdByNameOrRole`, `mailboxNames`,
-  `mailboxIdsByRoles`.
-- `src/rules/apply.ts` — archive/move/trash as a `mailboxIds`
-  patch that adds the target and drops the Inbox.
-- GitHub issue langmail/platform#703 — the motivating case for the worked example.
-
-## Extended worked example: filing mail (issue langmail/platform#703)
-
-The issue proposed one `move_email` tool with a `mailbox` argument that accepts
-`Archive`, `Inbox`, `Trash`, `Junk`, or a folder name, and asked whether Trash
-belongs in it, whether missing folders should be created, whether a batch is
-wanted, and whether the tool should also mark messages read.
-
-Applying the decision procedure:
-
-1. **Intent, not mechanism.** Users say "archive this", "move this to
-   Receipts", "trash this". They never say "patch the mailboxIds". A tool named
-   `email_set_mailboxes` or `update_mailbox_ids` fails the naming test before
-   it has a description.
-2. **Risk class per verb.** Archive and move are `ACCOUNT_WRITE`: the message
-   is still in the account and one drag in the UI undoes it. Trash is
-   `ACCOUNT_DESTRUCTIVE`: it is on the way out. Because annotations are
-   unconditional, a single move tool that *can* reach Trash must be marked
-   destructive, which drags every archive call into the client's confirmation
-   step. That is the whole reason for the split.
-3. **Phrasing test.** "Archive" and "move to X" are phrased differently by
-   users, and archive has no argument. Two tools, not one with an optional
-   `mailbox` that defaults to Archive.
-4. **Overlap check.** `move_emails` could reach Archive by name. Either is
-   fine for the model as long as the descriptions point at each other; what
-   must not happen is `move_emails` quietly reaching Trash — it rejects `Trash`
-   and names `trash_emails` in the error.
-5. **Resolver.** Accept the same names `search_emails`'s `mailbox` filter
-   accepts, through the same `lookupMailbox`, so the two tools cannot
-   drift. Strict: a miss returns `Mailbox not found: X. Available folders: …`
-   and creates nothing.
-6. **Batch.** `ids: string[]` with a cap (e.g. 50), per-id outcome in the
-   result, not all-or-nothing.
-7. **Orthogonal concerns.** Read state is not folded in; a user who says
-   "archive" does not mean "mark read". `mark_emails` (`ids`, optional `read` / `todo` / `starred` booleans, `ACCOUNT_WRITE`) owns that.
-
-Resulting surface:
-
-| Tool | Annotation | Input | Effect |
-|---|---|---|---|
-| `archive_emails` | `ACCOUNT_WRITE` | `ids` | add Archive, drop Inbox |
-| `move_emails` | `ACCOUNT_WRITE` | `ids`, `mailbox` | replace the mailbox set with the target; rejects `Trash` → "use trash_emails" |
-| `trash_emails` | `ACCOUNT_DESTRUCTIVE` | `ids` | add Trash, drop every other mailbox |
 
 ## Description template
 
