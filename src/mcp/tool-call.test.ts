@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 
+import { type AccessLevel } from '../access/levels.ts'
 import { createTicketStore } from '../attachments/tickets.ts'
 import { createUploadTicketStore } from '../attachments/upload-tickets.ts'
 import { createImageProxyStore } from '../email-render/image-proxy.ts'
@@ -7,7 +8,7 @@ import { makeJmapLive } from '../jmap/index.ts'
 import { logger } from '../logger/index.ts'
 import { createMcpHandler } from './handler.ts'
 
-const handle = createMcpHandler({
+const config = {
   imageTokens: createImageProxyStore(),
   live: makeJmapLive('https://mail.example.com'),
   publicUrl: 'https://mcp.example.com',
@@ -15,7 +16,8 @@ const handle = createMcpHandler({
   stalwartUrl: 'https://mail.example.com',
   tickets: createTicketStore(),
   uploadTickets: createUploadTicketStore(),
-})
+}
+const handlers = { hosted: createMcpHandler(config), selfHosted: createMcpHandler({ ...config, mode: 'self-hosted' }) }
 
 interface RpcMessage {
   error?: { code: number; message: string }
@@ -25,14 +27,19 @@ interface RpcMessage {
 // One tools/call through the real per-request server and transport, the path
 // an authenticated /mcp request takes. Every call here is answered before a
 // handler would reach Stalwart, so the placeholder URLs are never dialled.
-const callTool = async (name: string, args: Record<string, unknown>): Promise<RpcMessage> => {
-  const res = await handle(
+const callTool = async (
+  name: string,
+  args: Record<string, unknown>,
+  access: AccessLevel = 'everything',
+  mode: keyof typeof handlers = 'hosted'
+): Promise<RpcMessage> => {
+  const res = await handlers[mode](
     new Request('https://mcp.example.com/mcp', {
       body: JSON.stringify({ id: 1, jsonrpc: '2.0', method: 'tools/call', params: { arguments: args, name } }),
       headers: { accept: 'application/json, text/event-stream', 'content-type': 'application/json' },
       method: 'POST',
     }),
-    { exp: 0, principal: 'user@example.com', token: 'token', userId: 'user_123' }
+    { access, exp: 0, principal: 'user@example.com', token: 'token', userId: 'user_123' }
   )
   const text = await res.text()
   const data = text.split('\n').find((line) => line.startsWith('data: '))
@@ -89,6 +96,53 @@ describe('tools/call through the MCP handler', () => {
     const message = await callTool('no_such_tool', {})
 
     expect(message.result).toBeUndefined()
+    expect(message.error?.code).toBe(-32_602)
+  })
+
+  // A client may call a tool from a list it cached at a higher level. The call
+  // is answered in-band, names the level and where to change it, and runs
+  // nothing (the placeholder Stalwart URL would fail any real call).
+  test.each([
+    ['archive_emails', 'read-only', 'Read only'],
+    ['send_draft', 'read-only', 'Read only'],
+    ['send_draft', 'no-send', 'Change, never send'],
+    ['create_mail_rule', 'no-send', 'Change, never send'],
+  ] as const)('%p at %p is refused in-band, naming the level', async (name, access, levelName) => {
+    const warn = spyOn(logger, 'warn').mockImplementation(() => undefined)
+    try {
+      const message = await callTool(name, { ids: ['M1'] }, access)
+
+      expect(message.error).toBeUndefined()
+      expect(message.result?.isError).toBe(true)
+      const text = textOf(message)
+      expect(text).toContain(`${name} is not available`)
+      expect(text).toContain(`${levelName} access`)
+      expect(text).toContain('Nothing was changed or sent.')
+      expect(text).toContain('under Access in Langmail')
+      const fields = warn.mock.calls.map((call) => call[0] as Record<string, unknown>)
+      expect(fields).toContainEqual(expect.objectContaining({ outcome: 'not_in_access_level', tool: name }))
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  test('a self-hosted refusal points at the --access option and does not name Langmail', async () => {
+    const text = textOf(await callTool('archive_emails', { ids: ['M1'] }, 'read-only', 'selfHosted'))
+
+    expect(text).toContain('--access')
+    expect(text).not.toContain('Langmail')
+  })
+
+  test('a tool inside the level still runs', async () => {
+    // The tool's own refusal, not the access refusal.
+    const text = textOf(await callTool('search_emails', {}, 'read-only'))
+
+    expect(text).not.toContain('is not available')
+  })
+
+  test('an unknown tool is still a JSON-RPC error at a lower level', async () => {
+    const message = await callTool('no_such_tool', {}, 'read-only')
+
     expect(message.error?.code).toBe(-32_602)
   })
 })

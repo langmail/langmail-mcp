@@ -9,7 +9,7 @@ import { PassThrough } from 'node:stream'
 import { after, afterEach, before, describe, test } from 'node:test'
 import { setTimeout as sleep } from 'node:timers/promises'
 
-import { SELF_HOSTED_INSTRUCTIONS } from '../mcp/instructions.ts'
+import { buildInstructions } from '../mcp/instructions.ts'
 import {
   type FakeStalwart,
   fakeSessionBody,
@@ -32,6 +32,8 @@ let stalwart: FakeStalwart
 let stalwartUrl: string
 
 // --- outbound recording ----------------------------------------------------
+
+const SELF_HOSTED_INSTRUCTIONS = buildInstructions({ level: 'everything', mode: 'self-hosted', sharing: false })
 
 const originalFetch = globalThis.fetch
 const outbound: string[] = []
