@@ -12,9 +12,6 @@ not, dates or times that land on the wrong day or in the wrong time zone,
 credentials or mail content in log lines or error messages, and tool names,
 inputs or outputs that change without a breaking-change commit.
 
-## Do not report
-
-
 ## Always check
 
 - A change to a tool's shape, result or description is checked with an
