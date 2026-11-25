@@ -58,6 +58,11 @@ describe('access levels', () => {
       'unsubscribe_from_list',
       'share_calendar',
       'respond_to_event',
+      'create_calendar_event',
+      'update_calendar_event',
+      'delete_calendar_event',
+      'create_mail_rule',
+      'update_mail_rule',
     ] as const) {
       expect(TOOL_ACCESS[tool]).toBe('everything')
     }

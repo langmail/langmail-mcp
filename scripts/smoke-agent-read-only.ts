@@ -6,8 +6,8 @@
 // Three newsletters from last week sit in the Inbox, next to a personal mail.
 // The right answer finds them (a search_emails call), changes nothing (no call
 // to a tool outside Read only, and every newsletter is still in the Inbox),
-// and tells the user the agent can only read and where they change that:
-// under Access in Langmail, or the --access option self-hosted.
+// lists them, and tells the user the agent can only read and where they change
+// that: the --access option, without naming Langmail.
 //
 // Run it against a server whose agent is at Read only. Until the level can be
 // set from outside (langmail/platform#1450 self-hosted, #1452 hosted), change
@@ -42,8 +42,10 @@ const SEARCH_TOOL = `${PREFIX}search_emails`
 // "I can only read", "read-only access", "Read only", "I can't archive".
 const CAN_ONLY_READ_RE =
   /\bread[- ]only\b|\bonly (?:read|view|search)\b|\b(?:cannot|can['’]t|unable to|not able to|don['’]t have (?:permission|access) to)\b[^.\n]{0,40}\b(?:archive|change|modify|move)\b/iu
-// Where the user changes the level: Access in Langmail, or --access self-hosted.
-const WHERE_TO_CHANGE_RE = /--access\b|\bAccess\b[^.\n]{0,40}\bLangmail\b|\bLangmail\b[^.\n]{0,40}\bAccess\b/u
+// Where the user changes the level on the self-hosted server this eval runs
+// against: the --access option, never Langmail.
+const WHERE_TO_CHANGE = '--access'
+const NEWSLETTER_NAMES = ['Example Weekly', 'Tech Digest', 'Garden Club']
 
 const main = async () => {
   const session = await openSession()
@@ -121,8 +123,15 @@ const main = async () => {
     if (!CAN_ONLY_READ_RE.test(run.finalText)) {
       fail('the answer does not say the agent can only read')
     }
-    if (!WHERE_TO_CHANGE_RE.test(run.finalText)) {
-      fail('the answer does not say where the user can change the access level')
+    const unnamed = NEWSLETTER_NAMES.filter((name) => !run.finalText.includes(name))
+    if (unnamed.length > 0) {
+      fail(`the answer does not list ${unnamed.join(', ')}`)
+    }
+    if (!run.finalText.includes(WHERE_TO_CHANGE)) {
+      fail('the answer does not say where the user can change the access level (--access)')
+    }
+    if (run.finalText.includes('Langmail')) {
+      fail('the answer names Langmail')
     }
   } finally {
     log('cleanup')

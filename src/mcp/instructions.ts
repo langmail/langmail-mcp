@@ -41,6 +41,8 @@ const SELF_HOSTED_MAIL =
 
 // The lines that name write tools have narrower forms for the lower access
 // levels (src/access/levels.ts), which name only the tools those levels offer.
+const JUNK_ADVICE = ': leave it there unless the user says it is not spam.'
+
 const CONTACTS_READ =
   '- Contacts: search_contacts finds people and their addresses, also by what they are to the user ("my lawyer"); list_upcoming_birthdays for birthdays.'
 const CONTACTS = `${CONTACTS_READ} When the user names or confirms such a role, record it with update_contact.`
@@ -82,9 +84,9 @@ const SAFETY =
 const accessLine = (level: Exclude<AccessLevel, 'everything'>, mode: ServerMode): string => {
   const can =
     level === 'read-only'
-      ? 'This agent can read the account but not change or send anything.'
-      : 'This agent can change the account (file mail, stage drafts, edit calendars and contacts) but not send mail or reach anyone else; the user sends staged drafts themselves.'
-  return `Access: ${ACCESS_LEVEL_NAMES[level]}. ${can} When the user asks for more, say that you cannot and that they can change the access level ${whereToChange(mode)}.`
+      ? 'You can read the account but not change or send anything.'
+      : 'You can file mail, stage drafts, organize calendars (not their events) and edit contacts, but not send mail or reach anyone else; the user sends staged drafts themselves.'
+  return `Access: ${ACCESS_LEVEL_NAMES[level]}. ${can} When the user asks for something else, do the part you can, then say you cannot do the rest and that they can change the access level ${whereToChange(mode)}.`
 }
 
 export interface InstructionsOptions {
@@ -99,6 +101,8 @@ export const buildInstructions = ({ level, mode, sharing }: InstructionsOptions)
   const selfHosted = mode === 'self-hosted'
   const intro = selfHosted ? SELF_HOSTED_INTRO : HOSTED_INTRO
   const mail = selfHosted ? SELF_HOSTED_MAIL : HOSTED_MAIL
+  // Read only cannot move mail out of Junk, so it is not told when to.
+  const mailRead = mail.replace(JUNK_ADVICE, '.')
   const withSharing = sharing && !selfHosted
 
   if (level === 'everything') {
@@ -137,7 +141,7 @@ export const buildInstructions = ({ level, mode, sharing }: InstructionsOptions)
       accessLine(level, mode),
       '',
       'Where to start:',
-      mail,
+      mailRead,
       calendar,
       CONTACTS_READ,
       RULES_READ,
