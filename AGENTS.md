@@ -18,11 +18,11 @@ Langmail's MCP server. One codebase runs two ways:
 What `WORKFLOW.md` and the shared skills need to know about this repository.
 
 - **Issues:** GitHub issues in `langmail/langmail-mcp` are for reports from
-  outside. Langmail's own planned work on the server, follow-ups included,
-  is filed in `langmail/platform`, and commit messages from before the move
-  cite those issues as `langmail/platform#123`. A defect in Stalwart or
-  another dependency is a file under `docs/upstream/` (Upstream defects). An
-  agent run in this repository files its follow-ups here.
+  outside, and an agent run on one of them files its follow-ups here.
+  Langmail's own planned work on the server, and its follow-ups, is filed in
+  `langmail/platform`, and commit messages from before the move cite those
+  issues as `langmail/platform#123`. A defect in Stalwart or another
+  dependency is a file under `docs/upstream/` (Upstream defects).
 - **Priorities:** No list here: every issue is for now until the maintainer
   says otherwise.
 - **Scope:** No backwards compatibility inside the code: break internal APIs
@@ -39,8 +39,8 @@ What `WORKFLOW.md` and the shared skills need to know about this repository.
   touches, which CI runs too; a change to a tool's name, description, schema
   or result also needs an agent eval before and after (`docs/evals.md`).
   A session that cannot run it, such as a routine with no `claude` login,
-  leaves its box unticked and lists `- [ ] before merge: the maintainer runs
-  the agent eval` under the PR's Deploy.
+  lists `- [ ] before merge: the maintainer runs the agent eval` under the
+  PR's Deploy instead.
 - **Ship:** A change to a tool's behavior or schema also needs its public
   reference in `langmail/platform` updated once production runs the
   release (Adding or changing tools). A session that can reach
