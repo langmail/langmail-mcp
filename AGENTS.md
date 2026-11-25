@@ -41,8 +41,8 @@ What `WORKFLOW.md` and the shared skills need to know about this repository.
   reference in `langmail/platform` updated once production runs the
   release, so file a `langmail/platform` issue for it (Adding or changing
   tools).
-- **Release:** Release and deploy, below; nobody acts. A breaking change publishes a
-  major version, so its PR's Deploy section lists
+- **Release:** Release and deploy, below. Nobody acts, except that a breaking
+  change publishes a major version, so its PR's Deploy section lists
   `- [ ] before merge: the maintainer approves the major release`.
 
 ## Workflow
