@@ -9,6 +9,14 @@ This is the server Langmail runs at `mcp.langmail.me`, from the same code. The
 hosted server adds a few features that need Langmail's own services, listed
 under [Hosted and self-hosted](#hosted-and-self-hosted).
 
+## Let your agent decide if this is for you
+
+```sh
+I found this project on GitHub: https://github.com/langmail/langmail-mcp
+Is this something useful for my setup regarding MCP access to emails, calendars, and contacts?
+How does it compare to what we're currently using.
+```
+
 ## What your agent can do with it
 
 - **Mail:** search, read whole conversations, file, mark, archive and trash
