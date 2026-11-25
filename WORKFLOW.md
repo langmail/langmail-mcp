@@ -59,7 +59,7 @@ limitation.
   cannot resolve. Real freemail domains (`gmail.com`) are fine when a test
   needs one, paired with an obviously synthetic local part. This applies to
   a motivating case carried over from a design doc: anonymise it as it
-  enters the repo. The exception is records that are *about* real people by
+  enters the repo. The exception is records that are _about_ real people by
   nature, such as user-research interviews, where the real name is the
   content.
 
@@ -80,12 +80,12 @@ says what they can do or see once it is solved; the Factory section's
 Agents take an issue from filing to a pull request. One label says what it
 waits for:
 
-| Label | Waits for |
-|---|---|
-| none | Triage |
-| `needs-info` | The author, to answer the triage questions |
-| `needs-decision` | A human, to decide what is hard to undo |
-| `ready-for-agent` | An agent, to implement the Agent Brief on the issue |
+| Label             | Waits for                                                          |
+| ----------------- | ------------------------------------------------------------------ |
+| none              | Triage                                                             |
+| `needs-info`      | The author, to answer the triage questions                         |
+| `needs-decision`  | A human, to decide what is hard to undo                            |
+| `ready-for-agent` | An agent, to implement the Agent Brief on the issue                |
 | `ready-for-human` | A human, to do it: external access, a manual step, a judgment call |
 
 `urgent` puts an issue first. An assignee means someone is working on it. The
@@ -264,7 +264,7 @@ In the maintainer's interactive Claude Code CLI (`CLAUDE_CODE_ENTRYPOINT` is
 `cli` and `CLAUDE_CODE_REMOTE` is unset), merge the PR yourself once the
 loop stopped clean: checks pass, expected reviews are complete, and no valid
 blocking finding or user decision remains. Optional nits do not block it,
-and an unticked *before merge* step under `## Deploy` does.
+and an unticked _before merge_ step under `## Deploy` does.
 Recheck that the head you reviewed is still the PR's head and the PR is not
 a draft (the head call in the PR review loop), then squash-merge with
 `gh api -X PUT repos/<owner>/<repo>/pulls/<N>/merge -f merge_method=squash -f sha=<reviewed head sha>`,
