@@ -27,15 +27,11 @@ applies here. Load the skill first.
   mail. Unsent drafts are exempt (`delete_draft`): `update_draft` already
   destroys the revisions it replaces, and a trashed draft would still read as
   pending.
-- `idempotentHint` stays `false` on every write; a description says "safe to
-  re-run" instead.
 - `src/mcp/handler.ts` wires up every tool. Read it for the overlap check: a
   grep for `registerTool(` misses the tools that register through a
   `TOOL_NAME` constant.
-- A rename, removal or split also updates `src/mcp/instructions.ts`, the only
-  place with a test that catches a stale tool name, and the tool's public
-  reference page in `langmail/platform` (Adding or changing tools, in
-  `AGENTS.md`).
+- A rename, removal or split also updates the tool's public reference page
+  in `langmail/platform` (Adding or changing tools, in `AGENTS.md`).
 - Agent evals: `docs/evals.md`. The calls-until-the-answer measurements behind
   the skill's principle 13 were taken for
   https://github.com/langmail/platform/issues/917.
