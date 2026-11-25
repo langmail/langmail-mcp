@@ -25,4 +25,4 @@ inputs or outputs that change without a breaking-change commit.
 - Self-hosted code calls no Bun API at runtime, and self-hosted tool texts do
   not name Langmail
 - Log lines don't include email addresses, user IDs or message content
-- No real people or companies in code, tests, fixtures or docs (`AGENTS.md`)
+- No real people or companies in code, tests, fixtures or docs (`WORKFLOW.md`, Rules)

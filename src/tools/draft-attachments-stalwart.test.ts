@@ -74,7 +74,7 @@ const TOKEN = 'e2e-basic-auth' // ignored — the deps pin Basic auth (see heade
 
 const USING = ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail']
 
-// An invented correspondent at a reserved domain (AGENTS.md: no real people,
+// An invented correspondent at a reserved domain (WORKFLOW.md: no real people,
 // and the address provably cannot resolve).
 const CORRESPONDENT = 'Nadia Bram <nadia@example.org>'
 
