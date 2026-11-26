@@ -53,6 +53,14 @@ What `WORKFLOW.md` and the shared skills need to know about this repository.
 - **Release:** Release and deploy, below. Nobody acts, except that a breaking
   change publishes a major version, so its PR's Deploy section lists
   `- [ ] before merge: the maintainer approves the major release`.
+- **Dependencies:** `bun outdated` lists outdated packages, and Tech stack
+  lists the stack. Dependabot opens the minor and patch updates weekly as one
+  group; majors are the `upgrade-dependency` skill's. The bun runtime moves
+  in one PR: `BUN_VERSION` in `.github/workflows/release.yml` and
+  `FROM oven/bun:` in `Dockerfile`. Holds are the files in `docs/upstream/`,
+  except `stalwart/`. Left out: Stalwart (`infra/dev/stalwart`), which moves
+  with `langmail/platform`'s Stalwart, and GitHub Actions unless their
+  Dependabot PR is red.
 
 ## Workflow
 
