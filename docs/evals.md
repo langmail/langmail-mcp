@@ -22,6 +22,9 @@ STALWART_URL=http://127.0.0.1:9090 STALWART_USERNAME=<user> STALWART_PASSWORD=<a
   MCP_AUTH_TOKEN=eval-secret bun run start:self-hosted --transport http --port 8095
 ```
 
+An eval for an access level says in its header which `--access` to add
+(`smoke-agent-read-only`, `smoke-agent-no-send`).
+
 Run an eval in another:
 
 ```sh

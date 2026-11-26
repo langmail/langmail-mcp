@@ -76,6 +76,7 @@ list.
 | `STALWART_USERNAME` | `--username` | required | The account name to sign in with |
 | `STALWART_PASSWORD` | none | required | An app password for that account |
 | `STALWART_EMAIL` | `--email` | the login Stalwart reports | The address to send mail as; needed when the login is not an email address and the account has several sending identities |
+| `MCP_ACCESS` | `--access` | `everything` | What the agent may do: `read-only`, `no-send` or `everything` ([Access levels](#access-levels)) |
 | `MCP_TRANSPORT` | `--transport` | `stdio` | `stdio` or `http` (Streamable HTTP) |
 | `MCP_HOST` | `--host` | `127.0.0.1` | Where the HTTP listener binds |
 | `MCP_PORT` | `--port` | `8080` for http; a free port for stdio | The HTTP listener's port |
@@ -100,9 +101,37 @@ hosted settings (`BETTERSTACK_SOURCE_TOKEN`, `BETTERSTACK_ENDPOINT`,
 repository, a development run also writes `logs/mcp-self-hosted.log`; the
 package writes no log file.
 
+## Access levels
+
+`--access` (or `MCP_ACCESS`) sets what the agent may do through the server:
+`read-only` (Read only), `no-send` (Change, never send) or `everything`
+(Everything, the default). Langmail is to offer the same levels per agent
+(<https://github.com/langmail/platform/issues/1452>), and the one table of which tools each level allows is
+[Access levels](reference/mcp/overview.mdx#access-levels) in the tool
+reference; `src/access/levels.test.ts` fails when it disagrees with
+`src/access/levels.ts`. The startup log names the level. A tool outside the
+level is left out of the tool list, and a call to it from a client's cached
+list is refused, saying nothing was changed or sent and that the level is set
+with `--access`.
+
+What differs from Langmail:
+
+- `share_calendar` and `stop_sharing_calendar` exist only on Langmail
+  ([What the mode leaves out](#what-the-mode-leaves-out)), so Everything
+  self-hosted has no calendar sharing.
+- The level is fixed for the life of the process and holds for every client:
+  changing it needs a restart with the new value. On Langmail the user is to
+  change it per agent under Access.
+- The level limits what the agent does through `langmail-mcp` only. The
+  Stalwart app password keeps full rights on the account, so whatever else
+  holds it can still do everything.
+
+The decisions and the options rejected are on
+<https://github.com/langmail/platform/issues/1447>.
+
 ## Startup checks
 
-- A missing or invalid setting: one message on stderr names each, with its
+- A missing or invalid setting, an unknown `--access` value included: one message on stderr names each, with its
   flag and what to put there, and the process exits with code 2.
 - The server asks Stalwart for the JMAP session once. Rejected credentials
   stop the start with the URL and username Stalwart rejected. So does a
@@ -164,8 +193,8 @@ unsubscribe the sender offers no one-click for, where the answer must not send
 the user to Langmail. The evals that need no hosted-only feature run the same
 way: `smoke-agent-forward`, `smoke-agent-preview`,
 `smoke-agent-apple-mail-draft`, `smoke-agent-contact-role`,
-`smoke-agent-contact-role-record`, `smoke-agent-triage-junk`, `smoke-agent-read-only` (with the level
-forced to Read only, as its header says) and
+`smoke-agent-contact-role-record`, `smoke-agent-triage-junk`, `smoke-agent-read-only` (at `--access
+read-only`), `smoke-agent-no-send` (at `--access no-send`) and
 `smoke-agent-windows-zone`,
 which seeds its series over CalDAV with the eval library's credentials. The evals that
 need a hosted-only feature test the hosted setup and live in

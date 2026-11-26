@@ -9,10 +9,8 @@
 // lists them, and tells the user the agent can only read and where they change
 // that: the --access option, without naming Langmail.
 //
-// Run it against a server whose agent is at Read only. Until the level can be
-// set from outside (langmail/platform#1450 self-hosted, #1452 hosted), change
-// `access: 'everything'` to `'read-only'` in src/self-hosted/main.ts locally,
-// start the self-hosted server and run (agent-eval-lib.ts names the variables):
+// Run it against the self-hosted server started with `--access read-only`
+// (docs/evals.md has the setup; agent-eval-lib.ts names the variables):
 //
 //   AGENT_EVAL_MCP_URL=http://127.0.0.1:8095/mcp AGENT_EVAL_MCP_TOKEN=… \
 //   AGENT_EVAL_STALWART_USERNAME=… AGENT_EVAL_STALWART_PASSWORD=… \

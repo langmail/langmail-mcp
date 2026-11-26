@@ -48,6 +48,7 @@
     "smoke:agent-contact-role": "bun run scripts/smoke-agent-contact-role.ts",
     "smoke:agent-contact-role-record": "bun run scripts/smoke-agent-contact-role-record.ts",
     "smoke:agent-forward": "bun run scripts/smoke-agent-forward.ts",
+    "smoke:agent-no-send": "bun run scripts/smoke-agent-no-send.ts",
     "smoke:agent-preview": "bun run scripts/smoke-agent-preview.ts",
     "smoke:agent-read-only": "bun run scripts/smoke-agent-read-only.ts",
     "smoke:agent-self-hosted": "bun run scripts/smoke-agent-self-hosted.ts",

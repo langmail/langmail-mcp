@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import { McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
@@ -8,7 +9,15 @@ import { createImageProxyStore } from '../email-render/image-proxy.ts'
 import { makeJmapLive } from '../jmap/index.ts'
 import { createMcpServerFactory } from '../mcp/handler.ts'
 import { fakeShareStore } from '../tools/calendar-share-test-fixtures.ts'
-import { ACCESS_LEVELS, type AccessLevel, allows, reachesOthers, TOOL_ACCESS, type ToolName } from './levels.ts'
+import {
+  ACCESS_LEVEL_NAMES,
+  ACCESS_LEVELS,
+  type AccessLevel,
+  allows,
+  reachesOthers,
+  TOOL_ACCESS,
+  type ToolName,
+} from './levels.ts'
 import { restrictToAccess } from './restrict.ts'
 
 const build = createMcpServerFactory({
@@ -85,5 +94,30 @@ describe('access levels', () => {
     expect(() =>
       server.registerTool('frobnicate_emails', { inputSchema: z.object({}) }, () => ({ content: [] }))
     ).toThrow('has no access level')
+  })
+})
+
+// The one documented table of what each level allows: Access levels in the
+// tool reference, which docs/self-hosted.md and Langmail's docs link to.
+const OVERVIEW = new URL('../../docs/reference/mcp/overview.mdx', import.meta.url)
+const TOOL_CODE_RE = /`([a-z_]+)`/gu
+
+describe('the documented access levels', () => {
+  const section = readFileSync(OVERVIEW, 'utf8').split('## Access levels')[1]?.split('\n## ')[0] ?? ''
+  const rows = section
+    .split('\n')
+    .filter((line) => line.startsWith('| ') && !line.startsWith('| Level'))
+    .map((line) => line.split('|').map((cell) => cell.trim()))
+
+  test('the table has one row per level, in order, with its --access value', () => {
+    expect(rows.map((cells) => cells[1])).toEqual(ACCESS_LEVELS.map((level) => ACCESS_LEVEL_NAMES[level]))
+    expect(rows.map((cells) => cells[2])).toEqual(ACCESS_LEVELS.map((level) => `\`${level}\``))
+  })
+
+  test('each row lists exactly the tools its level adds', () => {
+    for (const [index, level] of ACCESS_LEVELS.entries()) {
+      const listed = [...(rows[index]?.[4] ?? '').matchAll(TOOL_CODE_RE)].map((match) => match[1]).sort()
+      expect(listed).toEqual(toolNames.filter((tool) => TOOL_ACCESS[tool] === level).sort())
+    }
   })
 })

@@ -143,20 +143,20 @@ The table describes the tools at Everything. At Change, never send, the event an
 
 ## Access levels
 
-The server offers an agent the tools of one access level. Each level adds tools to the one below it:
+The server offers an agent the tools of one access level. Each level adds tools to the one below it. A [self-hosted server](https://github.com/langmail/langmail-mcp/blob/main/docs/self-hosted.md#access-levels) takes the same levels from its `--access` setting:
 
-| Level | What the agent can do | Tools added |
-|---|---|---|
-| Read only | Read the account: search, read, preview, download, list | every read-only tool in the table above |
-| Change, never send | Also change the account itself, without reaching anyone else: file and flag mail, stage drafts, upload attachments, manage calendars, personal events, contacts and mail rules, end a calendar share | `archive_emails`, `move_emails`, `trash_emails`, `mark_emails`, `upload_attachments`, `create_draft`, `update_draft`, `delete_draft`, `create_mail_rule`, `update_mail_rule`, `delete_mail_rule`, `create_calendar`, `update_calendar`, `stop_sharing_calendar`, `create_calendar_event`, `update_calendar_event`, `delete_calendar_event`, `move_calendar_events`, `create_contact`, `update_contact`, `merge_contacts`, `delete_contact` |
-| Everything | Also reach other people: send mail, unsubscribe, share a calendar, invite and answer invitations, forward mail by rule | `send_draft`, `reply_to_message`, `forward_message`, `unsubscribe_from_list`, `share_calendar`, `respond_to_event` |
+| Level | `--access` | What the agent can do | Tools added |
+|---|---|---|---|
+| Read only | `read-only` | Read the account: search, read, preview, download, list | `search_emails`, `get_email`, `get_thread`, `preview_email`, `download_attachment`, `download_email`, `list_drafts`, `get_draft`, `list_mail_rules`, `preview_mail_rule`, `search_contacts`, `list_upcoming_birthdays`, `list_calendars`, `list_calendar_events` |
+| Change, never send | `no-send` | Also change the account itself, without reaching anyone else: file and flag mail, stage drafts, upload attachments, manage calendars, personal events, contacts and mail rules, end a calendar share | `archive_emails`, `move_emails`, `trash_emails`, `mark_emails`, `upload_attachments`, `create_draft`, `update_draft`, `delete_draft`, `create_mail_rule`, `update_mail_rule`, `delete_mail_rule`, `create_calendar`, `update_calendar`, `stop_sharing_calendar`, `create_calendar_event`, `update_calendar_event`, `delete_calendar_event`, `move_calendar_events`, `create_contact`, `update_contact`, `merge_contacts`, `delete_contact` |
+| Everything | `everything` | Also reach other people: send mail, unsubscribe, share a calendar, invite and answer invitations, forward mail by rule | `send_draft`, `reply_to_message`, `forward_message`, `unsubscribe_from_list`, `share_calendar`, `respond_to_event` |
 
 At Change, never send, five tools have a narrowed form that handles only what stays in the account. The update and delete tools refuse a stored event or rule that already reaches other people:
 
 - [`create_calendar_event`](/reference/mcp/create-calendar-event#at-change-never-send), [`update_calendar_event`](/reference/mcp/update-calendar-event#at-change-never-send) and [`delete_calendar_event`](/reference/mcp/delete-calendar-event#at-change-never-send) handle personal events, ones nobody else is on, and notify nobody.
 - [`create_mail_rule`](/reference/mcp/create-mail-rule#at-change-never-send) and [`update_mail_rule`](/reference/mcp/update-mail-rule#at-change-never-send) offer every action except `forward`.
 
-The level limits only what the agent does through this server. Today every agent connects to `mcp.langmail.me` at Everything.
+The level limits only what the agent does through this server. The credential the server acts with keeps full rights on the mail server: the OAuth bearer token on `mcp.langmail.me`, the app password on a self-hosted server. Today every agent connects to `mcp.langmail.me` at Everything.
 
 ## Result conventions
 

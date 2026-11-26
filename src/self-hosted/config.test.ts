@@ -24,6 +24,7 @@ describe('parseSelfHostedConfig', () => {
     const r = parseSelfHostedConfig([], STALWART)
     assert.deepEqual(r, {
       config: {
+        access: 'everything',
         host: '127.0.0.1',
         password: 'app-pass',
         stalwartUrl: 'https://mail.example.com',
@@ -83,6 +84,24 @@ describe('parseSelfHostedConfig', () => {
     }
   })
 
+  test('MCP_ACCESS (--access) sets the access level, the flag winning', () => {
+    for (const access of ['read-only', 'no-send', 'everything']) {
+      assertIncludes(parseSelfHostedConfig(['--access', access], STALWART), { access })
+    }
+    assertIncludes(parseSelfHostedConfig([], { ...STALWART, MCP_ACCESS: 'read-only' }), { access: 'read-only' })
+    assertIncludes(parseSelfHostedConfig(['--access', 'no-send'], { ...STALWART, MCP_ACCESS: 'read-only' }), {
+      access: 'no-send',
+    })
+  })
+
+  test('an unknown access level stops startup and lists the valid ones', () => {
+    const r = parseSelfHostedConfig(['--access', 'read'], STALWART)
+    const message = r.ok ? '' : r.message
+    assert.ok(
+      message.includes('MCP_ACCESS (--access): "read" is not an access level; use read-only, no-send, everything')
+    )
+  })
+
   test('rejects an unknown transport, a bad port and a non-http URL', () => {
     assert.equal(parseSelfHostedConfig(['--port', '0x50'], STALWART).ok, false)
     const r = parseSelfHostedConfig(['--transport', 'sse', '--port', 'eighty'], {
@@ -107,6 +126,7 @@ describe('--help', () => {
       'STALWART_USERNAME (--username)',
       'STALWART_PASSWORD:',
       'STALWART_EMAIL (--email)',
+      'MCP_ACCESS (--access)',
       'MCP_TRANSPORT (--transport)',
       'MCP_HOST (--host)',
       'MCP_PORT (--port)',
