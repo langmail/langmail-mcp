@@ -24,7 +24,10 @@ What `WORKFLOW.md` and the shared skills need to know about this repository.
   issues as `langmail/platform#123`. A defect in Stalwart or another
   dependency is a file under `docs/upstream/` (Upstream defects).
 - **Priorities:** No list here: every issue is for now until the maintainer
-  says otherwise.
+  says otherwise. Triage closes a `needs-info` issue as not planned once it
+  has had no reply for 14 days since it started waiting (the latest of the
+  comment that asked, the label, a reopening and the latest reply), unless
+  it is `urgent` or assigned.
 - **Scope:** No backwards compatibility inside the code: break internal APIs
   freely and delete old code. A change that breaks what an MCP client or a
   package user sees is a breaking change and gets a `BREAKING CHANGE:`
