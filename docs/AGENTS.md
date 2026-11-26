@@ -38,6 +38,11 @@ together.
   (`reference/mcp/overview.mdx`: the index, the tool count, the annotation
   table and the access levels) in the same pull request. Self-hosted
   differences belong in `self-hosted.md`.
+- Langmail's homepage links to three headings of `reference/mcp/overview.mdx`
+  (`Email — read`, `Contacts — read-write`, `Calendar — read-write`), from
+  `apps/homepage/src/data/products.ts` in `langmail/platform`. Renaming one of
+  them needs a pull request there that updates the link, or the link stops
+  landing on its section without a 404.
 - Every page needs `title` and `description` frontmatter (`description`
   feeds SEO and the generated `llms.txt`).
 - Voice: calm, exact, no hype; second person; sentence-case headings.
@@ -45,8 +50,7 @@ together.
 
 ## Deployment
 
-The Mintlify GitHub App deploys the site on push. Until it is pointed at this
-folder (https://github.com/langmail/platform/issues/1470), docs.langmail.me
-still serves from `apps/docs` in `langmail/platform`. Account setup, the
-app's installation and the `docs.langmail.me` DNS are one-time manual steps
+The Mintlify GitHub App deploys the site from this folder on push. Account
+setup, the app's installation and the `docs.langmail.me` DNS (in
+`infra/tofu/docs.tf` in `langmail/platform`) are one-time manual steps
 outside this repository.
