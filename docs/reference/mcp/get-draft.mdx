@@ -13,7 +13,7 @@ For messages that have already been sent or received, use [`get_email`](/referen
 ## Parameters
 
 <ParamField body="draftId" type="string" required>
-  The draft id, as returned by [`create_draft`](/reference/mcp/create-draft), [`update_draft`](/reference/mcp/update-draft) or [`list_drafts`](/reference/mcp/list-drafts) — edits do not change it — or a message id from [`search_emails`](/reference/mcp/search-emails) with `mailbox: "Drafts"`. A message id stops working once the draft is edited; use the draftId the edit returns from then on.
+  The draft id, as returned by [`create_draft`](/reference/mcp/create-draft), [`update_draft`](/reference/mcp/update-draft) or [`list_drafts`](/reference/mcp/list-drafts) (edits keep the id), or a message id from [`search_emails`](/reference/mcp/search-emails) with `mailbox: "Drafts"`. A message id stops working once the draft is edited; use the draftId the edit returns from then on.
 </ParamField>
 
 ## Example

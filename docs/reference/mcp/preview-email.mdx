@@ -50,8 +50,8 @@ Preview of "Your tickets for Friday" prepared (html rendering). On clients with 
 
 - The message's own HTML, with its layout, tables and inline styles. Scripts, event handlers, forms and embedded frames are removed.
 - Images never load from the sender's servers. Inline images (`cid:`) load through a short-lived capability URL under `https://mcp.langmail.me/attachments/…`, and remote images through Langmail's image proxy, so the sender cannot track when the message was opened. Embedded raster images (`data:image/…`) show as they are. Any other image is dropped.
-- A message without an HTML part, or with one larger than 2 MB, is shown as its plain text, or `(no text body)` when it has none.
+- A message is shown as its plain text, or `(no text body)` when it has none, when it has no HTML part, when the HTML part is over 2,000,000 bytes or of unknown size, or when the HTML part cannot be downloaded or is empty.
 
 ## Errors
 
-- `Email not found: <id>`: no message with that id in the user's mailbox.
+- `Email not found: <id>` — no message with that id in the user's mailbox.

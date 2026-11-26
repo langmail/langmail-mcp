@@ -25,24 +25,24 @@ By default this deletes the **entire** event — for a recurring event, every oc
 ## Example
 
 ```json Call
-{ "uid": "9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d@langmail.me" }
+{ "uid": "9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d" }
 ```
 
 ```text Result
-Event 9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d@langmail.me deleted; Stalwart will send cancellations to any attendees.
+Event 9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d deleted; Stalwart will send cancellations to any attendees.
 ```
 
 ### Cancel one occurrence
 
 ```json Call
 {
-  "uid": "9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d@langmail.me",
+  "uid": "9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d",
   "recurrenceId": "2026-06-23T10:00:00Z"
 }
 ```
 
 ```text Result
-Occurrence of 9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d@langmail.me on 2026-06-23T10:00:00Z cancelled; attendees are notified so just that instance is removed from their calendars. The rest of the series is unchanged.
+Occurrence of 9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d on 2026-06-23T10:00:00Z cancelled; attendees are notified so just that instance is removed from their calendars. The rest of the series is unchanged.
 ```
 
 ## At Change, never send
@@ -52,7 +52,7 @@ At the access level Change, never send, the server registers a narrowed form of 
 - It takes the same parameters. This tool has no attendee fields and no `notify` at any level.
 - It refuses an event that has anyone other than the user on it, including an invitation the user received: `Event <uid> has attendees: it is a meeting with other people or an invitation the user received. Nothing was changed. Meetings with other people need Everything access, which the user can set under Access in Langmail.` A self-hosted server says `by restarting the server with the --access option` in place of `under Access in Langmail`.
 - A deletion reports `Event <uid> deleted; nobody else was on it.`, and a single occurrence `Occurrence of <uid> on <recurrenceId> removed; nobody else is on this event. The rest of the series is unchanged.`
-- It is annotated as an account-only write: `readOnlyHint: false`, `destructiveHint: true`, `idempotentHint: false`, `openWorldHint: false`.
+- It is annotated as account-only and destructive: `readOnlyHint: false`, `destructiveHint: true`, `idempotentHint: false`, `openWorldHint: false`.
 
 ## Errors
 

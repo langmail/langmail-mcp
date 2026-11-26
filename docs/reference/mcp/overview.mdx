@@ -1,7 +1,7 @@
 ---
 title: "MCP server overview"
 sidebarTitle: "Overview"
-description: "The Langmail MCP server at mcp.langmail.me — transport, authorization, result conventions, risk annotations, access levels, and the index of all 42 tools."
+description: "The Langmail MCP server at mcp.langmail.me — transport, authorization, result conventions, risk annotations, access levels and the index of all 42 tools."
 keywords: ["mcp", "tools", "reference", "streamable http", "overview"]
 ---
 
@@ -135,7 +135,7 @@ Every tool carries MCP [tool annotations](https://modelcontextprotocol.io/), so 
 
 Staging is deliberately distinguishable from sending on the hints alone: `create_draft` is an account write, `send_draft` is outward destructive. `update_draft` counts as destructive because editing a draft replaces the message — the previous version does not come back, and the draft being edited need not be one the agent wrote.
 
-The mail-rule writers count as outward, not account-local, because a rule may carry a `forward` action — which redirects a copy of every matching future message to an arbitrary address. A static annotation has to describe what a tool *can* do, and quietly installing a persistent forwarding rule is the furthest outward reach on this surface. `share_calendar` counts as outward because it hands a live view of a calendar to whoever holds the link, and as destructive because, given an address, it emails that link at once, which cannot be taken back.
+The mail-rule writers count as outward, not account-local, because a rule may carry a `forward` action — which redirects a copy of every matching future message to an arbitrary address. A static annotation has to describe what a tool *can* do, and installing a persistent forwarding rule is the furthest outward reach on this surface. `share_calendar` counts as outward because it hands a live view of a calendar to whoever holds the link, and as destructive because, given an address, it emails that link at once, which cannot be taken back.
 
 The table describes the tools at Everything. At Change, never send, the event and mail-rule writers are account-only and carry `openWorldHint: false` ([Access levels](#access-levels)).
 
@@ -151,7 +151,7 @@ The server offers an agent the tools of one access level. Each level adds tools 
 | Change, never send | Also change the account itself, without reaching anyone else: file and flag mail, stage drafts, upload attachments, manage calendars, personal events, contacts and mail rules, end a calendar share | `archive_emails`, `move_emails`, `trash_emails`, `mark_emails`, `upload_attachments`, `create_draft`, `update_draft`, `delete_draft`, `create_mail_rule`, `update_mail_rule`, `delete_mail_rule`, `create_calendar`, `update_calendar`, `stop_sharing_calendar`, `create_calendar_event`, `update_calendar_event`, `delete_calendar_event`, `move_calendar_events`, `create_contact`, `update_contact`, `merge_contacts`, `delete_contact` |
 | Everything | Also reach other people: send mail, unsubscribe, share a calendar, invite and answer invitations, forward mail by rule | `send_draft`, `reply_to_message`, `forward_message`, `unsubscribe_from_list`, `share_calendar`, `respond_to_event` |
 
-At Change, never send, five tools have a narrowed form. They handle only what stays in the account, and they refuse a stored event or rule that already reaches other people:
+At Change, never send, five tools have a narrowed form that handles only what stays in the account. The update and delete tools refuse a stored event or rule that already reaches other people:
 
 - [`create_calendar_event`](/reference/mcp/create-calendar-event#at-change-never-send), [`update_calendar_event`](/reference/mcp/update-calendar-event#at-change-never-send) and [`delete_calendar_event`](/reference/mcp/delete-calendar-event#at-change-never-send) handle personal events, ones nobody else is on, and notify nobody.
 - [`create_mail_rule`](/reference/mcp/create-mail-rule#at-change-never-send) and [`update_mail_rule`](/reference/mcp/update-mail-rule#at-change-never-send) offer every action except `forward`.
@@ -160,7 +160,7 @@ The level limits only what the agent does through this server. Today every agent
 
 ## Result conventions
 
-- Every tool returns a single plain-text content block, formatted for direct agent consumption — compact and stable, no JSON envelope to parse.
+- Every tool returns a single plain-text content block, formatted for direct agent consumption — compact and stable, no JSON envelope to parse. The one addition is `preview_email`, which also returns `structuredContent` with the message's metadata and carries the rendered body in `_meta` for the client.
 - List results are numbered and include the identifiers (`id`, `uid`, `calendarUrl`) that downstream tools take.
 - Search and thread results include snippets but omit full message bodies by design; full bodies come from `get_email` only.
 - Failures return a text block with the MCP `isError` flag and a one-line reason, for example `Email not found: M123` or `Calendar not found: <url>`. Where a failure could be mistaken for a partial send, the reason says so explicitly — `Nothing was sent.`

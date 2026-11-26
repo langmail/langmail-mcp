@@ -11,7 +11,7 @@ Validates a proposed rule and reports its blast radius **without creating a rule
 Takes the same rule spec as [`create_mail_rule`](/reference/mcp/create-mail-rule), so a rule that previews cleanly can be passed on unchanged.
 
 <ParamField body="name" type="string">
-  Optional human-readable rule name, up to 200 characters, e.g. `"Archive GitHub Notifications"`.
+  Optional human-readable rule name, 1–200 characters, e.g. `"Archive GitHub Notifications"`.
 </ParamField>
 
 <ParamField body="match" type="string" default="all">
@@ -19,7 +19,7 @@ Takes the same rule spec as [`create_mail_rule`](/reference/mcp/create-mail-rule
 </ParamField>
 
 <ParamField body="conditions" type="object" required>
-  When the rule would fire. Give at least one; matching is case-insensitive substring matching. Each text condition is 1 to 200 characters.
+  When the rule would fire. Give at least one; matching is case-insensitive substring matching. Each text condition is 1–200 characters.
 
   - `from` — sender contains this (an address, a domain like `github.com`, or a display name)
   - `to` — a To/Cc recipient contains this (address or name)
@@ -29,7 +29,7 @@ Takes the same rule spec as [`create_mail_rule`](/reference/mcp/create-mail-rule
 </ParamField>
 
 <ParamField body="actions" type="array" required>
-  One to 10 actions, applied in order. Each is `{ "type": … }` plus its fields:
+  1–10 actions, applied in order. Each is `{ "type": … }` plus its fields:
 
   - `archive` — move out of the Inbox into the Archive folder
   - `move` / `copy` — `mailbox`: target folder, 1 to 100 characters (created if missing)

@@ -19,7 +19,7 @@ The sender and the reply threading are not editable here. Changing who a message
 ## Parameters
 
 <ParamField body="draftId" type="string" required>
-  The draft to edit, as returned by [`create_draft`](/reference/mcp/create-draft), an earlier `update_draft` or [`list_drafts`](/reference/mcp/list-drafts) — edits do not change it — or a message id from [`search_emails`](/reference/mcp/search-emails) with `mailbox: "Drafts"`. Editing a draft found that way returns the draftId to use from then on.
+  The draft to edit, as returned by [`create_draft`](/reference/mcp/create-draft), an earlier `update_draft` or [`list_drafts`](/reference/mcp/list-drafts) (edits keep the id), or a message id from [`search_emails`](/reference/mcp/search-emails) with `mailbox: "Drafts"`. Editing a draft found that way returns the draftId to use from then on.
 </ParamField>
 
 <ParamField body="to" type="string[]">

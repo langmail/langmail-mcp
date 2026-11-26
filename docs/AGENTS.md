@@ -45,6 +45,8 @@ together.
 
 ## Deployment
 
-The Mintlify GitHub App deploys the site from `main` on push. Account setup,
-the app's installation and the `docs.langmail.me` DNS are one-time manual
-steps outside this repository.
+The Mintlify GitHub App deploys the site on push. Until it is pointed at this
+folder (https://github.com/langmail/platform/issues/1470), docs.langmail.me
+still serves from `apps/docs` in `langmail/platform`. Account setup, the
+app's installation and the `docs.langmail.me` DNS are one-time manual steps
+outside this repository.
