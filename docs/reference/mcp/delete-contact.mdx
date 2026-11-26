@@ -1,0 +1,45 @@
+---
+title: "delete_contact"
+description: "Delete a contact by id, removing it from the account and from every device syncing the address book."
+keywords: ["delete_contact", "contacts", "address book", "remove contact", "mcp tool"]
+---
+
+Removes a contact card from the account. Find the id with [`search_contacts`](/reference/mcp/search-contacts).
+
+To drop one field rather than the whole record — a stale phone number, an old address — use [`update_contact`](/reference/mcp/update-contact) with the matching `removed…` list instead. To get rid of a duplicate of someone who has another contact, use [`merge_contacts`](/reference/mcp/merge-contacts): deleting a derived duplicate only lasts until their next message.
+
+<Warning>
+The deletion syncs to every device connected over CardDAV. This tool is annotated destructive; clients that gate on `destructiveHint` will ask before calling it.
+</Warning>
+
+## Parameters
+
+<ParamField body="contactId" type="string" required>
+  The contact id, as printed by `search_contacts` under `contact_id`.
+</ParamField>
+
+## What deletion means depends on where the record came from
+
+Deletion is not one thing on this surface, and the result says which one happened:
+
+| `source` | After deletion |
+|---|---|
+| `authored` | Gone. Nothing brings it back; recreate it with `create_contact` if that was a mistake. |
+| `imported` | Gone from the account address book. It does not come back on its own. |
+| `derived` | Gone **until the next sighting**. The record was built from mail headers and calendar attendees, and collection has no memory of a deletion — the next message or invitation from this person recreates the card. |
+
+Deleting a derived contact is therefore a reset, not a suppression. Permanently suppressing a person would need a block list, which this surface does not have yet; the tool says so in the result rather than refusing the call.
+
+## Example
+
+```json Call
+{ "contactId": "c17" }
+```
+
+```text Result
+Deleted the contact "Robin Fairweather" (contact_id: c17). It was authored here, so nothing will bring it back — recreate it with create_contact if that was a mistake. The deletion syncs to every device connected over CardDAV.
+```
+
+## Errors
+
+- `No contact with id <id>.` — the id does not resolve. Find it with `search_contacts`.

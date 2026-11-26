@@ -1,0 +1,58 @@
+---
+title: "ChatGPT"
+description: "Add the Langmail MCP server to ChatGPT as a custom connector in developer mode."
+keywords: ["chatgpt", "openai", "connector", "developer mode", "mcp", "connect"]
+---
+
+ChatGPT supports custom MCP connectors through developer mode.
+
+## Prerequisites
+
+- A Langmail account — [sign up at app.langmail.me](https://app.langmail.me/signup).
+- A ChatGPT plan with custom connectors (Plus, Pro, Business, Enterprise, or Edu). On Business and Enterprise workspaces, an admin must allow custom connectors first.
+
+## Connect
+
+<Steps>
+  <Step title="Enable developer mode">
+    Open **Settings → Apps & Connectors** (on some plans **Connectors**), scroll to **Advanced settings**, and turn on **Developer mode**.
+  </Step>
+  <Step title="Add the Langmail connector">
+    Back in **Apps & Connectors**, choose **Create** and fill in:
+
+    - **Name**: `Langmail`
+    - **MCP server URL**: `https://mcp.langmail.me/mcp`
+    - **Authentication**: OAuth
+  </Step>
+  <Step title="Authorize access">
+    ChatGPT starts the authorization flow: sign in to your Langmail account and approve the consent screen.
+  </Step>
+  <Step title="Enable it in a chat">
+    In a conversation, open the tools menu, choose **Developer mode**, and enable **Langmail**. The connector stays active for the rest of the conversation.
+  </Step>
+</Steps>
+
+## Test it
+
+Ask ChatGPT:
+
+```text Prompt
+Search my Langmail inbox for the 5 most recent messages.
+```
+
+It calls `search_emails` with `{ "mailbox": "Inbox", "limit": 5 }` and answers from the result.
+
+## Ending access
+
+Remove the connector from **Settings → Apps & Connectors**. Removing it discards its tokens; without the refresh token, access lapses when the current access token expires.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Search and triage email" icon="magnifying-glass" href="/guides/search-and-triage">
+    Real prompts and the tool calls they produce.
+  </Card>
+  <Card title="How authorization works" icon="key" href="/connect/authorization">
+    What happens between "add connector" and "connected".
+  </Card>
+</CardGroup>

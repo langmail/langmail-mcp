@@ -1,0 +1,70 @@
+---
+title: "VS Code"
+description: "Add the Langmail MCP server to VS Code and use it from Copilot agent mode."
+keywords: ["vs code", "copilot", "agent mode", "mcp.json", "mcp", "connect"]
+---
+
+VS Code supports remote MCP servers in Copilot agent mode (VS Code 1.102 or later).
+
+## Prerequisites
+
+- A Langmail account — [sign up at app.langmail.me](https://app.langmail.me/signup).
+- [VS Code](https://code.visualstudio.com) with GitHub Copilot.
+
+## Connect
+
+<Steps>
+  <Step title="Add the server">
+    From the terminal:
+
+    ```sh
+    code --add-mcp '{"name":"langmail","type":"http","url":"https://mcp.langmail.me/mcp"}'
+    ```
+
+    Or add it to `.vscode/mcp.json` in your workspace:
+
+    ```json .vscode/mcp.json
+    {
+      "servers": {
+        "langmail": {
+          "type": "http",
+          "url": "https://mcp.langmail.me/mcp"
+        }
+      }
+    }
+    ```
+
+    You can also run **MCP: Add Server** from the command palette and choose **HTTP**.
+  </Step>
+  <Step title="Authorize access">
+    Start the server from the play button in `mcp.json` or via **MCP: List Servers**. VS Code prompts you to authorize — the browser opens for Langmail sign-in and consent.
+  </Step>
+  <Step title="Verify">
+    Open the Chat view in agent mode and check the tools menu: the Langmail tools are listed under **langmail**.
+  </Step>
+</Steps>
+
+## Test it
+
+Ask the agent:
+
+```text Prompt
+List my Langmail calendars.
+```
+
+It calls `list_calendars` and returns your calendars with their CalDAV URLs.
+
+## Ending access
+
+Remove the `langmail` entry from `mcp.json` (or via **MCP: List Servers**). Removing it discards its tokens; without the refresh token, access lapses when the current access token expires.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Search and triage email" icon="magnifying-glass" href="/guides/search-and-triage">
+    Real prompts and the tool calls they produce.
+  </Card>
+  <Card title="How authorization works" icon="key" href="/connect/authorization">
+    What happens between "add server" and "connected".
+  </Card>
+</CardGroup>

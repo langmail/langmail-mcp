@@ -1,0 +1,100 @@
+---
+title: "update_draft"
+description: "Edit a staged draft. The draft id stays the same; on a reply, the quoted original stays below the new text."
+keywords: ["update_draft", "draft", "edit", "mcp tool"]
+---
+
+Edits a draft that has not been sent. Omitted fields keep their staged values; a supplied field replaces it; an empty recipient array clears that field.
+
+**The draft id stays the same, and the previous version is not recoverable.** JMAP makes a message's content immutable — only its keywords and folder membership can be patched — so editing a draft means writing a new message and retiring the old one. The new message is written first and the old one retired only once it exists, so a rejected write (a quota error, say) leaves the original intact rather than losing the content. Each new message carries the draft's id as a keyword, so the `draftId` [`create_draft`](/reference/mcp/create-draft) returned keeps naming the current version in [`get_draft`](/reference/mcp/get-draft), `update_draft`, and [`send_draft`](/reference/mcp/send-draft). A draft staged by another mail client gets a draft id on its first edit; the result says so, and that id is the one to use from then on.
+
+**On a reply, `text` and `html` are the new part only.** The original is quoted below them again, the way [`create_draft`](/reference/mcp/create-draft) quotes it, when the staged draft carried the quote. `quoteOriginal: false` drops the quote; `quoteOriginal: true` adds one to a bare reply. An edit that rewrites the body and also adds a recipient the original was never addressed to leaves the quote off unless `quoteOriginal: true` is passed, as `create_draft` does — re-attaching it would forward the original to them. An edit that only changes the recipients leaves the body, quote included, as it is; when it adds such a recipient and the original can still be read, the result says the quoted text now goes to them, and either dropping that recipient again or passing your own wording again — without the quoted part — with `quoteOriginal: false` takes it off. The same note comes back when the text an edit passes already carries the quote.
+
+Labels the user put on the draft are carried onto the replacement, so an edit does not quietly untag it.
+
+**On a forward staged with `forwardOf`, `text` and `html` are the note only.** The `Forwarded message` block and the original body are rebuilt below the new note, in both parts, so either one alone is enough, and the original's files stay attached. `quoteOriginal` is refused on a forward. If the original can no longer be read, the note goes out as given and the result says so.
+
+The sender and the reply threading are not editable here. Changing who a message is from, or which conversation it belongs to, makes it a different message — stage that with [`create_draft`](/reference/mcp/create-draft).
+
+## Parameters
+
+<ParamField body="draftId" type="string" required>
+  The draft to edit, as returned by [`create_draft`](/reference/mcp/create-draft), an earlier `update_draft` or [`list_drafts`](/reference/mcp/list-drafts) (edits keep the id), or a message id from [`search_emails`](/reference/mcp/search-emails) with `mailbox: "Drafts"`. Editing a draft found that way returns the draftId to use from then on.
+</ParamField>
+
+<ParamField body="to" type="string[]">
+  Replace the recipients. Omit to keep them; pass `[]` to clear them. Bare address or `Name <address>` form, up to 50 entries.
+</ParamField>
+
+<ParamField body="cc" type="string[]">
+  Replace the carbon-copy recipients, same rules as `to`.
+</ParamField>
+
+<ParamField body="bcc" type="string[]">
+  Replace the blind-copy recipients, same rules as `to`.
+</ParamField>
+
+<ParamField body="subject" type="string">
+  Replace the subject, up to 500 characters. Omit to keep it.
+</ParamField>
+
+<ParamField body="text" type="string">
+  Replace the plain-text body, up to 100,000 characters. Omit to keep it. On a reply, write only the new part — the quoted original is re-attached below it, so do not paste the quote from [`get_draft`](/reference/mcp/get-draft) back in. If the draft has **both** a plain-text and an HTML body, pass both or neither — see the note below.
+</ParamField>
+
+<ParamField body="html" type="string">
+  Replace the HTML body, up to 100,000 characters. Omit to keep it. On a reply, write only the new part, as for `text`. If the draft has both bodies, pass both or neither.
+</ParamField>
+
+<ParamField body="quoteOriginal" type="boolean">
+  On a reply, together with `text` or `html`: whether the original is quoted below the new text. Defaults to what the staged draft does. `false` drops the quote, `true` adds it to a bare reply or quotes it for a new recipient. When the same call adds a recipient the original was not addressed to, the default leaves the quote off. Passing it without `text` or `html` is refused, and so is passing it on a forward.
+</ParamField>
+
+<ParamField body="attachments" type="object[]">
+  Replace the attached files, at most 10, same entry shape as [`create_draft`](/reference/mcp/create-draft): `blobId` (including one from [`upload_attachments`](/reference/mcp/upload-attachments)) **or** base64 `content`. `filename` is **required** with `blobId` — a blob carries no name of its own, and the one [`get_draft`](/reference/mcp/get-draft) lists beside it is the one to pass — and optional but worth setting with `content`. `mimeType` is guessed from the filename's extension when omitted.
+
+  Omit to keep the files already attached — the rewrite re-references their blobs, so this transfers nothing. Pass `[]` to remove them all. Supplying a list replaces the whole thing, so to *add* a file, read the existing `blobId`s back with [`get_draft`](/reference/mcp/get-draft) and list them alongside the new one.
+</ParamField>
+
+## Example
+
+```json Call
+{ "draftId": "6b1f3c2e-8d4a-4e7b-9a10-2c5d7e9f0a11", "subject": "Re: Quarterly numbers (final)" }
+```
+
+```text Result
+Draft updated and still unsent — the draftId is unchanged.
+draftId: 6b1f3c2e-8d4a-4e7b-9a10-2c5d7e9f0a11
+from: Dana Okonjo <dana@langmail.me>
+to: Nadia Bram <nadia@example.org>
+subject: Re: Quarterly numbers (final)
+threadId: T77
+threading: In-Reply-To/References set — this message continues an existing conversation
+body (text): Confirmed — the Q2 figures are final.
+```
+
+## Notes
+
+- **A draft with both bodies must have both replaced at once.** Replacing only `text` on a text+HTML draft is refused, because mail clients render the HTML alternative: the tool would report the corrected body and deliver the old one.
+- A draft whose body is too large to read back in full is refused rather than edited, since re-staging a truncated read would silently amputate the message.
+- **Attached files survive an edit that never mentions them.** The rewrite re-references the blobs the draft already points at, so keeping them transfers nothing. Supplying `attachments` replaces the whole list instead — to add one more file, read the existing `blobId`s back with [`get_draft`](/reference/mcp/get-draft) and list them alongside the new one; an empty array removes them all.
+- **An attachment that cannot be re-referenced blocks the edit.** A stored part with no `blobId` could not be carried onto the replacement, and the original is destroyed on the way, so the loss would be permanent and reported as a success. Such a draft is left unchanged — pass `attachments` explicitly to say what the edited draft should carry, or ask the user to edit it in their mail app.
+- An edit that changes nothing is refused too: replacing a draft for no change would run the rewrite's failure modes for no benefit.
+- **A quote in another client's format goes with the old wording.** Only the quote Langmail writes is recognised; the result carries a note when a different one was replaced, and `quoteOriginal: true` quotes the original anew.
+- If the message a reply answers can no longer be found, the edit goes ahead without the quote and the result says so.
+
+## Errors
+
+- `Draft not found: <id>. Find it with list_drafts.`
+- `<id> is not a draft — it has already been sent or received, and cannot be edited.`
+- `Draft <id> is in Trash — it was discarded, so it was left unchanged.` — followed by how to move it back to Drafts with [`move_emails`](/reference/mcp/move-emails).
+- `Not a valid email address: …` — a replacement recipient was malformed. Nothing was changed.
+- `This draft has both a plain-text and an HTML body, and only \`text\` was given…` — pass both, or stage a fresh draft.
+- `Draft <id> has a body too large to edit without risking losing part of it…`
+- `Draft <id> carries a file this tool cannot carry across an edit (<names>), so it was left unchanged.`
+- `The server refused this draft (invalidProperties).` — most often an attachment `blobId` the server does not recognise; blobIds belong to one account and do not outlive the message they were read from. The draft is left unchanged.
+- `No changes were given, so draft <id> was left exactly as it is.`
+- `` `quoteOriginal` only applies together with a new `text` or `html` `` — nothing was changed.
+- `` `quoteOriginal` applies to replies, and draft <id> is a forward… `` — the draft was left unchanged.
+- `This account has no Drafts folder, so the draft cannot be re-staged.`
+- `Note: the pre-edit copy (message <id>) could not be removed and is still in Drafts…` — appended to a successful result when the replacement landed but the superseded message couldn't be retired. The draft id is taken off the old copy, so it names only the edited version, which is what `send_draft` with the draft id sends; the old copy should be removed with [`trash_emails`](/reference/mcp/trash-emails) once the user agrees.

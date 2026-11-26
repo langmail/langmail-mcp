@@ -1,0 +1,92 @@
+---
+title: "create_mail_rule"
+description: "Turn a natural-language request like “whenever I receive an invoice from Stripe, move it to Finance” into a persistent server-side mail rule — optionally applying it to existing mail."
+keywords: ["create_mail_rule", "mail rules", "filters", "sieve", "automation", "backfill", "mcp tool"]
+---
+
+Creates a **persistent mail rule** that automatically applies to **future incoming messages** until it is disabled or deleted. The agent distills the user's natural language ("automatically archive all GitHub notifications") into structured conditions and actions; the rule then runs server-side inside the mail server on every delivery — no client or agent needs to be online.
+
+Rules are stored as a single managed [Sieve](/reference/protocols) script named `langmail-rules` in the user's own account, so they are visible over ManageSieve and leave with the user — no proprietary rule store.
+
+<Note>
+This tool is for **ongoing behavior** ("automatically…", "from now on…", "whenever I receive…"). Future automation and historical cleanup are separate concerns: by default existing mail is untouched, and the optional `existingMail` policy is what applies the same actions to mail already in the mailbox. Clients should ask for clarification when a request like "archive all GitHub notifications" could equally mean either.
+</Note>
+
+## Parameters
+
+<ParamField body="name" type="string">
+  Optional human-readable rule name, 1–200 characters, e.g. `"Archive GitHub Notifications"`.
+</ParamField>
+
+<ParamField body="match" type="string" default="all">
+  How multiple conditions combine: `"all"` (every condition must match) or `"any"` (one is enough).
+</ParamField>
+
+<ParamField body="conditions" type="object" required>
+  When the rule fires — at least one of (all matching is case-insensitive substring matching; each text field takes 1–200 characters):
+
+  - `from` — sender contains this (address, domain, or display name)
+  - `to` — a To/Cc recipient contains this
+  - `subject` — subject line contains this
+  - `bodyContains` — message body contains this text
+  - `hasAttachment` — `true` to match only messages that appear to carry an attachment (heuristic; some signed or inline-attachment messages may not match)
+</ParamField>
+
+<ParamField body="actions" type="array" required>
+  1–10 actions, applied in order. Each is `{ "type": … }` plus its fields:
+
+  - `archive` — move out of the Inbox into the Archive folder
+  - `move` / `copy` — `mailbox`: target folder, 1–100 characters (created if missing)
+  - `addTag` / `removeTag` — `tag`: tag name, 1–50 characters, slugified (`"Acme Corp"` → `acme-corp`)
+  - `markRead` / `markUnread` / `flag`
+  - `delete` — move to Trash (not a permanent erase)
+  - `forward` — `to`: address that receives a copy; the original still lands in the mailbox
+  - `stopProcessing` — stop evaluating later rules for this message
+</ParamField>
+
+<ParamField body="existingMail" type="object">
+  Optional policy for also applying the actions to mail already in the mailbox:
+
+  - `mode` — `"none"` (default), `"messages"` (each matching message), or `"conversations"` (every message in a matching thread)
+  - `scope` — `"inbox"` (default) or `"all"` mail
+  - `confirmLargeApply` — required `true` when more than 200 existing messages match; call [`preview_mail_rule`](/reference/mcp/preview-mail-rule) first and confirm the count with the user
+
+  `forward` and `stopProcessing` are future-mail-only and are skipped (and reported) in a backfill.
+</ParamField>
+
+## Example
+
+```json Call
+{
+  "name": "Finance invoices",
+  "conditions": { "from": "stripe.com", "subject": "invoice" },
+  "actions": [{ "type": "move", "mailbox": "Finance" }],
+  "existingMail": { "mode": "messages", "scope": "inbox" }
+}
+```
+
+```text Result
+Mail rule created — it now applies to future incoming messages:
+
+1. [rule-3f8a1c2e] Finance invoices
+   when ALL of: sender contains "stripe.com" AND subject contains "invoice"
+   then: move to "Finance"
+   created: 2026-07-22T12:00:00.000Z
+
+Applied to existing mail: 12 messages matched, 12 modified.
+
+Change it later with update_mail_rule("rule-3f8a1c2e") or remove it with delete_mail_rule("rule-3f8a1c2e").
+```
+
+## At Change, never send
+
+At the access level Change, never send, the server registers a narrowed form of this tool:
+
+- `actions` offers every action except `forward`. A call with a `forward` action fails input validation and creates nothing.
+- It is annotated as an account-only write: `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: false`.
+
+## Notes
+
+- Rules are independent: every enabled rule whose conditions match a message runs, unless an earlier rule used `stopProcessing`.
+- A denied large backfill creates **nothing** — the rule is only saved once the call goes through.
+- A forwarding rule always keeps the local copy (`redirect :copy` in Sieve) — a rule can never make mail silently vanish.

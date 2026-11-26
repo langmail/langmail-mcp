@@ -1,0 +1,56 @@
+---
+title: "move_calendar_events"
+description: "Move events to another of the authenticated user's calendars without changing them or notifying anyone."
+keywords: ["move_calendar_events", "move event to calendar", "change calendar", "sort events", "caldav", "mcp tool"]
+---
+
+Moves events onto another of the user's calendars — for example into a new "Private" calendar — without changing their time or content. Each event is re-filed on the server with a CalDAV `MOVE`, not copied and deleted, so it keeps its `uid`, attendees, reminders, every changed occurrence of a recurring series, and any property another calendar app wrote. Attendees are not notified.
+
+To change *when* an event happens ("move the meeting to 3 pm"), use [`update_calendar_event`](/reference/mcp/update-calendar-event). The destination calendar must already exist; create one with [`create_calendar`](/reference/mcp/create-calendar).
+
+## Parameters
+
+<ParamField body="uids" type="string[]" required>
+  The events to move, by the `uid` [`list_calendar_events`](/reference/mcp/list-calendar-events) shows. 1–50 per call; duplicates are collapsed. Each uid is 1–255 characters and cannot contain `/` or `\`. A recurring event moves as a whole series, including its changed occurrences — a single occurrence cannot be filed on a different calendar from the rest of its series.
+</ParamField>
+
+<ParamField body="calendar" type="string" required>
+  The destination: its name, matched ignoring case, or its CalDAV URL from [`list_calendars`](/reference/mcp/list-calendars). Calendars are never created here.
+</ParamField>
+
+<ParamField body="fromCalendar" type="string">
+  Only needed when a `uid` exists in more than one calendar: the calendar to move it out of, by name or URL. Omit it otherwise; each event is found wherever it is.
+</ParamField>
+
+## Example
+
+```json Call
+{ "uids": ["5a90c1e2-…", "d128f7b0-…", "4f5f09aa-…"], "calendar": "Private" }
+```
+
+```text Result
+Moved 1 event(s) to Private.
+Already in Private (1): d128f7b0-….
+Not moved (1): 4f5f09aa-… (ambiguous: in "Business" <https://…/default/> and "Shared Team" <https://…/team/>; pass one as fromCalendar).
+```
+
+The call is safe to re-run: an event already in the destination counts as done.
+
+## Outcomes per event
+
+- **Moved** — the event now lives in the destination calendar.
+- **Already in** — nothing to do: the event is in the destination and in no other calendar.
+- **Not moved** — nothing changed for that event. The reason is one of `notFound`, `ambiguous` (pass `fromCalendar`), `duplicate` or `uidConflict` (the destination already holds a separate copy with the same `uid`; the reason names both calendars' URLs so the unwanted copy can be deleted with `delete_calendar_event`, and warns when the event has attendees, because deleting either copy sends them a cancellation), `nameConflict`, `forbidden`, or `failed`.
+- **Outcome unknown** — the connection broke off before the server answered, so the event may have moved. Re-run with those uids.
+- **Not attempted** — the call ran out of time. Re-run with those uids.
+
+The result is an error only when no event moved, none was already in place, and no outcome is unknown.
+
+## Errors
+
+Every error leaves every event where it was.
+
+- `No calendar named "…"` or `No calendar at …` — the destination (or `fromCalendar`) matched nothing. The error lists every calendar with its URL.
+- `2 calendars are named "…"` — the name is ambiguous. Pass the URL of the one you mean.
+- `fromCalendar and calendar both name "…"` — pass the calendar the events are in now, or omit `fromCalendar`.
+- `Could not read "…"` — the destination calendar could not be listed. Re-run later.

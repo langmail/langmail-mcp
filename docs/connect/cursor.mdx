@@ -1,0 +1,65 @@
+---
+title: "Cursor"
+description: "Add the Langmail MCP server to Cursor with one click or one mcp.json entry."
+keywords: ["cursor", "mcp.json", "one-click install", "mcp", "connect"]
+---
+
+Cursor supports one-click installs for remote MCP servers, or you can add one config entry by hand.
+
+## Prerequisites
+
+- A Langmail account — [sign up at app.langmail.me](https://app.langmail.me/signup).
+- [Cursor](https://cursor.com) installed.
+
+## Connect
+
+<Steps>
+  <Step title="Add the server">
+    One click:
+
+    [**Install in Cursor**](cursor://anysphere.cursor-deeplink/mcp/install?name=langmail&config=eyJ1cmwiOiJodHRwczovL21jcC5sYW5nbWFpbC5tZS9tY3AifQ==)
+
+    Or add it to `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` in a project:
+
+    ```json mcp.json
+    {
+      "mcpServers": {
+        "langmail": {
+          "url": "https://mcp.langmail.me/mcp"
+        }
+      }
+    }
+    ```
+  </Step>
+  <Step title="Authorize access">
+    Open **Cursor Settings → MCP**, find **langmail**, and complete the login prompt — the browser opens for Langmail sign-in and consent.
+  </Step>
+  <Step title="Verify">
+    Once authorized, the Langmail tools show up in the agent's tool list under **langmail**.
+  </Step>
+</Steps>
+
+## Test it
+
+Ask the agent:
+
+```text Prompt
+List my Langmail calendars.
+```
+
+It calls `list_calendars` and returns your calendars with their CalDAV URLs.
+
+## Ending access
+
+Remove the `langmail` entry from `mcp.json` (or delete the server in **Cursor Settings → MCP**). Removing it discards its tokens; without the refresh token, access lapses when the current access token expires.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Search and triage email" icon="magnifying-glass" href="/guides/search-and-triage">
+    Real prompts and the tool calls they produce.
+  </Card>
+  <Card title="How authorization works" icon="key" href="/connect/authorization">
+    What happens between "add server" and "connected".
+  </Card>
+</CardGroup>

@@ -44,12 +44,8 @@ What `WORKFLOW.md` and the shared skills need to know about this repository.
   A session that cannot run it, such as a routine with no `claude` login,
   lists `- [ ] before merge: the maintainer runs the agent eval` under the
   PR's Deploy instead.
-- **Ship:** A change to a tool's behavior or schema also needs its public
-  reference in `langmail/platform` updated once production runs the
-  release (Adding or changing tools). A session that can reach
-  `langmail/platform` files an issue there for it; otherwise the PR's Deploy
-  lists `- [ ] after merge: file the tool reference update in
-  langmail/platform`.
+- **Ship:** A change to a tool's behavior or schema also updates its public
+  reference page in the same PR (Adding or changing tools).
 - **Release:** Release and deploy, below. Nobody acts, except that a breaking
   change publishes a major version, so its PR's Deploy section lists
   `- [ ] before merge: the maintainer approves the major release`.
@@ -156,9 +152,10 @@ repository's own conventions for tools are in `docs/tool-conventions.md`.
 
 - One file per tool under `src/tools/`, exporting a `register<Tool>`
   function that `src/mcp/handler.ts` calls with the `McpServer`.
-- The public tool reference is `apps/docs/reference/mcp/<tool>.mdx` in
-  `langmail/platform`, published at <https://docs.langmail.me/reference/mcp/overview>.
-  A change to a tool's behaviour or schema needs that page updated there too.
+- The public tool reference is `docs/reference/mcp/<tool>.mdx`, published at
+  <https://docs.langmail.me/reference/mcp/overview>. A change to a tool's
+  behaviour or schema updates that page in the same pull request
+  (`docs/AGENTS.md`).
 - `src/mcp/tool-surface.test.ts` pins the hosted tool surface. A diff there is
   a hosted change: regenerate the snapshot only when it is meant.
 - `src/contacts/` and the email type list in `src/tools/email-types.ts` have

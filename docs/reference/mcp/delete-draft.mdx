@@ -1,0 +1,42 @@
+---
+title: "delete_draft"
+description: "Permanently delete an unsent draft, so a superseded version does not linger in Drafts."
+keywords: ["delete_draft", "draft", "delete", "discard", "mcp tool"]
+---
+
+Removes a staged draft from the account. The typical case is cleanup after re-staging: an agent writes a shorter version of a reply with [`create_draft`](/reference/mcp/create-draft) and retires the first one, so the user finds a single draft in their mail client rather than two.
+
+The draft does not go to Trash. Afterwards [`get_draft`](/reference/mcp/get-draft) and [`send_draft`](/reference/mcp/send-draft) with the same id answer "Draft not found". To change a draft rather than remove it, use [`update_draft`](/reference/mcp/update-draft).
+
+<Warning>
+Deletion is permanent: there is no Trash copy of the deleted version to restore. This tool is annotated destructive; clients that gate on `destructiveHint` will ask before calling it.
+</Warning>
+
+Only unsent drafts can be deleted. Sent or received mail is refused whatever id is passed, so the tool cannot destroy real mail — use [`trash_emails`](/reference/mcp/trash-emails) for that. A draft that was moved to Trash is still a draft and can be deleted.
+
+## Parameters
+
+<ParamField body="draftId" type="string" required>
+  The draft to delete, as returned by [`create_draft`](/reference/mcp/create-draft), [`update_draft`](/reference/mcp/update-draft) or [`list_drafts`](/reference/mcp/list-drafts) — edits do not change it — or a message id from [`search_emails`](/reference/mcp/search-emails) with `mailbox: "Drafts"`.
+</ParamField>
+
+## Example
+
+```json Call
+{ "draftId": "6b1f3c2e-8d4a-4e7b-9a10-2c5d7e9f0a11" }
+```
+
+```text Result
+Deleted draft 6b1f3c2e-8d4a-4e7b-9a10-2c5d7e9f0a11 ("Re: Quarterly numbers", to Nadia Bram <nadia@example.org>). The deleted version cannot be recovered.
+```
+
+## Errors
+
+Every refusal says `Nothing was deleted.`, except a destroy the server left unanswered, where that cannot be asserted.
+
+- `Draft not found: <id>.` — the id does not resolve, or the draft was removed before the call reached it. Find drafts with [`list_drafts`](/reference/mcp/list-drafts).
+- `<id> is not a draft — it has already been sent or received…` — the message is real mail. Read it with `get_email`.
+- `Another call is already working on <id>…` — a `send_draft` or another `delete_draft` for this draft is running. Wait, then read the draft back with `get_draft`.
+- `An earlier send of <id> failed without saying whether the message went out.` — check Sent before deciding.
+- `The server did not say whether <id> was deleted.` — read it back with `get_draft` before retrying.
+- `The server refused to delete <id> (<type>).` — the server answered the delete with an error of that type.

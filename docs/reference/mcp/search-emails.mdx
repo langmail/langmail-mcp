@@ -1,0 +1,156 @@
+---
+title: "search_emails"
+description: "Search the authenticated user's mailbox — free-text search combined with email-type, sender, date-range, read-state, starred, and mailbox filters."
+keywords: ["search_emails", "search", "filters", "email type", "unread", "starred", "mcp tool"]
+---
+
+Searches the mailbox and returns a compact hit list without full message bodies, a page at a time. Multi-term queries list messages matching every term first, then partial matches ranked by how many terms they hold; everything else is newest-first. When more match than a page shows, the result carries a `cursor` for the next page. Combine free text with any of the structured filters; **at least one filter is required**. Hits include a body snippet and attachment metadata when available, so [`download_attachment`](/reference/mcp/download-attachment) can often be called directly from the search result. Fetch a full message with [`get_email`](/reference/mcp/get-email) when you need recipients or the complete body.
+
+<Tip>
+  **Filter first, search second.** Transactional mail — tickets, invoices, orders, bookings, confirmations — rarely
+  names its own type in the subject or body: a cinema booking is titled after the film, an invoice after the vendor.
+  For a request like "find my tickets" or "show the invoice from X", reach for `keywords` plus an `after`/`before`
+  window rather than a free-text `query`. Use `query` for words the sender actually wrote.
+</Tip>
+
+## Parameters
+
+<ParamField body="query" type="string">
+  Free-text search over subject, body, and addresses. 1–500 characters. Terms are matched independently and combined with OR — a message matches if it contains **any** of the terms — and messages containing every term come first, then the rest ranked within their page by how many terms they contain, with each hit showing a `matched: X/N terms` line. Wrap a phrase in double quotes (`"order shipped today"`) to match only messages holding those words next to each other, in that order, rather than any one of them anywhere. To narrow a search, combine `query` with the structured filters (`from`, `keywords`, `after`/`before`, `read`, `starred`) instead of adding more terms; only the first 10 terms are used.
+</ParamField>
+
+<ParamField body="after" type="string">
+  Only messages received on or after this UTC ISO 8601 timestamp, e.g. `2026-04-01T00:00:00Z`.
+
+  This filters the **received** date, not any date the message talks about. A confirmation arrives before the event
+  it confirms, so for an event-anchored request ("yesterday's show", "last week's flight") start the window a
+  booking lead time — days to weeks — before the event rather than on the event day. Paired with an email-type
+  filter, a wide window no longer drowns the target in newsletter noise.
+</ParamField>
+
+<ParamField body="before" type="string">
+  Only messages received strictly before this UTC ISO 8601 timestamp, e.g. `2026-07-01T00:00:00Z`. Also the received
+  date: for an event-anchored request, end the window at the event rather than bounding it to the event day.
+</ParamField>
+
+<ParamField body="from" type="string">
+  Substring match on the sender's name or address. 1–200 characters.
+</ParamField>
+
+<ParamField body="keywords" type="string[]">
+  Filter by the classified [email type](/concepts/email-intelligence); multiple values combine with OR. At least one
+  value when present. Valid values:
+
+  | Value | Meaning |
+  |---|---|
+  | `direct` | Person-to-person mail written by an individual, with no platform in between |
+  | `newsletter` | Recurring updates, news digests, curated broadcast content |
+  | `promotional` | Marketing mail, sales pitches, discount offers |
+  | `notification` | Platform activity alerts and account notices such as billing or subscription problems |
+  | `ticket` | Event tickets: theater, cinema, concerts, conferences |
+  | `receipt` | Transaction receipts and payment confirmations |
+  | `order` | Order confirmations, shipping updates, delivery tracking, returns and refunds |
+  | `scheduling` | Calendar invites and booking confirmations — hotels, flights, restaurants, meetings, appointments |
+  | `security_alert` | Login alerts, password changes, verification codes, account recovery notices |
+  | `terms` | Terms of service and privacy policy updates, and other legal or compliance notices |
+  | `todo` | Messages flagged as an action item — see [Email intelligence](/concepts/email-intelligence); set or clear it with [`mark_emails`](/reference/mcp/mark-emails) |
+
+  Every value except `todo` is a classified email type, and each message carries exactly one of them: `receipt`
+  returns receipts and not orders. `todo` is a flag orthogonal to the taxonomy, so it combines with any type.
+
+  Messages analyzed before classification existed carry no type. If a type filter returns nothing, fall back to a
+  free-text `query`.
+</ParamField>
+
+<ParamField body="mailbox" type="string">
+  Restrict to a named mailbox/folder, e.g. `Inbox`.
+
+  The standard places — `Inbox`, `Sent`, `Archive`, `Drafts`, `Trash`, `Junk` — are resolved to the folder
+  holding that [special-use role](https://www.rfc-editor.org/rfc/rfc8621#section-2), so they match whatever
+  the server actually names it (`Sent` finds a mailbox called `Sent Items`). Any other value matches a folder
+  name exactly, and a place name falls back to a name match when no folder carries the role.
+</ParamField>
+
+<ParamField body="read" type="boolean">
+  `false` returns only unread messages, `true` only read ones. Leave it out to match both. Without `mailbox` it
+  covers every folder, so `{ "read": false }` on its own is "everything not read yet", including mail already filed
+  into Archive, Junk, or Trash.
+
+  Read state is Langmail's own. A message read in a linked Gmail account shows as read here, but marking it with
+  [`mark_emails`](/reference/mcp/mark-emails) does not change it in Gmail.
+</ParamField>
+
+<ParamField body="starred" type="boolean">
+  `true` returns only starred messages, `false` only unstarred ones. Leave it out to match both.
+</ParamField>
+
+<ParamField body="limit" type="integer" default="20">
+  Hits per page, 1–100.
+</ParamField>
+
+<ParamField body="cursor" type="string">
+  The cursor a previous result printed, to get the page after it. Pass it exactly as printed, with the same `query`
+  and filters as that search (`limit` may change); leave it out to start from the newest match. Keep passing each new
+  cursor until a page comes back without one. The cursor marks the oldest hit shown, not a position, so marking hits
+  read under `read: false` between calls neither repeats nor skips one. Mail that arrives during the walk is newer
+  than its first page, so it belongs to the next search rather than to this one. A cursor passed with other filters
+  is refused.
+</ParamField>
+
+## Example
+
+```json Call
+{
+  "query": "invoice",
+  "keywords": ["receipt"],
+  "after": "2026-06-01T00:00:00Z",
+  "limit": 10
+}
+```
+
+```text Result
+2 of 2 message(s) matched:
+
+1. Your invoice for June
+   id: Mabc123
+   from: Acme Billing <billing@acme.example>
+   date: 2026-07-05T08:12:00Z
+   folders: Inbox
+   tags: receipt
+   snippet: Invoice No. IWGKCS-00018 · $34.86
+   attachments:
+   1. invoice.pdf — application/pdf, 34.9 KB — blobId: Gabc123
+
+2. Invoice #4021
+   id: Mab9f01
+   from: Hosting Co <billing@hosting.example>
+   date: 2026-06-14T07:30:00Z
+   folders: Archive, Invoices
+   tags: receipt
+   snippet: Your monthly hosting invoice is ready.
+```
+
+A filter-only call needs no free text at all — the shape to reach for when the request names a kind of mail rather
+than its content. Here the window starts three weeks before the show, because the confirmation arrived when the
+seats were booked, not when the film ran:
+
+```json Call
+{
+  "keywords": ["ticket"],
+  "after": "2026-07-09T00:00:00Z",
+  "before": "2026-07-31T00:00:00Z",
+  "limit": 10
+}
+```
+
+A `folders:` line names the folders a message is in. The standard places carry their place name, whatever the server calls them (Inbox, Archive, Sent, Drafts, Junk, Trash, in that order), and any other folder follows under its own name. If the folder listing fails, the line is left out and the messages are still returned. A hit in Junk is mail the server filtered as spam: leave it there unless the user says it is not spam.
+
+Messages with no tags omit the `tags:` line. A `flags:` line names `unread` and `starred` when set; a hit without it has been read and is not starred. Messages with no preview omit the `snippet:` line. Hits from a multi-term `query` carry a `matched: X/N terms` line: full matches come first, newest-first, then partial matches, ordered within their page by that count (newest-first within equal counts). Single-term and filter-only results are newest-first. Hits carrying files list non-inline attachments with filename, media type, size, and `blobId`; if the server reports attachments but no non-inline parts are available, the hit falls back to `attachments: yes`. An empty result returns `No messages matched.` The first line states how many messages are shown out of how many match in total, e.g. `10 of 213 message(s) matched`. When more match than are shown, it says how many were cut off and prints the cursor for the next page: `10 of 213 message(s) matched — 203 more not shown. For the next page, repeat this search with cursor: "v1.…"`. A page reached with a cursor counts what is left from it on: `10 of 203 remaining message(s) matched`. If the total cannot be counted, the line reads `10 of at least 10` and still carries a cursor. A cursor past the last match returns `No more messages matched after this cursor.`
+
+## Errors
+
+- `Provide at least one filter: query, after, before, from, keywords, mailbox, read, or starred.` — the call had no filter.
+- `query contains no searchable terms.` — the `query` value was only whitespace or empty quotes.
+- `cursor is not one search_emails printed. …` — the `cursor` value was changed or made up. Pass it exactly as printed, or leave it out.
+- `cursor belongs to a search with other filters. …` — the cursor came from a search with a different `query` or filters. Repeat that search, or leave the cursor out.
+- `Mailbox not found: <name>. Available folders: ...` — the `mailbox` value matched neither a folder name nor a special-use role. The listed folder names say what to ask for instead.

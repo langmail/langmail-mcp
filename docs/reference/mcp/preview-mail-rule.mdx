@@ -1,0 +1,77 @@
+---
+title: "preview_mail_rule"
+description: "Validate a proposed mail rule and estimate how much existing mail it would touch — without creating or changing anything."
+keywords: ["preview_mail_rule", "mail rules", "dry run", "estimate", "mcp tool"]
+---
+
+Validates a proposed rule and reports its blast radius **without creating a rule or modifying any mail**: whether the rule is valid, warnings, how many existing messages and conversations currently match, and a plain-language summary of what would happen. Use it before [`create_mail_rule`](/reference/mcp/create-mail-rule) so the user can confirm — required practice before any large backfill.
+
+## Parameters
+
+Takes the same rule spec as [`create_mail_rule`](/reference/mcp/create-mail-rule), so a rule that previews cleanly can be passed on unchanged.
+
+<ParamField body="name" type="string">
+  Optional human-readable rule name, 1–200 characters, e.g. `"Archive GitHub Notifications"`.
+</ParamField>
+
+<ParamField body="match" type="string" default="all">
+  How multiple conditions combine: `"all"` (every condition must match) or `"any"` (one is enough).
+</ParamField>
+
+<ParamField body="conditions" type="object" required>
+  When the rule would fire. Give at least one; matching is case-insensitive substring matching. Each text condition is 1–200 characters.
+
+  - `from` — sender contains this (an address, a domain like `github.com`, or a display name)
+  - `to` — a To/Cc recipient contains this (address or name)
+  - `subject` — subject line contains this
+  - `bodyContains` — message body contains this text
+  - `hasAttachment` — `true` to match only messages that appear to carry an attachment (heuristic); `false` is the same as leaving it out
+</ParamField>
+
+<ParamField body="actions" type="array" required>
+  1–10 actions, applied in order. Each is `{ "type": … }` plus its fields:
+
+  - `archive` — move out of the Inbox into the Archive folder
+  - `move` / `copy` — `mailbox`: target folder, 1 to 100 characters (created if missing)
+  - `addTag` / `removeTag` — `tag`: tag name, 1 to 50 characters, slugified (`"Acme Corp"` → `acme-corp`)
+  - `markRead` / `markUnread` / `flag`
+  - `delete` — move to Trash (not a permanent erase)
+  - `forward` — `to`: address that receives a copy; the original still lands in the mailbox
+  - `stopProcessing` — skip any later rules for this message
+</ParamField>
+
+<ParamField body="existingMail" type="object">
+  The existing-mail policy you are considering for `create_mail_rule`. Only `scope` changes the preview: it decides where matches are counted.
+
+  - `scope` — `"inbox"` (default) or `"all"` mail
+  - `mode` — `"none"` (default), `"messages"` or `"conversations"`; accepted so the same object can be passed on, but it does not change the count
+  - `confirmLargeApply` — accepted for the same reason; nothing is applied here
+</ParamField>
+
+## Example
+
+```json Call
+{
+  "name": "Archive GitHub Notifications",
+  "conditions": { "from": "notifications@github.com" },
+  "actions": [{ "type": "archive" }, { "type": "addTag", "tag": "GitHub" }],
+  "existingMail": { "mode": "messages", "scope": "inbox" }
+}
+```
+
+```text Result
+Rule is valid. Nothing was created or modified.
+
+Would match when ALL of: sender contains "notifications@github.com"
+Would then: archive, then add tag "github"
+
+Approximately 184 existing Inbox message(s) match (92 conversation(s)).
+
+To install it, call create_mail_rule with the same rule (add existingMail to also process the existing matches).
+```
+
+## Notes
+
+- An invalid rule is reported in the result text (`Rule is INVALID: …`), not as a tool error — the question being asked is "would this work?".
+- Counts above the 1000-message query window are reported as `1000+` (a lower bound).
+- Warnings cover actions a backfill would skip (`forward`, `stopProcessing`) and the heuristic nature of `hasAttachment` matching.

@@ -1,0 +1,124 @@
+---
+title: "update_contact"
+description: "Change named fields of a stored contact — scalars directly, repeated fields by delta — leaving everything else untouched."
+keywords: ["update_contact", "contacts", "address book", "edit contact", "mcp tool"]
+---
+
+Edits a stored contact **by delta**, never by replacement. You name the fields that change; everything else keeps its stored value, so you never have to read the record and re-send it.
+
+This is the same shape [`update_calendar_event`](/reference/mcp/update-calendar-event) uses for attendees, and for the same reason: a full-replacement object forces a caller to read the whole record first and silently drops anything it did not know to re-send. Here that would mean an agent correcting a postal code wiping a phone number a CardDAV client added an hour earlier.
+
+Find the `contact_id` and the `[a0]`-style handles with [`search_contacts`](/reference/mcp/search-contacts) — the id appears in both response formats, the handles in `detailed`.
+
+<Warning>
+The edit syncs to every device connected over CardDAV.
+</Warning>
+
+## Parameters
+
+<ParamField body="contactId" type="string" required>
+  The contact id, as printed by `search_contacts` under `contact_id`.
+</ParamField>
+
+<ParamField body="name" type="string">
+  New display name, 1–200 characters. Omit to keep the stored one.
+</ParamField>
+
+<ParamField body="organization" type="string">
+  New organization, up to 200 characters; `""` clears it. Omit to keep the stored one.
+</ParamField>
+
+<ParamField body="birthday" type="string">
+  New birthday as `YYYY-MM-DD`, or `--MM-DD` when the year is unknown; `""` clears it. Omit to keep the stored one. Up to 40 characters. Only the birthday is touched: a wedding or other anniversary a CardDAV client stored on the same card is preserved, and a birthday another client wrote is edited in place rather than duplicated.
+</ParamField>
+
+<ParamField body="note" type="string">
+  New note, up to 2000 characters, replacing every note stored on the contact; `""` clears them. Omit to keep them. (A contact edited in a CardDAV client can carry more than one note — `search_contacts` shows them joined, and this field replaces the whole thing rather than writing beside them.)
+</ParamField>
+
+<ParamField body="addedRoles" type="string[]">
+  Roles to add: what the person is to the user, such as `lawyer`. Up to 10 per call, each 1–50 characters; a contact holds at most 10. Roles are stored lowercase with a leading "my" dropped, and one the contact already holds is skipped (asked alone, the call reports that nothing changed). Record only a role the user said or confirmed ("Robin is my lawyer"), never one inferred from mail. [`search_contacts`](/reference/mcp/search-contacts) then finds the person by it and ranks them first. A job title another client stored on the card is left alone.
+</ParamField>
+
+<ParamField body="removedRoles" type="string[]">
+  Roles to remove, matched case-insensitively. Up to 10.
+</ParamField>
+
+<ParamField body="addedEmails" type="object[]">
+  Email addresses to add, up to 10, each `{ address, context? }`. Re-adding an address already on the card is a no-op; an address that belongs to a *different* contact is rejected, the same way [`create_contact`](/reference/mcp/create-contact) rejects it.
+</ParamField>
+
+<ParamField body="removedEmails" type="string[]">
+  Email addresses to remove, case-insensitive. Up to 10.
+</ParamField>
+
+<ParamField body="preferredEmail" type="string">
+  The address mail to this contact should go to: one already on the contact, or one added in the same call. It is stored on the contact (vCard `PREF`), and `search_contacts` ranks it first, ahead of the confidence ratings. Naming an address the contact does not hold, or one removed in the same call, is refused and changes nothing.
+</ParamField>
+
+<ParamField body="addedPhones" type="object[]">
+  Phone numbers to add, up to 10, each `{ number, label? }` as in [`create_contact`](/reference/mcp/create-contact).
+</ParamField>
+
+<ParamField body="removedPhones" type="string[]">
+  Phone numbers to remove, up to 10, each given either as its `[p0]` handle or as the number itself.
+</ParamField>
+
+<ParamField body="addedPostalAddresses" type="object[]">
+  Postal addresses to add, up to 5 — same components and limits as [`create_contact`](/reference/mcp/create-contact).
+</ParamField>
+
+<ParamField body="updatedPostalAddresses" type="object[]">
+  Corrections to stored postal addresses, up to 5: each entry names a `key` (the `[a0]` handle) plus only the components that change. Everything left out keeps its stored value — including parts of an imported address this API has no field for, such as a separately stored house number, apartment, or floor. Correcting `street` replaces the whole street line, which is what `search_contacts` showed you.
+</ParamField>
+
+<ParamField body="removedPostalAddresses" type="string[]">
+  Postal addresses to remove, up to 5, each given either as its `[a0]` handle or as its label (`home`, `work`).
+</ParamField>
+
+At least one field beyond `contactId` is required.
+
+## Example — correcting one component
+
+```json Call
+{
+  "contactId": "c17",
+  "updatedPostalAddresses": [{ "key": "a0", "postalCode": "80331" }]
+}
+```
+
+```text Result
+Updated contact:
+
+Robin Fairweather
+   contact_id: c17
+   organization: Northwind
+   emails:
+   - robin@northwind.example
+   phones:
+   - [p0] +49 89 1234567 (mobile)
+   postal_addresses:
+   - [a0] Beispielweg 1, 80331 München, DE (home)
+   note: Prefers letters.
+   source: authored
+
+Fields you did not name are unchanged. The edit syncs to every device connected over CardDAV.
+```
+
+The street, city, country, organization, email, phone, and note were never sent — and are all still there.
+
+## Errors
+
+- `No contact with id <id>.` — the id does not resolve. Find it with `search_contacts`.
+- `<address> already belongs to a different contact (contact_id: …)` — remove it there first, or edit that record instead. If both records are the same person or organization, fold them into one with [`merge_contacts`](/reference/mcp/merge-contacts).
+- `<address> is not an address of this contact.` — `preferredEmail` names an address the contact does not hold. Add it with `addedEmails` in the same call.
+- `This contact has no postal address <key>. Stored handles: …` — a correction was addressed to a handle the card does not carry. Nothing is written; read the handles back with `search_contacts` in `detailed` format.
+- `update_contact needs at least one field to change.` — only `contactId` was passed.
+- `Nothing to change: the requested edit is already the stored state.` — every named field already holds the requested value.
+- `<address> is removed in this same call, so it cannot become the preferred address.` — `preferredEmail` names an address listed in `removedEmails`.
+- `A contact holds at most 10 roles; this one would have <n>.` — `addedRoles` would take the contact past the cap. Nothing was changed.
+- `Birthday "<value>" is not a date.` / `… is not a calendar date` — pass `YYYY-MM-DD` or `--MM-DD`, with a day the month actually has. Nothing was changed.
+
+## What this tool does not do
+
+It does not merge two contacts — that is [`merge_contacts`](/reference/mcp/merge-contacts) — and it does not change a record's `source`. A derived record you correct stays derived — the correction is protected regardless, because collection only ever fills blanks and never overwrites a field that already has a value.

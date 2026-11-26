@@ -1,0 +1,55 @@
+---
+title: "Open protocols"
+description: "The open-protocol surface of a Langmail mailbox — JMAP, CalDAV, IMAP, and SMTP endpoints on mail.langmail.me, and how each authenticates."
+keywords: ["jmap", "caldav", "imap", "smtp", "protocols", "endpoints", "ports"]
+---
+
+Everything in a Langmail mailbox is reachable over standard protocols on `mail.langmail.me`. This page is the endpoint map — the same one an export tool or a competitor's migration script would use. That's the point.
+
+## Endpoints
+
+| Protocol | Endpoint | Use |
+|---|---|---|
+| JMAP | `https://mail.langmail.me` — session at `/.well-known/jmap` | Modern JSON mail access; what the MCP server uses |
+| CalDAV | `https://mail.langmail.me` — discovery at `/.well-known/caldav`, collections under `/dav/cal/` | Calendars and scheduling; what the calendar tools use |
+| CardDAV | `https://mail.langmail.me` — discovery at `/.well-known/carddav`, collections under `/dav/card/` | Contacts; synced to every device you connect ([Use a contacts app](/guides/contacts-clients)) |
+| IMAP | `mail.langmail.me:993` (SSL/TLS) or `:143` (STARTTLS) | Any classic mail client; full archive access |
+| SMTP submission | `mail.langmail.me:465` (SSL/TLS) or `:587` (STARTTLS) | Sending from mail clients |
+| ManageSieve | `mail.langmail.me:4190` | Server-side filtering rules (Sieve) |
+
+## Autodiscovery
+
+Standard clients fill in these endpoints from just a `@langmail.me` address — no manual server entry. Three mechanisms (DNS SRV, Mozilla autoconfig, MS Autodiscover) cover the common desktop clients, all pointing back at `mail.langmail.me`:
+
+| Client | Mechanism | Record / endpoint |
+|---|---|---|
+| Apple Mail (macOS) | RFC 6186 SRV | `_imaps._tcp`, `_submission._tcp`, `_submissions._tcp` |
+| Apple Calendar | RFC 6764 + SRV | `/.well-known/caldav`, `_caldavs._tcp` |
+| Thunderbird | Mozilla autoconfig | `https://autoconfig.langmail.me/mail/config-v1.1.xml` |
+| Outlook | MS Autodiscover — published, but not reliably applied | `https://autodiscover.langmail.me/autodiscover/autodiscover.xml`, `_autodiscover._tcp` |
+| iOS Mail | none of the above — Apple configuration profile | `https://auth.langmail.me/native-mailbox/apple-profile` |
+
+The `_pop3`/`_pop3s` SRV sentinels steer SRV-based clients (macOS Mail) to IMAP rather than POP. Autodiscovery carries **settings only** — you still generate and enter an app password.
+
+Both chains also reach the **apex** (`langmail.me`), at different points: Autodiscover probes it *before* `autodiscover.langmail.me`, while autoconfig falls back to `langmail.me/.well-known/autoconfig/` only if `autoconfig.langmail.me` fails. The apex is the marketing site, so it answers `404` on both paths rather than serving its SPA fallback — an HTML page returned with `200` reads as a valid response and can strand a client mid-chain.
+
+**Two clients cannot be set up this way.** iPhone and iPad Mail resolve setup against Apple's private built-in provider database: they do not query SRV, do not fetch Mozilla autoconfig, and discard Autodiscover for plain IMAP accounts (that path is Exchange/EAS only). iOS is configured instead with a downloadable [configuration profile](/guides/mail-clients#iphone-and-ipad), which — unlike the mechanisms above — carries the credential as well as the settings. Recent Outlook releases, including Outlook for iOS, also fail to apply Autodiscover for IMAP accounts and need [manual server entry](/guides/mail-clients#outlook). The records above are correct and serve macOS Mail, Thunderbird, and other standards-consuming clients.
+
+## Authentication
+
+| Method | Works for | How to get it |
+|---|---|---|
+| OAuth bearer token | JMAP, CalDAV (HTTP `Authorization: Bearer` header) | The [OAuth flow](/connect/authorization) — this is what MCP clients use |
+| App password | IMAP, SMTP, CalDAV, CardDAV | Create in [Access](https://app.langmail.me/access) under **App passwords**; see [Use a mail client](/guides/mail-clients), [Use a calendar client](/guides/calendar-clients) or [Use a contacts app](/guides/contacts-clients) |
+
+Your account password is never used directly by mail protocols — interactive sign-in happens in the browser, and each device or script gets its own revocable app password.
+
+## What this buys you
+
+- **Complete export, any time.** An IMAP or JMAP sync of your mailbox is a complete, portable archive in standard formats — including the classification keywords Langmail adds, which are plain mailbox keywords.
+- **Client freedom.** Apple Mail, Thunderbird, Outlook, mutt, offlineimap — any standards-compliant mail client works without Langmail's involvement.
+- **No proprietary surface to depend on.** The MCP server itself is a thin layer over JMAP and CalDAV. If you outgrow it, the protocols underneath are yours.
+
+<Note>
+Metadata that lives outside the mailbox — account settings, Morning Brief configuration — is app-level and not part of the protocol surface.
+</Note>

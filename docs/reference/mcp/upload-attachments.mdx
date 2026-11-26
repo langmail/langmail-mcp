@@ -1,0 +1,66 @@
+---
+title: "upload_attachments"
+description: "Mint short-lived upload URLs for files on the agent's disk — the bytes go straight to the mailbox, never through the conversation, and come back as a blobId create_draft takes."
+keywords: ["upload_attachments", "attachments", "capability url", "upload", "mcp tool"]
+---
+
+Returns one short-lived, single-use HTTPS upload URL per file. The agent PUTs each file to its URL straight from disk, the response carries the file's `blobId`, and that `blobId`, with the filename and media type the result lists, goes into the `attachments` of [`create_draft`](/reference/mcp/create-draft) or [`update_draft`](/reference/mcp/update-draft) exactly like a file already in the mailbox. The tool result is metadata and URLs — **the file content never passes through the conversation**, so a 10 MB PDF costs about as many tokens as a 10 KB one.
+
+For a file that is already in the mailbox, skip this tool and pass the `blobId` that [`get_email`](/reference/mcp/get-email) lists.
+
+## Parameters
+
+<ParamField body="files" type="object[]" required>
+  The local files to upload, 1 to 10. Each gets its own URL.
+
+  - `filename` (string, required) — the name the recipient sees, 1–255 characters. Pass the same name to `create_draft`.
+  - `mimeType` (string) — a media type such as `application/pdf`, in `type/subtype` form and up to 255 characters. Guessed from the filename's extension when omitted.
+  - `sizeBytes` (integer, 0 or more) — the file's size in bytes, if known. A file over 25 MB gets no URL; the others in the call still do.
+</ParamField>
+
+## Example
+
+```json Call
+{ "files": [{ "filename": "Bescheid-2025.pdf", "sizeBytes": 2579206 }] }
+```
+
+```text Result
+Upload URLs for 1 of 1 file(s), each single use, up to 25 MB, valid 15 minutes:
+
+Bescheid-2025.pdf (application/pdf), expires 2026-10-26T09:15:00.000Z:
+  curl -sS -T '<path to Bescheid-2025.pdf>' 'https://mcp.langmail.me/attachments/uploads/7Xq…aR'
+  then attach: {"blobId":"<blobId>","filename":"Bescheid-2025.pdf","mimeType":"application/pdf"}
+
+PUT each file straight from disk with its command. …
+```
+
+```json Upload response
+{
+  "blobId": "Gb1c2d3e",
+  "filename": "Bescheid-2025.pdf",
+  "mimeType": "application/pdf",
+  "size": 2579206,
+  "next": "Attach it within 60 minutes by passing {\"blobId\":\"Gb1c2d3e\",\"filename\":\"Bescheid-2025.pdf\",\"mimeType\":\"application/pdf\"} in the `attachments` of create_draft or update_draft. …"
+}
+```
+
+## How the URL works
+
+- Each URL is a capability: an unguessable 256-bit token bound server-side to the granting user's session and one file. No bearer token is needed to use it — the token *is* the credential — so agents are told never to show it to the user.
+- It takes **one** `PUT`, expires after **15 minutes**, and dies with a server restart; call the tool again for a fresh one.
+- The media type is fixed when the URL is issued; the PUT's own `Content-Type` is ignored.
+- Bodies over **25 MB** are refused with `413`. When the size is declared up front the URL stays usable for a smaller file; otherwise it is spent.
+- The mail server discards an upload no draft references after about **an hour**, so attach it promptly.
+
+## Errors
+
+From the tool:
+
+- `Not uploadable (<n>): <files> — over the 25 MB an attachment can be. …` — those files declared a `sizeBytes` over the cap and got no URL. The rest of the call still succeeds; it is an error only when no file fits, and then no URL was issued.
+
+From the upload URL (JSON with `error` and `message`):
+
+- `404 not_found` — unknown, expired, or already used.
+- `413 too_large` — over 25 MB.
+- `400 empty` / `400 incomplete` — no bytes, or the connection dropped mid-upload. The URL is spent.
+- `502 upstream_error` — the mail server refused the file. Nothing was stored.

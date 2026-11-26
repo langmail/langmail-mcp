@@ -1,0 +1,32 @@
+---
+title: "create_calendar"
+description: "Create a new calendar for the authenticated user and get back its CalDAV URL."
+keywords: ["create_calendar", "calendar", "caldav", "mcp tool"]
+---
+
+Creates a new calendar (a CalDAV collection) — useful to keep a workstream's events separate from the personal calendar. Pass the returned `calendarUrl` to [`create_calendar_event`](/reference/mcp/create-calendar-event) to add events to it. To rename or recolor an existing calendar instead, use [`update_calendar`](/reference/mcp/update-calendar).
+
+## Parameters
+
+<ParamField body="name" type="string" required>
+  The calendar's display name. 1–200 characters.
+</ParamField>
+
+<ParamField body="color" type="string">
+  A hex display color, `#RRGGBB` or `#RRGGBBAA` (e.g. `#7FA6C9`). Carried through the `calendar-color` extension so CalDAV clients show the calendar visually distinct.
+</ParamField>
+
+## Example
+
+```json Call
+{ "name": "Marketing", "color": "#7FA6C9" }
+```
+
+```text Result
+Calendar "Marketing" created.
+calendarUrl: https://mail.langmail.me/dav/cal/you%40langmail.me/a1b2c3/
+```
+
+## Errors
+
+- `color must be a hex value like #FF6600` — the `color` value wasn't a valid hex color.

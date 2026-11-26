@@ -1,0 +1,56 @@
+---
+title: "Email intelligence"
+description: "What happens to every message that lands in your mailbox — classification into ten email types, to-do detection, summaries, the Morning Brief, and Gmail mirroring."
+keywords: ["classification", "email type", "todo", "morning brief", "gmail sync", "keywords"]
+---
+
+Every message that arrives in your Langmail mailbox is processed on arrival — whether it came in natively over SMTP or was synced from a connected Gmail account. The results are stored as standard mailbox keywords, so agents can filter by them over MCP.
+
+## The email types
+
+Each message is classified into exactly one of ten types; the orthogonal `todo` flag comes on top (next section). All eleven values are accepted by the [`search_emails`](/reference/mcp/search-emails) `keywords` filter:
+
+| Value | What lands here |
+|---|---|
+| `direct` | Person-to-person mail written by an individual, with no platform in between |
+| `newsletter` | Recurring updates, news digests, curated broadcast content |
+| `promotional` | Marketing mail, sales pitches, discount offers |
+| `notification` | Platform activity alerts and account notices such as billing or subscription problems |
+| `ticket` | Event tickets: theater, cinema, concerts, conferences |
+| `receipt` | Transaction receipts and payment confirmations |
+| `order` | Order confirmations, shipping updates, delivery tracking, returns and refunds |
+| `scheduling` | Calendar invites and booking confirmations — hotels, flights, restaurants, meetings, appointments |
+| `security_alert` | Login alerts, password changes, verification codes, account recovery notices |
+| `terms` | Terms of service and privacy policy updates, and other legal or compliance notices |
+| `todo` | Messages flagged as requiring action — see below |
+
+The type is stored on the message as a mailbox keyword (`$type:receipt` and so on) and appears on the `tags:` line of tool results. Because each message carries exactly one, the filter means what it says: `receipt` returns receipts, not orders.
+
+<Note>
+  Your **sub-agents** group mail more coarsely than the type taxonomy — Orders &amp; Expenses covers both `receipt`
+  and `order`, Notifications covers `notification`, `security_alert`, and `terms` — and it is those grouping labels
+  that show as tags in mail clients that render keywords. Search filters on the exact type instead, so a `ticket` or `scheduling` message is
+  findable through an agent even though no sub-agent claims it.
+</Note>
+
+## To-do detection
+
+Orthogonally to its type, each message is checked for whether it needs explicit action from you — a deadline, a payment, a form, a confirmation. Those messages get the `todo` keyword on top of their type, which makes *"what needs my attention?"* a one-call query for an agent:
+
+```json Tool call — search_emails
+{ "keywords": ["todo"] }
+```
+
+Detection is only the starting point: an agent can also set and clear the flag with [`mark_emails`](/reference/mcp/mark-emails) — flag a message that needs your action, and clear it once the to-do is done.
+
+## Summaries and the Morning Brief
+
+Each processed message also gets a short generated summary. Once a day, the Morning Brief email delivers your open to-dos and the sub-agent groups you opted into — in the language you choose — so the default way to consume a busy inbox is one email, not fifty. You configure the brief (groups, language) on the [Morning Brief tab](https://app.langmail.me/morning-brief).
+
+## Connected Gmail accounts
+
+You can connect one or more Gmail accounts to the same Langmail user. Their mail is synced in — live updates plus historical backfill — and processed by the same pipeline. State flows back too: a to-do appears in Gmail as a `Todo` label, and archiving in Langmail archives in Gmail, whether the change came from an agent, MCP, or a mail client. Mirroring is on by default and can be disabled per account.
+
+<Note>
+Agents see one unified mailbox: synced Gmail messages and native `@langmail.me` mail are searched by the same tools with the same filters.
+</Note>

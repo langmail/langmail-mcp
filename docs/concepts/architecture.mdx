@@ -1,0 +1,60 @@
+---
+title: "Architecture"
+description: "How Langmail is put together — the mail server on open protocols, the MCP server your agent uses, and one identity for you and your agents."
+keywords: ["architecture", "jmap", "caldav", "mcp", "stalwart", "identity"]
+---
+
+Langmail separates *where your data lives* from *how agents act on it*. Both layers are open: standard protocols at the bottom, MCP on top.
+
+```text
+              your agent (Claude, Cursor, ...)          you
+                          │                                       │
+                          │ MCP over Streamable HTTP              │
+                          ▼                                       ▼
+              ┌───────────────────────┐               ┌───────────────────────┐
+              │  MCP server           │               │  Mail and calendar    │
+              │  mcp.langmail.me      │               │  clients              │
+              └───────────┬───────────┘               └───────────┬───────────┘
+                          │ JMAP + CalDAV                         │ IMAP · SMTP · CalDAV
+                          ▼                                       ▼
+              ┌───────────────────────────────────────────────────────────────┐
+              │  Mail server — mail.langmail.me                               │
+              │  your mailbox and calendars · JMAP · CalDAV · IMAP · SMTP     │
+              └───────────────────────────────────────────────────────────────┘
+```
+
+## The mail server
+
+Your inbox and calendars live on Langmail's own mail server ([Stalwart](https://stalw.art)) at `mail.langmail.me`, hosted in Germany. The server speaks:
+
+- **JMAP** for mail — the modern, JSON-based successor to IMAP
+- **CalDAV** for calendars and scheduling
+- **IMAP and SMTP** for compatibility with every existing mail client
+
+Because the mail server speaks standard protocols end to end, nothing about your mail is locked in a proprietary format. Any JMAP or IMAP client can export everything. Endpoints and ports are listed in [Open protocols](/reference/protocols).
+
+## The MCP server
+
+The MCP server at `mcp.langmail.me` is a thin, stateless translation layer: it authenticates the agent, then executes tools against the mail server over JMAP (email tools) and CalDAV (calendar tools) as the user who granted it access. It holds no copy of your mail.
+
+Its design goals, visible in the tool surface:
+
+- **Token-frugal.** Search and thread results are compact plain text without message bodies; the agent fetches a body only when it needs one.
+- **Structured over scraping.** Email-type, sender, date-range, and mailbox filters answer most questions in one call.
+- **Read-write, with clear stakes.** The agent can read, draft, send, file and mark mail, set up mail rules, and manage calendars and contacts. Each tool's annotations say whether it changes data and whether that can be undone, so a client can ask before `send_draft`, `reply_to_message` or `trash_emails`.
+
+## One identity for humans and agents
+
+A single identity service (`auth.langmail.me`) signs you into the web app's Account settings and every agent grant:
+
+| Consumer | How it authenticates |
+|---|---|
+| Web app (Account settings) | Langmail sign-in (Google optional), browser session |
+| MCP clients (agents) | OAuth 2.1 grant you approve per client — see [How authorization works](/connect/authorization) |
+| Mail and calendar clients (IMAP/SMTP, CalDAV/CardDAV) | Per-device [app passwords](/guides/mail-clients) |
+
+Every path resolves to the same principal: your `you@langmail.me` mailbox. An agent's token is scoped to the user who granted it — it can never reach another mailbox.
+
+## Humans and agents, same mailbox
+
+There is no "agent copy" of your data. When [classification](/concepts/email-intelligence) flags a message as a to-do or types it `receipt`, the result is a standard mailbox keyword on the message itself — the same one a connected agent filters by a second later, and the same one your sub-agent labels show up as in your mail client. The mailbox is the single source of truth, and every surface — human or agent — reads the same one.

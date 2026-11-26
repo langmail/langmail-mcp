@@ -1,0 +1,83 @@
+---
+title: "list_calendar_events"
+description: "List what is on a calendar: every event and occurrence inside a start/end window, or each stored event once."
+keywords: ["list_calendar_events", "events", "agenda", "occurrences", "recurring", "time window", "all-day", "reminder", "organizer", "mcp tool"]
+---
+
+Lists what is on the calendar. With a `start`/`end` window, every event and every occurrence of a repeating series that overlaps the window is listed at its actual date and time, so "what is on my calendar on Tuesday" needs no reading of repeat rules. Without a window, each stored event is listed once, a series at its first occurrence with its repeat rule.
+
+Each entry has its title, time, location, whether it is free time, repeat rule, reminders, organizer, attendees (with their response status for that occurrence), and `uid`. An occurrence of a series also carries its `recurrenceId`, its original start. The `uid`, plus the `recurrenceId` to touch one occurrence only, is what [`update_calendar_event`](/reference/mcp/update-calendar-event) and [`delete_calendar_event`](/reference/mcp/delete-calendar-event) take; [`respond_to_event`](/reference/mcp/respond-to-event) takes the `uid`. The attendee list is the current membership `update_calendar_event` edits — read it here before adding or removing attendees rather than sourcing it elsewhere.
+
+## Parameters
+
+<ParamField body="calendarUrl" type="string">
+  A CalDAV URL from [`list_calendars`](/reference/mcp/list-calendars). Defaults to the user's default calendar.
+</ParamField>
+
+<ParamField body="start" type="string">
+  Window start, ISO 8601 with offset. Must be paired with `end`.
+</ParamField>
+
+<ParamField body="end" type="string">
+  Window end, ISO 8601 with offset, exclusive: a day runs to the next midnight. Must be paired with `start`. Omit both to list every stored event once.
+</ParamField>
+
+## Example
+
+```json Call
+{
+  "start": "2026-07-06T00:00:00+02:00",
+  "end": "2026-07-13T00:00:00+02:00"
+}
+```
+
+```text Result
+4 event(s) between 2026-07-06T00:00:00+02:00 and 2026-07-13T00:00:00+02:00, each occurrence of a series at its own time:
+
+1. Vacation
+   when: 2026-07-04 → 2026-07-12 (all day; end date exclusive)
+   showAs: free
+   reminder: 09:00 the day before
+   uid: 5d7e0a9c-1b2f-4c3d-8e4f-6a7b8c9d0e1f
+
+2. Team standup
+   when: 2026-07-06T09:00:00 → 2026-07-06T09:15:00 (Europe/Berlin)
+   repeats: FREQ=WEEKLY;BYDAY=MO
+   recurrenceId: 2026-07-06T07:00:00Z
+   organizer: you@langmail.me (you)
+   attendees: anna@example.com (accepted), ben@example.com
+   uid: 3c1e9b2a-77aa-4d55-8a10-2f9d1c0e6b21@langmail.me
+
+3. Review
+   when: 2026-07-08T10:00:00 → 2026-07-08T10:45:00 (Europe/Berlin)
+   location: Zoom
+   organizer: anna@example.com
+   attendees: anna@example.com (accepted), you@langmail.me
+   uid: 9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d@langmail.me
+
+4. Team standup
+   when: 2026-07-10T09:00:00 → 2026-07-10T09:15:00 (Europe/Berlin)
+   moved from: 2026-07-13T09:00:00 (Europe/Berlin)
+   repeats: FREQ=WEEKLY;BYDAY=MO
+   recurrenceId: 2026-07-13T07:00:00Z
+   organizer: you@langmail.me (you)
+   attendees: anna@example.com (accepted), ben@example.com (declined)
+   uid: 3c1e9b2a-77aa-4d55-8a10-2f9d1c0e6b21@langmail.me
+```
+
+An all-day event shows its dates with no clock time. The end date is exclusive, as stored and as `create_calendar_event` takes it: `2026-07-04 → 2026-07-05` is one day. Inside a window, all-day events are placed on the caller's days, read from the offsets `start` and `end` are written with.
+
+- `moved from:` appears on an occurrence that was moved, with its original time; it is listed on the day it moved to, not the day it left.
+- `repeats:` names the rule of the series an entry belongs to; `recurrenceId:` appears on each occurrence of a series, as an instant (`…Z`), or as a date for an all-day series.
+- `showAs: free` appears on an event that does not count as busy time. Every other event is busy, and shows no line for it. An occurrence that was changed on its own shows its own value, not the series'.
+- `organizer:` is marked `(you)` when it is the user, so an organizer's own blank response status doesn't read as an unanswered invitation.
+- `location:`, `reminder:` (or `reminders:`) and `attendees:` appear only when set. A reminder is shown as the offset from start or end (on an all-day event, the clock time it fires), or as an instant for an absolute trigger; a response status like `(accepted)` is shown once an invitee replies.
+- A series that can't be expanded into its occurrences (an unreadable or minutely/secondly rule, a time zone that isn't an IANA zone, or a changed occurrence that can't be matched) is listed once as stored at its first occurrence, with a note that whether it occurs inside the window is unknown.
+
+At most 200 entries are shown; a longer listing says so and how to narrow it. An empty window returns `No events between <start> and <end>.`, an empty calendar `No events found.`
+
+## Errors
+
+- `Provide both start and end, or neither.` — only one side of the window was given.
+- `No calendar available to list events from.` — the user has no calendar and none was specified.
+- `Calendar not found: <url>` — the `calendarUrl` didn't resolve.

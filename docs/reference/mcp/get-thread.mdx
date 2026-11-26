@@ -1,0 +1,55 @@
+---
+title: "get_thread"
+description: "List every message in the same thread as a given message id, oldest-first."
+keywords: ["get_thread", "conversation", "thread", "mcp tool"]
+---
+
+Given any message id, returns every message in its conversation thread, oldest-first, in the same lightweight shape as search results — snippets and attachment metadata, but no full bodies. The message you asked about is marked in the list. Fetch a body with [`get_email`](/reference/mcp/get-email) when you need recipients or the complete body.
+
+## Parameters
+
+<ParamField body="id" type="string" required>
+  A message id; every message in its thread is returned.
+</ParamField>
+
+## Example
+
+```json Call
+{ "id": "Mf31a" }
+```
+
+```text Result
+3 message(s) in thread:
+
+1. Contract renewal timeline
+   id: Mf2f0
+   from: HR <hr@acme.example>
+   date: 2026-06-28T10:00:00Z
+   folders: Archive
+   tags: direct
+
+2. Re: Contract renewal timeline
+   id: Mf2f4
+   from: You <you@langmail.me>
+   date: 2026-06-28T14:12:00Z
+   folders: Archive, Sent
+
+3. Please confirm your new contract  ← requested
+   id: Mf31a
+   from: HR <hr@acme.example>
+   date: 2026-07-03T09:20:00Z
+   folders: Inbox
+   tags: direct, todo
+   flags: unread
+   snippet: Please review and sign the attached renewal.
+   attachments:
+   1. renewal.pdf — application/pdf, 182.4 KB — blobId: Grenewal
+```
+
+A `folders:` line names the folders a message is in. The standard places carry their place name, whatever the server calls them (Inbox, Archive, Sent, Drafts, Junk, Trash, in that order), and any other folder follows under its own name. If the folder listing fails, the line is left out and the messages are still returned.
+
+Each message shows a `flags:` line naming `unread` and `starred` when set, same as search hits; a message without it has been read. Messages carrying files show non-inline attachment metadata with `blobId`, same as [`search_emails`](/reference/mcp/search-emails) hits. If the server reports attachments but no non-inline parts are available, the hit falls back to `attachments: yes`.
+
+## Errors
+
+- `Thread not found for message: <id>` — no message with that id in the caller's mailbox.

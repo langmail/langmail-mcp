@@ -1,0 +1,54 @@
+---
+title: "What is Langmail"
+sidebarTitle: "Introduction"
+description: "Langmail is the inbox, calendar and contacts that Claude, ChatGPT or any other agent works in over MCP, on open protocols, hosted in Germany."
+keywords: ["langmail", "mcp", "email", "calendar", "agents", "open protocols"]
+---
+
+Langmail is an inbox, calendar and contacts that Claude, ChatGPT or any other agent can fully operate. Your inbox lives on Langmail's own mail server in Germany, speaks open protocols, and exposes one MCP server that any MCP client supporting remote servers and OAuth can connect to.
+
+It has [two parts](/concepts/architecture):
+
+- **The mail server** — your inbox and calendars on `mail.langmail.me`, reachable over JMAP, CalDAV, IMAP, and SMTP. Open protocols mean you can take your data and leave, any time, with standard tools.
+- **The MCP server** — the Langmail MCP server at `https://mcp.langmail.me/mcp`. It gives your agent structured search over your mail, full message and thread reads, and complete calendar management, in compact responses designed for agent context windows.
+
+You and your agent share the same inbox: you read your mail in [any mail client](/guides/mail-clients) — Apple Mail, Thunderbird, Outlook — while your agent works on the same messages over MCP.
+
+## Start here
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Connect your agent to your inbox and make your first tool call in about a minute.
+  </Card>
+  <Card title="Connect your agent" icon="plug" href="/connect/claude">
+    Wire the Langmail MCP server into Claude, Claude Code, ChatGPT, Cursor, VS Code, Notion, or any MCP client.
+  </Card>
+  <Card title="MCP tool reference" icon="wrench" href="/reference/mcp/overview">
+    All 42 tools with exact parameters, constraints, and example output.
+  </Card>
+  <Card title="Open protocols" icon="globe" href="/reference/protocols">
+    JMAP, CalDAV, IMAP, and SMTP endpoints — the right to leave, documented.
+  </Card>
+</CardGroup>
+
+## What the MCP server can do today
+
+| Area | Tools |
+|---|---|
+| Search and read email | `search_emails`, `get_email`, `preview_email`, `get_thread`, `download_attachment`, `download_email` |
+| Compose and send | `create_draft`, `update_draft`, `send_draft`, `reply_to_message`, `upload_attachments` |
+| File email | `archive_emails`, `move_emails`, `trash_emails` |
+| Mark email read, unread, to-do or starred | `mark_emails` |
+| Manage calendars | `list_calendars`, `create_calendar`, `update_calendar` |
+| Manage events | `list_calendar_events`, `create_calendar_event`, `update_calendar_event`, `delete_calendar_event`, `move_calendar_events` |
+| Respond to invitations | `respond_to_event` |
+| Find people | `search_contacts`, `list_upcoming_birthdays` |
+| Keep an address book | `create_contact`, `update_contact`, `merge_contacts`, `delete_contact` |
+
+Filing mail never creates folders and never touches flags (read state, to-dos, stars) — reading doesn't touch read state either; `mark_emails` sets read state, to-dos and stars explicitly. `trash_emails` is the only destructive filing tool, so a client can gate it on the annotations alone. Calendar tools are read-write, including sending invitations and cancellations to attendees.
+
+## Why builders pick Langmail
+
+- **Built for agents first.** Compact, plain-text tool results keep token spend low. Structured filters (email type, sender, date range, `mailbox`) mean one precise call instead of paging through an inbox.
+- **OAuth, not your password.** Each MCP client connects through an OAuth grant you approve in the browser. Your agent never sees or stores your password.
+- **Hosted in Germany, on open protocols.** Your mail lives on Langmail's own server in Germany and is never used as training signal. Every layer speaks an open standard, so your data goes with you — see [Open protocols](/reference/protocols).

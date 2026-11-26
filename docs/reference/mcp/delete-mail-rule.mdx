@@ -1,0 +1,27 @@
+---
+title: "delete_mail_rule"
+description: "Delete a persistent mail rule by id so it stops applying to future incoming messages."
+keywords: ["delete_mail_rule", "mail rules", "filters", "sieve", "mcp tool"]
+---
+
+Deletes one persistent mail rule by id. The rule stops applying to incoming messages immediately; mail it already processed is not reverted. To pause a rule instead of removing it, use [`update_mail_rule`](/reference/mcp/update-mail-rule) with `enabled: false`.
+
+## Parameters
+
+<ParamField body="ruleId" type="string" required>
+  The rule's id, e.g. `rule-3f8a1c2e` — as returned by `create_mail_rule` or listed by [`list_mail_rules`](/reference/mcp/list-mail-rules).
+</ParamField>
+
+## Example
+
+```json Call
+{ "ruleId": "rule-3f8a1c2e" }
+```
+
+```text Result
+Deleted mail rule rule-3f8a1c2e ("Finance invoices"). It no longer applies to incoming messages; mail it already processed is unchanged.
+```
+
+## Errors
+
+- `No mail rule with id <ruleId>. Use list_mail_rules to see the current rules and ids.`

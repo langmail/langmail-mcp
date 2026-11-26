@@ -1,0 +1,57 @@
+---
+title: "Notion"
+description: "Give Notion agents access to your Langmail mailbox through a custom MCP server connection."
+keywords: ["notion", "notion agents", "custom mcp server", "mcp", "connect"]
+---
+
+Notion agents can use the Langmail MCP server as a custom MCP connection.
+
+## Prerequisites
+
+- A Langmail account — [sign up at app.langmail.me](https://app.langmail.me/signup).
+- A Notion workspace with Notion AI. Custom MCP servers must be enabled by a workspace owner or admin.
+
+## Connect
+
+<Steps>
+  <Step title="Enable custom MCP servers (admin, once)">
+    A workspace owner or admin goes to **Settings → Connections**, opens the **Manage** tab, and toggles on **Enable custom MCP servers**.
+  </Step>
+  <Step title="Add the Langmail connection">
+    In your agent's configuration, open **Tools & Access** and choose **Add connection → Custom MCP server**. Enter the URL:
+
+    ```text
+    https://mcp.langmail.me/mcp
+    ```
+  </Step>
+  <Step title="Authorize access">
+    Notion starts the authorization flow: sign in to your Langmail account and approve the consent screen.
+  </Step>
+</Steps>
+
+Once connected, the Langmail tools are available to the agent like any pre-configured connection.
+
+## Test it
+
+Ask the agent:
+
+```text Prompt
+Search my Langmail inbox for the 5 most recent messages.
+```
+
+It calls `search_emails` with `{ "mailbox": "Inbox", "limit": 5 }` and answers from the result.
+
+## Ending access
+
+Remove the connection from the agent's **Tools & Access** settings. Removing it discards its tokens; without the refresh token, access lapses when the current access token expires.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Search and triage email" icon="magnifying-glass" href="/guides/search-and-triage">
+    Real prompts and the tool calls they produce.
+  </Card>
+  <Card title="How authorization works" icon="key" href="/connect/authorization">
+    What happens between "add connection" and "connected".
+  </Card>
+</CardGroup>

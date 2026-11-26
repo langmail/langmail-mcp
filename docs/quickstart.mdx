@@ -1,0 +1,87 @@
+---
+title: "Quickstart"
+description: "Connect any MCP client to your Langmail mailbox in about a minute — paste one URL, sign in, and make your first tool call."
+keywords: ["quickstart", "mcp", "connect", "install", "oauth"]
+---
+
+The Langmail MCP server is a remote server — nothing to install or run locally. Every client connects to the same URL:
+
+```text Langmail MCP server
+https://mcp.langmail.me/mcp
+```
+
+It speaks the Streamable HTTP transport with OAuth authorization: you paste the URL into your client, sign in to Langmail in the browser, approve the consent screen, and the tools are live.
+
+## Prerequisites
+
+- A Langmail account — [sign up at app.langmail.me](https://app.langmail.me/signup). Signing up creates your `you@langmail.me` mailbox.
+
+## Pick your client
+
+Step-by-step instructions for the most popular clients:
+
+<CardGroup cols={2}>
+  <Card title="Claude" href="/connect/claude">
+    claude.ai and Claude Desktop, via a custom connector.
+  </Card>
+  <Card title="Claude Code" href="/connect/claude-code">
+    One `claude mcp add` command in the terminal.
+  </Card>
+  <Card title="ChatGPT" href="/connect/chatgpt">
+    A custom connector in developer mode.
+  </Card>
+  <Card title="Cursor" href="/connect/cursor">
+    One-click install or one `mcp.json` entry.
+  </Card>
+  <Card title="VS Code" href="/connect/vs-code">
+    Copilot agent mode with an `mcp.json` entry.
+  </Card>
+  <Card title="Notion" href="/connect/notion">
+    A custom MCP server for Notion agents.
+  </Card>
+  <Card title="Mistral Le Chat" href="/connect/le-chat">
+    A custom MCP connector in Le Chat.
+  </Card>
+  <Card title="Other clients" href="/connect/other-clients">
+    Any client that speaks Streamable HTTP with OAuth.
+  </Card>
+</CardGroup>
+
+## The short version
+
+Whatever the client, connecting is the same three moves:
+
+<Steps>
+  <Step title="Add the server">
+    Find your client's remote MCP / custom connector option and paste `https://mcp.langmail.me/mcp`.
+  </Step>
+  <Step title="Authorize access">
+    Your browser opens: sign in to your Langmail account and approve the consent screen. The grant is per-client — your agent never sees your password.
+  </Step>
+  <Step title="Make your first tool call">
+    Ask your agent:
+
+    ```text Prompt
+    Search my Langmail inbox for the 5 most recent messages.
+    ```
+
+    It calls `search_emails` with `{ "mailbox": "Inbox", "limit": 5 }` and answers from a compact, newest-first hit list. Search results deliberately omit message bodies to stay light on tokens — the agent fetches a full message with `get_email` when it needs one.
+  </Step>
+</Steps>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Search and triage email" icon="magnifying-glass" href="/guides/search-and-triage">
+    Find to-dos, filter by email type and sender, read whole threads.
+  </Card>
+  <Card title="Calendar workflows" icon="calendar" href="/guides/calendar-workflows">
+    Schedule meetings with invitations, create recurring series, RSVP.
+  </Card>
+  <Card title="How authorization works" icon="key" href="/connect/authorization">
+    The OAuth flow behind the browser window, endpoint by endpoint.
+  </Card>
+  <Card title="Tool reference" icon="wrench" href="/reference/mcp/overview">
+    Exact parameters and output shapes for all 42 tools.
+  </Card>
+</CardGroup>

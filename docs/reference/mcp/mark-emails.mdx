@@ -1,0 +1,54 @@
+---
+title: "mark_emails"
+description: "Set or clear the read, to-do and starred flags on one or more messages."
+keywords: ["mark_emails", "mark as read", "mark as unread", "to-do", "todo", "star", "starred", "flag", "read state", "mcp tool"]
+---
+
+Sets or clears the user-facing flags on up to 50 messages in one call: read / unread, to-do, and starred. Several flags go in one call, and a flag left out is untouched. Nothing else about a message changes: it stays in the folders it was in and keeps its classified type. Re-running it on the same ids is harmless.
+
+Reading a message never changes its read state on its own — [`get_email`](/reference/mcp/get-email), [`get_thread`](/reference/mcp/get-thread) and [`search_emails`](/reference/mcp/search-emails) leave it as it was. The agent decides, with this tool: mark what it handled as read, mark a message unread to keep it for the user, flag a message that needs the user's action as a to-do, and clear the to-do once it is done. To get a message out of the inbox use [`archive_emails`](/reference/mcp/archive-emails) or [`move_emails`](/reference/mcp/move-emails); finishing a to-do is usually `todo: false` here, then `archive_emails`.
+
+Only these three flags can be set. System flags that record what happened to a message (answered, draft) and classified types are not settable.
+
+For an account connected to Gmail, the to-do flag is written back to Gmail as the `Todo` label (unless [mirroring](/concepts/email-intelligence) is disabled for the account). Read state and stars set here stay in Langmail: they are not yet written back to Gmail, and changing them in Gmail later overrides them.
+
+## Parameters
+
+<ParamField body="ids" type="string[]" required>
+  1–50 message ids, as returned by [`search_emails`](/reference/mcp/search-emails) or [`get_thread`](/reference/mcp/get-thread). Duplicates are collapsed.
+</ParamField>
+
+<ParamField body="read" type="boolean">
+  `true` marks the messages read, `false` marks them unread. Leave out to keep read state.
+</ParamField>
+
+<ParamField body="todo" type="boolean">
+  `true` flags the messages as a to-do for the user, `false` clears the to-do. This is the flag [`search_emails`](/reference/mcp/search-emails) filters on with `keywords: ["todo"]`. Leave out to keep it.
+</ParamField>
+
+<ParamField body="starred" type="boolean">
+  `true` stars the messages, `false` removes the star. Leave out to keep it.
+</ParamField>
+
+At least one of `read`, `todo` and `starred` is required.
+
+## Example
+
+```json Call — finish a to-do
+{ "ids": ["Mf2f0", "Mf2f4", "Mf31a"], "read": true, "todo": false }
+```
+
+```text Result
+Marked 3 message(s) as read, not to-do.
+```
+
+A batch is not all-or-nothing. Ids the server refused are listed with the reason, and the call only counts as an error when nothing was marked:
+
+```text Result — one stale id
+Marked 2 message(s) as read, not to-do. Not updated (1): Mf31a (notFound).
+```
+
+## Errors
+
+- `No flag given, so nothing was changed. Pass at least one of read, todo or starred.` — the call named no flag.
+- `Marked 0 message(s) as …. Not updated (N): … Re-run search_emails or get_thread for current ids.` — every id was refused, typically because the messages no longer exist.

@@ -1,0 +1,73 @@
+---
+title: "Claude Code"
+description: "Add the Langmail MCP server to Claude Code with one command and authorize it against your mailbox."
+keywords: ["claude code", "mcp", "connect", "remote server", "cli"]
+---
+
+Claude Code connects to the Langmail MCP server with one command — no local process, no config file.
+
+## Prerequisites
+
+- A Langmail account — [sign up at app.langmail.me](https://app.langmail.me/signup).
+- [Claude Code](https://code.claude.com) installed.
+
+## Connect
+
+<Steps>
+  <Step title="Add the server">
+    ```sh
+    claude mcp add --transport http langmail https://mcp.langmail.me/mcp
+    ```
+  </Step>
+  <Step title="Authorize access">
+    Inside a Claude Code session, run:
+
+    ```text
+    /mcp
+    ```
+
+    Select **langmail** and follow the authentication prompt. Your browser opens for Langmail sign-in and a consent screen; approve it and return to the terminal.
+
+    The grant is per-client: you authorize this Claude Code installation, not a shared credential. Your agent never sees your password.
+  </Step>
+  <Step title="Verify">
+    ```sh
+    claude mcp list
+    ```
+
+    ```text Output
+    langmail: https://mcp.langmail.me/mcp (HTTP) - ✓ Connected
+    ```
+
+    Use `/mcp` at any time to inspect the connection, list the exposed tools, or re-run authentication.
+  </Step>
+</Steps>
+
+## Test it
+
+Ask Claude:
+
+```text Prompt
+Search my Langmail inbox for the 5 most recent messages.
+```
+
+Claude calls `search_emails` with `{ "mailbox": "Inbox", "limit": 5 }` and answers from a compact, newest-first hit list. If the call fails with an authorization error, re-run the authentication from `/mcp`.
+
+## Ending access
+
+Removing the server discards its tokens; without the refresh token, access lapses when the current access token expires:
+
+```sh
+claude mcp remove langmail
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Search and triage email" icon="magnifying-glass" href="/guides/search-and-triage">
+    Real prompts and the tool calls they produce.
+  </Card>
+  <Card title="How authorization works" icon="key" href="/connect/authorization">
+    What happens between "add server" and "connected".
+  </Card>
+</CardGroup>

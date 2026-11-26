@@ -1,0 +1,141 @@
+---
+title: "create_calendar_event"
+description: "Create a calendar event — or a recurring series — optionally sending iMIP invitations to attendees."
+keywords: ["create_calendar_event", "event", "invitation", "recurrence", "rrule", "personal event", "free", "busy", "showAs", "all-day", "reminder", "mcp tool"]
+---
+
+Creates an event with the authenticated user as organizer. When `attendees` are given, the mail server is asked to send each of them a standard iMIP invitation; omit the field (or pass an empty array) to create a **personal event** — a block of your own time such as a focus block or a travel buffer — with no invitations sent. Pass `start`/`end` as dates for an **all-day event** — a day off, a vacation. Pass `recurrence` to create a repeating series in the same call, and `reminderMinutesBefore` to be reminded before it starts.
+
+## Parameters
+
+<ParamField body="title" type="string" required>
+  Event title. 1–200 characters.
+</ParamField>
+
+<ParamField body="start" type="string" required>
+  Start datetime, ISO 8601 with seconds, e.g. `2026-07-14T10:00:00+02:00` — or a date, e.g. `2026-10-03`, for an all-day event. Up to three fractional digits and an optional `Z` or `±HH:MM` offset are accepted; `2026-07-14T10:00` (no seconds) is refused. For a series, the first occurrence.
+</ParamField>
+
+<ParamField body="end" type="string" required>
+  End datetime, ISO 8601 with seconds, in the same form as `start`. Must be after `start`. For an all-day event a date, and **exclusive** (RFC 5545): the day after the last day. A day off on October 3 is `start: "2026-10-03"`, `end: "2026-10-04"`. `start` and `end` must both be dates or both be date-times.
+</ParamField>
+
+<ParamField body="timeZone" type="string">
+  An IANA time zone such as `Europe/Berlin` for `start` and `end`. Their clock digits are read as wall-clock time in this zone, and any offset they carry is ignored. Defaults to the account's time zone, then UTC. It does not change the dates of an all-day event.
+</ParamField>
+
+<ParamField body="reminderMinutesBefore" type="integer">
+  Adds one reminder that fires this many minutes before the start (0 to 40,320, which is four weeks). For an all-day event the start is midnight, so `900` fires at 09:00 the day before. Omit for no reminder.
+</ParamField>
+
+<ParamField body="attendees" type="string[]">
+  Up to 50 attendee email addresses. Each receives an invitation. Omit — or pass `[]` — for a personal event with no invitations.
+</ParamField>
+
+<ParamField body="notify" type="string" default="all">
+  `all` (default) sends invitations to the attendees; `none` writes the event without inviting anyone — useful when an invitation has already been sent out of band. Irrelevant without attendees.
+</ParamField>
+
+<ParamField body="showAs" type="string" default="busy">
+  Whether the event counts as busy time. `busy` (default) means it does; `free` means it does not — for holds, reminders and travel buffers you don't want counted against your availability. Only for events without attendees: inviting people makes an event count as busy time, so `free` together with `attendees` is refused and nothing is created.
+</ParamField>
+
+<ParamField body="calendarUrl" type="string">
+  A CalDAV URL from [`list_calendars`](/reference/mcp/list-calendars). Defaults to the user's default calendar.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Event description, up to 5,000 characters.
+</ParamField>
+
+<ParamField body="location" type="string">
+  Event location, up to 500 characters.
+</ParamField>
+
+<ParamField body="recurrence" type="string | object">
+  Turns the event into a repeating series; omit for a one-off event. Two forms:
+
+  **Structured object:**
+
+  | Field | Type | Notes |
+  |---|---|---|
+  | `frequency` | `"daily" \| "weekly" \| "monthly" \| "yearly"` | Required |
+  | `interval` | integer 1–1000 | Repeat every N periods; defaults to 1 (2 with `weekly` = fortnightly) |
+  | `byDay` | array of `MO` `TU` `WE` `TH` `FR` `SA` `SU` | 1–7 weekday codes (RFC 5545) |
+  | `until` | ISO 8601 date or date-time with offset | Last day (`2026-12-31`) or instant of the series. Mutually exclusive with `count` |
+  | `count` | integer 1–1000 | Total occurrences. Mutually exclusive with `until` |
+
+  **Raw RRULE string:** a single-line iCalendar RRULE starting with `FREQ=`, up to 1,000 characters, e.g. `FREQ=WEEKLY;BYDAY=TH` or `FREQ=DAILY;COUNT=10`. `UNTIL` may be a date (`UNTIL=20261231`) or a UTC date-time (`UNTIL=20261231T000000Z`). Either way it is converted to match the event, as RFC 5545 requires: a date on an all-day series, and on a timed series a UTC date-time, where a date means the end of that day in the event's time zone. Raw rules are only lightly validated — malformed rules surface as server errors.
+</ParamField>
+
+## Example
+
+```json Call
+{
+  "title": "Team standup",
+  "start": "2026-07-13T09:00:00+02:00",
+  "end": "2026-07-13T09:15:00+02:00",
+  "attendees": ["team@example.com"],
+  "recurrence": { "frequency": "weekly", "byDay": ["MO"] }
+}
+```
+
+```text Result
+Recurring event "Team standup" created (invitations requested for 1 attendee(s): team@example.com).
+uid: 3c1e9b2a-77aa-4d55-8a10-2f9d1c0e6b21
+calendarUrl: https://mail.langmail.me/dav/cal/you%40langmail.me/default/
+```
+
+A personal event needs nothing but a title and a time:
+
+```json Call
+{
+  "title": "Focus block",
+  "start": "2026-07-14T09:00:00+02:00",
+  "end": "2026-07-14T11:00:00+02:00"
+}
+```
+
+```text Result
+Event "Focus block" created (no attendees, no invitations).
+uid: 8f2a1c4d-90bb-4e66-9b21-3a0e2d1f7c32
+calendarUrl: https://mail.langmail.me/dav/cal/you%40langmail.me/default/
+```
+
+An all-day vacation with a reminder at 09:00 the day before (an all-day event starts at 00:00, so 900 minutes back is 09:00):
+
+```json Call
+{
+  "title": "Vacation",
+  "start": "2026-10-03",
+  "end": "2026-10-11",
+  "reminderMinutesBefore": 900
+}
+```
+
+```text Result
+All-day event "Vacation" created (no attendees, no invitations; reminder 09:00 the day before).
+uid: 5d7e0a9c-1b2f-4c3d-8e4f-6a7b8c9d0e1f
+calendarUrl: https://mail.langmail.me/dav/cal/you%40langmail.me/default/
+```
+
+Keep the returned `uid` — it identifies the event for updates, deletion, and RSVPs. To invite people to an event created without attendees, pass `addedAttendees` to [`update_calendar_event`](/reference/mcp/update-calendar-event) later.
+
+## At Change, never send
+
+At the access level Change, never send, the server registers a narrowed form of this tool that creates personal events only:
+
+- It takes no `attendees` and no `notify`. Every other parameter is the same. A call that still passes either field fails input validation and creates nothing.
+- It is annotated as an account-only write: `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: false`.
+
+## Errors
+
+- ``Input validation error: … start: Expected a date (2026-10-03) for an all-day event, or a date-time with seconds …`` — a `start` or `end` without seconds, with more than three fractional digits, or otherwise not ISO 8601. Nothing was created.
+- `Event end must be after its start. Nothing was created.`
+- ``An all-day event's `end` is exclusive …`` — an all-day `end` on or before its `start`. The message names the right `end`.
+- ``Pass `start` and `end` both as dates … or both as date-times …`` — a date mixed with a date-time.
+- ``Input validation error: … timeZone must be a valid IANA timezone, e.g. Europe/Berlin`` — an unknown `timeZone`. Nothing was created.
+- `No calendar available to create the event in.` — the user has no calendar and none was specified.
+- `Calendar not found: <url>` — the `calendarUrl` didn't resolve.
+- ``An event with attendees cannot be marked `showAs: "free"` …`` — `free` together with `attendees`. Nothing was created.
+- ``Provide at most one of `until` or `count`, not both.`` — conflicting series bounds.

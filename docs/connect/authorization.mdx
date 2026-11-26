@@ -1,0 +1,132 @@
+---
+title: "How authorization works"
+sidebarTitle: "Authorization"
+description: "The OAuth 2.1 flow between an MCP client and the Langmail MCP server, endpoint by endpoint — discovery, dynamic client registration, consent, and tokens."
+keywords: ["oauth", "authorization", "pkce", "dynamic client registration", "mcp auth"]
+---
+
+MCP clients authorize against Langmail with standard OAuth 2.1 discovery — no pre-shared client IDs, no API keys. This page documents the flow as implemented, for anyone debugging a connection or building their own MCP client.
+
+The parties involved:
+
+| Role | URL |
+|---|---|
+| Resource server (the MCP server) | `https://mcp.langmail.me` |
+| Authorization server (Langmail's identity service) | `https://auth.langmail.me` |
+| Login page (unauthenticated users land here) | `https://app.langmail.me/login` |
+
+## The flow
+
+<Steps>
+  <Step title="The first request gets a 401">
+    A request to `https://mcp.langmail.me/mcp` without a bearer token returns `401` with a pointer to the resource metadata:
+
+    ```text Response header
+    WWW-Authenticate: Bearer realm="mcp", resource_metadata="https://mcp.langmail.me/.well-known/oauth-protected-resource", scope="openid email offline_access"
+    ```
+  </Step>
+  <Step title="Discover the protected resource">
+    ```sh Request
+    curl https://mcp.langmail.me/.well-known/oauth-protected-resource
+    ```
+
+    ```json Response
+    {
+      "authorization_servers": ["https://mcp.langmail.me"],
+      "bearer_methods_supported": ["header"],
+      "resource": "https://mcp.langmail.me",
+      "scopes_supported": ["openid", "email", "offline_access"]
+    }
+    ```
+  </Step>
+  <Step title="Discover the authorization server">
+    ```sh Request
+    curl https://mcp.langmail.me/.well-known/oauth-authorization-server
+    ```
+
+    ```json Response
+    {
+      "issuer": "https://mcp.langmail.me",
+      "authorization_endpoint": "https://auth.langmail.me/api/auth/oauth2/authorize",
+      "token_endpoint": "https://auth.langmail.me/api/auth/oauth2/token",
+      "registration_endpoint": "https://auth.langmail.me/api/auth/oauth2/register",
+      "userinfo_endpoint": "https://auth.langmail.me/api/auth/oauth2/userinfo",
+      "scopes_supported": ["openid", "email", "offline_access"],
+      "response_types_supported": ["code"],
+      "grant_types_supported": ["authorization_code", "refresh_token"],
+      "code_challenge_methods_supported": ["S256"],
+      "token_endpoint_auth_methods_supported": ["none"],
+      "resource": "https://mcp.langmail.me"
+    }
+    ```
+
+    The issuer is the MCP server's own URL, while the functional endpoints live on `auth.langmail.me`. Clients only need to follow the endpoints in this document.
+  </Step>
+  <Step title="Register as a client">
+    The registration endpoint accepts dynamic client registration (RFC 7591) without prior credentials, rate-limited per IP. MCP clients typically register as a public client with a loopback redirect:
+
+    ```json Registration request
+    {
+      "client_name": "My MCP client",
+      "redirect_uris": ["http://127.0.0.1:33418/callback"],
+      "grant_types": ["authorization_code", "refresh_token"],
+      "response_types": ["code"],
+      "token_endpoint_auth_method": "none",
+      "application_type": "native",
+      "scope": "openid email offline_access"
+    }
+    ```
+
+    Redirect URIs are matched exactly at authorization time, so register the precise URI you will use, including the port.
+  </Step>
+  <Step title="The user signs in and consents">
+    The client opens the authorization URL with a PKCE challenge:
+
+    ```text
+    https://auth.langmail.me/api/auth/oauth2/authorize?response_type=code
+      &client_id=<CLIENT_ID>
+      &redirect_uri=http://127.0.0.1:33418/callback
+      &scope=openid+email+offline_access
+      &code_challenge=<S256_CHALLENGE>
+      &code_challenge_method=S256
+      &state=<STATE>
+    ```
+
+    A client that sends no `scope` asks for `openid email offline_access`, the same scopes the challenge and metadata advertise.
+
+    A user without a session is sent to the Langmail login page first (Google sign-in is optional). Then a consent screen shows what the named client is asking for; approving redirects back to the client's `redirect_uri` with an authorization code. Every dynamically registered client goes through consent — there are no silent grants.
+  </Step>
+  <Step title="Exchange the code for tokens">
+    ```sh Request
+    curl -X POST https://auth.langmail.me/api/auth/oauth2/token \
+      -d grant_type=authorization_code \
+      -d code=<CODE> \
+      -d redirect_uri=http://127.0.0.1:33418/callback \
+      -d client_id=<CLIENT_ID> \
+      -d code_verifier=<PKCE_VERIFIER>
+    ```
+
+    The response contains an `access_token` and, because `offline_access` was granted, a `refresh_token`. Public clients send no client secret; the PKCE verifier binds the exchange to the client that started the flow.
+  </Step>
+  <Step title="Call the MCP server">
+    ```text Request header
+    Authorization: Bearer <ACCESS_TOKEN>
+    ```
+
+    The MCP server validates the token against the authorization server's userinfo endpoint and resolves the caller to their `@langmail.me` mailbox. Every tool call then operates on that mailbox — tokens are per-user, and a token can never reach another user's mail.
+  </Step>
+</Steps>
+
+## Tokens
+
+- **Access tokens are opaque** — treat them as bearer credentials, not as JWTs to inspect.
+- **Refresh tokens** are issued when `offline_access` is granted, so clients can stay connected without re-prompting you to sign in.
+- **Ending access:** every agent you connected is listed under [Access](https://app.langmail.me/access) with the scopes you granted. **Revoke** deletes its tokens and your consent, so it cannot refresh and has to connect again. An agent that is running can keep working for up to an hour after the revoke. Removing the server from your MCP client discards its tokens as well.
+
+## Requirements on the user
+
+The signed-in account must belong to a Langmail user with an active `@langmail.me` mailbox. Accounts without one are rejected at the MCP server with `401 invalid_token` — sign up at [app.langmail.me](https://app.langmail.me/signup) first.
+
+<Note>
+Authorization gives a client access to the tools the server exposes for your mailbox — currently read access to mail and read-write access to calendars. See the [tool reference](/reference/mcp/overview) for the exact surface.
+</Note>

@@ -1,0 +1,48 @@
+---
+title: "get_draft"
+description: "Read a staged draft back exactly as it will be sent, blind-copied recipients included."
+keywords: ["get_draft", "draft", "bcc", "mcp tool"]
+---
+
+Reads a staged draft back: its sender, every recipient including `bcc`, the subject, whether it is threaded onto a conversation, the first 500 characters of the body, and every attached file with its `blobId`. Use it to confirm what [`create_draft`](/reference/mcp/create-draft) or [`update_draft`](/reference/mcp/update-draft) actually staged before sending.
+
+[`get_email`](/reference/mcp/get-email) deliberately can't do this job. It renders a message through the cleaning pipeline (markdown out, whatever the sender put in) and never shows `bcc`, because a received message has none. A draft needs the literal staged fields.
+
+For messages that have already been sent or received, use [`get_email`](/reference/mcp/get-email).
+
+## Parameters
+
+<ParamField body="draftId" type="string" required>
+  The draft id, as returned by [`create_draft`](/reference/mcp/create-draft), [`update_draft`](/reference/mcp/update-draft) or [`list_drafts`](/reference/mcp/list-drafts) (edits keep the id), or a message id from [`search_emails`](/reference/mcp/search-emails) with `mailbox: "Drafts"`. A message id stops working once the draft is edited; use the draftId the edit returns from then on.
+</ParamField>
+
+## Example
+
+```json Call
+{ "draftId": "6b1f3c2e-8d4a-4e7b-9a10-2c5d7e9f0a11" }
+```
+
+```text Result
+Draft (not sent):
+draftId: 6b1f3c2e-8d4a-4e7b-9a10-2c5d7e9f0a11
+from: Dana Okonjo <dana@langmail.me>
+to: Nadia Bram <nadia@example.org>
+cc: carl@example.org
+bcc: archive@example.org
+subject: Re: Quarterly numbers
+threadId: T77
+threading: In-Reply-To/References set — this message continues an existing conversation
+body (text): Confirmed — the Q2 figures are final.
+attachments (1):
+  1. Q2-figures.pdf — application/pdf — 284.1 KB — blobId: Gd4f21c
+```
+
+The attachments section lists every file the draft carries. The `blobId` on each line is the handle to pass back to [`update_draft`](/reference/mcp/update-draft): supplying `attachments` replaces the list wholesale, so an edit that means to *add* a file lists these alongside the new one. Drafts with no files omit the section.
+
+A line may instead say the file has **no blobId, so it cannot be re-attached**. That happens for a draft written by another client whose attachment the server exposes without a retrieval handle: the file is really there and [`send_draft`](/reference/mcp/send-draft) will deliver it, but [`update_draft`](/reference/mcp/update-draft) cannot carry it onto the rewritten message and refuses the edit rather than dropping it. The user edits that draft in their mail app.
+
+## Errors
+
+- `Draft not found: <id>. Find it with list_drafts.` — no such draft.
+- `<id> is not a draft — it has already been sent or received. Read it with get_email instead, passing id <messageId>.`
+- `Draft <id> is in Trash — it was discarded and is no longer pending.` — followed by how to move it back to Drafts with [`move_emails`](/reference/mcp/move-emails).

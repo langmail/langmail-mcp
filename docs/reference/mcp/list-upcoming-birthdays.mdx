@@ -1,0 +1,55 @@
+---
+title: "list_upcoming_birthdays"
+description: "List the contacts whose birthday falls within the next N days — a week, a month, a quarter — across every address book, with the age they are turning and the address to write to."
+keywords: ["list_upcoming_birthdays", "birthdays", "contacts", "address book", "upcoming", "mcp tool"]
+---
+
+Answers "whose birthday is coming up" from the birthdays stored on contact cards. The window is a day count starting today (or on a date you name), so a week, a month, and a quarter are `7`, `30`, and `90`; a past `from` answers "which birthdays did I miss last week". Every address book on the account is scanned, collected and personal alike.
+
+Only birthdays **stored** on a contact are listed — set with [`create_contact`](/reference/mcp/create-contact) or [`update_contact`](/reference/mcp/update-contact), or synced in from a phone over CardDAV. Langmail never infers a birthday from a "happy birthday" subject line, so the field can be treated as authoritative. To look one person up by name, use [`search_contacts`](/reference/mcp/search-contacts), which prints the birthday when there is one.
+
+## Parameters
+
+<ParamField body="days" type="integer" default="30">
+  Length of the window in days, 1–366, counting `from` as day 0 with an exclusive end — `7` from a Monday covers Monday through Sunday.
+</ParamField>
+
+<ParamField body="from" type="string">
+  First day of the window as `YYYY-MM-DD`. Defaults to today in the account's preferred time zone (UTC when none is set); pass the user's local date when you know it.
+</ParamField>
+
+<ParamField body="limit" type="integer" default="25">
+  Maximum number of people to list, 1–100.
+</ParamField>
+
+## Example
+
+```json Call
+{
+  "days": 30
+}
+```
+
+```text Result
+2 upcoming birthday(s) in the next 30 day(s) from 2026-09-18:
+
+1. Robin Fairweather — 2026-10-02 (in 14 days, turning 36)
+   contact_id: c17
+   birthday: 1990-10-02
+   best_address: robin@northwind.example
+
+2. Kim Achterberg — 2026-10-15 (in 27 days)
+   contact_id: c42
+   birthday: --10-15
+   best_address: kim@example.org
+```
+
+Rows are sorted by date, then name. Each carries the date the birthday falls on this time round, how far away it is (`today`, `tomorrow`, `in N days`), the age the person is turning when the birth year is stored, the `contact_id`, the stored birthday in the spelling the write tools accept, and the best email address — so drafting a card chains straight into [`create_draft`](/reference/mcp/create-draft) without another lookup.
+
+A birthday on **February 29** is listed on February 28 in a year that has no leap day.
+
+When nothing falls in the window the result says so and points at `update_contact`. When `limit` cuts the list, a trailer says how many were left out. The scan reads at most 10,000 cards; when the address books reach that cap, the result says the list may be incomplete.
+
+## Errors
+
+- `from "<value>" is not a calendar date. Use YYYY-MM-DD.` — the `from` value was not a real date.

@@ -1,0 +1,45 @@
+---
+title: "download_attachment"
+description: "Mint a short-lived download URL for one email attachment — the bytes go straight to disk, never through the conversation."
+keywords: ["download_attachment", "attachments", "capability url", "invoice", "mcp tool"]
+---
+
+Returns a short-lived HTTPS download URL for a single attachment, identified by the message id plus the `blobId` listed by [`search_emails`](/reference/mcp/search-emails), [`get_thread`](/reference/mcp/get-thread), or [`get_email`](/reference/mcp/get-email). The tool result is ~100 tokens of metadata and a URL — **never the file content**; the agent saves the file out-of-band, e.g. with `curl -o`. For the whole message as an `.eml` file, use [`download_email`](/reference/mcp/download-email).
+
+## Parameters
+
+<ParamField body="emailId" type="string" required>
+  The id of the message the attachment belongs to, as returned by `search_emails` or `get_thread`.
+</ParamField>
+
+<ParamField body="blobId" type="string" required>
+  The attachment's `blobId`, as listed by `search_emails`, `get_thread`, or `get_email` for that message.
+</ParamField>
+
+## Example
+
+```json Call
+{ "emailId": "Mabc123", "blobId": "Gd41d8cd" }
+```
+
+```text Result
+invoice-2026-06.pdf (application/pdf, 182.4 KB)
+Download URL (expires in 24 hours):
+https://mcp.langmail.me/attachments/3K9c…Qw
+
+Save it straight to a file, e.g.:
+  curl -sS -o 'invoice-2026-06.pdf' 'https://mcp.langmail.me/attachments/3K9c…Qw'
+Do not fetch this URL into the conversation — the file may be large.
+```
+
+## How the URL works
+
+- The URL is a single-blob capability: an unguessable 256-bit token bound server-side to the granting user's session and exactly one attachment. No bearer token is needed (or accepted) to fetch it — the token *is* the credential, like a presigned URL.
+- It expires after **24 hours** and is reusable within that window (retries are fine). After expiry — or a server restart, or once the session's access token lapses — the URL returns a `404`/error; call the tool again for a fresh one.
+- `GET` on the URL streams the file with its correct `Content-Type` and a `Content-Disposition` filename; there is no size cap.
+- The filename and media type in the result come from the message itself, not from client input.
+
+## Errors
+
+- `Email not found: <emailId>` — no message with that id in the caller's mailbox.
+- `No attachment with blobId <blobId> on message <emailId>.` — the blob isn't an attachment of that message.
