@@ -1,0 +1,49 @@
+name: Docs Validate
+
+# Validates the Mintlify site in docs/ (docs.langmail.me), so a broken link or
+# an invalid docs.json is caught in the PR instead of at Mintlify's deploy-time
+# build. Path-scoped: runs only when docs/ changes. The mint version is pinned
+# in the docs:* scripts in package.json (docs/AGENTS.md).
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs-validate.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs-validate.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Docs Site
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # Bun only runs `bunx mint` here, so it takes the latest release rather
+      # than a third copy of the runtime pin in release.yml and the Dockerfile.
+      # Uncached on purpose: in langmail/platform a cache for the mint download
+      # saved less time than restoring it took.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Validate build
+        run: bun run docs:validate
+
+      - name: Check links
+        run: bun run docs:links
