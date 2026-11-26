@@ -36,6 +36,24 @@ describe('hasOtherPeople', () => {
     expect(hasOtherPeople(event([SELF], 'organizer@example.com'), SELF)).toBe(true)
   })
 
+  test('an invitation whose organizer address does not parse counts as someone else', () => {
+    const ics = [
+      'BEGIN:VCALENDAR',
+      'BEGIN:VEVENT',
+      'UID:evt-2',
+      'DTSTART:20260612T100000Z',
+      'DTEND:20260612T103000Z',
+      'SUMMARY:Their meeting',
+      'ORGANIZER:urn:uuid:0b6f6d2e-1d1a-4d36-9a0b-5f0c2b4e8a11',
+      `ATTENDEE:mailto:${SELF}`,
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n')
+    const events = parseEvents(ics)
+    expect(events[0]?.unparsedOrganizer).toBe(true)
+    expect(hasOtherPeople(events, SELF)).toBe(true)
+  })
+
   test('without an own address every attendee is someone else', () => {
     expect(hasOtherPeople(event([SELF], SELF), '')).toBe(true)
   })

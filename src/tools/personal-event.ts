@@ -12,14 +12,16 @@ const isSelf = (email: string, selfAddress: string): boolean => email.toLowerCas
 // master does not. An attendee whose address could not be parsed is someone
 // else. The user's own address as the only attendee (some clients write the
 // organizer as an attendee) leaves the event personal, unless someone else
-// organizes it: then it is an invitation the user received. An alias of the
-// account counts as someone else, which refuses rather than reaches.
+// organizes it: then it is an invitation the user received. An organizer whose
+// address could not be parsed, and an alias of the account, count as someone
+// else, which refuses rather than reaches.
 export const hasOtherPeople = (events: ParsedEvent[], selfAddress: string): boolean =>
   events.some(
     (event) =>
       (event.unparsedAttendeeCount ?? 0) > 0 ||
       event.attendees.some((attendee) => !isSelf(attendee.email, selfAddress)) ||
-      (event.attendees.length > 0 && event.organizer !== undefined && !isSelf(event.organizer, selfAddress))
+      (event.attendees.length > 0 &&
+        (event.unparsedOrganizer === true || (event.organizer !== undefined && !isSelf(event.organizer, selfAddress))))
   )
 
 export const meetingRefusal = (uid: string, narrowed: Narrowed): string =>
