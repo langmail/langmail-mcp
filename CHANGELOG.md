@@ -1,3 +1,10 @@
+# [0.5.0](https://github.com/langmail/langmail-mcp/compare/v0.4.0...v0.5.0) (2026-11-26)
+
+
+### Features
+
+* **access:** at Change, never send, manage personal events and mail rules without forwarding ([#32](https://github.com/langmail/langmail-mcp/issues/32)) ([e701096](https://github.com/langmail/langmail-mcp/commit/e70109684e5ba2628965ee38cd6d421733b7cd7d)), closes [langmail/platform#1449](https://github.com/langmail/platform/issues/1449)
+
 # [0.4.0](https://github.com/langmail/langmail-mcp/compare/v0.3.0...v0.4.0) (2026-11-26)
 
 
