@@ -80,7 +80,9 @@ export {
   mailboxIdByNameOrRole,
   mailboxIdByRole,
   mailboxIdsByRoles,
+  mailboxList,
   mailboxNames,
+  PLACES_IN_ORDER,
   roleForPlaceName,
   type ThreadEmailIdsParams,
   threadEmailIds,
@@ -142,4 +144,5 @@ export type {
   EmailUnsubscribeRecord,
   IdentityRecord,
   JmapSession,
+  MailboxRecord,
 } from './types.ts'

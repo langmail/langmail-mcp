@@ -1,6 +1,6 @@
 {
   "name": "langmail-mcp",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "Langmail's MCP server for your own Stalwart mailbox: mail, calendar and contacts for an AI agent, over stdio or Streamable HTTP",
   "keywords": [
     "mcp",
@@ -46,7 +46,9 @@
     "smoke:agent-contact-role-record": "bun run scripts/smoke-agent-contact-role-record.ts",
     "smoke:agent-forward": "bun run scripts/smoke-agent-forward.ts",
     "smoke:agent-preview": "bun run scripts/smoke-agent-preview.ts",
+    "smoke:agent-read-only": "bun run scripts/smoke-agent-read-only.ts",
     "smoke:agent-self-hosted": "bun run scripts/smoke-agent-self-hosted.ts",
+    "smoke:agent-triage-junk": "bun run scripts/smoke-agent-triage-junk.ts",
     "smoke:agent-windows-zone": "bun run scripts/smoke-agent-windows-zone.ts",
     "spec:check": "./spec/check.sh",
     "stalwart:setup": "bun run infra/dev/stalwart/setup.ts",

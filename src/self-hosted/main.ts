@@ -75,6 +75,9 @@ export const startSelfHosted = async (opts: StartOptions): Promise<StartResult> 
   // The principal picks the sending identity: STALWART_EMAIL when set, else
   // the login Stalwart reports.
   const ctx: ServerContext = {
+    // Every connection runs at Everything until the self-hosted setting
+    // arrives (langmail/platform#1450).
+    access: 'everything',
     principal: config.email ?? checked.session.principal,
     token: authorization,
     userId: '',

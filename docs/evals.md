@@ -11,6 +11,9 @@ You need the `claude` CLI on `PATH` and a Stalwart account that can be filled
 with test mail. The dev Stalwart in `infra/dev/stalwart` works: start it with
 `docker compose -f infra/dev/stalwart/docker-compose.yml up -d`, then create a
 throwaway user with an app password in its admin at `http://127.0.0.1:9090` (`admin` / `devpassword`).
+A stock account has no Archive mailbox: an eval that archives
+(`smoke-agent-triage-junk`) needs one with the `archive` role, made with a JMAP
+`Mailbox/set` create of `{ "name": "Archive", "role": "archive" }` as that user.
 
 Start the self-hosted server over HTTP in one shell:
 

@@ -5,6 +5,7 @@ import {
   type EmailQueryPerTermParams,
   type EmailQueryTotalParams,
   type EmailRecord,
+  type MailboxRecord,
 } from '../jmap/index.ts'
 import {
   decodeCursor,
@@ -29,6 +30,7 @@ const fakeDeps = (opts: {
   tierIds?: { all?: string[]; some?: string[] }
   perTermIds?: string[][]
   emails?: EmailRecord[]
+  mailboxes?: MailboxRecord[]
   onQuery?: (p: EmailQueryParams) => void
   onPerTermQuery?: (p: EmailQueryPerTermParams) => void
   onTotalQuery?: (p: EmailQueryTotalParams) => void
@@ -50,6 +52,7 @@ const fakeDeps = (opts: {
     opts.onTotalQuery?.(p)
     return Promise.resolve(opts.total ?? 0)
   },
+  mailboxList: () => Promise.resolve(opts.mailboxes ?? []),
   resolveAccountId: () => Promise.resolve(opts.accountId ?? 'acct'),
   resolveMailbox: (_authorization: string, name: string) =>
     Promise.resolve({ available: opts.available ?? [], id: opts.mailboxByName ? opts.mailboxByName(name) : null }),
@@ -145,6 +148,26 @@ describe('queryTerms', () => {
 })
 
 describe('searchEmails', () => {
+  test('each hit names its folders, so a Junk hit reads as spam', async () => {
+    const result = await searchEmails(
+      fakeDeps({
+        emails: [
+          { id: 'a', mailboxIds: { 'mb-inbox': true }, subject: 'Lunch?' },
+          { id: 'b', mailboxIds: { 'mb-junk': true }, subject: 'You won' },
+        ],
+        mailboxes: [
+          { id: 'mb-inbox', name: 'Inbox', role: 'inbox' },
+          { id: 'mb-junk', name: 'Junk Mail', role: 'junk' },
+        ],
+        queryIds: ['a', 'b'],
+      }),
+      { args: { limit: 20, read: false }, token: 'tok' }
+    )
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toContain('1. Lunch?\n   id: a\n   from: (unknown sender)\n   date: \n   folders: Inbox')
+    expect(txt).toContain('   folders: Junk')
+  })
+
   test('returns a formatted text block with id/subject/sender/date', async () => {
     const result = await searchEmails(
       fakeDeps({
@@ -685,6 +708,7 @@ describe('searchEmails', () => {
         },
         emailQueryPerTerm: () => Promise.resolve([]),
         emailQueryTotal: () => Promise.resolve(0),
+        mailboxList: () => Promise.resolve([]),
         resolveAccountId: () => Promise.resolve('acct'),
         resolveMailbox: (_authorization, name) =>
           Promise.resolve({ available: [], id: name === 'Inbox' ? 'm1' : null }),

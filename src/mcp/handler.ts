@@ -11,6 +11,9 @@
 
 import { McpServer, WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server'
 
+import packageJson from '../../package.json' with { type: 'json' }
+import { type AccessLevel } from '../access/levels.ts'
+import { restrictToAccess } from '../access/restrict.ts'
 import { type RecordAgentActivity } from '../activity/record-agent-activity.ts'
 import { type TicketStore } from '../attachments/tickets.ts'
 import { type UploadTicketStore } from '../attachments/upload-tickets.ts'
@@ -88,7 +91,7 @@ import { registerUpdateContact } from '../tools/update-contact.ts'
 import { registerUpdateDraft } from '../tools/update-draft.ts'
 import { registerUpdateMailRule } from '../tools/update-mail-rule.ts'
 import { makeLiveDeps as makeUploadAttachmentsDeps, registerUploadAttachments } from '../tools/upload-attachments.ts'
-import { SELF_HOSTED_INSTRUCTIONS, SERVER_INSTRUCTIONS, SERVER_INSTRUCTIONS_WITHOUT_SHARING } from './instructions.ts'
+import { buildInstructions } from './instructions.ts'
 import { instrumentToolLogging } from './tool-logging.ts'
 
 export interface McpHandlerConfig {
@@ -122,10 +125,11 @@ export interface McpHandlerConfig {
 
 // The credential and identity one MCP server acts with: the hosted server
 // builds it per request from the validated bearer (AuthContext); the
-// self-hosted one builds it once from its settings.
-export type ServerContext = Pick<AuthContext, 'principal' | 'token' | 'userId'>
+// self-hosted one builds it once from its settings. `access` is the level the
+// agent was connected at: the server offers only that level's tools.
+export type ServerContext = Pick<AuthContext, 'access' | 'principal' | 'token' | 'userId'>
 
-// Builds a fresh McpServer with the whole tool surface for one context. The
+// Builds a fresh McpServer with the tool surface of one context's access level. The
 // deps behind it (JMAP session cache, replay cache, send guard) are built once
 // and shared by every server the factory makes.
 export const createMcpServerFactory = (cfg: McpHandlerConfig): ((ctx: ServerContext) => McpServer) => {
@@ -190,22 +194,28 @@ export const createMcpServerFactory = (cfg: McpHandlerConfig): ((ctx: ServerCont
   // before the first call answers can't deliver a second copy.
   const sendGuard = createSendGuard()
 
-  let instructions = SERVER_INSTRUCTIONS_WITHOUT_SHARING
-  if (selfHosted) {
-    instructions = SELF_HOSTED_INSTRUCTIONS
-  } else if (calendarShares) {
-    instructions = SERVER_INSTRUCTIONS
+  const instructionsByLevel = new Map<AccessLevel, string>()
+  const instructionsFor = (level: AccessLevel): string => {
+    let text = instructionsByLevel.get(level)
+    if (text === undefined) {
+      text = buildInstructions({ level, mode, sharing: calendarShares !== undefined })
+      instructionsByLevel.set(level, text)
+    }
+    return text
   }
 
   return (ctx) => {
     const server = new McpServer(
       {
         name: 'langmail-mcp',
-        // The langmail-mcp package version; scripts/check-package.ts holds the two equal.
-        version: '0.2.0',
+        // semantic-release bumps package.json; the package bundle inlines it.
+        version: packageJson.version,
       },
-      { instructions }
+      { instructions: instructionsFor(ctx.access) }
     )
+    // Before any registerTool call, and before the logging wrapper: a tool
+    // outside the level is never registered, and a call to one is refused.
+    restrictToAccess(server, ctx.access, mode)
     // Before any registerTool call — the wrapper only covers later registrations.
     instrumentToolLogging(server, () => recordAgentActivity(ctx.userId))
     registerSearchEmails(server, searchEmailsDeps, () => ctx.token, mode)

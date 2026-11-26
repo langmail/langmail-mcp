@@ -26,3 +26,6 @@ updates:
       day: "monday"
     commit-message:
       prefix: "ci"
+    ignore:
+      # Factory sync PRs move this pin together with the skills it checks.
+      - dependency-name: "langmail/factory*"

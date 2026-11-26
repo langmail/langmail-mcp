@@ -8,6 +8,7 @@ const deps = (opts: { ids?: string[]; emails?: EmailRecord[]; onGet?: (p: EmailG
     opts.onGet?.(p)
     return Promise.resolve(opts.emails ?? [])
   },
+  mailboxList: () => Promise.resolve([]),
   resolveAccountId: () => Promise.resolve('acct'),
   threadEmailIds: () => Promise.resolve(opts.ids ?? []),
 })
@@ -20,6 +21,43 @@ describe('getThreadInput schema', () => {
 })
 
 describe('getThread', () => {
+  test('a failed mailbox listing costs only the folders line', async () => {
+    const result = await getThread(
+      {
+        ...deps({ emails: [{ id: 'e1', mailboxIds: { 'mb-inbox': true }, subject: 'Hi' }], ids: ['e1'] }),
+        mailboxList: () => Promise.reject(new Error('Mailbox/get failed')),
+      },
+      { args: { id: 'e1' }, token: 'tok' }
+    )
+    expect(result.isError).toBeUndefined()
+    expect(result.content[0]?.text).toContain('1. Hi')
+    expect(result.content[0]?.text).not.toContain('folders:')
+  })
+
+  test("names each message's folders, so a reply in Sent reads apart from the Inbox", async () => {
+    const result = await getThread(
+      {
+        ...deps({
+          emails: [
+            { id: 'e1', mailboxIds: { 'mb-inbox': true }, subject: 'Hi' },
+            { id: 'e2', mailboxIds: { 'mb-archive': true, 'mb-sent': true }, subject: 'Re: Hi' },
+          ],
+          ids: ['e1', 'e2'],
+        }),
+        mailboxList: () =>
+          Promise.resolve([
+            { id: 'mb-inbox', name: 'Inbox', role: 'inbox' },
+            { id: 'mb-archive', name: 'Archive', role: 'archive' },
+            { id: 'mb-sent', name: 'Sent Items', role: 'sent' },
+          ]),
+      },
+      { args: { id: 'e1' }, token: 'tok' }
+    )
+    const txt = result.content[0]?.text ?? ''
+    expect(txt).toContain('folders: Inbox')
+    expect(txt).toContain('folders: Archive, Sent')
+  })
+
   test('lists the thread oldest-first and marks the requested message', async () => {
     let getIds: string[] | undefined
     const result = await getThread(

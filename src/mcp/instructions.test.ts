@@ -1,12 +1,17 @@
 import { describe, expect, test } from 'bun:test'
 
+import { ACCESS_LEVELS, type AccessLevel } from '../access/levels.ts'
 import { createTicketStore } from '../attachments/tickets.ts'
 import { createUploadTicketStore } from '../attachments/upload-tickets.ts'
 import { createImageProxyStore } from '../email-render/image-proxy.ts'
 import { makeJmapLive } from '../jmap/index.ts'
 import { fakeShareStore } from '../tools/calendar-share-test-fixtures.ts'
 import { createMcpHandler } from './handler.ts'
-import { SELF_HOSTED_INSTRUCTIONS, SERVER_INSTRUCTIONS, SERVER_INSTRUCTIONS_WITHOUT_SHARING } from './instructions.ts'
+import { buildInstructions } from './instructions.ts'
+
+const SERVER_INSTRUCTIONS = buildInstructions({ level: 'everything', mode: 'hosted', sharing: true })
+const SERVER_INSTRUCTIONS_WITHOUT_SHARING = buildInstructions({ level: 'everything', mode: 'hosted', sharing: false })
+const SELF_HOSTED_INSTRUCTIONS = buildInstructions({ level: 'everything', mode: 'self-hosted', sharing: false })
 
 // Claude Code's default cap on upfront server instructions
 // (CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH); anything longer is cut off.
@@ -38,7 +43,8 @@ const HANDLERS = { off: handler(false), on: handler(true), selfHosted: handler(t
 const rpc = async (
   method: string,
   params: Record<string, unknown>,
-  sharing: keyof typeof HANDLERS = 'on'
+  sharing: keyof typeof HANDLERS = 'on',
+  access: AccessLevel = 'everything'
 ): Promise<Record<string, unknown>> => {
   const res = await HANDLERS[sharing](
     new Request('https://mcp.example.com/mcp', {
@@ -46,7 +52,7 @@ const rpc = async (
       headers: { accept: 'application/json, text/event-stream', 'content-type': 'application/json' },
       method: 'POST',
     }),
-    { exp: 0, principal: 'user@example.com', token: 'token', userId: 'user_123' }
+    { access, exp: 0, principal: 'user@example.com', token: 'token', userId: 'user_123' }
   )
   const text = await res.text()
   // The transport answers as an SSE stream; the result is the one `data:` line.
@@ -66,7 +72,7 @@ const rpc = async (
 
 type Sharing = keyof typeof HANDLERS
 
-const sentInstructions = async (sharing: Sharing = 'on'): Promise<string> => {
+const sentInstructions = async (sharing: Sharing = 'on', access: AccessLevel = 'everything'): Promise<string> => {
   const result = await rpc(
     'initialize',
     {
@@ -74,7 +80,8 @@ const sentInstructions = async (sharing: Sharing = 'on'): Promise<string> => {
       clientInfo: { name: 'instructions-test', version: '0' },
       protocolVersion: '2025-06-18',
     },
-    sharing
+    sharing,
+    access
   )
   if (typeof result.instructions !== 'string') {
     throw new Error('initialize sent no instructions')
@@ -82,8 +89,8 @@ const sentInstructions = async (sharing: Sharing = 'on'): Promise<string> => {
   return result.instructions
 }
 
-const registeredTools = async (sharing: Sharing = 'on'): Promise<Set<string>> => {
-  const result = (await rpc('tools/list', {}, sharing)) as { tools: { name: string }[] }
+const registeredTools = async (sharing: Sharing = 'on', access: AccessLevel = 'everything'): Promise<Set<string>> => {
+  const result = (await rpc('tools/list', {}, sharing, access)) as { tools: { name: string }[] }
   return new Set(result.tools.map((t) => t.name))
 }
 
@@ -151,6 +158,12 @@ describe('self-hosted server instructions', () => {
     expect(SELF_HOSTED_INSTRUCTIONS.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS_LENGTH)
   })
 
+  test('tell the agent to leave mail in Junk alone, as the hosted ones do', () => {
+    for (const text of [SELF_HOSTED_INSTRUCTIONS, SERVER_INSTRUCTIONS]) {
+      expect(text).toContain('A hit in Junk is mail the server filtered as spam')
+    }
+  })
+
   // The self-hosted server serves someone's own Stalwart with no Langmail
   // account, so no tool may send the user to Langmail or name it as the actor.
   test('no tool description or input schema names Langmail', async () => {
@@ -163,5 +176,39 @@ describe('self-hosted server instructions', () => {
   test('do not mention a type filter or classified types', () => {
     expect(SELF_HOSTED_INSTRUCTIONS).not.toMatch(TYPE_FILTER_WORDING_RE)
     expect(SELF_HOSTED_INSTRUCTIONS).not.toMatch(COLLECTED_BOOK_WORDING_RE)
+  })
+})
+
+// Every snake_case word with at least one underscore is a tool name; plain
+// prose words are not.
+const TOOL_NAME_RE = /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g
+
+describe('server instructions per access level', () => {
+  for (const access of ACCESS_LEVELS) {
+    for (const sharing of ['on', 'off', 'selfHosted'] as const) {
+      test(`${access}, ${sharing}: name only offered tools, fit the cap, keep the safety line`, async () => {
+        const text = await sentInstructions(sharing, access)
+        const tools = await registeredTools(sharing, access)
+        const mentioned = new Set(text.match(TOOL_NAME_RE) ?? [])
+
+        expect(mentioned.size).toBeGreaterThan(0)
+        expect([...mentioned].filter((name) => !tools.has(name))).toEqual([])
+        expect(text.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS_LENGTH)
+        expect(text).toContain(SAFETY_LINE)
+        // One line says the level, and only below Everything, whose text is
+        // today's.
+        expect(text.includes('Access: ')).toBe(access !== 'everything')
+        if (sharing === 'selfHosted') {
+          expect(text).not.toContain('Langmail')
+        }
+      })
+    }
+  }
+
+  test('a lower level says where the user changes it', async () => {
+    expect(await sentInstructions('on', 'read-only')).toContain('Access: Read only.')
+    expect(await sentInstructions('on', 'read-only')).toContain('under Access in Langmail')
+    expect(await sentInstructions('on', 'no-send')).toContain('Access: Change, never send.')
+    expect(await sentInstructions('selfHosted', 'no-send')).toContain('--access')
   })
 })

@@ -39,7 +39,8 @@ const EMAIL_PROPERTIES = [
 // Richer properties for get_email and the poller's analysis input:
 // recipients, the text body parts, the RFC 5322 Message-ID list, the
 // raw-message blob handle (blobId/size) for langmail preprocessing, and
-// mailboxIds so the poller can tell sent mail by its Sent membership.
+// mailboxIds so the poller can tell sent mail by its Sent membership and
+// get_email can name the message's folders.
 const EMAIL_DETAIL_PROPERTIES = [
   'id',
   'blobId',
@@ -341,7 +342,7 @@ export interface EmailHeadersMatchingParams extends JmapCall {
 // not a person the user wrote with. The Email/get reads the query's ids by
 // back-reference.
 export const emailHeadersMatching = async (p: EmailHeadersMatchingParams): Promise<EmailHeaderRecord[]> => {
-  const skipped = (await fetchMailboxes(p)).filter((m) => m.role === 'junk' || m.role === 'trash').map((m) => m.id)
+  const skipped = (await mailboxList(p)).filter((m) => m.role === 'junk' || m.role === 'trash').map((m) => m.id)
   const headers = { conditions: [{ from: p.query }, { to: p.query }, { cc: p.query }], operator: 'OR' }
   const resp = await call(p, {
     methodCalls: [
@@ -693,7 +694,8 @@ export const threadsExpandEmailIds = async (p: ThreadExpandParams): Promise<stri
 // One round-trip that hydrates every mailbox's id + name + role. Stalwart's
 // mailbox count is small, so listing all and matching in memory is cheaper
 // than the name/role-filtered Mailbox/query JMAP doesn't directly support.
-const fetchMailboxes = async (p: JmapCall & { accountId: string }): Promise<MailboxRecord[]> => {
+// Exported so the read tools can name the folders a message is in.
+export const mailboxList = async (p: JmapCall & { accountId: string }): Promise<MailboxRecord[]> => {
   const resp = await call(p, {
     methodCalls: [
       ['Mailbox/query', { accountId: p.accountId }, '0'],
@@ -728,7 +730,7 @@ export interface MailboxIdByRoleParams extends JmapCall {
 // inbox, independent of the localized display name.
 export const mailboxIdByRole = async (p: MailboxIdByRoleParams): Promise<string | null> => {
   const wanted = p.role.toLowerCase()
-  const hit = (await fetchMailboxes(p)).find((m) => m.role?.toLowerCase() === wanted)
+  const hit = (await mailboxList(p)).find((m) => m.role?.toLowerCase() === wanted)
   return hit?.id ?? null
 }
 
@@ -759,6 +761,19 @@ const ROLE_BY_PLACE_NAME: Record<string, string> = {
 // isn't a place (an ordinary user folder, resolvable by name only).
 export const roleForPlaceName = (name: string): string | undefined => ROLE_BY_PLACE_NAME[name.trim().toLowerCase()]
 
+// The other direction: the one place name each role is shown as, in the
+// order a reader expects them. A message's folders are listed under these
+// names, the same ones the `mailbox` arguments accept, whatever the server
+// calls the folder.
+export const PLACES_IN_ORDER: readonly { name: string; role: string }[] = [
+  { name: 'Inbox', role: 'inbox' },
+  { name: 'Archive', role: 'archive' },
+  { name: 'Sent', role: 'sent' },
+  { name: 'Drafts', role: 'drafts' },
+  { name: 'Junk', role: 'junk' },
+  { name: 'Trash', role: 'trash' },
+]
+
 // Resolve a caller-supplied folder name to a mailbox id: for a *place* name the
 // mailbox carrying that role, else (and as the fallback) an exact, case-folded
 // name match. One round-trip serves both lookups.
@@ -775,7 +790,7 @@ export const roleForPlaceName = (name: string): string | undefined => ROLE_BY_PL
 // did, and a place name still works on a server that has no mailbox carrying
 // that role but does have one named for it.
 export const mailboxIdByNameOrRole = async (p: MailboxIdByNameParams): Promise<string | null> => {
-  const mailboxes = await fetchMailboxes(p)
+  const mailboxes = await mailboxList(p)
   const role = roleForPlaceName(p.name)
   const byRole = role ? mailboxes.find((m) => m.role?.toLowerCase() === role) : undefined
   if (byRole) {
@@ -788,7 +803,7 @@ export const mailboxIdByNameOrRole = async (p: MailboxIdByNameParams): Promise<s
 // Every folder name in the account. Used to turn a failed mailbox lookup into
 // an actionable error rather than a dead end.
 export const mailboxNames = async (p: JmapCall & { accountId: string }): Promise<string[]> =>
-  (await fetchMailboxes(p)).map((m) => m.name)
+  (await mailboxList(p)).map((m) => m.name)
 
 export interface MailboxIdsByRolesParams extends JmapCall {
   accountId: string
@@ -796,9 +811,9 @@ export interface MailboxIdsByRolesParams extends JmapCall {
 }
 
 // Resolve several special-use roles from one mailbox listing — the archive
-// move needs both inbox and archive, and one round-trip beats two.
+// patch needs archive, inbox, junk and trash, and one round-trip beats four.
 export const mailboxIdsByRoles = async (p: MailboxIdsByRolesParams): Promise<Record<string, string | null>> => {
-  const mailboxes = await fetchMailboxes(p)
+  const mailboxes = await mailboxList(p)
   return Object.fromEntries(
     p.roles.map((role) => {
       const wanted = role.toLowerCase()

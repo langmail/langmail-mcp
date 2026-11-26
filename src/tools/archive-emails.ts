@@ -1,7 +1,10 @@
-// archive_emails tool — take messages out of the Inbox and into the Archive
-// mailbox. Add-Archive + drop-Inbox rather than a wholesale replacement so a
-// message that also lives in Sent (your own reply in a thread) stays there;
-// this is the same patch the rules engine's `archive` action builds.
+// archive_emails tool — take messages out of the places mail waits in before
+// it is handled (Inbox, Junk, Trash) and into the Archive mailbox. Add-Archive
+// + drop-those-three rather than a wholesale replacement so a message that also
+// lives in Sent (your own reply in a thread) or in a user folder stays there.
+// Junk and Trash are dropped too, or a message archived out of Junk would sit
+// in both folders. The rules engine's `archive` action still drops only the
+// Inbox.
 
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
@@ -25,9 +28,13 @@ export const archiveEmails = async (deps: FileEmailsDeps, ctx: ArchiveEmailsCont
         'or use move_emails with an existing folder.'
     )
   }
+  // Removing a mailbox the message is not in is a no-op (Stalwart accepts
+  // it), so one patch serves every id without reading where each one is first.
   const mailboxIds: Record<string, boolean> = { [places.archive]: true }
-  if (places.inbox && places.inbox !== places.archive) {
-    mailboxIds[places.inbox] = false
+  for (const left of [places.inbox, places.junk, places.trash]) {
+    if (left && left !== places.archive) {
+      mailboxIds[left] = false
+    }
   }
   const result = await deps.updateEmails(ctx.token, ctx.args.ids, { mailboxIds })
   return formatBatchResult('Archived', result)
@@ -41,8 +48,10 @@ export const registerArchiveEmails = (server: McpServer, deps: FileEmailsDeps, g
     {
       annotations: ACCOUNT_WRITE,
       description:
-        'Archive one or more messages: remove them from the Inbox and file them in the Archive ' +
-        'mailbox. Use this when the user says archive, clear, or "get this out of my inbox". ' +
+        'Archive one or more messages: take them out of the Inbox, Junk and Trash and file them in the ' +
+        'Archive mailbox; Sent and any other folder they are in stay as they are. Use this when the user ' +
+        'says archive, clear, or "get this out of my inbox". A message in Junk is spam: archive it only ' +
+        'when the user says it is not spam. ' +
         'Read state and flags (to-do, starred) are untouched (use mark_emails for those), and ' +
         're-running it on the same ids is harmless. Takes message ids ' +
         "from search_emails or get_thread; pass all of a thread's ids to archive the conversation. " +

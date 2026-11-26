@@ -7,6 +7,7 @@
 
 import { describe, expect, test } from 'bun:test'
 
+import { ACCESS_LEVELS, type AccessLevel } from '../access/levels.ts'
 import { createTicketStore } from '../attachments/tickets.ts'
 import { createUploadTicketStore } from '../attachments/upload-tickets.ts'
 import { createImageProxyStore } from '../email-render/image-proxy.ts'
@@ -14,9 +15,10 @@ import { makeJmapLive } from '../jmap/index.ts'
 import { fakeShareStore } from '../tools/calendar-share-test-fixtures.ts'
 import { createMcpHandler } from './handler.ts'
 
-const handler = (sharing: boolean) =>
+const handler = (sharing: boolean, selfHosted = false) =>
   createMcpHandler({
     ...(sharing ? { calendarShares: fakeShareStore() } : {}),
+    ...(selfHosted ? { mode: 'self-hosted' as const } : {}),
     imageTokens: createImageProxyStore(),
     live: makeJmapLive('https://mail.example.com'),
     publicUrl: 'https://mcp.example.com',
@@ -26,14 +28,20 @@ const handler = (sharing: boolean) =>
     uploadTickets: createUploadTicketStore(),
   })
 
-const rpc = async (sharing: boolean, method: string, params: Record<string, unknown>): Promise<unknown> => {
-  const res = await handler(sharing)(
+const rpc = async (
+  sharing: boolean,
+  method: string,
+  params: Record<string, unknown>,
+  access: AccessLevel = 'everything',
+  selfHosted = false
+): Promise<unknown> => {
+  const res = await handler(sharing, selfHosted)(
     new Request('https://mcp.example.com/mcp', {
       body: JSON.stringify({ id: 1, jsonrpc: '2.0', method, params }),
       headers: { accept: 'application/json, text/event-stream', 'content-type': 'application/json' },
       method: 'POST',
     }),
-    { exp: 0, principal: 'user@example.com', token: 'token', userId: 'user_123' }
+    { access, exp: 0, principal: 'user@example.com', token: 'token', userId: 'user_123' }
   )
   const data = (await res.text()).split('\n').find((line) => line.startsWith('data: '))
   if (!data) {
@@ -56,5 +64,35 @@ describe('hosted tool surface', () => {
       const tools = sharing ? list.tools : list.tools.map((tool) => tool.name)
       expect({ instructions: init.instructions, tools }).toMatchSnapshot()
     })
+  }
+})
+
+// What each access level offers, hosted (with and without sharing) and
+// self-hosted: the tool names and the instructions. Everything is pinned in
+// full above; this pins the lower levels and the self-hosted surface.
+describe('tool surface per access level', () => {
+  const surfaces = [
+    { label: 'hosted, sharing on', selfHosted: false, sharing: true },
+    { label: 'hosted, sharing off', selfHosted: false, sharing: false },
+    { label: 'self-hosted', selfHosted: true, sharing: false },
+  ]
+  for (const access of ACCESS_LEVELS) {
+    for (const { label, selfHosted, sharing } of surfaces) {
+      test(`${access}, ${label}`, async () => {
+        const init = (await rpc(
+          sharing,
+          'initialize',
+          {
+            capabilities: {},
+            clientInfo: { name: 'tool-surface-test', version: '0' },
+            protocolVersion: '2025-06-18',
+          },
+          access,
+          selfHosted
+        )) as { instructions: string }
+        const list = (await rpc(sharing, 'tools/list', {}, access, selfHosted)) as { tools: { name: string }[] }
+        expect({ instructions: init.instructions, tools: list.tools.map((tool) => tool.name) }).toMatchSnapshot()
+      })
+    }
   }
 })

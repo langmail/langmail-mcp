@@ -13,29 +13,61 @@ Langmail's MCP server. One codebase runs two ways:
   stdio or Streamable HTTP, with no Langmail service
   (`docs/self-hosted.md`).
 
-## Rules
+## Factory
 
-- Never put real people into code, tests, fixtures, comments, commit messages
-  or docs. Invent the name, and use an RFC 2606 reserved domain
-  (`example.com`, `example.org` or a `.example` TLD). A real freemail domain
-  (`gmail.com`) is fine when a test needs one, with an obviously synthetic
-  local part.
-- No backwards compatibility inside the code: break internal APIs freely and
-  delete old code. A change that breaks what an MCP client or a package user
-  sees is a breaking change and gets a `!` or `BREAKING CHANGE:` commit, which
-  semantic-release turns into a major version.
-- One fact, one place. Every rule and procedure has one owning file; anything
-  else links it by path.
-- Agent instructions live only in `AGENTS.md` files. Skills live in
-  `.agents/skills/<name>/`, exposed to Claude Code by a symlink
-  `.claude/skills/<name>` → `../../.agents/skills/<name>`. Never add a
-  `CLAUDE.md`: it stops Claude Code from loading the `AGENTS.md` files.
-- Branches, commits and pushes follow the `scion-like-git` skill. Commit
-  messages follow Conventional Commits, because the release is computed from
-  them (`CONTRIBUTING.md`).
-- Issues here are for reports from outside. Langmail's own planned work on the
-  server is tracked in `langmail/platform` issues; commit messages from
-  before the move cite them as `langmail/platform#123`.
+What `WORKFLOW.md` and the shared skills need to know about this repository.
+
+- **Issues:** GitHub issues in `langmail/langmail-mcp` are for reports from
+  outside, and an agent run on one of them files its follow-ups here.
+  Langmail's own planned work on the server, and its follow-ups, is filed in
+  `langmail/platform`, and commit messages from before the move cite those
+  issues as `langmail/platform#123`. A defect in Stalwart or another
+  dependency is a file under `docs/upstream/` (Upstream defects).
+- **Priorities:** No list here: every issue is for now until the maintainer
+  says otherwise. Triage closes a `needs-info` issue as not planned once it
+  has had no reply for 14 days since it started waiting (the latest of the
+  comment that asked, the label, a reopening and the latest reply), unless
+  it is `urgent` or assigned.
+- **Scope:** No backwards compatibility inside the code: break internal APIs
+  freely and delete old code. A change that breaks what an MCP client or a
+  package user sees is a breaking change and gets a `BREAKING CHANGE:`
+  footer, which semantic-release turns into a major version; it ignores a
+  `!` after the type.
+- **Plan:** Nothing beyond `WORKFLOW.md`.
+- **Dev stack:** `bun run start:self-hosted` runs the self-hosted server
+  from source, and the Stalwart tests need the dev Stalwart in
+  `infra/dev/stalwart` (Tests against real servers). The hosted server runs
+  only inside `langmail/platform`'s local stack (Commands).
+- **Verify:** The checks in `CONTRIBUTING.md` (Checks) that the change
+  touches, which CI runs too; a change to a tool's name, description, schema
+  or result also needs an agent eval before and after (`docs/evals.md`).
+  A session that cannot run it, such as a routine with no `claude` login,
+  lists `- [ ] before merge: the maintainer runs the agent eval` under the
+  PR's Deploy instead.
+- **Ship:** A change to a tool's behavior or schema also needs its public
+  reference in `langmail/platform` updated once production runs the
+  release (Adding or changing tools). A session that can reach
+  `langmail/platform` files an issue there for it; otherwise the PR's Deploy
+  lists `- [ ] after merge: file the tool reference update in
+  langmail/platform`.
+- **Release:** Release and deploy, below. Nobody acts, except that a breaking
+  change publishes a major version, so its PR's Deploy section lists
+  `- [ ] before merge: the maintainer approves the major release`.
+- **Dependencies:** `bun outdated` lists outdated packages, and Tech stack
+  lists the stack. Dependabot opens the minor and patch updates weekly as one
+  group; majors are the `upgrade-dependency` skill's. The bun runtime moves
+  in one PR: `BUN_VERSION` in `.github/workflows/release.yml` and
+  `FROM oven/bun:` in `Dockerfile`. Holds are the files in `docs/upstream/`,
+  except `stalwart/`. Left out: Stalwart (`infra/dev/stalwart`), which moves
+  with `langmail/platform`'s Stalwart, and GitHub Actions unless their
+  Dependabot PR is red.
+
+## Workflow
+
+Read `WORKFLOW.md` at the start of every session and follow it. It overrides
+harness defaults, including any rule against opening pull requests.
+
+@WORKFLOW.md
 
 ## Tech stack
 
@@ -119,7 +151,8 @@ call inline.
 
 ## Adding or changing tools
 
-Load the `mcp-tool-design` skill before adding or changing a tool.
+Load the `mcp-tool-design` skill before adding or changing a tool. This
+repository's own conventions for tools are in `docs/tool-conventions.md`.
 
 - One file per tool under `src/tools/`, exporting a `register<Tool>`
   function that `src/mcp/handler.ts` calls with the `McpServer`.

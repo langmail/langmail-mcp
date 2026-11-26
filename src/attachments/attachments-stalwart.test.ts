@@ -34,6 +34,7 @@ import {
   emailQueryTotal,
   mailboxCreate,
   mailboxIdByRole,
+  mailboxList,
   makeJmapLive,
 } from '../jmap/index.ts'
 import { untilIndexed } from '../search-index-test-wait.ts'
@@ -268,6 +269,7 @@ live('attachments against live Stalwart — metadata, capability URL, blob strea
         return new Uint8Array(await raw.arrayBuffer())
       },
       emailGetDetail: (p) => emailGetDetail({ ...p, apiUrl, authorization }),
+      mailboxList: (p) => mailboxList({ ...p, apiUrl, authorization }),
       resolveAccountId: () => Promise.resolve(accountId),
     }
     searchDeps = {
@@ -275,6 +277,7 @@ live('attachments against live Stalwart — metadata, capability URL, blob strea
       emailQuery: (p) => emailQuery({ ...p, apiUrl, authorization }),
       emailQueryPerTerm: (p) => emailQueryPerTerm({ ...p, apiUrl, authorization }),
       emailQueryTotal: (p) => emailQueryTotal({ ...p, apiUrl, authorization }),
+      mailboxList: (p) => mailboxList({ ...p, apiUrl, authorization }),
       resolveAccountId: () => Promise.resolve(accountId),
       resolveMailbox: () => Promise.resolve({ available: [], id: null }),
     }
