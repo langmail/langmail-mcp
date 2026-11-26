@@ -1,3 +1,10 @@
+# [0.4.0](https://github.com/langmail/langmail-mcp/compare/v0.3.0...v0.4.0) (2026-11-26)
+
+
+### Features
+
+* **share_calendar:** email the link to the person when given their address ([#12](https://github.com/langmail/langmail-mcp/issues/12)) ([37a5997](https://github.com/langmail/langmail-mcp/commit/37a5997458d4162be37c758f028531ebb2b248d4)), closes [langmail/platform#1405](https://github.com/langmail/platform/issues/1405)
+
 # [0.3.0](https://github.com/langmail/langmail-mcp/compare/v0.2.2...v0.3.0) (2026-11-26)
 
 
