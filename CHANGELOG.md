@@ -1,3 +1,10 @@
+# [0.3.0](https://github.com/langmail/langmail-mcp/compare/v0.2.2...v0.3.0) (2026-11-26)
+
+
+### Features
+
+* **access:** offer an agent only the tools its access level allows ([#28](https://github.com/langmail/langmail-mcp/issues/28)) ([9982348](https://github.com/langmail/langmail-mcp/commit/998234844d8c70281d7ed8db39d15c7a47d8e14c)), closes [langmail/platform#1448](https://github.com/langmail/platform/issues/1448)
+
 ## [0.2.2](https://github.com/langmail/langmail-mcp/compare/v0.2.1...v0.2.2) (2026-11-25)
 
 
