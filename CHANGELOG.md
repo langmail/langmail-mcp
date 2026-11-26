@@ -1,3 +1,10 @@
+# [0.6.0](https://github.com/langmail/langmail-mcp/compare/v0.5.0...v0.6.0) (2026-11-26)
+
+
+### Features
+
+* **self-hosted:** start at Read only, Change never send or Everything with --access ([#34](https://github.com/langmail/langmail-mcp/issues/34)) ([64c4b0c](https://github.com/langmail/langmail-mcp/commit/64c4b0c35c6af4c8080c633131aceba9ce754122)), closes [langmail/platform#1450](https://github.com/langmail/platform/issues/1450)
+
 # [0.5.0](https://github.com/langmail/langmail-mcp/compare/v0.4.0...v0.5.0) (2026-11-26)
 
 
