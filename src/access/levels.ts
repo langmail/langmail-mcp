@@ -5,11 +5,17 @@
 //   read-only    reads the account: search, get, preview, download, list.
 //   no-send      also changes the account itself: filing, flags, trash, drafts
 //                (a staged reply or forward included), uploads, calendars,
-//                moving events, contacts, deleting a rule, ending a share.
+//                personal events (ones nobody else is on), moving events,
+//                contacts, mail rules without a forward action, ending a share.
 //                Nothing leaves the account and nobody else is told.
 //   everything   also reaches other people: sending, unsubscribing, sharing a
-//                calendar, event writes and invitation replies, and the rule
-//                writers (a rule may forward mail).
+//                calendar, events with attendees, invitation replies, and rules
+//                that forward mail.
+//
+// The event and rule writers sit in no-send but register a narrowed form there
+// (`reachesOthers` below): no attendees or `notify` on events, no forward action
+// on rules, and a refusal for an event that has attendees or a rule that
+// already forwards. Everything registers their full form.
 //
 // The level limits what the agent does through this server only. The bearer
 // token (hosted) or app password (self-hosted) keeps full rights on Stalwart.
@@ -48,8 +54,11 @@ export const TOOL_ACCESS = {
   // no-send
   archive_emails: 'no-send',
   create_calendar: 'no-send',
+  create_calendar_event: 'no-send',
   create_contact: 'no-send',
   create_draft: 'no-send',
+  create_mail_rule: 'no-send',
+  delete_calendar_event: 'no-send',
   delete_contact: 'no-send',
   delete_draft: 'no-send',
   delete_mail_rule: 'no-send',
@@ -60,23 +69,19 @@ export const TOOL_ACCESS = {
   stop_sharing_calendar: 'no-send',
   trash_emails: 'no-send',
   update_calendar: 'no-send',
+  update_calendar_event: 'no-send',
   update_contact: 'no-send',
   update_draft: 'no-send',
+  update_mail_rule: 'no-send',
   upload_attachments: 'no-send',
 
-  // everything: the event and rule writers come down to no-send in narrowed
-  // forms with langmail/platform#1449.
-  create_calendar_event: 'everything',
-  create_mail_rule: 'everything',
-  delete_calendar_event: 'everything',
+  // everything
   forward_message: 'everything',
   reply_to_message: 'everything',
   respond_to_event: 'everything',
   send_draft: 'everything',
   share_calendar: 'everything',
   unsubscribe_from_list: 'everything',
-  update_calendar_event: 'everything',
-  update_mail_rule: 'everything',
 } as const satisfies Record<string, AccessLevel>
 
 export type ToolName = keyof typeof TOOL_ACCESS
@@ -86,3 +91,7 @@ export const isToolName = (name: string): name is ToolName => Object.hasOwn(TOOL
 // Whether an agent at `level` is offered `tool`.
 export const allows = (level: AccessLevel, tool: ToolName): boolean =>
   ACCESS_LEVELS.indexOf(TOOL_ACCESS[tool]) <= ACCESS_LEVELS.indexOf(level)
+
+// Whether an agent at `level` may reach other people. The event and rule
+// writers register their full form when it may, their narrowed form otherwise.
+export const reachesOthers = (level: AccessLevel): boolean => level === 'everything'

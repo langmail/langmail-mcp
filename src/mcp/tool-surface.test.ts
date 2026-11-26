@@ -96,3 +96,18 @@ describe('tool surface per access level', () => {
     }
   }
 })
+
+// The event and rule writers at Change, never send register a narrowed form
+// (src/access/levels.ts): pinned in full, so their schemas and annotations are
+// a decision too. At Everything they are the full forms pinned above.
+test('narrowed tools at no-send, in full', async () => {
+  const narrowed = new Set([
+    'create_calendar_event',
+    'create_mail_rule',
+    'delete_calendar_event',
+    'update_calendar_event',
+    'update_mail_rule',
+  ])
+  const list = (await rpc(true, 'tools/list', {}, 'no-send')) as { tools: { name: string }[] }
+  expect(list.tools.filter((tool) => narrowed.has(tool.name))).toMatchSnapshot()
+})

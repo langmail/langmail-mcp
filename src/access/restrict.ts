@@ -12,19 +12,13 @@ import { logger } from '../logger/index.ts'
 import { type ServerMode } from '../mode.ts'
 import { errorResult, type ToolResult } from '../tools/result.ts'
 import { ACCESS_LEVEL_NAMES, type AccessLevel, allows, isToolName } from './levels.ts'
+import { whereToChange } from './narrowed.ts'
 
 const ALLOWS: Record<Exclude<AccessLevel, 'everything'>, string> = {
   'no-send':
-    'which lets it file mail, stage drafts, organize calendars (not their events) and edit contacts, but not send mail or reach anyone else',
+    'which lets it file mail, stage drafts, manage personal events and mail rules that do not forward, and edit contacts, but not send mail or reach anyone else',
   'read-only': 'which lets it read mail, calendars, contacts and mail rules but not change or send anything',
 }
-
-// Where the user changes the level. Neither place exists yet: the self-hosted
-// --access option comes with langmail/platform#1450 and the Access page with
-// the Langmail slices of #1447. Until then every connection runs at
-// Everything, so no agent reads this.
-export const whereToChange = (mode: ServerMode): string =>
-  mode === 'self-hosted' ? 'by restarting the server with the --access option' : 'under Access in Langmail'
 
 const refusalText = (tool: string, level: AccessLevel, mode: ServerMode): string => {
   const allowed = level === 'everything' ? '' : `, ${ALLOWS[level]}`

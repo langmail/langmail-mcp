@@ -1,9 +1,16 @@
 import { describe, expect, test } from 'bun:test'
+import { type McpServer } from '@modelcontextprotocol/server'
 
 import { type DeleteEventParams, type FetchEventParams, type UpdateEventParams } from '../caldav/client.ts'
 import { buildInvite } from '../caldav/ical.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
-import { type DeleteCalendarEventArgs, deleteCalendarEvent, deleteCalendarEventInput } from './delete-calendar-event.ts'
+import {
+  type DeleteCalendarEventArgs,
+  deleteCalendarEvent,
+  deleteCalendarEventInput,
+  deletePersonalEventInput,
+  registerDeleteCalendarEvent,
+} from './delete-calendar-event.ts'
 
 const CAL = 'https://m/dav/cal/u/default/'
 const UID = 'evt-1@langmail.me'
@@ -445,5 +452,139 @@ describe('deleteCalendarEvent — all-day series occurrence', () => {
     })
     expect(result.isError).toBe(true)
     expect(cap.updated).toHaveLength(0)
+  })
+})
+
+describe('deleteCalendarEvent — Change, never send', () => {
+  const narrowed = { mode: 'hosted' as const }
+
+  // A personal series: no ORGANIZER, no ATTENDEE.
+  const personalSeries = (): CalendarObject => ({
+    data: buildInvite({
+      attendees: [],
+      end: new Date('2026-06-16T10:30:00Z'),
+      rrule: 'FREQ=WEEKLY;BYDAY=TU',
+      start: new Date('2026-06-16T10:00:00Z'),
+      title: 'Gym',
+      uid: UID,
+    }),
+    etag: '"abc"',
+    url: `${CAL}${UID}.ics`,
+  })
+
+  // An invitation the user received: someone else organizes it and the user
+  // is an attendee.
+  const receivedInvitation = (): CalendarObject => ({
+    data: buildInvite({
+      attendees: ['host@langmail.me'],
+      end: new Date('2026-06-12T10:30:00Z'),
+      organizer: 'someone@example.com',
+      start: new Date('2026-06-12T10:00:00Z'),
+      title: 'Their meeting',
+      uid: UID,
+    }),
+    etag: '"abc"',
+    url: `${CAL}${UID}.ics`,
+  })
+
+  test.each([
+    ['a meeting the user organizes', recurringStored],
+    ['an invitation the user received', receivedInvitation],
+  ])('refuses %s and deletes nothing', async (_label, stored) => {
+    const cap = captured()
+    const result = await deleteCalendarEvent(makeDeps(account(), stored(), cap), {
+      args: args(),
+      narrowed,
+      token: 'tok',
+    })
+
+    expect(result.isError).toBe(true)
+    const text = result.content[0]?.text ?? ''
+    expect(text).toContain('has attendees')
+    expect(text).toContain('Nothing was changed.')
+    expect(text).toContain('need Everything access')
+    expect(text).toContain('under Access in Langmail')
+    expect(cap.deleted).toHaveLength(0)
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('refuses one occurrence of a meeting too', async () => {
+    const cap = captured()
+    const result = await deleteCalendarEvent(makeDeps(account(), recurringStored(), cap), {
+      args: args({ recurrenceId: '2026-06-23T10:00:00Z' }),
+      narrowed,
+      token: 'tok',
+    })
+
+    expect(result.isError).toBe(true)
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('deletes a personal event and says nobody was told', async () => {
+    const cap = captured()
+    const result = await deleteCalendarEvent(makeDeps(account(), personalSeries(), cap), {
+      args: args(),
+      narrowed,
+      token: 'tok',
+    })
+
+    expect(result.isError).toBeUndefined()
+    expect(cap.deleted).toHaveLength(1)
+    expect(result.content[0]?.text).toContain('nobody else was on it')
+    expect(result.content[0]?.text).not.toContain('cancellations')
+  })
+
+  test('removes one occurrence of a personal series', async () => {
+    const cap = captured()
+    const result = await deleteCalendarEvent(makeDeps(account(), personalSeries(), cap), {
+      args: args({ recurrenceId: '2026-06-23T10:00:00Z' }),
+      narrowed,
+      token: 'tok',
+    })
+
+    expect(result.isError).toBeUndefined()
+    expect(cap.updated).toHaveLength(1)
+    expect(result.content[0]?.text).toContain('removed; nobody else is on this event')
+  })
+
+  test('the narrowed schema takes the same fields and nothing else', () => {
+    expect(Object.keys(deletePersonalEventInput.shape).sort()).toEqual(
+      Object.keys(deleteCalendarEventInput.shape).sort()
+    )
+    expect(deletePersonalEventInput.safeParse({ notify: 'none', uid: UID }).success).toBe(false)
+  })
+})
+
+// Through registration, so the level decides the form and the refusal.
+describe('registerDeleteCalendarEvent per level', () => {
+  const register = (access: 'everything' | 'no-send', cap: Captured) => {
+    let handler: ((args: unknown) => Promise<{ content: { text: string }[]; isError?: boolean }>) | undefined
+    const server = {
+      registerTool: (_name: string, _config: unknown, cb: typeof handler) => {
+        handler = cb
+      },
+    } as unknown as McpServer
+    registerDeleteCalendarEvent(server, makeDeps(account(), recurringStored(), cap), () => 'tok', access, 'hosted')
+    if (!handler) {
+      throw new Error('not registered')
+    }
+    return handler
+  }
+
+  test('at no-send a meeting is refused and nothing is deleted', async () => {
+    const cap = captured()
+    const result = await register('no-send', cap)({ uid: UID })
+
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('need Everything access')
+    expect(cap.deleted).toHaveLength(0)
+  })
+
+  test('at everything the same meeting is deleted', async () => {
+    const cap = captured()
+    const result = await register('everything', cap)({ uid: UID })
+
+    expect(result.isError).toBeUndefined()
+    expect(cap.deleted).toHaveLength(1)
   })
 })

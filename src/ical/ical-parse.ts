@@ -114,6 +114,10 @@ export interface ParsedEvent {
   // refuse a delta edit rather than silently drop those people. Absent when all
   // attendees parsed cleanly.
   unparsedAttendeeCount?: number
+  // True when the VEVENT has an ORGANIZER that could not be reduced to a bare
+  // email (a non-mailto cal-address), so `organizer` is absent although someone
+  // organizes it. Absent otherwise.
+  unparsedOrganizer?: true
 }
 
 // RFC 5545 folds long lines with CRLF (or LF) + a single space/tab. Undo
@@ -437,7 +441,8 @@ const isDateValue = (property: ParsedProperty | undefined): boolean =>
 const optionalFields = (block: ParsedBlock, attendees: ParsedAttendee[]): Partial<ParsedEvent> => {
   const description = block.props.get('DESCRIPTION')?.value
   const location = block.props.get('LOCATION')?.value
-  const organizer = parseOrganizerEmail(block.props.get('ORGANIZER'))
+  const organizerProperty = block.props.get('ORGANIZER')
+  const organizer = parseOrganizerEmail(organizerProperty)
   // Trim so a server that emits a trailing space (`RRULE:FREQ=WEEKLY `) doesn't
   // leak it into the listed `repeats:` value.
   const recurrence = block.props.get('RRULE')?.value.trim()
@@ -462,6 +467,7 @@ const optionalFields = (block: ParsedBlock, attendees: ParsedAttendee[]): Partia
     ...(excludedDates.length > 0 ? { excludedDates } : {}),
     ...(location ? { location: unescapeText(location) } : {}),
     ...(organizer ? { organizer } : {}),
+    ...(organizerProperty && !organizer ? { unparsedOrganizer: true as const } : {}),
     ...(recurrence ? { recurrence } : {}),
     ...(recurrenceId ? { recurrenceId } : {}),
     ...(showAs ? { showAs } : {}),

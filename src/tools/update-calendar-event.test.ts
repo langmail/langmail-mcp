@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test'
+import { type McpServer } from '@modelcontextprotocol/server'
 
 import { type FetchEventParams, type UpdateEventParams } from '../caldav/client.ts'
 import { buildInvite, maxSequence } from '../caldav/ical.ts'
@@ -7,9 +8,11 @@ import { parseEvents } from '../ical/index.ts'
 import { logger } from '../logger/index.ts'
 import {
   mergeAttendees,
+  registerUpdateCalendarEvent,
   type UpdateCalendarEventArgs,
   updateCalendarEvent,
   updateCalendarEventInput,
+  updatePersonalEventInput,
 } from './update-calendar-event.ts'
 
 const CAL = 'https://m/dav/cal/u/default/'
@@ -2413,5 +2416,99 @@ describe('updateCalendarEvent — unmodelled properties are preserved', () => {
     expect(await edit({ title: 'Renamed' })).toEqual(moz)
     expect(await edit({ start: '2026-06-12T14:00:00Z' })).toEqual([])
     expect(await edit({ reminderMinutesBefore: 10, title: 'Renamed' })).toEqual([])
+  })
+})
+
+describe('updateCalendarEvent — Change, never send', () => {
+  const narrowed = { mode: 'self-hosted' as const }
+
+  const personalStored = (): CalendarObject => ({
+    data: buildInvite({
+      attendees: [],
+      end: new Date('2026-06-12T10:30:00Z'),
+      start: new Date('2026-06-12T10:00:00Z'),
+      timeZone: 'UTC',
+      title: 'Dentist',
+      uid: UID,
+    }),
+    etag: '"abc"',
+    url: `${CAL}${UID}.ics`,
+  })
+
+  test.each([
+    ['a title change', { title: 'Renamed' }],
+    ['a reminder-only edit', { reminderMinutesBefore: 30 }],
+    ['an occurrence edit', { recurrenceId: '2026-06-23T10:00:00Z', title: 'Moved' }],
+  ] as const)('refuses %s on an event with attendees and changes nothing', async (_label, over) => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
+      args: { uid: UID, ...over },
+      narrowed,
+      token: 'tok',
+    })
+
+    expect(result.isError).toBe(true)
+    const text = result.content[0]?.text ?? ''
+    expect(text).toContain('has attendees')
+    expect(text).toContain('Nothing was changed.')
+    expect(text).toContain('need Everything access')
+    expect(text).toContain('--access')
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('reschedules a personal event and notifies nobody', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), personalStored(), cap), {
+      args: updatePersonalEventInput.parse({ start: '2026-06-12T14:00:00Z', uid: UID }),
+      narrowed,
+      token: 'tok',
+    })
+
+    expect(result.isError).toBeUndefined()
+    expect(cap.updated).toHaveLength(1)
+    expect(unfold(cap.updated[0]?.ical ?? '')).not.toContain('ATTENDEE')
+    expect(result.content[0]?.text).toContain('no attendees, no notifications')
+  })
+
+  test('the narrowed schema takes no attendee fields and no notify', () => {
+    for (const field of ['addedAttendees', 'attendees', 'notify', 'removedAttendees']) {
+      expect(Object.keys(updatePersonalEventInput.shape)).not.toContain(field)
+      expect(updatePersonalEventInput.safeParse({ [field]: [], uid: UID }).success).toBe(false)
+    }
+    expect(updatePersonalEventInput.safeParse({ title: 'Renamed', uid: UID }).success).toBe(true)
+  })
+})
+
+// Through registration, so the level decides the form and the refusal.
+describe('registerUpdateCalendarEvent per level', () => {
+  const register = (access: 'everything' | 'no-send', cap: Captured) => {
+    let handler: ((args: unknown) => Promise<{ content: { text: string }[]; isError?: boolean }>) | undefined
+    const server = {
+      registerTool: (_name: string, _config: unknown, cb: typeof handler) => {
+        handler = cb
+      },
+    } as unknown as McpServer
+    registerUpdateCalendarEvent(server, makeDeps(account(), storedEvent(), cap), () => 'tok', access, 'hosted')
+    if (!handler) {
+      throw new Error('not registered')
+    }
+    return handler
+  }
+
+  test('at no-send a meeting is refused and nothing is written', async () => {
+    const cap = captured()
+    const result = await register('no-send', cap)({ title: 'Renamed', uid: UID })
+
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('need Everything access')
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('at everything the same meeting is updated', async () => {
+    const cap = captured()
+    const result = await register('everything', cap)({ title: 'Renamed', uid: UID })
+
+    expect(result.isError).toBeUndefined()
+    expect(cap.updated).toHaveLength(1)
   })
 })

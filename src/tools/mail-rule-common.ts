@@ -6,7 +6,12 @@
 import { z } from 'zod'
 
 import { LARGE_APPLY_THRESHOLD, type MailRulesApplier } from '../rules/apply.ts'
-import { MATCH_VALUES, mailRuleActionsSchema, mailRuleConditionsShape } from '../rules/rule.ts'
+import {
+  MATCH_VALUES,
+  mailRuleActionsSchema,
+  mailRuleConditionsShape,
+  mailRuleLocalActionsSchema,
+} from '../rules/rule.ts'
 import { type MailRulesStore } from '../rules/store.ts'
 
 export interface MailRuleToolDeps {
@@ -40,6 +45,12 @@ export const ruleConditionsField = z
 
 export const ruleActionsField = mailRuleActionsSchema.describe(
   'What happens to a matching message — one or more actions, applied in order.'
+)
+
+// At Change, never send (src/access/levels.ts) a rule keeps mail inside the
+// account, so the forward action is not offered.
+export const ruleLocalActionsField = mailRuleLocalActionsSchema.describe(
+  'What happens to a matching message: one or more actions, applied in order. Forwarding needs Everything access.'
 )
 
 // --- existing-mail policy ----------------------------------------------------

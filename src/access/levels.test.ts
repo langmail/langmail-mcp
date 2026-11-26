@@ -8,7 +8,7 @@ import { createImageProxyStore } from '../email-render/image-proxy.ts'
 import { makeJmapLive } from '../jmap/index.ts'
 import { createMcpServerFactory } from '../mcp/handler.ts'
 import { fakeShareStore } from '../tools/calendar-share-test-fixtures.ts'
-import { ACCESS_LEVELS, type AccessLevel, allows, TOOL_ACCESS, type ToolName } from './levels.ts'
+import { ACCESS_LEVELS, type AccessLevel, allows, reachesOthers, TOOL_ACCESS, type ToolName } from './levels.ts'
 import { restrictToAccess } from './restrict.ts'
 
 const build = createMcpServerFactory({
@@ -58,14 +58,24 @@ describe('access levels', () => {
       'unsubscribe_from_list',
       'share_calendar',
       'respond_to_event',
+    ] as const) {
+      expect(TOOL_ACCESS[tool]).toBe('everything')
+    }
+  })
+
+  test('the event and rule writers come down to Change, never send, in a narrowed form', () => {
+    for (const tool of [
       'create_calendar_event',
       'update_calendar_event',
       'delete_calendar_event',
       'create_mail_rule',
       'update_mail_rule',
     ] as const) {
-      expect(TOOL_ACCESS[tool]).toBe('everything')
+      expect(TOOL_ACCESS[tool]).toBe('no-send')
     }
+    expect(reachesOthers('everything')).toBe(true)
+    expect(reachesOthers('no-send')).toBe(false)
+    expect(reachesOthers('read-only')).toBe(false)
   })
 
   test('registering a tool with no level fails', () => {
