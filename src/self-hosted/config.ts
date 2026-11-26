@@ -7,9 +7,13 @@
 
 import { parseArgs } from 'node:util'
 
+import { ACCESS_LEVELS, type AccessLevel } from '../access/levels.ts'
+
 export type Transport = 'http' | 'stdio'
 
 export interface SelfHostedConfig {
+  // What the agent may do through this server (src/access/levels.ts).
+  access: AccessLevel
   // Bearer every /mcp request must carry; http only.
   authToken?: string
   // The address mail is sent as, when the login is not an email address and
@@ -29,6 +33,7 @@ export interface SelfHostedConfig {
 // help: --help (-h) was given; message is the help text, for stdout.
 export type ParseResult = { config: SelfHostedConfig; ok: true } | { help?: true; message: string; ok: false }
 
+const DEFAULT_ACCESS: AccessLevel = 'everything'
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_HTTP_PORT = 8080
 const TRAILING_SLASHES_RE = /\/+$/u
@@ -62,7 +67,7 @@ const describe = (s: Setting): string => `  ${s.env}${s.flag ? ` (${s.flag})` : 
 
 const USAGE = [
   'Usage: langmail-mcp [--transport stdio|http] [--stalwart-url URL] [--username NAME] [--email ADDRESS]',
-  '         [--host HOST] [--port PORT] [--public-url URL]',
+  `         [--access ${ACCESS_LEVELS.join('|')}] [--host HOST] [--port PORT] [--public-url URL]`,
   'Secrets come from the environment only: STALWART_PASSWORD, and MCP_AUTH_TOKEN for http.',
   'langmail-mcp --help lists every setting.',
 ].join('\n')
@@ -77,6 +82,11 @@ const HELP_SETTINGS: Setting[] = [
     env: 'STALWART_EMAIL',
     flag: '--email',
     what: 'the address to send mail as; default: the login Stalwart reports. Needed when the login is not an email address and the account has several sending identities',
+  },
+  {
+    env: 'MCP_ACCESS',
+    flag: '--access',
+    what: 'what the agent may do: read-only (read mail, calendars, contacts and rules), no-send (also change the account, but send nothing and reach no one else) or everything (the default). Changing it needs a restart',
   },
   { env: 'MCP_TRANSPORT', flag: '--transport', what: 'stdio (default) or http (Streamable HTTP)' },
   { env: 'MCP_HOST', flag: '--host', what: `where the HTTP listener binds; default ${DEFAULT_HOST}` },
@@ -139,6 +149,7 @@ const readFlags = (argv: string[]): { flags: Flags } | { message: string } => {
     const { values } = parseArgs({
       args: argv,
       options: {
+        access: { type: 'string' },
         help: { short: 'h', type: 'boolean' },
         host: { type: 'string' },
         port: { type: 'string' },
@@ -161,6 +172,7 @@ const pick = (flag: boolean | string | undefined, variable: string | undefined):
   (typeof flag === 'string' ? nonEmpty(flag) : undefined) ?? nonEmpty(variable)
 
 interface Raw {
+  access: string
   authToken?: string
   email?: string
   host: string
@@ -173,6 +185,7 @@ interface Raw {
 }
 
 const readRaw = (flags: Flags, env: Record<string, string | undefined>): Raw => ({
+  access: pick(flags.access, env.MCP_ACCESS) ?? DEFAULT_ACCESS,
   authToken: nonEmpty(env.MCP_AUTH_TOKEN),
   email: pick(flags.email, env.STALWART_EMAIL),
   host: pick(flags.host, env.MCP_HOST) ?? DEFAULT_HOST,
@@ -193,8 +206,13 @@ const missingSettings = (raw: Raw): Setting[] =>
     raw.transport === 'http' && !raw.authToken ? MCP_AUTH_TOKEN : undefined,
   ].filter((s): s is Setting => s !== undefined)
 
+const isAccessLevel = (raw: string): raw is AccessLevel => (ACCESS_LEVELS as readonly string[]).includes(raw)
+
 const invalidSettings = (raw: Raw): string[] => {
   const problems: string[] = []
+  if (!isAccessLevel(raw.access)) {
+    problems.push(`  MCP_ACCESS (--access): "${raw.access}" is not an access level; use ${ACCESS_LEVELS.join(', ')}`)
+  }
   if (raw.transport !== 'stdio' && raw.transport !== 'http') {
     problems.push(`  MCP_TRANSPORT (--transport): "${raw.transport}" is not a transport; use stdio or http`)
   }
@@ -226,8 +244,8 @@ export const parseSelfHostedConfig = (argv: string[], env: Record<string, string
     ...(missing.length > 0 ? [`Missing settings:\n${missing.map(describe).join('\n')}`] : []),
     ...(problems.length > 0 ? [`Invalid settings:\n${problems.join('\n')}`] : []),
   ]
-  const { password, stalwartUrl, username } = raw
-  if (sections.length > 0 || !stalwartUrl || !username || !password) {
+  const { access, password, stalwartUrl, username } = raw
+  if (sections.length > 0 || !stalwartUrl || !username || !password || !isAccessLevel(access)) {
     return {
       message: `The self-hosted Langmail MCP server cannot start.\n${sections.join('\n')}\n${USAGE}`,
       ok: false,
@@ -240,6 +258,7 @@ export const parseSelfHostedConfig = (argv: string[], env: Record<string, string
   const port = raw.portRaw === undefined ? defaultPort : parsePort(raw.portRaw)
   return {
     config: {
+      access,
       ...(raw.authToken ? { authToken: raw.authToken } : {}),
       ...(raw.email ? { email: raw.email } : {}),
       host: raw.host,

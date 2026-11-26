@@ -9,6 +9,7 @@ import { PassThrough } from 'node:stream'
 import { after, afterEach, before, describe, test } from 'node:test'
 import { setTimeout as sleep } from 'node:timers/promises'
 
+import { allows, TOOL_ACCESS, type ToolName } from '../access/levels.ts'
 import { buildInstructions } from '../mcp/instructions.ts'
 import {
   type FakeStalwart,
@@ -71,9 +72,9 @@ const env = (extra: Record<string, string> = {}) => ({
   ...extra,
 })
 
-const startHttp = async () => {
+const startHttp = async (argv: string[] = []) => {
   const result = await startSelfHosted({
-    argv: ['--transport', 'http', '--port', '0'],
+    argv: ['--transport', 'http', '--port', '0', ...argv],
     env: env({ MCP_AUTH_TOKEN: MCP_TOKEN }),
   })
   if (!result.ok) {
@@ -168,6 +169,26 @@ describe('self-hosted over http', () => {
       outbound.filter((url) => new URL(url).origin !== stalwartUrl),
       []
     )
+  })
+
+  test("--access offers only that level's tools, and a call outside it says how the level was set", async () => {
+    const { listenUrl } = await startHttp(['--access', 'read-only'])
+
+    const { tools } = (await rpc(listenUrl, 'tools/list', {})) as { tools: ListedTool[] }
+    const expected = (Object.keys(TOOL_ACCESS) as ToolName[]).filter((tool) => allows('read-only', tool)).sort()
+    assert.deepEqual(tools.map((tool) => tool.name).sort(), expected)
+
+    // A client that cached the tool list at a higher level may still call it.
+    const refused = (await rpc(listenUrl, 'tools/call', {
+      arguments: { emailId: 'e1' },
+      name: 'send_draft',
+    })) as { content: { text: string }[]; isError?: boolean }
+    assert.equal(refused.isError, true)
+    const text = refused.content[0]?.text ?? ''
+    assert.ok(text.includes('Read only access'), text)
+    assert.ok(text.includes('Nothing was changed or sent'), text)
+    assert.ok(text.includes('--access'), text)
+    assert.ok(!text.includes('Langmail'), text)
   })
 
   test('/mcp needs the operator bearer, and there is no OAuth discovery or feed route', async () => {

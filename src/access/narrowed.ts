@@ -10,10 +10,9 @@ export interface Narrowed {
   mode: ServerMode
 }
 
-// Where the user changes the level. Neither place exists yet: the self-hosted
-// --access option comes with langmail/platform#1450 and the Access page with
-// the Langmail slices of #1447. Until then every connection runs at
-// Everything, so no agent reads this.
+// Where the user changes the level: the self-hosted --access option, or the
+// Access page in Langmail (langmail/platform#1452; until it exists every
+// hosted connection runs at Everything, src/auth/middleware.ts).
 export const whereToChange = (mode: ServerMode): string =>
   mode === 'self-hosted' ? 'by restarting the server with the --access option' : 'under Access in Langmail'
 

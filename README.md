@@ -99,6 +99,7 @@ A client configured with JSON, such as Claude Desktop:
 | `STALWART_USERNAME` | `--username` | required | The account name to sign in with |
 | `STALWART_PASSWORD` | none | required | An app password for that account |
 | `STALWART_EMAIL` | `--email` | the login Stalwart reports | The address to send mail as |
+| `MCP_ACCESS` | `--access` | `everything` | What the agent may do: `read-only`, `no-send` or `everything` ([access levels](docs/reference/mcp/overview.mdx#access-levels)) |
 | `MCP_TRANSPORT` | `--transport` | `stdio` | `stdio` or `http` (Streamable HTTP) |
 | `MCP_HOST` | `--host` | `127.0.0.1` | Where the HTTP listener binds |
 | `MCP_PORT` | `--port` | `8080` for http | The HTTP listener's port |

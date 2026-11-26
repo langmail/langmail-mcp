@@ -11,6 +11,7 @@
 import { type Readable, type Writable } from 'node:stream'
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
 
+import { ACCESS_LEVEL_NAMES } from '../access/levels.ts'
 import { createAttachmentDownload } from '../attachments/download.ts'
 import { createTicketStore } from '../attachments/tickets.ts'
 import { createAttachmentUpload } from '../attachments/upload.ts'
@@ -75,9 +76,7 @@ export const startSelfHosted = async (opts: StartOptions): Promise<StartResult> 
   // The principal picks the sending identity: STALWART_EMAIL when set, else
   // the login Stalwart reports.
   const ctx: ServerContext = {
-    // Every connection runs at Everything until the self-hosted setting
-    // arrives (langmail/platform#1450).
-    access: 'everything',
+    access: config.access,
     principal: config.email ?? checked.session.principal,
     token: authorization,
     userId: '',
@@ -153,8 +152,8 @@ export const startSelfHosted = async (opts: StartOptions): Promise<StartResult> 
 
   const listenUrl = defaultPublicUrl(config.host, port)
   logger.info(
-    { jmapUpstream: config.stalwartUrl, listenUrl, publicUrl, transport: config.transport },
-    'self-hosted mcp ready'
+    { access: config.access, jmapUpstream: config.stalwartUrl, listenUrl, publicUrl, transport: config.transport },
+    `self-hosted mcp ready at ${ACCESS_LEVEL_NAMES[config.access]} access`
   )
 
   return {
