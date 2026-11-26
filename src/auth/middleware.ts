@@ -10,11 +10,15 @@
 // once per token, then caching the (principal, exp) tuple until the
 // token expires. See docs/reference/security/authentication.md.
 
+import { type AccessLevel } from '../access/levels.ts'
 import { MCP_SCOPES } from './scopes.ts'
 import { type TokenCache } from './token-cache.ts'
 import { fetchUserinfo, UserinfoError } from './userinfo.ts'
 
 export interface AuthContext {
+  // The agent's access level (src/access/levels.ts). Every connection runs at
+  // Everything until it is read from Auth (langmail/platform#1452).
+  access: AccessLevel
   exp: number
   principal: string
   token: string
@@ -60,13 +64,13 @@ export const createAuthMiddleware = (opts: AuthMiddlewareOptions): AuthMiddlewar
 
     const cached = opts.cache.get(token)
     if (cached) {
-      return { exp: cached.exp, principal: cached.principal, token, userId: cached.userId }
+      return { access: 'everything', exp: cached.exp, principal: cached.principal, token, userId: cached.userId }
     }
 
     try {
       const { principal, exp, userId } = await fetchUserinfo(opts.authIssuer, token)
       opts.cache.set(token, { exp, principal, userId })
-      return { exp, principal, token, userId }
+      return { access: 'everything', exp, principal, token, userId }
     } catch (error) {
       if (error instanceof UserinfoError) {
         return unauth('invalid_token')
