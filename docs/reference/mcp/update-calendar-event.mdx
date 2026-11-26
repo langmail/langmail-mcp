@@ -31,22 +31,50 @@ By default the attendees are re-notified by iMIP. Pass `notify: "none"` to make 
 
 ## Parameters
 
-All parameters of [`create_calendar_event`](/reference/mcp/create-calendar-event), each of them optional here, plus the fields below.
+Every parameter except `uid` is optional. Unlike [`create_calendar_event`](/reference/mcp/create-calendar-event) there is no `showAs`.
 
 <ParamField body="uid" type="string" required>
   The event's iCalendar UID, from `create_calendar_event` or [`list_calendar_events`](/reference/mcp/list-calendar-events). Up to 255 characters; must not contain path separators.
 </ParamField>
 
+<ParamField body="title" type="string">
+  New title, 1–200 characters. Omit to keep the stored one.
+</ParamField>
+
+<ParamField body="start" type="string">
+  New start, in the forms `create_calendar_event` takes: an ISO 8601 date-time with seconds, or a date (`2026-10-03`) for an all-day event. Omit to keep the stored start.
+</ParamField>
+
+<ParamField body="end" type="string">
+  New end, in the same form as `start`; for an all-day event a date, exclusive. Omit to keep the event's length when you move `start`, and its stored end otherwise.
+</ParamField>
+
+<ParamField body="timeZone" type="string">
+  An IANA time zone such as `Europe/Berlin` for the `start` and `end` you pass. Their clock digits are read as wall-clock time in this zone, and any offset they carry is ignored. Defaults to the event's own stored zone; a time you omit keeps its zone.
+</ParamField>
+
+<ParamField body="location" type="string">
+  New location, up to 500 characters. `""` clears it; omit to keep the stored one.
+</ParamField>
+
+<ParamField body="description" type="string">
+  New description, up to 5,000 characters. `""` clears it; omit to keep the stored one.
+</ParamField>
+
+<ParamField body="calendarUrl" type="string">
+  A CalDAV URL from [`list_calendars`](/reference/mcp/list-calendars) naming the calendar the event is in. Defaults to the user's default calendar. To move the event to another calendar, use [`move_calendar_events`](/reference/mcp/move-calendar-events).
+</ParamField>
+
 <ParamField body="attendees" type="string[]">
-  The complete attendee list after the edit, replacing the stored one. `[]` uninvites everyone and turns the event into a personal one. Omit to keep the stored attendees.
+  Up to 50 email addresses: the complete attendee list after the edit, replacing the stored one. `[]` uninvites everyone and turns the event into a personal one. Omit to keep the stored attendees.
 </ParamField>
 
 <ParamField body="addedAttendees" type="string[]">
-  Email addresses to invite on top of the stored attendees. Cannot be combined with `attendees`.
+  1–50 email addresses to invite on top of the stored attendees. Cannot be combined with `attendees`.
 </ParamField>
 
 <ParamField body="removedAttendees" type="string[]">
-  Email addresses to uninvite, matched case-insensitively against the stored attendees. Removing an address that isn't invited is a no-op. Cannot be combined with `attendees`.
+  1–50 email addresses to uninvite, matched case-insensitively against the stored attendees. Removing an address that isn't invited is a no-op. Cannot be combined with `attendees`.
 </ParamField>
 
 <ParamField body="recurrence" type="string | object">
@@ -62,7 +90,7 @@ All parameters of [`create_calendar_event`](/reference/mcp/create-calendar-event
 </ParamField>
 
 <ParamField body="reminderMinutesBefore" type="integer | &quot;none&quot;">
-  Replaces every stored reminder with one that fires this many minutes before the start. `"none"` removes all reminders. Omit to keep the stored ones.
+  Replaces every stored reminder with one that fires this many minutes before the start (0 to 40,320). `"none"` removes all reminders. Omit to keep the stored ones.
 </ParamField>
 
 ## Examples
@@ -109,6 +137,14 @@ Move one occurrence of a weekly series without touching the rest:
 Occurrence of "Weekly Sync" on 2026-06-23T10:00:00Z updated (notifications requested for 1 attendee(s): guest@example.com).
 The rest of the series is unchanged.
 ```
+
+## At Change, never send
+
+At the access level Change, never send, the server registers a narrowed form of this tool that edits personal events only:
+
+- It takes no `attendees`, `addedAttendees`, `removedAttendees` or `notify`. Every other parameter is the same. A call that still passes one of them fails input validation and changes nothing.
+- It refuses an event that has anyone other than the user on it, including an invitation the user received: `Event <uid> has attendees: it is a meeting with other people or an invitation the user received. Nothing was changed. Meetings with other people need Everything access, which the user can set under Access in Langmail.` A self-hosted server says `by restarting the server with the --access option` in place of `under Access in Langmail`.
+- It is annotated as an account-only write: `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: false`.
 
 ## Errors
 

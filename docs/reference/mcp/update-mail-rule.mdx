@@ -12,11 +12,11 @@ Updates an existing rule in place, preserving its identity: the `ruleId` and cre
   The rule's id, as returned by `create_mail_rule` or listed by [`list_mail_rules`](/reference/mcp/list-mail-rules).
 </ParamField>
 
-<ParamField body="name" type="string">New name.</ParamField>
+<ParamField body="name" type="string">New name, 1–200 characters.</ParamField>
 <ParamField body="enabled" type="boolean">Enable (`true`) or pause (`false`) the rule without deleting it.</ParamField>
 <ParamField body="match" type="string">New condition combinator: `"all"` or `"any"`.</ParamField>
-<ParamField body="conditions" type="object">Replacement conditions (at least one when given).</ParamField>
-<ParamField body="actions" type="array">Replacement ordered action list.</ParamField>
+<ParamField body="conditions" type="object">Replacement conditions, in the shape `create_mail_rule` takes (at least one when given).</ParamField>
+<ParamField body="actions" type="array">Replacement ordered action list of 1–10 actions, in the shape `create_mail_rule` takes.</ParamField>
 <ParamField body="existingMail" type="object">Optionally apply the updated rule to existing mail (`mode`, `scope`, `confirmLargeApply`) after saving.</ParamField>
 
 ## Example
@@ -40,6 +40,15 @@ Mail rule updated:
    then: archive, then add tag "github", then mark as read
    created: 2026-07-20T09:00:00.000Z, modified: 2026-07-22T12:00:00.000Z
 ```
+
+## At Change, never send
+
+At the access level Change, never send, the server registers a narrowed form of this tool:
+
+- `actions` offers every action except `forward`. A call with a `forward` action fails input validation and changes nothing.
+- It refuses a rule that already forwards, whatever the call changes: `Mail rule <ruleId> forwards mail to another address, so it cannot be changed at this access level. If the user wants the rule gone, delete_mail_rule removes it. Nothing was changed. Changes to rules that forward mail need Everything access, which the user can set under Access in Langmail.` A self-hosted server says `by restarting the server with the --access option` in place of `under Access in Langmail`.
+- [`delete_mail_rule`](/reference/mcp/delete-mail-rule) can still remove such a rule at this level.
+- It is annotated as an account-only write: `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: false`.
 
 ## Errors
 

@@ -15,7 +15,7 @@ This tool is for **ongoing behavior** ("automatically…", "from now on…", "wh
 ## Parameters
 
 <ParamField body="name" type="string">
-  Optional human-readable rule name, e.g. `"Archive GitHub Notifications"`.
+  Optional human-readable rule name, 1–200 characters, e.g. `"Archive GitHub Notifications"`.
 </ParamField>
 
 <ParamField body="match" type="string" default="all">
@@ -23,7 +23,7 @@ This tool is for **ongoing behavior** ("automatically…", "from now on…", "wh
 </ParamField>
 
 <ParamField body="conditions" type="object" required>
-  When the rule fires — at least one of (all matching is case-insensitive substring matching):
+  When the rule fires — at least one of (all matching is case-insensitive substring matching; each text field takes 1–200 characters):
 
   - `from` — sender contains this (address, domain, or display name)
   - `to` — a To/Cc recipient contains this
@@ -33,11 +33,11 @@ This tool is for **ongoing behavior** ("automatically…", "from now on…", "wh
 </ParamField>
 
 <ParamField body="actions" type="array" required>
-  One or more actions, applied in order. Each is `{ "type": … }` plus its fields:
+  1–10 actions, applied in order. Each is `{ "type": … }` plus its fields:
 
   - `archive` — move out of the Inbox into the Archive folder
-  - `move` / `copy` — `mailbox`: target folder (created if missing)
-  - `addTag` / `removeTag` — `tag`: tag name, slugified (`"Acme Corp"` → `acme-corp`)
+  - `move` / `copy` — `mailbox`: target folder, 1–100 characters (created if missing)
+  - `addTag` / `removeTag` — `tag`: tag name, 1–50 characters, slugified (`"Acme Corp"` → `acme-corp`)
   - `markRead` / `markUnread` / `flag`
   - `delete` — move to Trash (not a permanent erase)
   - `forward` — `to`: address that receives a copy; the original still lands in the mailbox
@@ -77,6 +77,13 @@ Applied to existing mail: 12 messages matched, 12 modified.
 
 Change it later with update_mail_rule("rule-3f8a1c2e") or remove it with delete_mail_rule("rule-3f8a1c2e").
 ```
+
+## At Change, never send
+
+At the access level Change, never send, the server registers a narrowed form of this tool:
+
+- `actions` offers every action except `forward`. A call with a `forward` action fails input validation and creates nothing.
+- It is annotated as an account-only write: `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: false`.
 
 ## Notes
 

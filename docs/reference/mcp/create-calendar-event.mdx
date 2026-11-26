@@ -20,6 +20,10 @@ Creates an event with the authenticated user as organizer. When `attendees` are 
   End datetime, ISO 8601 with seconds, in the same form as `start`. Must be after `start`. For an all-day event a date, and **exclusive** (RFC 5545): the day after the last day. A day off on October 3 is `start: "2026-10-03"`, `end: "2026-10-04"`. `start` and `end` must both be dates or both be date-times.
 </ParamField>
 
+<ParamField body="timeZone" type="string">
+  An IANA time zone such as `Europe/Berlin` for `start` and `end`. Their clock digits are read as wall-clock time in this zone, and any offset they carry is ignored. Defaults to the account's time zone, then UTC. It does not change the dates of an all-day event.
+</ParamField>
+
 <ParamField body="reminderMinutesBefore" type="integer">
   Adds one reminder that fires this many minutes before the start (0 to 40,320, which is four weeks). For an all-day event the start is midnight, so `900` fires at 09:00 the day before. Omit for no reminder.
 </ParamField>
@@ -78,7 +82,7 @@ Creates an event with the authenticated user as organizer. When `attendees` are 
 
 ```text Result
 Recurring event "Team standup" created (invitations requested for 1 attendee(s): team@example.com).
-uid: 3c1e9b2a-77aa-4d55-8a10-2f9d1c0e6b21@langmail.me
+uid: 3c1e9b2a-77aa-4d55-8a10-2f9d1c0e6b21
 calendarUrl: https://mail.langmail.me/dav/cal/you%40langmail.me/default/
 ```
 
@@ -94,7 +98,7 @@ A personal event needs nothing but a title and a time:
 
 ```text Result
 Event "Focus block" created (no attendees, no invitations).
-uid: 8f2a1c4d-90bb-4e66-9b21-3a0e2d1f7c32@langmail.me
+uid: 8f2a1c4d-90bb-4e66-9b21-3a0e2d1f7c32
 calendarUrl: https://mail.langmail.me/dav/cal/you%40langmail.me/default/
 ```
 
@@ -117,12 +121,20 @@ calendarUrl: https://mail.langmail.me/dav/cal/you%40langmail.me/default/
 
 Keep the returned `uid` — it identifies the event for updates, deletion, and RSVPs. To invite people to an event created without attendees, pass `addedAttendees` to [`update_calendar_event`](/reference/mcp/update-calendar-event) later.
 
+## At Change, never send
+
+At the access level Change, never send, the server registers a narrowed form of this tool that creates personal events only:
+
+- It takes no `attendees` and no `notify`. Every other parameter is the same. A call that still passes either field fails input validation and creates nothing.
+- It is annotated as an account-only write: `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: false`.
+
 ## Errors
 
 - ``Input validation error: … start: Expected a date (2026-10-03) for an all-day event, or a date-time with seconds …`` — a `start` or `end` without seconds, with more than three fractional digits, or otherwise not ISO 8601. Nothing was created.
 - `Event end must be after its start. Nothing was created.`
 - ``An all-day event's `end` is exclusive …`` — an all-day `end` on or before its `start`. The message names the right `end`.
 - ``Pass `start` and `end` both as dates … or both as date-times …`` — a date mixed with a date-time.
+- ``Input validation error: … timeZone must be a valid IANA timezone, e.g. Europe/Berlin`` — an unknown `timeZone`. Nothing was created.
 - `No calendar available to create the event in.` — the user has no calendar and none was specified.
 - `Calendar not found: <url>` — the `calendarUrl` didn't resolve.
 - ``An event with attendees cannot be marked `showAs: "free"` …`` — `free` together with `attendees`. Nothing was created.
