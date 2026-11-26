@@ -25,11 +25,11 @@ Contacts are stored in the account's address book, which syncs to every device c
 </ParamField>
 
 <ParamField body="phones" type="object[]">
-  Up to 10 entries, each `{ number, label? }`. `label` is `mobile`, `home`, `work`, `fax`, or `other` (the default).
+  Up to 10 entries, each `{ number, label? }`. `number` is 3–50 characters, written as the user gave it. `label` is `mobile`, `home`, `work`, `fax`, or `other` (the default).
 </ParamField>
 
 <ParamField body="postalAddresses" type="object[]">
-  Up to 5 entries, each `{ street?, postalCode?, city?, region?, country?, label? }`. At least one of `street`, `postalCode`, `city`, or `region` is required. `country` is an ISO 3166-1 alpha-2 code such as `DE` — convert a country name yourself. `label` is `home`, `work`, or `other` (the default).
+  Up to 5 entries, each `{ street?, postalCode?, city?, region?, country?, label? }`. At least one of `street`, `postalCode`, `city`, or `region` is required. `street` takes up to 200 characters, `city` and `region` up to 100 each, `postalCode` up to 20. `country` is an ISO 3166-1 alpha-2 code such as `DE` — convert a country name yourself. `label` is `home`, `work`, or `other` (the default).
 </ParamField>
 
 <ParamField body="organization" type="string">
@@ -41,7 +41,7 @@ Contacts are stored in the account's address book, which syncs to every device c
 </ParamField>
 
 <ParamField body="birthday" type="string">
-  `YYYY-MM-DD`, or `--MM-DD` when the year is unknown. Stored as the standard JSContact `birth` anniversary, which CardDAV clients show as the birthday field, so it appears on the user's phone. A date that is not a real calendar date (`2024-02-30`) is refused and nothing is created; `--02-29` is accepted. An empty string means none.
+  `YYYY-MM-DD`, or `--MM-DD` when the year is unknown. Stored as the standard JSContact `birth` anniversary, which CardDAV clients show as the birthday field, so it appears on the user's phone. A date that is not a real calendar date (`2024-02-30`) is refused and nothing is created; `--02-29` is accepted. An empty string means none. Up to 40 characters.
 </ParamField>
 
 <ParamField body="note" type="string">
@@ -99,6 +99,7 @@ The marker matters because a confidence rating means different things across the
 
 ## Errors
 
+- `name must not be empty.` — `name` was only whitespace.
 - `<address> already belongs to an existing contact (contact_id: …)` — the address is on another card. Use `update_contact` against that id instead of splitting the person across two records.
 - `a postal address needs at least a street, city, postal code, or region` — a postal address entry carried only a label.
 - `Birthday "<value>" is not a date.` / `… is not a calendar date` — pass `YYYY-MM-DD` or `--MM-DD`, with a day the month actually has. Nothing was created.

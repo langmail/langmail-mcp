@@ -99,6 +99,7 @@
             "pages": [
               "reference/mcp/search-emails",
               "reference/mcp/get-email",
+              "reference/mcp/preview-email",
               "reference/mcp/get-thread",
               "reference/mcp/download-attachment",
               "reference/mcp/download-email",

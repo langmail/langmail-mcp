@@ -13,7 +13,7 @@ For messages that have already been sent or received, use [`get_email`](/referen
 ## Parameters
 
 <ParamField body="draftId" type="string" required>
-  The draft id, as returned by [`create_draft`](/reference/mcp/create-draft) or [`list_drafts`](/reference/mcp/list-drafts) — edits do not change it — or a message id from [`search_emails`](/reference/mcp/search-emails) with `mailbox: "Drafts"`.
+  The draft id, as returned by [`create_draft`](/reference/mcp/create-draft), [`update_draft`](/reference/mcp/update-draft) or [`list_drafts`](/reference/mcp/list-drafts) — edits do not change it — or a message id from [`search_emails`](/reference/mcp/search-emails) with `mailbox: "Drafts"`. A message id stops working once the draft is edited; use the draftId the edit returns from then on.
 </ParamField>
 
 ## Example
@@ -43,5 +43,6 @@ A line may instead say the file has **no blobId, so it cannot be re-attached**. 
 
 ## Errors
 
-- `Draft not found: <id>` — no such message.
-- `<id> is not a draft — it has already been sent or received.` — read it with [`get_email`](/reference/mcp/get-email) instead.
+- `Draft not found: <id>. Find it with list_drafts.` — no such draft.
+- `<id> is not a draft — it has already been sent or received. Read it with get_email instead, passing id <messageId>.`
+- `Draft <id> is in Trash — it was discarded and is no longer pending.` — followed by how to move it back to Drafts with [`move_emails`](/reference/mcp/move-emails).

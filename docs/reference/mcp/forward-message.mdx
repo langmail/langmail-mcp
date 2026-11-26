@@ -24,31 +24,31 @@ The subject is `Fwd: <original subject>`, with no second prefix when it already 
 </ParamField>
 
 <ParamField body="to" type="string[]" required>
-  Recipients, at least one. A bare address (`person@example.com`) or the `Name <person@example.com>` form [`search_contacts`](/reference/mcp/search-contacts) returns. Recipients are never taken from the original.
+  Recipients, 1 to 50. A bare address (`person@example.com`) or the `Name <person@example.com>` form [`search_contacts`](/reference/mcp/search-contacts) returns. Recipients are never taken from the original.
 </ParamField>
 
 <ParamField body="cc" type="string[]">
-  Carbon-copy recipients.
+  Carbon-copy recipients, same forms as `to`, up to 50. Never taken from the original.
 </ParamField>
 
 <ParamField body="bcc" type="string[]">
-  Blind-copy recipients.
+  Blind-copy recipients, same forms as `to`, up to 50. Never taken from the original.
 </ParamField>
 
 <ParamField body="text" type="string">
-  Optional note above the forwarded message, in plain text.
+  Optional note above the forwarded message, in plain text, up to 100,000 characters. Write only the note: the original follows it.
 </ParamField>
 
 <ParamField body="html" type="string">
-  HTML version of the note. Either form alone is enough: the other part is derived from it.
+  HTML version of the note, up to 100,000 characters. Either form alone is enough: the other part is derived from it.
 </ParamField>
 
 <ParamField body="subject" type="string">
-  Override the subject. Defaults to `Fwd: <original subject>`.
+  Override the subject, up to 500 characters. Defaults to `Fwd: <original subject>`.
 </ParamField>
 
 <ParamField body="idempotencyKey" type="string">
-  Client-chosen key that makes the call safe to retry: a repeat with the same key returns the first call's answer instead of sending a second forward. Keys are scoped to the account **and to this tool**. Remembered for 15 minutes.
+  Client-chosen key that makes the call safe to retry: a repeat with the same key returns the first call's answer instead of sending a second forward. Pass one whenever the call might be retried. Up to 200 characters. Keys are scoped to the account **and to this tool**. Remembered for 15 minutes.
 </ParamField>
 
 ## Example
@@ -80,7 +80,11 @@ The message is in Sent — read it back with get_email using the messageId above
 
 ## Errors
 
-- `Cannot forward: message not found: <id>. Nothing was sent.`
+- `Cannot forward: message not found: <id>. Nothing was sent. Find it with search_emails.`
 - `Not a valid email address: … Nothing was sent.`
 - `<id> carries a file that cannot be forwarded by reference (…), so it would be left out. Nothing was sent.` A part with no blobId. Stage the forward with `create_draft` and `forwardOf` instead: the staged forward carries the whole original as an `.eml` file, which includes it.
+- `This account has no Drafts folder, so the forward cannot be composed. Nothing was sent.`
 - `A forward of <id> is already in progress. Nothing was sent by this call.`
+- `An earlier forward of <id> failed without saying whether it went out, so it was NOT sent again…` — check Sent before deciding.
+- `The forward was composed but the server refused to send it (<detail>). Nothing was sent. It is staged as draft <id>…` — send it with [`send_draft`](/reference/mcp/send-draft) once the cause is resolved, or delete it.
+- `The forward was staged as draft <id> and handed to the server, but the answer was lost (<detail>), so it may already have gone out. Do NOT send it again yet…`

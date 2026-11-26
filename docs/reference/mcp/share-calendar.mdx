@@ -1,14 +1,16 @@
 ---
 title: "share_calendar"
-description: "Share one of the user's calendars with a person outside Langmail, at busy times only or full details, through a secret link."
+description: "Share one of the user's calendars with a person outside Langmail, at busy times only or full details, through a secret link, and optionally email them the link from the user's address."
 keywords: ["share_calendar", "share calendar", "calendar subscription", "ics feed", "busy times", "mcp tool"]
 ---
 
 Shares one of the user's calendars with a person and returns a secret link that person adds in Google Calendar, Apple Calendar or Outlook. The calendar stays live behind the link: each time the person's app refreshes, it reads the calendar as it is now. How often that happens is up to their app, not Langmail; Google Calendar picks up changes every few hours, sometimes only once a day.
 
-The link is in this tool's result and nowhere else: Langmail keeps only a hash of it, so it cannot be shown again. If it is lost, stop the share with [`stop_sharing_calendar`](/reference/mcp/stop-sharing-calendar) and share again for a new link. Langmail does not send the link to anyone; to email it, stage a draft with [`create_draft`](/reference/mcp/create-draft).
+With `email`, Langmail also emails the person the link and how to add it, at once, from the user's own address. The email is sent the way [`send_draft`](/reference/mcp/send-draft) sends mail, so a copy lands in the user's Sent folder. Without `email`, nothing is sent and the user passes the link on themselves.
 
-There is one share per calendar and person. Sharing the same calendar with the same person again changes the level and keeps their existing link working.
+Langmail keeps only a hash of the link, so it cannot show the link again. It is in this tool's result and, when it was emailed, in that email and its copy in Sent. If it is lost, stop the share with [`stop_sharing_calendar`](/reference/mcp/stop-sharing-calendar) and share again for a new link.
+
+There is one share per calendar and person. Sharing the same calendar with the same person again changes the level and keeps their existing link working. It never sends an email, even with `email`.
 
 ## Parameters
 
@@ -17,11 +19,23 @@ There is one share per calendar and person. Sharing the same calendar with the s
 </ParamField>
 
 <ParamField body="with" type="string" required>
-  Who the calendar is shared with, as the user names them: `"Sam"`, `"my partner"`. 1–100 characters. A label only, matched ignoring case when the same calendar is shared again.
+  Who the calendar is shared with, as the user names them: `"Sam"`, `"my partner"`. 1–100 characters. A label only, never an address, matched ignoring case when the same calendar is shared again.
 </ParamField>
 
 <ParamField body="level" type="string" required>
   `busy`: the person sees only when the user is busy, every event titled "Busy". `full`: titles, times, locations, notes and guests. Private events show as busy at either level, and free events are left out of a busy-only share.
+</ParamField>
+
+<ParamField body="email" type="string">
+  The person's email address, bare (`sam@example.com`) or as `"Sam Lee <sam@example.com>"`, the form [`search_contacts`](/reference/mcp/search-contacts) gives. 3–320 characters. With it, the link and how to add it are emailed to this address from the user's address, immediately. Agents are told to pass only an address the user typed or confirmed.
+</ParamField>
+
+<ParamField body="note" type="string">
+  Only with `email`: the user's own words to the person, such as a greeting, placed above the link and the steps Langmail writes. 1–1,000 characters.
+</ParamField>
+
+<ParamField body="language" type="string" default="en">
+  Only with `email`: the language of the email, `de` or `en`.
 </ParamField>
 
 ## Example
@@ -45,12 +59,42 @@ How Sam adds it:
 How often the calendar refreshes is up to Sam's app, not Langmail: …
 ```
 
+With `email`:
+
+```json Call
+{ "calendar": "Personal", "with": "Sam", "level": "busy", "email": "Sam Lee <sam@example.com>", "note": "Hi Sam, here is my calendar so we can plan the weekend." }
+```
+
+```text Result
+Shared "Personal" with Sam at busy times only: they see when you are busy, with every event titled "Busy" and no details. Emailed the link and how to add it to sam@example.com from you@langmail.me.
+messageId: Mxyz789
+The message is in Sent — read it back with get_email using the messageId above.
+
+Link for Sam, also in the email: https://mcp.langmail.me/calendar-feeds/Xq3….ics
+This is the only time Langmail shows this link; the copy in the user's Sent folder is the other place to find it. If it gets lost, stop_sharing_calendar with Sam and share again for a new link.
+```
+
+The email's subject is `<sender> is sharing the calendar "<calendar>" with you`, or its German form with `language: "de"`.
+
 Sharing again at the other level answers `"Personal" is now shared with Sam at full details (was busy times only)` and that Sam's existing link keeps working, without a new link.
+
+## When the email fails
+
+The share is made before the email is sent, and it stays whatever happens to the email. The result then starts with what went wrong, followed by the link and the steps for the user to pass on:
+
+- `The calendar was shared, but the email to … was not sent: it could not be composed (…)`.
+- `The calendar was shared, but the server refused to send the email to … (…)`: the email is staged as a draft, to send with `send_draft` once the cause is resolved, or to delete when the link goes another way.
+- `The calendar was shared and the email to … was handed to the server, but the answer was lost (…)`: it may already have gone out. Check the Sent folder before sending anything again.
 
 ## Errors
 
-Every error leaves the shares unchanged.
+Every error leaves the shares unchanged and sends nothing.
 
 - `No calendar named "…"` or `No calendar at …` — nothing matched. The error lists every calendar with its URL.
 - `2 calendars are named "…"` — pass the URL of the one you mean.
+- `` `note` and `language` are for the email, so they need `email`, the person's address. ``
+- `Not a valid email address: …`: pass a bare address or the `"Name <address>"` form.
+- `Sharing "…" with … is already in progress.`: another call for the same calendar and person has not answered yet. Check `list_calendars` and the Sent folder.
+- `An earlier email sharing "…" with … failed without saying whether it went out`: check the Sent folder before deciding.
+- `This account has no Drafts folder, so the email cannot be composed.`
 - `Calendar sharing is not set up on this server.`

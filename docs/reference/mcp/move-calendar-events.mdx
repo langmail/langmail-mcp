@@ -11,7 +11,7 @@ To change *when* an event happens ("move the meeting to 3 pm"), use [`update_cal
 ## Parameters
 
 <ParamField body="uids" type="string[]" required>
-  The events to move, by the `uid` [`list_calendar_events`](/reference/mcp/list-calendar-events) shows. 1–50 per call; duplicates are collapsed. A recurring event moves as a whole series, including its changed occurrences — a single occurrence cannot be filed on a different calendar from the rest of its series.
+  The events to move, by the `uid` [`list_calendar_events`](/reference/mcp/list-calendar-events) shows. 1–50 per call; duplicates are collapsed. Each uid is 1–255 characters and cannot contain `/` or `\`. A recurring event moves as a whole series, including its changed occurrences — a single occurrence cannot be filed on a different calendar from the rest of its series.
 </ParamField>
 
 <ParamField body="calendar" type="string" required>

@@ -19,11 +19,11 @@ The sender and the reply threading are not editable here. Changing who a message
 ## Parameters
 
 <ParamField body="draftId" type="string" required>
-  The draft to edit, as returned by [`create_draft`](/reference/mcp/create-draft) or [`list_drafts`](/reference/mcp/list-drafts) — edits do not change it — or a message id from [`search_emails`](/reference/mcp/search-emails) with `mailbox: "Drafts"`. Editing a draft found that way returns the draftId to use from then on.
+  The draft to edit, as returned by [`create_draft`](/reference/mcp/create-draft), an earlier `update_draft` or [`list_drafts`](/reference/mcp/list-drafts) — edits do not change it — or a message id from [`search_emails`](/reference/mcp/search-emails) with `mailbox: "Drafts"`. Editing a draft found that way returns the draftId to use from then on.
 </ParamField>
 
 <ParamField body="to" type="string[]">
-  Replace the recipients. Omit to keep them; pass `[]` to clear them. Bare address or `Name <address>` form.
+  Replace the recipients. Omit to keep them; pass `[]` to clear them. Bare address or `Name <address>` form, up to 50 entries.
 </ParamField>
 
 <ParamField body="cc" type="string[]">
@@ -35,23 +35,23 @@ The sender and the reply threading are not editable here. Changing who a message
 </ParamField>
 
 <ParamField body="subject" type="string">
-  Replace the subject. Omit to keep it.
+  Replace the subject, up to 500 characters. Omit to keep it.
 </ParamField>
 
 <ParamField body="text" type="string">
-  Replace the plain-text body. Omit to keep it. On a reply, write only the new part — the quoted original is re-attached below it, so do not paste the quote from [`get_draft`](/reference/mcp/get-draft) back in. If the draft has **both** a plain-text and an HTML body, pass both or neither — see the note below.
+  Replace the plain-text body, up to 100,000 characters. Omit to keep it. On a reply, write only the new part — the quoted original is re-attached below it, so do not paste the quote from [`get_draft`](/reference/mcp/get-draft) back in. If the draft has **both** a plain-text and an HTML body, pass both or neither — see the note below.
 </ParamField>
 
 <ParamField body="html" type="string">
-  Replace the HTML body. Omit to keep it. On a reply, write only the new part, as for `text`. If the draft has both bodies, pass both or neither.
+  Replace the HTML body, up to 100,000 characters. Omit to keep it. On a reply, write only the new part, as for `text`. If the draft has both bodies, pass both or neither.
 </ParamField>
 
 <ParamField body="quoteOriginal" type="boolean">
-  On a reply, together with `text` or `html`: whether the original is quoted below the new text. Defaults to what the staged draft does. `false` drops the quote, `true` adds it to a bare reply. Passing it without `text` or `html` is refused.
+  On a reply, together with `text` or `html`: whether the original is quoted below the new text. Defaults to what the staged draft does. `false` drops the quote, `true` adds it to a bare reply or quotes it for a new recipient. When the same call adds a recipient the original was not addressed to, the default leaves the quote off. Passing it without `text` or `html` is refused, and so is passing it on a forward.
 </ParamField>
 
 <ParamField body="attachments" type="object[]">
-  Replace the attached files, same entry shape as [`create_draft`](/reference/mcp/create-draft): `blobId` (including one from [`upload_attachments`](/reference/mcp/upload-attachments)) **or** base64 `content`. `filename` is **required** with `blobId` — a blob carries no name of its own, and the one [`get_draft`](/reference/mcp/get-draft) lists beside it is the one to pass — and optional but worth setting with `content`. `mimeType` is guessed from the filename's extension when omitted.
+  Replace the attached files, at most 10, same entry shape as [`create_draft`](/reference/mcp/create-draft): `blobId` (including one from [`upload_attachments`](/reference/mcp/upload-attachments)) **or** base64 `content`. `filename` is **required** with `blobId` — a blob carries no name of its own, and the one [`get_draft`](/reference/mcp/get-draft) lists beside it is the one to pass — and optional but worth setting with `content`. `mimeType` is guessed from the filename's extension when omitted.
 
   Omit to keep the files already attached — the rewrite re-references their blobs, so this transfers nothing. Pass `[]` to remove them all. Supplying a list replaces the whole thing, so to *add* a file, read the existing `blobId`s back with [`get_draft`](/reference/mcp/get-draft) and list them alongside the new one.
 </ParamField>
@@ -87,6 +87,7 @@ body (text): Confirmed — the Q2 figures are final.
 
 - `Draft not found: <id>. Find it with list_drafts.`
 - `<id> is not a draft — it has already been sent or received, and cannot be edited.`
+- `Draft <id> is in Trash — it was discarded, so it was left unchanged.` — followed by how to move it back to Drafts with [`move_emails`](/reference/mcp/move-emails).
 - `Not a valid email address: …` — a replacement recipient was malformed. Nothing was changed.
 - `This draft has both a plain-text and an HTML body, and only \`text\` was given…` — pass both, or stage a fresh draft.
 - `Draft <id> has a body too large to edit without risking losing part of it…`
@@ -94,4 +95,6 @@ body (text): Confirmed — the Q2 figures are final.
 - `The server refused this draft (invalidProperties).` — most often an attachment `blobId` the server does not recognise; blobIds belong to one account and do not outlive the message they were read from. The draft is left unchanged.
 - `No changes were given, so draft <id> was left exactly as it is.`
 - `` `quoteOriginal` only applies together with a new `text` or `html` `` — nothing was changed.
+- `` `quoteOriginal` applies to replies, and draft <id> is a forward… `` — the draft was left unchanged.
+- `This account has no Drafts folder, so the draft cannot be re-staged.`
 - `Note: the pre-edit copy (message <id>) could not be removed and is still in Drafts…` — appended to a successful result when the replacement landed but the superseded message couldn't be retired. The draft id is taken off the old copy, so it names only the edited version, which is what `send_draft` with the draft id sends; the old copy should be removed with [`trash_emails`](/reference/mcp/trash-emails) once the user agrees.

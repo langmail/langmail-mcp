@@ -43,7 +43,7 @@ Attachments (2):
 The attachments section lists every file part with its filename, media type, human-readable size, and the `blobId` handle that [`download_attachment`](/reference/mcp/download-attachment) takes. Parts marked `inline` are images referenced by the HTML body (logos, signatures, tracking pixels) rather than genuine documents. Messages without attachments omit the section entirely — and the bytes themselves are never returned by this tool. For the message's raw source (an `.eml` with every header), use [`download_email`](/reference/mcp/download-email).
 
 <Note>
-Bodies are capped at 100,000 bytes; longer bodies are truncated at that limit.
+Bodies are capped at 100,000 characters (100,000 bytes when the message has only a plain-text part); longer bodies are truncated at that limit.
 </Note>
 
 ## Errors

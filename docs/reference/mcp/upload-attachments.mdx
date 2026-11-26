@@ -13,9 +13,9 @@ For a file that is already in the mailbox, skip this tool and pass the `blobId` 
 <ParamField body="files" type="object[]" required>
   The local files to upload, 1 to 10. Each gets its own URL.
 
-  - `filename` (string, required) — the name the recipient sees. Pass the same name to `create_draft`.
-  - `mimeType` (string) — a media type such as `application/pdf`. Guessed from the filename's extension when omitted.
-  - `sizeBytes` (integer) — the file's size, if known. A file over 25 MB gets no URL; the others in the call still do.
+  - `filename` (string, required) — the name the recipient sees, 1–255 characters. Pass the same name to `create_draft`.
+  - `mimeType` (string) — a media type such as `application/pdf`, in `type/subtype` form and up to 255 characters. Guessed from the filename's extension when omitted.
+  - `sizeBytes` (integer, 0 or more) — the file's size in bytes, if known. A file over 25 MB gets no URL; the others in the call still do.
 </ParamField>
 
 ## Example
@@ -56,7 +56,7 @@ PUT each file straight from disk with its command. …
 
 From the tool:
 
-- `Not uploadable (<n>): <files> — over the 25 MB an attachment can be.` — those files declared a `sizeBytes` over the cap and got no URL. The rest of the call still succeeds; it is an error only when no file fits, and then no URL was issued.
+- `Not uploadable (<n>): <files> — over the 25 MB an attachment can be. …` — those files declared a `sizeBytes` over the cap and got no URL. The rest of the call still succeeds; it is an error only when no file fits, and then no URL was issued.
 
 From the upload URL (JSON with `error` and `message`):
 

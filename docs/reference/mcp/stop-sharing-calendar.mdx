@@ -9,7 +9,7 @@ Stops a person's share of one calendar, or of every calendar when none is named.
 ## Parameters
 
 <ParamField body="with" type="string" required>
-  The person, by the name the calendar was shared with, matched ignoring case.
+  The person, by the name the calendar was shared with, matched ignoring case. Up to 100 characters.
 </ParamField>
 
 <ParamField body="calendar" type="string">
@@ -25,7 +25,7 @@ Stops a person's share of one calendar, or of every calendar when none is named.
 ```text Result
 Stopped 1 share(s):
 - "Personal" with Sam (busy times only)
-Sam's link now shows an empty calendar, for good. No other share changed.
+Sam’s link now shows an empty calendar, for good. No other share changed.
 ```
 
 ## Errors
@@ -33,5 +33,6 @@ Sam's link now shows an empty calendar, for good. No other share changed.
 Every error stops nothing.
 
 - `No share with … ` — nothing matched. The error lists every current share.
-- `No calendar named "…"` — the calendar did not match. The error lists every calendar with its URL.
+- `No calendar named "…"` or `No calendar at …` — the calendar did not match. The error lists every calendar with its URL.
+- `2 calendars are named "…"` — the name is ambiguous. The error lists the matching calendars; pass the URL of the one you mean.
 - `Calendar sharing is not set up on this server.`

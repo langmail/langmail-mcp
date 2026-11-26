@@ -9,7 +9,7 @@ Sets the user's own attendance status on an event they were invited to and saves
 ## Parameters
 
 <ParamField body="uid" type="string" required>
-  The event's iCalendar UID, from [`list_calendar_events`](/reference/mcp/list-calendar-events).
+  The event's iCalendar UID, from [`list_calendar_events`](/reference/mcp/list-calendar-events). 1–255 characters, with no `/` or `\`.
 </ParamField>
 
 <ParamField body="response" type="string" required>
@@ -35,3 +35,5 @@ RSVP'd accepted to "Planning".
 - `You are not an attendee of this event, so you can't RSVP.` — the event doesn't list the user as an attendee.
 - `Event not found: <uid>` — no event with that UID in the target calendar.
 - `Calendar not found: <url>` — the `calendarUrl` didn't resolve.
+- `No calendar available to respond in.` — the user has no calendar and none was specified.
+- `Could not determine your address for this account.` — the server did not report the user's own calendar address, so there is no attendee to match.

@@ -18,7 +18,7 @@ A draft that another mail client left in Trash as well as in Drafts is not liste
 ## Parameters
 
 <ParamField body="query" type="string">
-  Whole words matched against the subject and every recipient (to, cc, bcc), by name or address — `"invoice"`, `"Nadia"`, `"nadia@example.org"` or `"example.org"`. A fragment of a word does not match: `"invo"` finds nothing. The body is not searched.
+  Whole words matched against the subject and every recipient (to, cc, bcc), by name or address — `"invoice"`, `"Nadia"`, `"nadia@example.org"` or `"example.org"`. A fragment of a word does not match: `"invo"` finds nothing. The body is not searched. Up to 200 characters.
 </ParamField>
 
 <ParamField body="after" type="string">
@@ -26,10 +26,10 @@ A draft that another mail client left in Trash as well as in Drafts is not liste
 </ParamField>
 
 <ParamField body="before" type="string">
-  Only drafts last staged or edited strictly before this UTC ISO-8601 timestamp.
+  Only drafts last staged or edited strictly before this UTC ISO-8601 timestamp, e.g. `"2026-10-08T00:00:00Z"`.
 </ParamField>
 
-<ParamField body="limit" type="number" default="20">
+<ParamField body="limit" type="integer" default="20">
   How many drafts to return, newest first. 1–50.
 </ParamField>
 
@@ -59,7 +59,7 @@ A draft that another mail client left in Trash as well as in Drafts is not liste
 
 `last staged` is when the current version was written. An edit rewrites the message, so it is the last edit, not when the draft was first created, and `after`/`before` filter on the same time. `reply to` names the message a reply draft answers, when the draft was staged by Langmail.
 
-When more drafts match than `limit` allows, the heading reads `Showing the newest 20 of 34 draft(s)` and a closing line says how many were left out. There is no paging: narrow with `query` or `after`/`before`, or raise `limit`.
+When more drafts match than `limit` allows, the heading reads `Showing the newest 20 of 34 draft(s) (not sent):` and a closing line says how many were left out. There is no paging: narrow with `query` or `after`/`before`, or raise `limit`.
 
 ## Results with nothing listed
 

@@ -8,7 +8,45 @@ Validates a proposed rule and reports its blast radius **without creating a rule
 
 ## Parameters
 
-Takes the same rule spec as `create_mail_rule`: optional `name`, `match` (`all`/`any`), `conditions`, `actions`, and an optional `existingMail` policy whose `scope` (`inbox` default, or `all`) decides where matches are counted.
+Takes the same rule spec as [`create_mail_rule`](/reference/mcp/create-mail-rule), so a rule that previews cleanly can be passed on unchanged.
+
+<ParamField body="name" type="string">
+  Optional human-readable rule name, up to 200 characters, e.g. `"Archive GitHub Notifications"`.
+</ParamField>
+
+<ParamField body="match" type="string" default="all">
+  How multiple conditions combine: `"all"` (every condition must match) or `"any"` (one is enough).
+</ParamField>
+
+<ParamField body="conditions" type="object" required>
+  When the rule would fire. Give at least one; matching is case-insensitive substring matching. Each text condition is 1 to 200 characters.
+
+  - `from` — sender contains this (an address, a domain like `github.com`, or a display name)
+  - `to` — a To/Cc recipient contains this (address or name)
+  - `subject` — subject line contains this
+  - `bodyContains` — message body contains this text
+  - `hasAttachment` — `true` to match only messages that appear to carry an attachment (heuristic); `false` is the same as leaving it out
+</ParamField>
+
+<ParamField body="actions" type="array" required>
+  One to 10 actions, applied in order. Each is `{ "type": … }` plus its fields:
+
+  - `archive` — move out of the Inbox into the Archive folder
+  - `move` / `copy` — `mailbox`: target folder, 1 to 100 characters (created if missing)
+  - `addTag` / `removeTag` — `tag`: tag name, 1 to 50 characters, slugified (`"Acme Corp"` → `acme-corp`)
+  - `markRead` / `markUnread` / `flag`
+  - `delete` — move to Trash (not a permanent erase)
+  - `forward` — `to`: address that receives a copy; the original still lands in the mailbox
+  - `stopProcessing` — skip any later rules for this message
+</ParamField>
+
+<ParamField body="existingMail" type="object">
+  The existing-mail policy you are considering for `create_mail_rule`. Only `scope` changes the preview: it decides where matches are counted.
+
+  - `scope` — `"inbox"` (default) or `"all"` mail
+  - `mode` — `"none"` (default), `"messages"` or `"conversations"`; accepted so the same object can be passed on, but it does not change the count
+  - `confirmLargeApply` — accepted for the same reason; nothing is applied here
+</ParamField>
 
 ## Example
 

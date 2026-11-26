@@ -1,0 +1,57 @@
+---
+title: "preview_email"
+description: "Show one message to the user as a rendered document, inline in the conversation: tickets, boarding passes, invoices and receipts with their layout, QR codes and barcodes."
+keywords: ["preview_email", "render email", "show email", "mcp apps", "ticket", "invoice", "mcp tool"]
+---
+
+Shows one message to the user as it looks in a mail client, inside the conversation. Use it when the user wants to see a message or a document in one, such as a ticket, a boarding pass, an invoice or a receipt, where the rendering itself matters: a QR code, a barcode, a table layout. To read a message's content for summarizing or extracting facts, use [`get_email`](/reference/mcp/get-email) instead.
+
+The rendered message goes to the user, not to the model. The tool result gives the model a one-line status and a few fields of metadata; the HTML travels in the result's `_meta`, which the client hands to the email viewer and keeps out of the conversation. An agent therefore cannot read the message from this call.
+
+The rendering uses the [MCP Apps](https://modelcontextprotocol.io/) extension: the tool links the viewer template `ui://langmail/email-viewer`. A client without MCP Apps support shows only the text result, which tells the agent to say so and fall back to `get_email`.
+
+## Parameters
+
+<ParamField body="id" type="string" required>
+  The message id, as returned by [`search_emails`](/reference/mcp/search-emails) or [`get_thread`](/reference/mcp/get-thread).
+</ParamField>
+
+## Example
+
+```json Call
+{ "id": "Mabc123" }
+```
+
+```text Result
+Preview of "Your tickets for Friday" prepared (html rendering). On clients with MCP Apps support the email renders inline in the conversation. If no rendered email is visible to the user, this client does not support inline rendering — say so, and use get_email to relay the content instead.
+```
+
+```json Structured content
+{
+  "attachmentCount": 1,
+  "date": "2026-07-05T08:12:00Z",
+  "from": "Cinema Example <tickets@cinema.example>",
+  "renderSource": "html",
+  "subject": "Your tickets for Friday",
+  "tags": ["ticket"]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `subject` | The subject, or `(no subject)` |
+| `from` | The sender, or `(unknown sender)` |
+| `date` | When the message was received, ISO 8601 |
+| `tags` | The message's email type and labels, such as `ticket` or `receipt` |
+| `attachmentCount` | Attached files, not counting inline images that are part of the rendering |
+| `renderSource` | `html` when the preview shows the message's HTML, `text` when it falls back to the plain-text body |
+
+## What the user sees
+
+- The message's own HTML, with its layout, tables and inline styles. Scripts, event handlers, forms and embedded frames are removed.
+- Images never load from the sender's servers. Inline images (`cid:`) load through a short-lived capability URL under `https://mcp.langmail.me/attachments/…`, and remote images through Langmail's image proxy, so the sender cannot track when the message was opened. Embedded raster images (`data:image/…`) show as they are. Any other image is dropped.
+- A message without an HTML part, or with one larger than 2 MB, is shown as its plain text, or `(no text body)` when it has none.
+
+## Errors
+
+- `Email not found: <id>`: no message with that id in the user's mailbox.
