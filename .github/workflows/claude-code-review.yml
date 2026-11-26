@@ -1,11 +1,14 @@
 name: Claude Code Review
 
 # The review runs in langmail/factory's review.yml, whose sync PRs move the
-# pin. What matters in this repo is in REVIEW.md.
+# pin. What matters in this repo is in REVIEW.md. A maintainer's claude-review
+# label asks for a review on any open PR, including one from a fork.
 
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
+  pull_request_target:
+    types: [labeled]
 
 permissions: {}
 
@@ -19,3 +22,5 @@ jobs:
       id-token: write
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    # Other labels would start a run that review.yml skips.
+    if: github.event_name == 'pull_request' || github.event.label.name == 'claude-review'
