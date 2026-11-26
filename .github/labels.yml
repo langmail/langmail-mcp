@@ -1,5 +1,4 @@
-# The labels of the issue workflow and the PR review, the same in every
-# Langmail repo. Edit them in langmail/factory: its sync copies this file to
+# The labels of the issue workflow, the same in every Langmail repo. Edit them in langmail/factory: its sync copies this file to
 # .github/labels.yml in each repo, the factory check fails on a hand edit to
 # that copy, and the factory's labels workflow syncs the copy to GitHub on
 # each push to main.
@@ -24,11 +23,9 @@ labels:
   - name: urgent
     color: "b60205"
     description: "Fast lane: incident, broken for users, data loss or security"
-  - name: claude-review
-    color: "5319e7"
-    description: A maintainer asks for one Claude review, such as on a PR from a fork
 
 retired:
+  - name: claude-review
   - name: bug
     type: Bug
   - name: enhancement

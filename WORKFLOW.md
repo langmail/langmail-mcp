@@ -242,8 +242,8 @@ The REST calls, each with `--paginate` where it lists:
   the wait limit. Report unavailable reviews and checks explicitly; do not
   describe an unverified PR as clean. Draft or bot PRs may skip reviews by
   design; do not wait for reviews that are not scheduled. A PR from a fork
-  gets a Claude review only when a maintainer adds the `claude-review`
-  label, one review per label; ask the user for it instead of waiting.
+  gets a Claude review only when a maintainer comments `/claude-review` on
+  it, one review per comment; ask the user for it instead of waiting.
 
 These limits take precedence over starting another round after a push.
 If a blocker recurs, stop automatic fixes even if other findings are new.
