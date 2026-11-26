@@ -32,7 +32,7 @@ applies here. Load the skill first.
   grep for `registerTool(` misses the tools that register through a
   `TOOL_NAME` constant.
 - A rename, removal or split also updates the tool's public reference page
-  in `langmail/platform` (Adding or changing tools, in `AGENTS.md`).
+  in `docs/reference/mcp/` (Adding or changing tools, in `AGENTS.md`).
 - Agent evals: `docs/evals.md`. The calls-until-the-answer measurements behind
   the skill's principle 13 were taken for
   https://github.com/langmail/platform/issues/917.

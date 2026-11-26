@@ -1,0 +1,5 @@
+# Internal docs for this repository's contributors and agents, not site pages:
+# the site's pages are .mdx, so every .md file (AGENTS.md included) and the
+# upstream defect records stay off docs.langmail.me.
+*.md
+upstream/

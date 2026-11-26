@@ -34,8 +34,10 @@ output.
 | `bun run test:integration` | The CalDAV adapter against Radicale (`AGENTS.md` § Tests against real servers) |
 | `bun run test:stalwart` | Tests against the dev Stalwart in `infra/dev/stalwart` |
 | `bun run spec:check` | The TLA+ model of sending (`spec/AGENTS.md`); needs Java 11 or later |
+| `bun run docs:validate`, `bun run docs:links` | The docs site in `docs/` (`docs/AGENTS.md`) |
 
-CI runs all of them on every pull request.
+CI runs all of them on every pull request, the docs checks only when `docs/`
+changes.
 
 A change to a tool's name, description, schema or result also needs an
 agent eval before and after (`docs/evals.md`), because unit tests do not show
