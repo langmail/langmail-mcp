@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test'
+import { type McpServer } from '@modelcontextprotocol/server'
 
 import { type FetchEventParams, type UpdateEventParams } from '../caldav/client.ts'
 import { buildInvite, maxSequence } from '../caldav/ical.ts'
@@ -7,6 +8,7 @@ import { parseEvents } from '../ical/index.ts'
 import { logger } from '../logger/index.ts'
 import {
   mergeAttendees,
+  registerUpdateCalendarEvent,
   type UpdateCalendarEventArgs,
   updateCalendarEvent,
   updateCalendarEventInput,
@@ -2418,7 +2420,7 @@ describe('updateCalendarEvent — unmodelled properties are preserved', () => {
 })
 
 describe('updateCalendarEvent — Change, never send', () => {
-  const personalOnly = { mode: 'self-hosted' as const }
+  const narrowed = { mode: 'self-hosted' as const }
 
   const personalStored = (): CalendarObject => ({
     data: buildInvite({
@@ -2441,7 +2443,7 @@ describe('updateCalendarEvent — Change, never send', () => {
     const cap = captured()
     const result = await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
       args: { uid: UID, ...over },
-      personalOnly,
+      narrowed,
       token: 'tok',
     })
 
@@ -2458,7 +2460,7 @@ describe('updateCalendarEvent — Change, never send', () => {
     const cap = captured()
     const result = await updateCalendarEvent(makeDeps(account(), personalStored(), cap), {
       args: updatePersonalEventInput.parse({ start: '2026-06-12T14:00:00Z', uid: UID }),
-      personalOnly,
+      narrowed,
       token: 'tok',
     })
 
@@ -2474,5 +2476,39 @@ describe('updateCalendarEvent — Change, never send', () => {
       expect(updatePersonalEventInput.safeParse({ [field]: [], uid: UID }).success).toBe(false)
     }
     expect(updatePersonalEventInput.safeParse({ title: 'Renamed', uid: UID }).success).toBe(true)
+  })
+})
+
+// Through registration, so the level decides the form and the refusal.
+describe('registerUpdateCalendarEvent per level', () => {
+  const register = (access: 'everything' | 'no-send', cap: Captured) => {
+    let handler: ((args: unknown) => Promise<{ content: { text: string }[]; isError?: boolean }>) | undefined
+    const server = {
+      registerTool: (_name: string, _config: unknown, cb: typeof handler) => {
+        handler = cb
+      },
+    } as unknown as McpServer
+    registerUpdateCalendarEvent(server, makeDeps(account(), storedEvent(), cap), () => 'tok', access, 'hosted')
+    if (!handler) {
+      throw new Error('not registered')
+    }
+    return handler
+  }
+
+  test('at no-send a meeting is refused and nothing is written', async () => {
+    const cap = captured()
+    const result = await register('no-send', cap)({ title: 'Renamed', uid: UID })
+
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('need Everything access')
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('at everything the same meeting is updated', async () => {
+    const cap = captured()
+    const result = await register('everything', cap)({ title: 'Renamed', uid: UID })
+
+    expect(result.isError).toBeUndefined()
+    expect(cap.updated).toHaveLength(1)
   })
 })

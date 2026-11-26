@@ -5,6 +5,9 @@
 // structure distillation; this tool owns validation, id assignment,
 // persistence into the managed Sieve script, and the explicit backfill.
 //
+// At Change, never send a narrowed form offers every action but forward
+// (src/access/levels.ts).
+//
 // The persistent-vs-one-time distinction lives in the tool description: the
 // client must only reach for this tool when the user expresses *future*
 // behavior, and must clarify ambiguous requests instead of guessing.

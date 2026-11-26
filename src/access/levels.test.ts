@@ -75,6 +75,7 @@ describe('access levels', () => {
     }
     expect(reachesOthers('everything')).toBe(true)
     expect(reachesOthers('no-send')).toBe(false)
+    expect(reachesOthers('read-only')).toBe(false)
   })
 
   test('registering a tool with no level fails', () => {

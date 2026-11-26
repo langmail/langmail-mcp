@@ -158,7 +158,7 @@ describe('update_mail_rule at Change, never send', () => {
     const deps = fakeDeps([forwarding()])
     const result = await updateMailRule(deps, {
       args: updateMailRuleInput.parse({ ruleId: 'rule-00000001', ...over }),
-      localOnly: { mode: 'hosted' },
+      narrowed: { mode: 'hosted' },
       token: 'tok',
     })
 
@@ -175,7 +175,7 @@ describe('update_mail_rule at Change, never send', () => {
     const deps = fakeDeps([githubRule()])
     const result = await updateMailRule(deps, {
       args: updateMailRuleInput.parse({ enabled: false, ruleId: 'rule-00000001' }),
-      localOnly: { mode: 'hosted' },
+      narrowed: { mode: 'hosted' },
       token: 'tok',
     })
 
@@ -195,5 +195,27 @@ describe('update_mail_rule at Change, never send', () => {
 
     expect(result.isError).toBe(true)
     expect(deps.saves).toBe(0)
+  })
+
+  test('the registered narrowed form refuses a stored forwarding rule; the full form changes it', async () => {
+    const narrowed = makeServer()
+    const narrowedDeps = fakeDeps([forwarding()])
+    registerUpdateMailRule(narrowed.server, narrowedDeps, () => 'tok', 'no-send', 'hosted')
+    const refused = (await narrowed.registered.get('update_mail_rule')?.({
+      enabled: false,
+      ruleId: 'rule-00000001',
+    })) as ToolResult
+    expect(refused.isError).toBe(true)
+    expect(narrowedDeps.saves).toBe(0)
+
+    const full = makeServer()
+    const fullDeps = fakeDeps([forwarding()])
+    registerUpdateMailRule(full.server, fullDeps, () => 'tok', 'everything', 'hosted')
+    const changed = (await full.registered.get('update_mail_rule')?.({
+      enabled: false,
+      ruleId: 'rule-00000001',
+    })) as ToolResult
+    expect(changed.isError).toBeUndefined()
+    expect(fullDeps.saves).toBe(1)
   })
 })

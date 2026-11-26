@@ -2,13 +2,15 @@
 // its identity (id, createdAt). Only the provided parts change; conditions
 // and actions are replaced wholesale when given (a partial merge of
 // condition fields would be ambiguous about clearing). Optionally applies
-// the updated actions to existing matching mail, same policy as create.
+// the updated actions to existing matching mail, same policy as create. At
+// Change, never send a narrowed form offers no forward action and refuses a
+// rule that already forwards.
 
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { type AccessLevel, reachesOthers } from '../access/levels.ts'
-import { needsEverything } from '../access/restrict.ts'
+import { type Narrowed, needsEverything } from '../access/narrowed.ts'
 import { type ServerMode } from '../mode.ts'
 import { LARGE_APPLY_THRESHOLD } from '../rules/apply.ts'
 import {
@@ -88,11 +90,10 @@ export const updateLocalMailRuleInput = z
   .refine(CONDITIONS_RULE.check, { message: CONDITIONS_RULE.message })
   .refine(CHANGE_RULE.check, { message: CHANGE_RULE.message })
 
-export interface UpdateMailRuleContext {
+interface UpdateMailRuleContext {
   args: UpdateMailRuleArgs
-  // Set at Change, never send, with where the user changes the level: a rule
-  // that already forwards is refused.
-  localOnly?: { mode: ServerMode }
+  // Set at Change, never send: a rule that already forwards is refused.
+  narrowed?: Narrowed
   token: string
 }
 
@@ -105,12 +106,12 @@ export const updateMailRule = async (deps: MailRuleToolDeps, ctx: UpdateMailRule
   if (!current) {
     return errorResult(`No mail rule with id ${args.ruleId}. Use list_mail_rules to see the current rules and ids.`)
   }
-  if (ctx.localOnly && forwardsMail(current)) {
+  if (ctx.narrowed && forwardsMail(current)) {
     return errorResult(
       needsEverything(
-        `Mail rule ${args.ruleId} forwards mail to another address; delete_mail_rule can still remove it.`,
-        'Rules that forward mail',
-        ctx.localOnly.mode
+        `Mail rule ${args.ruleId} forwards mail to another address, so it cannot be changed at this access level. If the user wants the rule gone, delete_mail_rule removes it.`,
+        'Changes to rules that forward mail',
+        ctx.narrowed.mode
       )
     )
   }
@@ -154,7 +155,7 @@ export const registerUpdateMailRule = (
   deps: MailRuleToolDeps,
   getToken: () => string,
   access: AccessLevel,
-  mode: ServerMode
+  mode: ServerMode = 'hosted'
 ): void => {
   const full = reachesOthers(access)
   const input = full ? updateMailRuleInput : updateLocalMailRuleInput
@@ -180,7 +181,7 @@ export const registerUpdateMailRule = (
       return updateMailRule(deps, {
         args: parsed.data,
         token: getToken(),
-        ...(full ? {} : { localOnly: { mode } }),
+        ...(full ? {} : { narrowed: { mode } }),
       })
     }
   )

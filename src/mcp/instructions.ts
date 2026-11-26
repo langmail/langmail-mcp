@@ -16,7 +16,7 @@
 // tools it offers and adds one line saying what the agent may do.
 
 import { ACCESS_LEVEL_NAMES, type AccessLevel } from '../access/levels.ts'
-import { whereToChange } from '../access/restrict.ts'
+import { whereToChange } from '../access/narrowed.ts'
 import { type ServerMode } from '../mode.ts'
 
 const CALENDAR_WITH_SHARING =
@@ -92,7 +92,7 @@ const accessLine = (level: Exclude<AccessLevel, 'everything'>, mode: ServerMode)
   const can =
     level === 'read-only'
       ? 'You can read the account but not change or send anything.'
-      : 'You can file mail, stage drafts, keep personal events and mail rules and edit contacts, but not send mail or reach anyone else: events with attendees (meetings, invitations) and rules that forward mail need Everything. The user sends staged drafts themselves.'
+      : 'You can file mail, stage drafts, create, change and delete personal events and mail rules, and edit contacts, but not send mail or reach anyone else: events with attendees (meetings, invitations) and rules that forward mail need Everything. The user sends staged drafts themselves.'
   return `Access: ${ACCESS_LEVEL_NAMES[level]}. ${can} When the user asks for something else, do the part you can, then say you cannot do the rest and that they can change the access level ${whereToChange(mode)}.`
 }
 
@@ -139,6 +139,9 @@ export const buildInstructions = ({ level, mode, sharing }: InstructionsOptions)
   if (withSharing) {
     calendar =
       level === 'read-only' ? CALENDAR_SHARED_READ : `${CALENDAR_SHARED_READ} stop_sharing_calendar ends a share.`
+  }
+  if (level === 'no-send') {
+    calendar = `${calendar} create_calendar_event adds a personal event, such as an appointment.`
   }
 
   if (level === 'read-only') {

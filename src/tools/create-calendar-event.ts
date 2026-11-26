@@ -120,7 +120,7 @@ export const createPersonalEventInput = z.strictObject({
     .enum(['busy', 'free'])
     .optional()
     .describe(
-      'Whether this event counts as busy time. `busy` (default) means it does; `free` means it does not — ' +
+      'Whether this event counts as busy time. `busy` (default) means it does; `free` means it does not, ' +
         'for holds, reminders and travel buffers the user does not want counted against their availability.'
     ),
 })

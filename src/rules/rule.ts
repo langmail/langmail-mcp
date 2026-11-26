@@ -136,7 +136,7 @@ const stopProcessingAction = z
 
 export const mailRuleActionSchema = z.discriminatedUnion('type', [...localActions, forwardAction, stopProcessingAction])
 
-export const mailRuleLocalActionSchema = z.discriminatedUnion('type', [...localActions, stopProcessingAction])
+const mailRuleLocalActionSchema = z.discriminatedUnion('type', [...localActions, stopProcessingAction])
 
 export type MailRuleAction = z.infer<typeof mailRuleActionSchema>
 

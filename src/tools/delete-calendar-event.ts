@@ -2,7 +2,8 @@
 // calendar, addressed by the stable UID from create_calendar_event. Deleting
 // an organizer's scheduling object makes Stalwart fan out DKIM-signed iMIP
 // CANCEL messages to the attendees (RFC 6638 server-side scheduling), so we
-// don't build a cancellation iCal ourselves.
+// don't build a cancellation iCal ourselves. At Change, never send a narrowed
+// form deletes only events nobody else is on (personal-event.ts).
 //
 // We fetch the object first to confirm it exists (and pick up its ETag) before
 // acting. Two modes, chosen by `recurrenceId`:
@@ -30,6 +31,7 @@ import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
 import { type AccessLevel, reachesOthers } from '../access/levels.ts'
+import { type Narrowed } from '../access/narrowed.ts'
 import {
   type CalDavConfig,
   type DeleteEventParams,
@@ -48,7 +50,7 @@ import { parseEvents } from '../ical/index.ts'
 import { type ServerMode } from '../mode.ts'
 import { ACCOUNT_DESTRUCTIVE, OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import { eventUidSchema } from './create-calendar-event.ts'
-import { hasAttendees, meetingRefusal, type PersonalOnly } from './personal-event.ts'
+import { hasOtherPeople, meetingRefusal } from './personal-event.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 const recurrenceIdDescription =
@@ -95,7 +97,7 @@ export interface DeleteCalendarEventDeps {
 export interface DeleteCalendarEventContext {
   args: DeleteCalendarEventArgs
   // Set at Change, never send: an event with attendees is refused.
-  personalOnly?: PersonalOnly
+  narrowed?: Narrowed
   token: string
 }
 
@@ -197,10 +199,11 @@ export const deleteCalendarEvent = async (
   if (!existing) {
     return errorResult(`Event not found: ${args.uid}`)
   }
-  if (ctx.personalOnly && hasAttendees(parseEvents(existing.data))) {
-    return errorResult(meetingRefusal(args.uid, ctx.personalOnly))
+  // Without an own address every attendee counts as someone else.
+  if (ctx.narrowed && hasOtherPeople(parseEvents(existing.data), account.organizer ?? '')) {
+    return errorResult(meetingRefusal(args.uid, ctx.narrowed))
   }
-  const personal = ctx.personalOnly !== undefined
+  const personal = ctx.narrowed !== undefined
 
   if (args.recurrenceId !== undefined) {
     return cancelOccurrence({ args, deps, existing, personal, recurrenceId: args.recurrenceId, token })
@@ -231,7 +234,7 @@ export const registerDeleteCalendarEvent = (
   // Bearer threaded per request — see mcp/handler.ts.
   getToken: () => string,
   access: AccessLevel,
-  mode: ServerMode
+  mode: ServerMode = 'hosted'
 ): void => {
   if (!reachesOthers(access)) {
     server.registerTool(
@@ -242,7 +245,7 @@ export const registerDeleteCalendarEvent = (
           'Delete or remove a personal event from the user’s calendar, one nobody else is on, identified ' +
           'by its uid from create_calendar_event or list_calendar_events. Cancelling a meeting with other ' +
           'people, or declining an invitation, needs Everything access. By default this deletes the ENTIRE ' +
-          'event — for a recurring event every occurrence; pass recurrenceId to remove ONE occurrence. ' +
+          'event, for a recurring event every occurrence; pass recurrenceId to remove ONE occurrence. ' +
           'Defaults to the user’s default calendar; pass calendarUrl if the event lives in another calendar.',
         inputSchema: deletePersonalEventInput,
         title: 'Delete calendar event',
@@ -250,7 +253,7 @@ export const registerDeleteCalendarEvent = (
       (args) =>
         deleteCalendarEvent(deps, {
           args: deletePersonalEventInput.parse(args),
-          personalOnly: { mode },
+          narrowed: { mode },
           token: getToken(),
         })
     )

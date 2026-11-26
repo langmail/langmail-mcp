@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { type McpServer } from '@modelcontextprotocol/server'
 
 import { type DeleteEventParams, type FetchEventParams, type UpdateEventParams } from '../caldav/client.ts'
 import { buildInvite } from '../caldav/ical.ts'
@@ -8,6 +9,7 @@ import {
   deleteCalendarEvent,
   deleteCalendarEventInput,
   deletePersonalEventInput,
+  registerDeleteCalendarEvent,
 } from './delete-calendar-event.ts'
 
 const CAL = 'https://m/dav/cal/u/default/'
@@ -454,7 +456,7 @@ describe('deleteCalendarEvent — all-day series occurrence', () => {
 })
 
 describe('deleteCalendarEvent — Change, never send', () => {
-  const personalOnly = { mode: 'hosted' as const }
+  const narrowed = { mode: 'hosted' as const }
 
   // A personal series: no ORGANIZER, no ATTENDEE.
   const personalSeries = (): CalendarObject => ({
@@ -492,7 +494,7 @@ describe('deleteCalendarEvent — Change, never send', () => {
     const cap = captured()
     const result = await deleteCalendarEvent(makeDeps(account(), stored(), cap), {
       args: args(),
-      personalOnly,
+      narrowed,
       token: 'tok',
     })
 
@@ -510,7 +512,7 @@ describe('deleteCalendarEvent — Change, never send', () => {
     const cap = captured()
     const result = await deleteCalendarEvent(makeDeps(account(), recurringStored(), cap), {
       args: args({ recurrenceId: '2026-06-23T10:00:00Z' }),
-      personalOnly,
+      narrowed,
       token: 'tok',
     })
 
@@ -522,7 +524,7 @@ describe('deleteCalendarEvent — Change, never send', () => {
     const cap = captured()
     const result = await deleteCalendarEvent(makeDeps(account(), personalSeries(), cap), {
       args: args(),
-      personalOnly,
+      narrowed,
       token: 'tok',
     })
 
@@ -536,7 +538,7 @@ describe('deleteCalendarEvent — Change, never send', () => {
     const cap = captured()
     const result = await deleteCalendarEvent(makeDeps(account(), personalSeries(), cap), {
       args: args({ recurrenceId: '2026-06-23T10:00:00Z' }),
-      personalOnly,
+      narrowed,
       token: 'tok',
     })
 
@@ -550,5 +552,39 @@ describe('deleteCalendarEvent — Change, never send', () => {
       Object.keys(deleteCalendarEventInput.shape).sort()
     )
     expect(deletePersonalEventInput.safeParse({ notify: 'none', uid: UID }).success).toBe(false)
+  })
+})
+
+// Through registration, so the level decides the form and the refusal.
+describe('registerDeleteCalendarEvent per level', () => {
+  const register = (access: 'everything' | 'no-send', cap: Captured) => {
+    let handler: ((args: unknown) => Promise<{ content: { text: string }[]; isError?: boolean }>) | undefined
+    const server = {
+      registerTool: (_name: string, _config: unknown, cb: typeof handler) => {
+        handler = cb
+      },
+    } as unknown as McpServer
+    registerDeleteCalendarEvent(server, makeDeps(account(), recurringStored(), cap), () => 'tok', access, 'hosted')
+    if (!handler) {
+      throw new Error('not registered')
+    }
+    return handler
+  }
+
+  test('at no-send a meeting is refused and nothing is deleted', async () => {
+    const cap = captured()
+    const result = await register('no-send', cap)({ uid: UID })
+
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toContain('need Everything access')
+    expect(cap.deleted).toHaveLength(0)
+  })
+
+  test('at everything the same meeting is deleted', async () => {
+    const cap = captured()
+    const result = await register('everything', cap)({ uid: UID })
+
+    expect(result.isError).toBeUndefined()
+    expect(cap.deleted).toHaveLength(1)
   })
 })

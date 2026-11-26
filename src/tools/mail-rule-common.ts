@@ -50,7 +50,7 @@ export const ruleActionsField = mailRuleActionsSchema.describe(
 // At Change, never send (src/access/levels.ts) a rule keeps mail inside the
 // account, so the forward action is not offered.
 export const ruleLocalActionsField = mailRuleLocalActionsSchema.describe(
-  'What happens to a matching message — one or more actions, applied in order. Forwarding needs Everything access.'
+  'What happens to a matching message: one or more actions, applied in order. Forwarding needs Everything access.'
 )
 
 // --- existing-mail policy ----------------------------------------------------

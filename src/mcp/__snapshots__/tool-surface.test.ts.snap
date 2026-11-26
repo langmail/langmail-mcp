@@ -3465,11 +3465,11 @@ exports[`tool surface per access level no-send, hosted, sharing on 1`] = `
   "instructions": 
 "Langmail is the user’s own email, calendar and contacts account, plus the mail rules that file their incoming mail. Every tool acts on that one account.
 
-Access: Change, never send. You can file mail, stage drafts, keep personal events and mail rules and edit contacts, but not send mail or reach anyone else: events with attendees (meetings, invitations) and rules that forward mail need Everything. The user sends staged drafts themselves. When the user asks for something else, do the part you can, then say you cannot do the rest and that they can change the access level under Access in Langmail.
+Access: Change, never send. You can file mail, stage drafts, create, change and delete personal events and mail rules, and edit contacts, but not send mail or reach anyone else: events with attendees (meetings, invitations) and rules that forward mail need Everything. The user sends staged drafts themselves. When the user asks for something else, do the part you can, then say you cannot do the rest and that they can change the access level under Access in Langmail.
 
 Where to start:
 - Mail: search_emails finds messages (read: false finds everything not read yet, in every folder; each hit names its folders). A hit in Junk is mail the server filtered as spam: leave it there unless the user says it is not spam. Read one with get_email or a whole conversation with get_thread. preview_email shows one to the user as a rendered document (tickets, invoices).
-- Calendar: list_calendar_events for what is on the calendar; list_calendars for the calendars themselves and who each is shared with. stop_sharing_calendar ends a share.
+- Calendar: list_calendar_events for what is on the calendar; list_calendars for the calendars themselves and who each is shared with. stop_sharing_calendar ends a share. create_calendar_event adds a personal event, such as an appointment.
 - Contacts: search_contacts finds people and their addresses, also by what they are to the user ("my lawyer"); list_upcoming_birthdays for birthdays. When the user names or confirms such a role, record it with update_contact.
 - Mail rules: list_mail_rules for what is set up; preview_mail_rule before create_mail_rule to check what a rule would match. A rule cannot forward mail at this level.
 
@@ -3530,11 +3530,11 @@ exports[`tool surface per access level no-send, hosted, sharing off 1`] = `
   "instructions": 
 "Langmail is the user’s own email, calendar and contacts account, plus the mail rules that file their incoming mail. Every tool acts on that one account.
 
-Access: Change, never send. You can file mail, stage drafts, keep personal events and mail rules and edit contacts, but not send mail or reach anyone else: events with attendees (meetings, invitations) and rules that forward mail need Everything. The user sends staged drafts themselves. When the user asks for something else, do the part you can, then say you cannot do the rest and that they can change the access level under Access in Langmail.
+Access: Change, never send. You can file mail, stage drafts, create, change and delete personal events and mail rules, and edit contacts, but not send mail or reach anyone else: events with attendees (meetings, invitations) and rules that forward mail need Everything. The user sends staged drafts themselves. When the user asks for something else, do the part you can, then say you cannot do the rest and that they can change the access level under Access in Langmail.
 
 Where to start:
 - Mail: search_emails finds messages (read: false finds everything not read yet, in every folder; each hit names its folders). A hit in Junk is mail the server filtered as spam: leave it there unless the user says it is not spam. Read one with get_email or a whole conversation with get_thread. preview_email shows one to the user as a rendered document (tickets, invoices).
-- Calendar: list_calendar_events for what is on the calendar; list_calendars for the calendars themselves.
+- Calendar: list_calendar_events for what is on the calendar; list_calendars for the calendars themselves. create_calendar_event adds a personal event, such as an appointment.
 - Contacts: search_contacts finds people and their addresses, also by what they are to the user ("my lawyer"); list_upcoming_birthdays for birthdays. When the user names or confirms such a role, record it with update_contact.
 - Mail rules: list_mail_rules for what is set up; preview_mail_rule before create_mail_rule to check what a rule would match. A rule cannot forward mail at this level.
 
@@ -3594,11 +3594,11 @@ exports[`tool surface per access level no-send, self-hosted 1`] = `
   "instructions": 
 "These tools reach the user’s own email, calendar and contacts account on their mail server, plus the mail rules that file their incoming mail. Every tool acts on that one account.
 
-Access: Change, never send. You can file mail, stage drafts, keep personal events and mail rules and edit contacts, but not send mail or reach anyone else: events with attendees (meetings, invitations) and rules that forward mail need Everything. The user sends staged drafts themselves. When the user asks for something else, do the part you can, then say you cannot do the rest and that they can change the access level by restarting the server with the --access option.
+Access: Change, never send. You can file mail, stage drafts, create, change and delete personal events and mail rules, and edit contacts, but not send mail or reach anyone else: events with attendees (meetings, invitations) and rules that forward mail need Everything. The user sends staged drafts themselves. When the user asks for something else, do the part you can, then say you cannot do the rest and that they can change the access level by restarting the server with the --access option.
 
 Where to start:
 - Mail: search_emails finds messages (read: false finds everything not read yet, in every folder; todo: true finds the to-do list; each hit names its folders). A hit in Junk is mail the server filtered as spam: leave it there unless the user says it is not spam. Read one with get_email or a whole conversation with get_thread. Transactional mail is titled after what it is about (a ticket after its route, an invoice after its vendor), so search for those words with a date window. preview_email shows one to the user as a rendered document (tickets, invoices).
-- Calendar: list_calendar_events for what is on the calendar; list_calendars for the calendars themselves.
+- Calendar: list_calendar_events for what is on the calendar; list_calendars for the calendars themselves. create_calendar_event adds a personal event, such as an appointment.
 - Contacts: search_contacts finds people and their addresses, also by what they are to the user ("my lawyer"); list_upcoming_birthdays for birthdays. When the user names or confirms such a role, record it with update_contact.
 - Mail rules: list_mail_rules for what is set up; preview_mail_rule before create_mail_rule to check what a rule would match. A rule cannot forward mail at this level.
 
@@ -3879,7 +3879,7 @@ exports[`narrowed tools at no-send, in full 1`] = `
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
         "actions": {
-          "description": "What happens to a matching message — one or more actions, applied in order. Forwarding needs Everything access.",
+          "description": "What happens to a matching message: one or more actions, applied in order. Forwarding needs Everything access.",
           "items": {
             "oneOf": [
               {
@@ -4536,7 +4536,7 @@ exports[`narrowed tools at no-send, in full 1`] = `
           "type": "integer",
         },
         "showAs": {
-          "description": "Whether this event counts as busy time. \`busy\` (default) means it does; \`free\` means it does not — for holds, reminders and travel buffers the user does not want counted against their availability.",
+          "description": "Whether this event counts as busy time. \`busy\` (default) means it does; \`free\` means it does not, for holds, reminders and travel buffers the user does not want counted against their availability.",
           "enum": [
             "busy",
             "free",
@@ -4591,7 +4591,7 @@ exports[`narrowed tools at no-send, in full 1`] = `
       "openWorldHint": false,
       "readOnlyHint": false,
     },
-    "description": "Update, edit or reschedule a personal event on the user’s calendar, one nobody else is on: move it to a new time, change the time or title, or set the location. Changing a meeting with other people needs Everything access. Pass the event \`uid\` (from list_calendar_events or create_calendar_event) plus only the fields to change — every field you omit keeps its stored value. All-day events stay all-day; pass \`start\`/\`end\` as dates or date-times to switch. Set or clear a reminder with \`reminderMinutesBefore\`. To change one occurrence of a repeating series, pass \`recurrenceId\`. To put an event on a different calendar, use move_calendar_events.",
+    "description": "Update, edit or reschedule a personal event on the user’s calendar, one nobody else is on: move it to a new time, change the time or title, or set the location. Changing a meeting with other people needs Everything access. Pass the event \`uid\` (from list_calendar_events or create_calendar_event) plus only the fields to change; every field you omit keeps its stored value. All-day events stay all-day; pass \`start\`/\`end\` as dates or date-times to switch. Set or clear a reminder with \`reminderMinutesBefore\`. To change one occurrence of a repeating series, pass \`recurrenceId\`. To put an event on a different calendar, use move_calendar_events.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -4795,7 +4795,7 @@ exports[`narrowed tools at no-send, in full 1`] = `
       "openWorldHint": false,
       "readOnlyHint": false,
     },
-    "description": "Delete or remove a personal event from the user’s calendar, one nobody else is on, identified by its uid from create_calendar_event or list_calendar_events. Cancelling a meeting with other people, or declining an invitation, needs Everything access. By default this deletes the ENTIRE event — for a recurring event every occurrence; pass recurrenceId to remove ONE occurrence. Defaults to the user’s default calendar; pass calendarUrl if the event lives in another calendar.",
+    "description": "Delete or remove a personal event from the user’s calendar, one nobody else is on, identified by its uid from create_calendar_event or list_calendar_events. Cancelling a meeting with other people, or declining an invitation, needs Everything access. By default this deletes the ENTIRE event, for a recurring event every occurrence; pass recurrenceId to remove ONE occurrence. Defaults to the user’s default calendar; pass calendarUrl if the event lives in another calendar.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,

@@ -65,7 +65,9 @@ export const ACCOUNT_DESTRUCTIVE: ToolRiskAnnotations = {
 // message to an arbitrary address. A static annotation has to describe what the
 // tool *can* do, and "quietly installs a persistent data-forwarding rule" is the
 // most consequential outward reach on this surface — a client gating on
-// `openWorldHint` has to see it.
+// `openWorldHint` has to see it. That holds for their full form, at Everything;
+// the narrowed form below it (src/access/levels.ts) offers no forward action
+// and is ACCOUNT_WRITE.
 export const OUTWARD_WRITE: ToolRiskAnnotations = {
   destructiveHint: false,
   idempotentHint: false,
