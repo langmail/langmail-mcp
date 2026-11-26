@@ -7,6 +7,7 @@ import {
   type CreateCalendarEventArgs,
   createCalendarEvent,
   createCalendarEventInput,
+  createPersonalEventInput,
   eventUidSchema,
 } from './create-calendar-event.ts'
 
@@ -601,5 +602,31 @@ describe('scheduling handover audit log', () => {
     } finally {
       info.mockRestore()
     }
+  })
+})
+
+describe('createPersonalEventInput (Change, never send)', () => {
+  const personal = { end: '2026-06-12T10:30:00Z', start: '2026-06-12T10:00:00Z', title: 'Dentist' }
+
+  test('takes no attendees and no notify', () => {
+    expect(Object.keys(createPersonalEventInput.shape)).not.toContain('attendees')
+    expect(Object.keys(createPersonalEventInput.shape)).not.toContain('notify')
+    expect(createPersonalEventInput.safeParse(personal).success).toBe(true)
+    expect(createPersonalEventInput.safeParse({ ...personal, attendees: ['guest@example.com'] }).success).toBe(false)
+    expect(createPersonalEventInput.safeParse({ ...personal, notify: 'none' }).success).toBe(false)
+  })
+
+  test('creates an event nobody else is on', async () => {
+    const captured: PutEventParams[] = []
+    const result = await createCalendarEvent(makeDeps(account(), captured), {
+      args: createPersonalEventInput.parse({ ...personal, showAs: 'free' }),
+      token: 'tok',
+    })
+
+    expect(result.isError).toBeUndefined()
+    expect(result.content[0]?.text).toContain('no attendees, no invitations')
+    const ical = captured[0]?.ical ?? ''
+    expect(ical).not.toContain('ATTENDEE')
+    expect(ical).not.toContain('ORGANIZER')
   })
 })

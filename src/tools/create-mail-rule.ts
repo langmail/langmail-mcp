@@ -12,15 +12,17 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
+import { type AccessLevel, reachesOthers } from '../access/levels.ts'
 import { LARGE_APPLY_THRESHOLD } from '../rules/apply.ts'
 import { hasAnyCondition, type MailRule, normalizeConditions } from '../rules/rule.ts'
-import { OUTWARD_WRITE } from './annotations.ts'
+import { ACCOUNT_WRITE, OUTWARD_WRITE } from './annotations.ts'
 import {
   existingMailSchema,
   existingMailShape,
   type MailRuleToolDeps,
   ruleActionsField,
   ruleConditionsField,
+  ruleLocalActionsField,
   ruleMatchFieldWithDefault,
   ruleNameField,
   ruleTimestamp,
@@ -41,9 +43,19 @@ const createMailRuleShape = {
   name: ruleNameField.optional(),
 }
 
-export const createMailRuleInput = z.object(createMailRuleShape).refine((v) => hasAnyCondition(v.conditions), {
-  message: 'Provide at least one condition (from, to, subject, bodyContains, or hasAttachment).',
-})
+const NEEDS_CONDITION = 'Provide at least one condition (from, to, subject, bodyContains, or hasAttachment).'
+
+export const createMailRuleInput = z
+  .object(createMailRuleShape)
+  .refine((v) => hasAnyCondition(v.conditions), { message: NEEDS_CONDITION })
+
+// The form an agent at Change, never send gets (src/access/levels.ts): every
+// action but forward, so the rule keeps mail inside the account.
+const createLocalMailRuleShape = { ...createMailRuleShape, actions: ruleLocalActionsField }
+
+export const createLocalMailRuleInput = z
+  .object(createLocalMailRuleShape)
+  .refine((v) => hasAnyCondition(v.conditions), { message: NEEDS_CONDITION })
 
 export type CreateMailRuleArgs = z.infer<typeof createMailRuleInput>
 
@@ -109,26 +121,39 @@ export const createMailRule = async (deps: MailRuleToolDeps, ctx: CreateMailRule
 
 // --- MCP registration ----------------------------------------------------
 
-export const registerCreateMailRule = (server: McpServer, deps: MailRuleToolDeps, getToken: () => string): void => {
+const WHEN_TO_USE =
+  'Use ONLY when the user expresses ongoing ' +
+  'behavior — "automatically…", "from now on…", "whenever I receive…". If a request is ambiguous ' +
+  'between a one-time cleanup and a standing rule (e.g. "archive all GitHub notifications"), ask which ' +
+  'they mean first. Rules run server-side on arrival; every rule whose conditions match runs. Existing ' +
+  'mail is untouched unless you pass existingMail (preview_mail_rule first — large backfills need ' +
+  'explicit confirmation). Returns the created rule with its id.'
+
+export const registerCreateMailRule = (
+  server: McpServer,
+  deps: MailRuleToolDeps,
+  getToken: () => string,
+  access: AccessLevel
+): void => {
+  const full = reachesOthers(access)
+  const input = full ? createMailRuleInput : createLocalMailRuleInput
   server.registerTool(
     'create_mail_rule',
     {
-      annotations: OUTWARD_WRITE,
-      description:
-        'Create a persistent mail rule (filter) that automatically sorts, labels, archives or forwards ' +
-        'FUTURE incoming messages until it is disabled or deleted. Use ONLY when the user expresses ongoing ' +
-        'behavior — "automatically…", "from now on…", "whenever I receive…". If a request is ambiguous ' +
-        'between a one-time cleanup and a standing rule (e.g. "archive all GitHub notifications"), ask which ' +
-        'they mean first. Rules run server-side on arrival; every rule whose conditions match runs. Existing ' +
-        'mail is untouched unless you pass existingMail (preview_mail_rule first — large backfills need ' +
-        'explicit confirmation). Returns the created rule with its id.',
-      inputSchema: z.object(createMailRuleShape),
+      annotations: full ? OUTWARD_WRITE : ACCOUNT_WRITE,
+      description: full
+        ? 'Create a persistent mail rule (filter) that automatically sorts, labels, archives or forwards ' +
+          `FUTURE incoming messages until it is disabled or deleted. ${WHEN_TO_USE}`
+        : 'Create a persistent mail rule (filter) that automatically sorts, labels or archives FUTURE ' +
+          'incoming messages until it is disabled or deleted; a rule that forwards mail needs Everything ' +
+          `access. ${WHEN_TO_USE}`,
+      inputSchema: z.object(full ? createMailRuleShape : createLocalMailRuleShape),
       title: 'Create mail rule',
     },
     (args) => {
       // The SDK validated the field shapes; only the cross-field refine can
       // fail here. Surface it as a clean tool error, not a ZodError blob.
-      const parsed = createMailRuleInput.safeParse(args)
+      const parsed = input.safeParse(args)
       if (!parsed.success) {
         return errorResult(parsed.error.issues.map((i) => i.message).join(' '))
       }

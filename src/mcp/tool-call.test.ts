@@ -106,7 +106,7 @@ describe('tools/call through the MCP handler', () => {
     ['archive_emails', 'read-only', 'Read only'],
     ['send_draft', 'read-only', 'Read only'],
     ['send_draft', 'no-send', 'Change, never send'],
-    ['create_mail_rule', 'no-send', 'Change, never send'],
+    ['respond_to_event', 'no-send', 'Change, never send'],
   ] as const)('%p at %p is refused in-band, naming the level', async (name, access, levelName) => {
     const warn = spyOn(logger, 'warn').mockImplementation(() => undefined)
     try {
@@ -124,6 +124,28 @@ describe('tools/call through the MCP handler', () => {
     } finally {
       warn.mockRestore()
     }
+  })
+
+  // At Change, never send the event and rule writers are offered in a narrowed
+  // form. A client calling with the full form's arguments, from a list cached
+  // at Everything, gets them refused rather than silently dropped.
+  test.each([
+    [
+      'create_calendar_event',
+      { attendees: ['guest@example.com'], end: '2026-06-12T11:00:00Z', start: '2026-06-12T10:00:00Z', title: 'Sync' },
+      'attendees',
+    ],
+    ['update_calendar_event', { addedAttendees: ['guest@example.com'], uid: 'evt-1' }, 'addedAttendees'],
+    [
+      'create_mail_rule',
+      { actions: [{ to: 'someone@example.com', type: 'forward' }], conditions: { from: 'billing@example.com' } },
+      'actions',
+    ],
+  ] as const)('%p at no-send refuses the full form’s outward arguments', async (name, args, field) => {
+    const message = await callTool(name, args, 'no-send')
+
+    expect(message.result?.isError).toBe(true)
+    expect(textOf(message)).toContain(field)
   })
 
   test('a self-hosted refusal points at the --access option and does not name Langmail', async () => {

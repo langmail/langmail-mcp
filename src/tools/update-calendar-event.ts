@@ -29,6 +29,7 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
+import { type AccessLevel, reachesOthers } from '../access/levels.ts'
 import { type AccountTimeZoneResolver, makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
 import { describeReminder, MAX_REMINDER_MINUTES } from '../caldav/alarm.ts'
 import {
@@ -66,9 +67,11 @@ import {
 } from '../caldav/timezone.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
 import { type ParsedAttendee, type ParsedEvent, parseEvents } from '../ical/index.ts'
-import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
+import { type ServerMode } from '../mode.ts'
+import { ACCOUNT_WRITE, OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import { type AttendeeWriteThrough } from './contact-write-through.ts'
 import { createCalendarEventInput, eventUidSchema } from './create-calendar-event.ts'
+import { hasAttendees, meetingRefusal, type PersonalOnly } from './personal-event.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 // `"none"` is the explicit "make this a one-off again" sentinel: it is the one
@@ -152,6 +155,20 @@ export const updateCalendarEventInput = z.object({
 
 export type UpdateCalendarEventArgs = z.infer<typeof updateCalendarEventInput>
 
+// The form an agent at Change, never send gets (src/access/levels.ts): a
+// personal event only, so no attendee fields and nothing to notify. Strict, so
+// an agent still holding the full form from a cached tool list gets its
+// attendee fields refused instead of silently dropped.
+export const updatePersonalEventInput = z.strictObject({
+  ...updateCalendarEventInput.omit({ addedAttendees: true, attendees: true, notify: true, removedAttendees: true })
+    .shape,
+  recurrenceId: updateCalendarEventInput.shape.recurrenceId.describe(
+    'To change one occurrence of a repeating series alone, its original start as an ISO 8601 instant ' +
+      '(e.g. 2026-06-16T10:00:00Z), or its date for an all-day series (2026-06-16). Not combinable with ' +
+      '`recurrence`.'
+  ),
+})
+
 // Merges an attendee delta onto the stored list: start from `base`, append
 // `added`, drop everything in `removed`. All comparison is case-insensitive
 // (RFC 5545 calendar-user-addresses are), and duplicates collapse to the first
@@ -187,6 +204,8 @@ export interface UpdateCalendarEventDeps {
 
 export interface UpdateCalendarEventContext {
   args: UpdateCalendarEventArgs
+  // Set at Change, never send: an event with attendees is refused.
+  personalOnly?: PersonalOnly
   token: string
 }
 
@@ -412,7 +431,9 @@ const removedAttendees = (stored: string[], resolved: string[]): string[] => {
 // upstream and guarded by caldav/stalwart-move-occurrence.test.ts.
 const deliverySummary = (attendees: string[], scheduleAgent?: 'NONE', removedAny = false): string => {
   if (attendees.length === 0) {
-    return 'no attendees remain; anyone previously invited may receive a cancellation'
+    return removedAny
+      ? 'no attendees remain; anyone previously invited may receive a cancellation'
+      : 'no attendees, no notifications'
   }
   if (scheduleAgent === 'NONE') {
     return removedAny
@@ -1065,6 +1086,47 @@ const rebuildEvent = ({
   return carryStoredProperties(built, storedIcal, { replaced: replacedProperties(args) })
 }
 
+interface LoadedEvent {
+  existing: CalendarObject
+  ok: true
+  // The account's own address, the organizer of anything it creates.
+  organizer: string
+  stored: ParsedEvent[]
+}
+
+// Finds the event to edit, or the error result that ends the call: no organizer
+// address, no such calendar or event, or at Change, never send an event with
+// attendees.
+const loadEvent = async (
+  deps: UpdateCalendarEventDeps,
+  { args, personalOnly, token }: UpdateCalendarEventContext
+): Promise<LoadedEvent | { ok: false; result: ToolResult }> => {
+  const fail = (text: string) => ({ ok: false as const, result: errorResult(text) })
+  const account = await deps.discover(token)
+  if (!account.organizer) {
+    return fail('Could not determine an organizer address for this account.')
+  }
+
+  const resolved = resolveCalendarUrl(account, args.calendarUrl)
+  if (!resolved.ok) {
+    return fail(
+      resolved.reason === 'none'
+        ? 'No calendar available to update the event in.'
+        : `Calendar not found: ${args.calendarUrl}`
+    )
+  }
+
+  const existing = await deps.fetchEvent({ calendarUrl: resolved.url, token, uid: args.uid })
+  if (!existing) {
+    return fail(`Event not found: ${args.uid}`)
+  }
+  const stored = parseEvents(existing.data)
+  if (personalOnly && hasAttendees(stored)) {
+    return fail(meetingRefusal(args.uid, personalOnly))
+  }
+  return { existing, ok: true, organizer: account.organizer, stored }
+}
+
 export const updateCalendarEvent = async (
   deps: UpdateCalendarEventDeps,
   ctx: UpdateCalendarEventContext
@@ -1079,25 +1141,11 @@ export const updateCalendarEvent = async (
     return errorResult(comboError)
   }
 
-  const account = await deps.discover(token)
-  if (!account.organizer) {
-    return errorResult('Could not determine an organizer address for this account.')
+  const loaded = await loadEvent(deps, ctx)
+  if (!loaded.ok) {
+    return loaded.result
   }
-
-  const resolved = resolveCalendarUrl(account, args.calendarUrl)
-  if (!resolved.ok) {
-    return errorResult(
-      resolved.reason === 'none'
-        ? 'No calendar available to update the event in.'
-        : `Calendar not found: ${args.calendarUrl}`
-    )
-  }
-
-  const existing = await deps.fetchEvent({ calendarUrl: resolved.url, token, uid: args.uid })
-  if (!existing) {
-    return errorResult(`Event not found: ${args.uid}`)
-  }
-  const stored = parseEvents(existing.data)
+  const { existing, organizer, stored } = loaded
   const storedMaster = stored.find((e) => e.recurrence !== undefined) ?? stored[0]
 
   const timeZone = args.timeZone ?? storedMaster?.startTzid ?? (await deps.resolveTimeZone(token)) ?? UTC_TIME_ZONE
@@ -1132,7 +1180,7 @@ export const updateCalendarEvent = async (
       deps,
       existing,
       invitees: inviteAttendees(f.attendees, base.storedAttendees, rescheduled),
-      organizer: account.organizer,
+      organizer,
       recurrenceId,
       removedAttendees: removed,
       rescheduled,
@@ -1154,7 +1202,7 @@ export const updateCalendarEvent = async (
     args,
     f,
     invitees: inviteAttendees(f.attendees, base.storedAttendees, rescheduled),
-    organizer: account.organizer,
+    organizer,
     sequence,
     stored,
     storedIcal: existing.data,
@@ -1177,8 +1225,8 @@ export const updateCalendarEvent = async (
     attendees: attendeesWithStoredNames(f.attendees, storedMaster),
     // The same stored-organizer preference rebuildEvent applies, so the
     // collected card credits whoever actually owns the event.
-    organizer: stored.find((e) => e.organizer)?.organizer ?? account.organizer,
-    selfAddress: account.organizer,
+    organizer: stored.find((e) => e.organizer)?.organizer ?? organizer,
+    selfAddress: organizer,
     start: f.start.toISOString(),
     token,
     uid: args.uid,
@@ -1212,8 +1260,35 @@ export const registerUpdateCalendarEvent = (
   server: McpServer,
   deps: UpdateCalendarEventDeps,
   // Bearer threaded per request — see mcp/handler.ts.
-  getToken: () => string
+  getToken: () => string,
+  access: AccessLevel,
+  mode: ServerMode
 ): void => {
+  if (!reachesOthers(access)) {
+    server.registerTool(
+      TOOL_NAME,
+      {
+        annotations: ACCOUNT_WRITE,
+        description:
+          'Update, edit or reschedule a personal event on the user’s calendar, one nobody else is on: move ' +
+          'it to a new time, change the time or title, or set the location. Changing a meeting with other ' +
+          'people needs Everything access. Pass the event `uid` (from list_calendar_events or ' +
+          'create_calendar_event) plus only the fields to change — every field you omit keeps its stored ' +
+          'value. All-day events stay all-day; pass `start`/`end` as dates or date-times to switch. Set or ' +
+          'clear a reminder with `reminderMinutesBefore`. To change one occurrence of a repeating series, ' +
+          'pass `recurrenceId`. To put an event on a different calendar, use move_calendar_events.',
+        inputSchema: updatePersonalEventInput,
+        title: 'Update calendar event',
+      },
+      (args) =>
+        updateCalendarEvent(deps, {
+          args: updatePersonalEventInput.parse(args),
+          personalOnly: { mode },
+          token: getToken(),
+        })
+    )
+    return
+  }
   server.registerTool(
     TOOL_NAME,
     {

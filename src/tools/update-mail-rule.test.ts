@@ -3,7 +3,12 @@ import { type McpServer } from '@modelcontextprotocol/server'
 
 import { fakeDeps, githubRule } from './mail-rule-test-fixtures.ts'
 import { type ToolResult } from './result.ts'
-import { registerUpdateMailRule, updateMailRule, updateMailRuleInput } from './update-mail-rule.ts'
+import {
+  registerUpdateMailRule,
+  updateLocalMailRuleInput,
+  updateMailRule,
+  updateMailRuleInput,
+} from './update-mail-rule.ts'
 
 type Registered = (args: unknown) => unknown
 
@@ -110,7 +115,7 @@ describe('registerUpdateMailRule', () => {
   test('registers under update_mail_rule and rejects invalid args without calling deps', async () => {
     const deps = fakeDeps([githubRule()])
     const { registered, server } = makeServer()
-    registerUpdateMailRule(server, deps, () => 'tok')
+    registerUpdateMailRule(server, deps, () => 'tok', 'everything', 'hosted')
 
     const result = (await registered.get('update_mail_rule')?.({ ruleId: 'rule-00000001' })) as ToolResult
 
@@ -121,7 +126,7 @@ describe('registerUpdateMailRule', () => {
   test('parses valid args and delegates to updateMailRule', async () => {
     const deps = fakeDeps([githubRule()])
     const { registered, server } = makeServer()
-    registerUpdateMailRule(server, deps, () => 'tok')
+    registerUpdateMailRule(server, deps, () => 'tok', 'everything', 'hosted')
 
     const result = (await registered.get('update_mail_rule')?.({
       enabled: false,
@@ -130,5 +135,65 @@ describe('registerUpdateMailRule', () => {
 
     expect(result.isError).toBeUndefined()
     expect(deps.rules[0]?.enabled).toBe(false)
+  })
+})
+
+describe('update_mail_rule at Change, never send', () => {
+  const forwarding = () => githubRule({ actions: [{ to: 'someone@example.com', type: 'forward' }] })
+
+  test('the narrowed schema refuses a forward action and keeps the cross-field rules', () => {
+    expect(
+      updateLocalMailRuleInput.safeParse({ actions: [{ to: 'someone@example.com', type: 'forward' }], ruleId: 'r' })
+        .success
+    ).toBe(false)
+    expect(updateLocalMailRuleInput.safeParse({ actions: [{ type: 'archive' }], ruleId: 'r' }).success).toBe(true)
+    expect(updateLocalMailRuleInput.safeParse({ ruleId: 'r' }).success).toBe(false)
+    expect(updateLocalMailRuleInput.safeParse({ conditions: {}, ruleId: 'r' }).success).toBe(false)
+  })
+
+  test.each([
+    ['disabling it', { enabled: false }],
+    ['replacing its actions', { actions: [{ type: 'archive' as const }] }],
+  ])('refuses a rule that already forwards, even %s, and saves nothing', async (_label, over) => {
+    const deps = fakeDeps([forwarding()])
+    const result = await updateMailRule(deps, {
+      args: updateMailRuleInput.parse({ ruleId: 'rule-00000001', ...over }),
+      localOnly: { mode: 'hosted' },
+      token: 'tok',
+    })
+
+    expect(result.isError).toBe(true)
+    const text = result.content[0]?.text ?? ''
+    expect(text).toContain('forwards mail')
+    expect(text).toContain('Nothing was changed.')
+    expect(text).toContain('need Everything access')
+    expect(text).toContain('delete_mail_rule')
+    expect(deps.saves).toBe(0)
+  })
+
+  test('updates a rule that does not forward', async () => {
+    const deps = fakeDeps([githubRule()])
+    const result = await updateMailRule(deps, {
+      args: updateMailRuleInput.parse({ enabled: false, ruleId: 'rule-00000001' }),
+      localOnly: { mode: 'hosted' },
+      token: 'tok',
+    })
+
+    expect(result.isError).toBeUndefined()
+    expect(deps.saves).toBe(1)
+  })
+
+  test('the registered narrowed form refuses a forward action without calling deps', async () => {
+    const deps = fakeDeps([githubRule()])
+    const { registered, server } = makeServer()
+    registerUpdateMailRule(server, deps, () => 'tok', 'no-send', 'hosted')
+
+    const result = (await registered.get('update_mail_rule')?.({
+      actions: [{ to: 'someone@example.com', type: 'forward' }],
+      ruleId: 'rule-00000001',
+    })) as ToolResult
+
+    expect(result.isError).toBe(true)
+    expect(deps.saves).toBe(0)
   })
 })

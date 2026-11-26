@@ -11,6 +11,7 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
+import { type AccessLevel, reachesOthers } from '../access/levels.ts'
 import { type AccountTimeZoneResolver, makeAccountTimeZoneResolver } from '../caldav/account-settings.ts'
 import { describeReminder, MAX_REMINDER_MINUTES } from '../caldav/alarm.ts'
 import {
@@ -25,7 +26,7 @@ import { alignUntil, recurrenceDescription, recurrenceSchema, toRRule } from '..
 import { logSchedulingHandover } from '../caldav/scheduling-handover.ts'
 import { eventTimeSchema, resolveEventTimes, timeZoneSchema, UTC_TIME_ZONE } from '../caldav/timezone.ts'
 import { type DiscoveredAccount } from '../caldav/types.ts'
-import { OUTWARD_WRITE } from './annotations.ts'
+import { ACCOUNT_WRITE, OUTWARD_WRITE } from './annotations.ts'
 import { type AttendeeWriteThrough } from './contact-write-through.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
@@ -108,6 +109,21 @@ export const createCalendarEventInput = z.object({
 })
 
 export type CreateCalendarEventArgs = z.infer<typeof createCalendarEventInput>
+
+// The form an agent at Change, never send gets (src/access/levels.ts): a
+// personal event only, so no attendees and nothing to notify. Strict, so an
+// agent still holding the full form from a cached tool list gets its attendees
+// refused instead of silently dropped.
+export const createPersonalEventInput = z.strictObject({
+  ...createCalendarEventInput.omit({ attendees: true, notify: true }).shape,
+  showAs: z
+    .enum(['busy', 'free'])
+    .optional()
+    .describe(
+      'Whether this event counts as busy time. `busy` (default) means it does; `free` means it does not — ' +
+        'for holds, reminders and travel buffers the user does not want counted against their availability.'
+    ),
+})
 
 export interface CreateCalendarEventDeps {
   // Upserts the attendees into the collected address book after a successful
@@ -278,8 +294,27 @@ export const registerCreateCalendarEvent = (
   server: McpServer,
   deps: CreateCalendarEventDeps,
   // Bearer threaded per request — see mcp/handler.ts.
-  getToken: () => string
+  getToken: () => string,
+  access: AccessLevel
 ): void => {
+  if (!reachesOthers(access)) {
+    server.registerTool(
+      TOOL_NAME,
+      {
+        annotations: ACCOUNT_WRITE,
+        description:
+          'Create or book a personal event on the user’s calendar: a block of their own time that nobody ' +
+          'else is on, such as an appointment, a reminder or a trip. Inviting people to a meeting needs ' +
+          'Everything access. For an all-day event (a day off, a vacation) pass `start`/`end` as dates. ' +
+          'Pass `recurrence` for a repeating series in one call, and `reminderMinutesBefore` to be ' +
+          'reminded. Defaults to the user’s default calendar.',
+        inputSchema: createPersonalEventInput,
+        title: 'Create calendar event',
+      },
+      (args) => createCalendarEvent(deps, { args: createPersonalEventInput.parse(args), token: getToken() })
+    )
+    return
+  }
   server.registerTool(
     TOOL_NAME,
     {

@@ -10,6 +10,7 @@ import {
   type UpdateCalendarEventArgs,
   updateCalendarEvent,
   updateCalendarEventInput,
+  updatePersonalEventInput,
 } from './update-calendar-event.ts'
 
 const CAL = 'https://m/dav/cal/u/default/'
@@ -2413,5 +2414,65 @@ describe('updateCalendarEvent — unmodelled properties are preserved', () => {
     expect(await edit({ title: 'Renamed' })).toEqual(moz)
     expect(await edit({ start: '2026-06-12T14:00:00Z' })).toEqual([])
     expect(await edit({ reminderMinutesBefore: 10, title: 'Renamed' })).toEqual([])
+  })
+})
+
+describe('updateCalendarEvent — Change, never send', () => {
+  const personalOnly = { mode: 'self-hosted' as const }
+
+  const personalStored = (): CalendarObject => ({
+    data: buildInvite({
+      attendees: [],
+      end: new Date('2026-06-12T10:30:00Z'),
+      start: new Date('2026-06-12T10:00:00Z'),
+      timeZone: 'UTC',
+      title: 'Dentist',
+      uid: UID,
+    }),
+    etag: '"abc"',
+    url: `${CAL}${UID}.ics`,
+  })
+
+  test.each([
+    ['a title change', { title: 'Renamed' }],
+    ['a reminder-only edit', { reminderMinutesBefore: 30 }],
+    ['an occurrence edit', { recurrenceId: '2026-06-23T10:00:00Z', title: 'Moved' }],
+  ] as const)('refuses %s on an event with attendees and changes nothing', async (_label, over) => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), recurringStored(), cap), {
+      args: { uid: UID, ...over },
+      personalOnly,
+      token: 'tok',
+    })
+
+    expect(result.isError).toBe(true)
+    const text = result.content[0]?.text ?? ''
+    expect(text).toContain('has attendees')
+    expect(text).toContain('Nothing was changed.')
+    expect(text).toContain('need Everything access')
+    expect(text).toContain('--access')
+    expect(cap.updated).toHaveLength(0)
+  })
+
+  test('reschedules a personal event and notifies nobody', async () => {
+    const cap = captured()
+    const result = await updateCalendarEvent(makeDeps(account(), personalStored(), cap), {
+      args: updatePersonalEventInput.parse({ start: '2026-06-12T14:00:00Z', uid: UID }),
+      personalOnly,
+      token: 'tok',
+    })
+
+    expect(result.isError).toBeUndefined()
+    expect(cap.updated).toHaveLength(1)
+    expect(unfold(cap.updated[0]?.ical ?? '')).not.toContain('ATTENDEE')
+    expect(result.content[0]?.text).toContain('no attendees, no notifications')
+  })
+
+  test('the narrowed schema takes no attendee fields and no notify', () => {
+    for (const field of ['addedAttendees', 'attendees', 'notify', 'removedAttendees']) {
+      expect(Object.keys(updatePersonalEventInput.shape)).not.toContain(field)
+      expect(updatePersonalEventInput.safeParse({ [field]: [], uid: UID }).success).toBe(false)
+    }
+    expect(updatePersonalEventInput.safeParse({ title: 'Renamed', uid: UID }).success).toBe(true)
   })
 })

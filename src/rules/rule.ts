@@ -100,7 +100,11 @@ const mailboxString = conditionString(100)
 // Ordered action list (RFC-agnostic, provider-portable vocabulary). Each
 // entry is a discriminated object so new action types can grow fields
 // without breaking the stored shape.
-export const mailRuleActionSchema = z.discriminatedUnion('type', [
+//
+// The actions that stay inside the account, which is all a rule may do at
+// Change, never send (src/access/levels.ts); `forward` is the one that reaches
+// someone else.
+const localActions = [
   z.object({ type: z.literal('archive') }).describe('Move it out of the Inbox into Archive.'),
   z.object({
     mailbox: mailboxString.describe('Target mailbox/folder name; created if missing.'),
@@ -119,18 +123,29 @@ export const mailRuleActionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('markUnread') }),
   z.object({ type: z.literal('flag') }).describe('Flag/star it.'),
   z.object({ type: z.literal('delete') }).describe('Move it to Trash (not a permanent erase).'),
-  z.object({
-    to: z.email().describe('Forward a copy here; the original still lands in the mailbox.'),
-    type: z.literal('forward'),
-  }),
-  z
-    .object({ type: z.literal('stopProcessing') })
-    .describe('Skip any later rules for this message. Only useful as the last action.'),
-])
+] as const
+
+const forwardAction = z.object({
+  to: z.email().describe('Forward a copy here; the original still lands in the mailbox.'),
+  type: z.literal('forward'),
+})
+
+const stopProcessingAction = z
+  .object({ type: z.literal('stopProcessing') })
+  .describe('Skip any later rules for this message. Only useful as the last action.')
+
+export const mailRuleActionSchema = z.discriminatedUnion('type', [...localActions, forwardAction, stopProcessingAction])
+
+export const mailRuleLocalActionSchema = z.discriminatedUnion('type', [...localActions, stopProcessingAction])
 
 export type MailRuleAction = z.infer<typeof mailRuleActionSchema>
 
 export const mailRuleActionsSchema = z.array(mailRuleActionSchema).min(1).max(10)
+
+export const mailRuleLocalActionsSchema = z.array(mailRuleLocalActionSchema).min(1).max(10)
+
+export const forwardsMail = (rule: Pick<MailRule, 'actions'>): boolean =>
+  rule.actions.some((action) => action.type === 'forward')
 
 // --- rule ------------------------------------------------------------------------
 

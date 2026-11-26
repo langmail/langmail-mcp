@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { createMailRule, createMailRuleInput } from './create-mail-rule.ts'
+import { createLocalMailRuleInput, createMailRule, createMailRuleInput } from './create-mail-rule.ts'
 import { fakeDeps, githubRule, NOW } from './mail-rule-test-fixtures.ts'
 
 const RULE_ID_RE = /^rule-[0-9a-f]{8}$/
@@ -105,5 +105,19 @@ describe('createMailRule', () => {
     expect(deps.rules).toHaveLength(2)
     expect(deps.rules[0]).toEqual(existing)
     expect(deps.rules[1]?.id).not.toBe(existing.id)
+  })
+})
+
+describe('createLocalMailRuleInput (Change, never send)', () => {
+  test('accepts every action but forward', () => {
+    expect(createLocalMailRuleInput.safeParse(args).success).toBe(true)
+    expect(createLocalMailRuleInput.safeParse({ ...args, actions: [{ type: 'stopProcessing' }] }).success).toBe(true)
+    expect(
+      createLocalMailRuleInput.safeParse({ ...args, actions: [{ to: 'someone@example.com', type: 'forward' }] }).success
+    ).toBe(false)
+  })
+
+  test('still requires a condition', () => {
+    expect(createLocalMailRuleInput.safeParse({ ...args, conditions: {} }).success).toBe(false)
   })
 })

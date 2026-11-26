@@ -29,6 +29,7 @@
 import { type McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
+import { type AccessLevel, reachesOthers } from '../access/levels.ts'
 import {
   type CalDavConfig,
   type DeleteEventParams,
@@ -44,8 +45,10 @@ import { spliceOccurrenceCancellation } from '../caldav/occurrence.ts'
 import { isSeriesOccurrence, resolveRecurrenceId, seriesTimeZone } from '../caldav/recurrence.ts'
 import { type CalendarObject, type DiscoveredAccount } from '../caldav/types.ts'
 import { parseEvents } from '../ical/index.ts'
-import { OUTWARD_DESTRUCTIVE } from './annotations.ts'
+import { type ServerMode } from '../mode.ts'
+import { ACCOUNT_DESTRUCTIVE, OUTWARD_DESTRUCTIVE } from './annotations.ts'
 import { eventUidSchema } from './create-calendar-event.ts'
+import { hasAttendees, meetingRefusal, type PersonalOnly } from './personal-event.ts'
 import { errorResult, type ToolResult, textResult } from './result.ts'
 
 const recurrenceIdDescription =
@@ -70,6 +73,18 @@ export const deleteCalendarEventInput = z.object({
 
 export type DeleteCalendarEventArgs = z.infer<typeof deleteCalendarEventInput>
 
+// The form an agent at Change, never send gets (src/access/levels.ts): the same
+// fields, described for a personal event, which nobody is told about.
+export const deletePersonalEventInput = z.strictObject({
+  ...deleteCalendarEventInput.shape,
+  recurrenceId: deleteCalendarEventInput.shape.recurrenceId.describe(
+    'Optional ISO 8601 instant that scopes this deletion to a single occurrence of a recurring series, ' +
+      'identified by that occurrence’s original start (e.g. 2026-06-16T10:00:00Z), or its date for an ' +
+      'all-day series (2026-06-16). Only that occurrence is removed; the rule and every other occurrence ' +
+      'stay. Omit to delete the whole event (for a recurring event, the entire series).'
+  ),
+})
+
 export interface DeleteCalendarEventDeps {
   deleteEvent: (params: DeleteEventParams) => Promise<void>
   discover: (token: string) => Promise<DiscoveredAccount>
@@ -79,6 +94,8 @@ export interface DeleteCalendarEventDeps {
 
 export interface DeleteCalendarEventContext {
   args: DeleteCalendarEventArgs
+  // Set at Change, never send: an event with attendees is refused.
+  personalOnly?: PersonalOnly
   token: string
 }
 
@@ -88,6 +105,7 @@ interface OccurrenceCancellation {
   args: DeleteCalendarEventArgs
   deps: DeleteCalendarEventDeps
   existing: CalendarObject
+  personal: boolean
   recurrenceId: string
   token: string
 }
@@ -146,6 +164,12 @@ const cancelOccurrence = async (c: OccurrenceCancellation): Promise<ToolResult> 
     await deps.updateEvent({ ical, token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
   }
 
+  if (c.personal) {
+    return textResult(
+      `Occurrence of ${args.uid} on ${c.recurrenceId} removed; nobody else is on this event. ` +
+        'The rest of the series is unchanged.'
+    )
+  }
   return textResult(
     `Occurrence of ${args.uid} on ${c.recurrenceId} cancelled; attendees are notified so ` +
       'just that instance is removed from their calendars. The rest of the series is unchanged.'
@@ -173,13 +197,20 @@ export const deleteCalendarEvent = async (
   if (!existing) {
     return errorResult(`Event not found: ${args.uid}`)
   }
+  if (ctx.personalOnly && hasAttendees(parseEvents(existing.data))) {
+    return errorResult(meetingRefusal(args.uid, ctx.personalOnly))
+  }
+  const personal = ctx.personalOnly !== undefined
 
   if (args.recurrenceId !== undefined) {
-    return cancelOccurrence({ args, deps, existing, recurrenceId: args.recurrenceId, token })
+    return cancelOccurrence({ args, deps, existing, personal, recurrenceId: args.recurrenceId, token })
   }
 
   await deps.deleteEvent({ token, url: existing.url, ...(existing.etag ? { etag: existing.etag } : {}) })
 
+  if (personal) {
+    return textResult(`Event ${args.uid} deleted; nobody else was on it.`)
+  }
   return textResult(`Event ${args.uid} deleted; Stalwart will send cancellations to any attendees.`)
 }
 
@@ -198,8 +229,33 @@ export const registerDeleteCalendarEvent = (
   server: McpServer,
   deps: DeleteCalendarEventDeps,
   // Bearer threaded per request — see mcp/handler.ts.
-  getToken: () => string
+  getToken: () => string,
+  access: AccessLevel,
+  mode: ServerMode
 ): void => {
+  if (!reachesOthers(access)) {
+    server.registerTool(
+      'delete_calendar_event',
+      {
+        annotations: ACCOUNT_DESTRUCTIVE,
+        description:
+          'Delete or remove a personal event from the user’s calendar, one nobody else is on, identified ' +
+          'by its uid from create_calendar_event or list_calendar_events. Cancelling a meeting with other ' +
+          'people, or declining an invitation, needs Everything access. By default this deletes the ENTIRE ' +
+          'event — for a recurring event every occurrence; pass recurrenceId to remove ONE occurrence. ' +
+          'Defaults to the user’s default calendar; pass calendarUrl if the event lives in another calendar.',
+        inputSchema: deletePersonalEventInput,
+        title: 'Delete calendar event',
+      },
+      (args) =>
+        deleteCalendarEvent(deps, {
+          args: deletePersonalEventInput.parse(args),
+          personalOnly: { mode },
+          token: getToken(),
+        })
+    )
+    return
+  }
   server.registerTool(
     'delete_calendar_event',
     {

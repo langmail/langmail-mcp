@@ -52,6 +52,8 @@ const CONTACTS_READ =
 const CONTACTS = `${CONTACTS_READ} When the user names or confirms such a role, record it with update_contact.`
 
 const RULES_READ = '- Mail rules: list_mail_rules for what is set up; preview_mail_rule checks what a rule would match.'
+const RULES_NO_SEND =
+  '- Mail rules: list_mail_rules for what is set up; preview_mail_rule before create_mail_rule to check what a rule would match. A rule cannot forward mail at this level.'
 const RULES =
   '- Mail rules: list_mail_rules for what is set up; preview_mail_rule before create_mail_rule to check what a rule would match. A forward action (in create_mail_rule or update_mail_rule) sends a copy of every matching future message to another address, so confirm that address with the user.'
 
@@ -75,7 +77,8 @@ const FILING =
   '- archive_emails takes mail out of the Inbox, Junk and Trash and keeps it; trash_emails moves it to Trash, where it stays recoverable; move_emails files it into a named folder.'
 const EVENTS =
   '- Creating, updating or deleting an event the user organizes notifies its attendees (create and update accept notify: "none"); move_calendar_events only moves events between calendars and notifies nobody. respond_to_event replies to an invitation the user received.'
-const EVENTS_NO_SEND = '- move_calendar_events moves events between calendars and notifies nobody.'
+const EVENTS_NO_SEND =
+  '- create_calendar_event, update_calendar_event and delete_calendar_event handle personal events, ones nobody else is on; move_calendar_events moves events between calendars. None of them notifies anyone.'
 
 const confirm = (sendsMail: string): string =>
   `Confirm first: delivering mail (reply_to_message, forward_message, send_draft${sendsMail}), unsubscribing the user from a mailing list (unsubscribe_from_list) and changing or cancelling a meeting other people are invited to (update_calendar_event, delete_calendar_event) cannot be undone. Confirm with the user who it reaches and what it says (for an unsubscribe: which sender) first, unless they have already asked for exactly that.`
@@ -89,7 +92,7 @@ const accessLine = (level: Exclude<AccessLevel, 'everything'>, mode: ServerMode)
   const can =
     level === 'read-only'
       ? 'You can read the account but not change or send anything.'
-      : 'You can file mail, stage drafts, organize calendars (not their events) and edit contacts, but not send mail or reach anyone else; the user sends staged drafts themselves.'
+      : 'You can file mail, stage drafts, keep personal events and mail rules and edit contacts, but not send mail or reach anyone else: events with attendees (meetings, invitations) and rules that forward mail need Everything. The user sends staged drafts themselves.'
   return `Access: ${ACCESS_LEVEL_NAMES[level]}. ${can} When the user asks for something else, do the part you can, then say you cannot do the rest and that they can change the access level ${whereToChange(mode)}.`
 }
 
@@ -166,7 +169,7 @@ export const buildInstructions = ({ level, mode, sharing }: InstructionsOptions)
     mail,
     calendar,
     CONTACTS,
-    RULES_READ,
+    RULES_NO_SEND,
     '',
     ...WRITING_NO_SEND,
     '',
