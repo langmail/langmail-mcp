@@ -6,7 +6,10 @@ import { randomBytes } from 'node:crypto'
 
 import { type CalendarSummary } from '../caldav/types.ts'
 import { type CalendarShare, type CalendarShareStore } from '../calendar-feeds/shares.ts'
+import { createSendGuard } from '../drafts/send-guard.ts'
 import { type CalendarSharingDeps, calendarPath } from './calendar-share-common.ts'
+import { type DraftDepsOptions, draftDeps, TEST_PRINCIPAL } from './draft-test-fixtures.ts'
+import { type ShareCalendarSendDeps } from './share-calendar.ts'
 
 export const USER_ID = 'user-1'
 export const PUBLIC_URL = 'https://mcp.example.com'
@@ -82,6 +85,12 @@ export const sharingDeps = (
   ...(shares ? { shares } : {}),
 })
 
-export const ctx = <A>(args: A) => ({ args, token: 'tok', userId: USER_ID })
+export const ctx = <A>(args: A) => ({ args, principal: TEST_PRINCIPAL, token: 'tok', userId: USER_ID })
+
+// The send half of share_calendar: the shared fake mailbox and a fresh guard.
+export const sendDeps = (opts: DraftDepsOptions = {}): ShareCalendarSendDeps => ({
+  drafts: draftDeps(opts),
+  guard: createSendGuard(),
+})
 
 export const text = (result: { content: { text: string }[] }): string => result.content[0]?.text ?? ''
