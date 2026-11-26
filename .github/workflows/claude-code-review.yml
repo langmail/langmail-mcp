@@ -1,19 +1,21 @@
 name: Claude Code Review
 
 # The review runs in langmail/factory's review.yml, whose sync PRs move the
-# pin. What matters in this repo is in REVIEW.md. A maintainer's claude-review
-# label asks for a review on any open PR, including one from a fork.
+# pins. What matters in this repo is in REVIEW.md. A maintainer's
+# /claude-review comment asks for a review on any open PR, including one from
+# a fork.
 
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
-  pull_request_target:
-    types: [labeled]
+  issue_comment:
+    types: [created]
 
 permissions: {}
 
 jobs:
   review:
+    if: github.event_name == 'pull_request'
     uses: langmail/factory/.github/workflows/review.yml@e3fb051e0b87ce561a0490bf8b81465b83366b82 # v0.8.0
     permissions:
       contents: read
@@ -22,5 +24,15 @@ jobs:
       id-token: write
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-    # Other labels would start a run that review.yml skips.
-    if: github.event_name == 'pull_request' || github.event.label.name == 'claude-review'
+
+  # No id-token: this run reads a fork's code and text with the run's own
+  # token (review.yml). Other comments start no run.
+  review-on-request:
+    if: github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/claude-review')
+    uses: langmail/factory/.github/workflows/review.yml@e3fb051e0b87ce561a0490bf8b81465b83366b82 # v0.8.0
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
