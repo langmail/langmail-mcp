@@ -1,0 +1,190 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Langmail",
+  "description": "Email, calendar and contacts for the way they're handled now: by agents. Documentation for the Langmail MCP server and open-protocol surface.",
+  "colors": {
+    "primary": "#3E6E96",
+    "light": "#7FA6C9",
+    "dark": "#3E6E96"
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg",
+    "href": "https://langmail.me"
+  },
+  "favicon": "/favicon.svg",
+  "appearance": {
+    "default": "dark"
+  },
+  "background": {
+    "color": {
+      "light": "#F1F4F7",
+      "dark": "#191C21"
+    }
+  },
+  "fonts": {
+    "family": "IBM Plex Sans"
+  },
+  "navbar": {
+    "links": [
+      {
+        "type": "discord",
+        "label": "Discord",
+        "href": "https://discord.gg/CabhN3xuyk"
+      },
+      {
+        "label": "Blog",
+        "href": "https://langmail.me/blog"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Get started",
+      "href": "https://app.langmail.me"
+    }
+  },
+  "contextual": {
+    "options": ["copy", "view", "claude", "cursor"]
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": ["index", "quickstart"]
+          },
+          {
+            "group": "Connect your agent",
+            "pages": [
+              "connect/claude",
+              "connect/claude-code",
+              "connect/chatgpt",
+              "connect/cursor",
+              "connect/vs-code",
+              "connect/notion",
+              "connect/le-chat",
+              "connect/other-clients",
+              "connect/authorization"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/search-and-triage",
+              "guides/calendar-workflows",
+              "guides/mail-clients",
+              "guides/calendar-clients",
+              "guides/contacts-clients",
+              "guides/cal-com"
+            ]
+          },
+          {
+            "group": "Concepts",
+            "pages": ["concepts/architecture", "concepts/email-intelligence"]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "MCP server",
+            "pages": ["reference/mcp/overview"]
+          },
+          {
+            "group": "Email tools",
+            "pages": [
+              "reference/mcp/search-emails",
+              "reference/mcp/get-email",
+              "reference/mcp/get-thread",
+              "reference/mcp/download-attachment",
+              "reference/mcp/download-email",
+              "reference/mcp/upload-attachments",
+              "reference/mcp/archive-emails",
+              "reference/mcp/move-emails",
+              "reference/mcp/trash-emails",
+              "reference/mcp/mark-emails",
+              "reference/mcp/unsubscribe-from-list",
+              "reference/mcp/create-draft",
+              "reference/mcp/get-draft",
+              "reference/mcp/list-drafts",
+              "reference/mcp/update-draft",
+              "reference/mcp/send-draft",
+              "reference/mcp/delete-draft",
+              "reference/mcp/reply-to-message",
+              "reference/mcp/forward-message"
+            ]
+          },
+          {
+            "group": "Mail rule tools",
+            "pages": [
+              "reference/mcp/preview-mail-rule",
+              "reference/mcp/create-mail-rule",
+              "reference/mcp/list-mail-rules",
+              "reference/mcp/update-mail-rule",
+              "reference/mcp/delete-mail-rule"
+            ]
+          },
+          {
+            "group": "Contact tools",
+            "pages": [
+              "reference/mcp/search-contacts",
+              "reference/mcp/list-upcoming-birthdays",
+              "reference/mcp/create-contact",
+              "reference/mcp/update-contact",
+              "reference/mcp/merge-contacts",
+              "reference/mcp/delete-contact"
+            ]
+          },
+          {
+            "group": "Calendar tools",
+            "pages": [
+              "reference/mcp/list-calendars",
+              "reference/mcp/create-calendar",
+              "reference/mcp/update-calendar",
+              "reference/mcp/share-calendar",
+              "reference/mcp/stop-sharing-calendar",
+              "reference/mcp/list-calendar-events",
+              "reference/mcp/create-calendar-event",
+              "reference/mcp/update-calendar-event",
+              "reference/mcp/delete-calendar-event",
+              "reference/mcp/move-calendar-events",
+              "reference/mcp/respond-to-event"
+            ]
+          },
+          {
+            "group": "Open protocols",
+            "pages": ["reference/protocols"]
+          }
+        ]
+      }
+    ]
+  },
+  "footer": {
+    "links": [
+      {
+        "header": "Product",
+        "items": [
+          { "label": "Homepage", "href": "https://langmail.me" },
+          { "label": "Web app", "href": "https://app.langmail.me" }
+        ]
+      },
+      {
+        "header": "Legal",
+        "items": [
+          { "label": "Privacy", "href": "https://langmail.me/privacy" },
+          { "label": "Terms", "href": "https://langmail.me/terms" },
+          { "label": "Imprint", "href": "https://langmail.me/imprint" }
+        ]
+      }
+    ]
+  },
+  "seo": {
+    "metatags": {
+      "og:site_name": "Langmail Docs"
+    }
+  }
+}

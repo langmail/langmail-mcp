@@ -1,0 +1,97 @@
+---
+title: "merge_contacts"
+description: "Fold duplicate contacts of one person or organization into the one to keep, with their addresses, notes and history, and delete the rest."
+keywords: ["merge_contacts", "contacts", "duplicates", "merge contacts", "address book", "mcp tool"]
+---
+
+Collection builds one contact per sending address, so one person or organization can end up as several: a gym writing from its own address and from the booking platform it uses, say. `merge_contacts` folds those duplicates into the contact you keep, in one write.
+
+Find the ids with [`search_contacts`](/reference/mcp/search-contacts). To move a single address between two contacts that are *different* people, use [`update_contact`](/reference/mcp/update-contact); to drop a contact without keeping anything from it, [`delete_contact`](/reference/mcp/delete-contact).
+
+<Warning>
+The merged contacts are deleted, from the account and from every device connected over CardDAV. This tool is annotated destructive; clients that gate on `destructiveHint` will ask before calling it. The result carries everything needed to undo it by hand.
+</Warning>
+
+## Parameters
+
+<ParamField body="contactId" type="string" required>
+  The contact to keep, as printed by `search_contacts` under `contact_id`. Its name, organization and birthday win.
+</ParamField>
+
+<ParamField body="mergeContactIds" type="string[]" required>
+  The contacts to fold into it and then delete. One to ten ids.
+</ParamField>
+
+<ParamField body="preferredEmail" type="string">
+  The address mail to this contact should go to, from any of the contacts. Omit it to keep the preferred address the kept contact has now.
+</ParamField>
+
+## What the merge does
+
+| Field | Result |
+|---|---|
+| Email addresses, phone numbers, postal addresses | Joined, without duplicates. |
+| Roles | Joined, without duplicates: every role on any of the contacts stays. |
+| Notes | Combined: every note from the merged contacts joins the kept contact's, unless the same text is already there. |
+| Name, organization, birthday | The kept contact's value stays. A blank one is filled from a merged contact. A different value on a merged contact is listed as a conflict, never picked silently. |
+| Interaction history | Merged: per address, counts summed, the earliest first sighting and the latest last sighting, the highest confidence; the interaction log and the excluded relays joined. The merged contacts' interactions show on the kept one. |
+| Preferred address | Unchanged unless you pass `preferredEmail`. When the merged contact ends up with more than one address and none is marked yet, the kept contact's current best address is marked as preferred, so an address or history joining with a higher confidence does not quietly take over. |
+| Anything else (a nickname, a photo, a job title) | Not carried over, and listed as a conflict. |
+
+The update of the kept contact and the deletion of the others go out as one change, so a phone syncing the address book never shows a half-merged state.
+
+After the merge, mail from any of the merged addresses updates the kept contact; collection never creates a new contact for them. Within a moment of the merge, before the server's search index has caught up, a message from a merged address can still create a fresh collected contact; the next message from that address folds it back into the kept contact.
+
+## Example
+
+```json Call
+{ "contactId": "c12", "mergeContactIds": ["c31"] }
+```
+
+```text Result
+Merged 1 contact(s) into this one:
+
+Example Gym
+   contact_id: c12
+   best_address: hello@gym.example (work)
+   address_confidence: strong | relationship: active
+   last_interactions:
+   - 9 days ago — email sent: Your intro appointment
+   addresses:
+   - hello@gym.example (work, strong, preferred, last seen 5 weeks ago)
+   - gym@booking.example (work, confirmed, last seen 9 days ago)
+   note: Ask for Kim when booking personal training.
+   source: derived
+   interaction_records:
+   - 9 days ago — email sent: Your intro appointment [email id: Mb41f]
+
+Preferred address: hello@gym.example, kept from before the merge and now marked as preferred.
+
+Conflicts (the kept contact's value stays):
+- name: kept "Example Gym", dropped "Example Gym Booking" from "Example Gym Booking" (contact_id c31)
+
+Removed contacts:
+
+Example Gym Booking
+   contact_id: c31
+   emails:
+   - gym@booking.example
+   source: derived
+
+Moved addresses: gym@booking.example. To undo the merge, remove those from the kept contact with update_contact (`removedEmails`), then recreate each removed contact with create_contact from its details above. Later mail from any merged address updates the kept contact. The merge syncs to every device connected over CardDAV as one change.
+```
+
+## Undoing a merge
+
+There is no unmerge. The result lists each deleted contact with its addresses, phone numbers, postal addresses, birthday and note, and names the addresses that moved onto the kept contact. To reverse a merge, remove those moved addresses from the kept contact with [`update_contact`](/reference/mcp/update-contact) (`removedEmails`), then recreate each removed contact with [`create_contact`](/reference/mcp/create-contact). The interaction history stays on the kept contact.
+
+## Errors
+
+Each of these changes nothing:
+
+- `<id> is the contact to keep and cannot also be merged into itself.` — list only the other contacts in `mergeContactIds`.
+- `No contact with id <id>.` — an id does not resolve. Find it with `search_contacts`.
+- `<address> is on none of these contacts. Their addresses: …` — `preferredEmail` names an address none of the contacts hold; the error lists the ones they do.
+- `Could not update the contact to keep: its address book is read-only.` — the kept contact sits in an address book the account cannot write.
+
+If the server deletes a merged contact but refuses the update of the kept one, the result says so and lists the deleted contacts' details for `create_contact`. If it updates the kept contact but refuses to delete a merged one, the result names it. Running `merge_contacts` again with only the ids it names finishes the merge without counting their history twice.

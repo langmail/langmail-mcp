@@ -1,0 +1,56 @@
+---
+title: "share_calendar"
+description: "Share one of the user's calendars with a person outside Langmail, at busy times only or full details, through a secret link."
+keywords: ["share_calendar", "share calendar", "calendar subscription", "ics feed", "busy times", "mcp tool"]
+---
+
+Shares one of the user's calendars with a person and returns a secret link that person adds in Google Calendar, Apple Calendar or Outlook. The calendar stays live behind the link: each time the person's app refreshes, it reads the calendar as it is now. How often that happens is up to their app, not Langmail; Google Calendar picks up changes every few hours, sometimes only once a day.
+
+The link is in this tool's result and nowhere else: Langmail keeps only a hash of it, so it cannot be shown again. If it is lost, stop the share with [`stop_sharing_calendar`](/reference/mcp/stop-sharing-calendar) and share again for a new link. Langmail does not send the link to anyone; to email it, stage a draft with [`create_draft`](/reference/mcp/create-draft).
+
+There is one share per calendar and person. Sharing the same calendar with the same person again changes the level and keeps their existing link working.
+
+## Parameters
+
+<ParamField body="calendar" type="string" required>
+  The calendar to share: its name, matched ignoring case, or the CalDAV URL [`list_calendars`](/reference/mcp/list-calendars) returns. Use the URL when two calendars share a name.
+</ParamField>
+
+<ParamField body="with" type="string" required>
+  Who the calendar is shared with, as the user names them: `"Sam"`, `"my partner"`. 1–100 characters. A label only, matched ignoring case when the same calendar is shared again.
+</ParamField>
+
+<ParamField body="level" type="string" required>
+  `busy`: the person sees only when the user is busy, every event titled "Busy". `full`: titles, times, locations, notes and guests. Private events show as busy at either level, and free events are left out of a busy-only share.
+</ParamField>
+
+## Example
+
+```json Call
+{ "calendar": "Personal", "with": "Sam", "level": "busy" }
+```
+
+```text Result
+Shared "Personal" with Sam at busy times only: they see when you are busy, with every event titled "Busy" and no details.
+
+Link for Sam: https://mcp.langmail.me/calendar-feeds/Xq3….ics
+
+This is the only time Langmail shows this link. Anyone who has it can see the calendar, so pass it on to Sam only. If it gets lost, stop_sharing_calendar with Sam and share again for a new link.
+
+How Sam adds it:
+- Google Calendar (on a computer): Other calendars → + → From URL, then paste the link.
+- Apple Calendar: on a Mac, File → New Calendar Subscription; on an iPhone, Settings → Apps → Calendar → Calendar Accounts → Add Account → Other → Add Subscribed Calendar.
+- Outlook: Add calendar → Subscribe from web, then paste the link.
+
+How often the calendar refreshes is up to Sam's app, not Langmail: …
+```
+
+Sharing again at the other level answers `"Personal" is now shared with Sam at full details (was busy times only)` and that Sam's existing link keeps working, without a new link.
+
+## Errors
+
+Every error leaves the shares unchanged.
+
+- `No calendar named "…"` or `No calendar at …` — nothing matched. The error lists every calendar with its URL.
+- `2 calendars are named "…"` — pass the URL of the one you mean.
+- `Calendar sharing is not set up on this server.`

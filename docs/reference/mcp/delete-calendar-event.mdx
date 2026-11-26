@@ -1,0 +1,56 @@
+---
+title: "delete_calendar_event"
+description: "Delete a calendar event by uid; attendees receive iMIP cancellations."
+keywords: ["delete_calendar_event", "cancel event", "mcp tool"]
+---
+
+Deletes an event. The mail server sends standard iMIP cancellations to any attendees, so the event disappears from their calendars too.
+
+By default this deletes the **entire** event — for a recurring event, every occurrence. To cancel just **one** occurrence of a recurring series, pass `recurrenceId` (see below); the master rule and every other occurrence stay untouched, and attendees are notified so only that instance is removed from their calendars.
+
+## Parameters
+
+<ParamField body="uid" type="string" required>
+  The event's iCalendar UID, from [`create_calendar_event`](/reference/mcp/create-calendar-event) or [`list_calendar_events`](/reference/mcp/list-calendar-events).
+</ParamField>
+
+<ParamField body="recurrenceId" type="string">
+  An ISO 8601 instant (with offset, e.g. `2026-06-16T10:00:00Z`) that scopes the deletion to a single occurrence of a recurring series, identified by that occurrence's **original start**. For an all-day series, pass the occurrence's date instead (e.g. `2026-06-16`). When set, only that one occurrence is cancelled; omit it to delete the whole event. The instant must land on an actual occurrence of the series.
+</ParamField>
+
+<ParamField body="calendarUrl" type="string">
+  A CalDAV URL from [`list_calendars`](/reference/mcp/list-calendars). Defaults to the user's default calendar — pass this if the event lives in another calendar.
+</ParamField>
+
+## Example
+
+```json Call
+{ "uid": "9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d@langmail.me" }
+```
+
+```text Result
+Event 9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d@langmail.me deleted; Stalwart will send cancellations to any attendees.
+```
+
+### Cancel one occurrence
+
+```json Call
+{
+  "uid": "9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d@langmail.me",
+  "recurrenceId": "2026-06-23T10:00:00Z"
+}
+```
+
+```text Result
+Occurrence of 9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d@langmail.me on 2026-06-23T10:00:00Z cancelled; attendees are notified so just that instance is removed from their calendars. The rest of the series is unchanged.
+```
+
+## Errors
+
+- `Event not found: <uid>` — no event with that UID in the target calendar.
+- `Event <uid> is not a recurring series; omit recurrenceId to delete it.` — `recurrenceId` was given for a one-off event.
+- `This series is all-day; pass recurrenceId as the occurrence's date …` / `This series is not all-day; …` — the `recurrenceId` has the wrong form for the series: all-day series take a date, timed series a date-time.
+- `recurrenceId <instant> does not match an occurrence of this series (<rrule>); it must equal an occurrence's original start.` — the instant doesn't fall on the series. On an all-day series the message says "original date" instead, and both forms end with `Nothing was cancelled. Use list_calendar_events to see the series.`
+- `Could not evaluate this series' recurrence rule (<rrule>) to validate recurrenceId <instant>.` — the stored series has a recurrence rule that can't be parsed, so the occurrence can't be verified.
+- `No calendar available to delete the event from.` — the user has no calendar and none was specified.
+- `Calendar not found: <url>` — the `calendarUrl` didn't resolve.

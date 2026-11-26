@@ -1,0 +1,44 @@
+---
+title: "update_calendar"
+description: "Rename or recolor one of the authenticated user's calendars."
+keywords: ["update_calendar", "rename calendar", "calendar color", "caldav", "mcp tool"]
+---
+
+Renames or recolors a calendar — the calendar itself, not an event on it. Name the calendar by its current name or by the URL [`list_calendars`](/reference/mcp/list-calendars) returns. To change an event, use [`update_calendar_event`](/reference/mcp/update-calendar-event).
+
+## Parameters
+
+<ParamField body="calendar" type="string" required>
+  The calendar to change: its current name, matched ignoring case, or its CalDAV URL. A URL matches whether or not its path is percent-encoded (`%40` or `@`). Use the URL when two calendars share a name.
+</ParamField>
+
+<ParamField body="name" type="string">
+  The new name, 1–200 characters after trimming spaces. It must differ from every other calendar's name. Omit to keep the current name.
+</ParamField>
+
+<ParamField body="color" type="string">
+  The new color, `#RRGGBB` or `#RRGGBBAA` (e.g. `#2E6FD8`). Omit to keep the current color.
+</ParamField>
+
+Pass `name`, `color`, or both.
+
+## Example
+
+```json Call
+{ "calendar": "Personal", "name": "Business", "color": "#2E6FD8" }
+```
+
+```text Result
+Calendar "Personal" updated: name → "Business", color → #2E6FD8.
+calendarUrl: https://mail.langmail.me/dav/cal/you%40langmail.me/default/
+```
+
+## Errors
+
+Every error leaves the calendar unchanged.
+
+- `No calendar named "…"` or `No calendar at …` — nothing matched. The error lists every calendar with its URL, so the next call can pick one.
+- `2 calendars are named "…"` — the name is ambiguous. The error lists the matching calendars; pass the URL of the one you mean.
+- `Another calendar is already named "…"` — the new name is taken. Two calendars with one name would make lookups by name ambiguous. Pick another name, or rename that calendar first.
+- `Nothing to change` — neither `name` nor `color` was passed.
+- `Could not update calendar "…"` — the mail server refused the change, for example because the calendar is read-only for this account.

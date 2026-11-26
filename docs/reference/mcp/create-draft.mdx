@@ -1,0 +1,115 @@
+---
+title: "create_draft"
+description: "Compose a message and stage it in the Drafts folder without sending it — including a correctly threaded reply."
+keywords: ["create_draft", "draft", "compose", "reply", "mcp tool"]
+---
+
+Composes a message and files it into the user's Drafts folder. Nothing is sent and nobody outside the mailbox learns anything: the draft waits in the Drafts folder exactly as one written by hand, for the user to review, edit, or send from their mail app.
+
+This is the staging half of the sending surface. To actually send, call [`send_draft`](/reference/mcp/send-draft) — or leave the draft for the user.
+
+To draft a reply, pass `inReplyTo`. The recipients, the `Re:` subject, and the `In-Reply-To`/`References` headers are all derived server-side from the message being replied to, so the reply lands in the same conversation in every mail client, not just in Langmail's own threading. An agent never assembles a header itself.
+
+## Parameters
+
+<ParamField body="to" type="string[]">
+  Recipients. Each entry is a bare address (`person@example.com`) or the `Name <person@example.com>` form that [`search_contacts`](/reference/mcp/search-contacts) returns — both are accepted. Up to 50 entries.
+</ParamField>
+
+<ParamField body="cc" type="string[]">
+  Carbon-copy recipients, same forms as `to`.
+</ParamField>
+
+<ParamField body="bcc" type="string[]">
+  Blind-copy recipients, same forms as `to`. Delivered but not shown in the sent message's headers.
+</ParamField>
+
+<ParamField body="subject" type="string">
+  Subject line, up to 500 characters. Defaults to `Re: <original subject>` when `inReplyTo` is set.
+</ParamField>
+
+<ParamField body="text" type="string">
+  Plain-text body. Either `text` or `html` (or both) is required.
+</ParamField>
+
+<ParamField body="html" type="string">
+  HTML body. Pass `text` as well when both are wanted; they are sent as alternatives of the same message.
+</ParamField>
+
+<ParamField body="attachments" type="object[]">
+  Files to attach, up to 10. Each entry names its file **either** by `blobId` **or** by base64 `content` — giving both is an error. `filename` is the name the recipient sees; `mimeType` is guessed from its extension when omitted, defaulting to `application/octet-stream`.
+
+  - `blobId` — a file already in the mailbox, as reported by [`search_emails`](/reference/mcp/search-emails), [`get_email`](/reference/mcp/get-email), or [`get_draft`](/reference/mcp/get-draft), or a local file uploaded with [`upload_attachments`](/reference/mcp/upload-attachments). Nothing is transferred: the new message re-references the blob the server already holds, which is how an attachment is forwarded without downloading it. **`filename` is required here** — a blob carries bytes and nothing else, so without it the forwarded file would arrive unnamed and as an unrecognised download. Whatever listed the blobId printed the filename on the same line.
+  - `content` — base64 bytes of a small file you generated. These travel through the conversation, so they are capped at 25 MB across all `content` entries in one call; `blobId` entries are not counted against it.
+
+  There is no `path`: the MCP server runs elsewhere and cannot read the agent's filesystem. Upload a local file with [`upload_attachments`](/reference/mcp/upload-attachments) and pass the `blobId` it returns.
+</ParamField>
+
+<ParamField body="forwardOf" type="string">
+  Id of a message to forward, as returned by [`search_emails`](/reference/mcp/search-emails) or [`get_thread`](/reference/mcp/get-thread). The draft gets the `Fwd:` subject, a `Forwarded message` block with the original's From, Date, Subject, To and Cc, the original body in both HTML and text, and every file the original carried, by blobId. `text`/`html` become an optional note above it. `to` (or `cc`/`bcc`) is required: recipients are never taken from the original. Cannot be combined with `inReplyTo`, `replyAll` or `quoteOriginal`. [`forward_message`](/reference/mcp/forward-message) does the same and sends it in one call.
+</ParamField>
+
+<ParamField body="inReplyTo" type="string">
+  Id of the message this draft replies to, as returned by [`search_emails`](/reference/mcp/search-emails) or [`get_thread`](/reference/mcp/get-thread). Sets the threading headers and defaults the subject and recipients from that message.
+</ParamField>
+
+<ParamField body="replyAll" type="boolean">
+  With `inReplyTo`: also Cc everyone the original was addressed to, minus every address belonging to this account. Cannot be combined with `to`, `cc`, or `bcc` — see the note below. Ignored without `inReplyTo`.
+</ParamField>
+
+<ParamField body="from" type="string">
+  Sending address. Defaults to the authenticated account's own address. Only an address the account is configured to send as (one of its aliases) is accepted — anything else is an error rather than a silent substitution.
+</ParamField>
+
+<ParamField body="idempotencyKey" type="string">
+  Client-chosen key that makes the call safe to retry: a repeat with the same key returns the first call's answer instead of staging a second draft. Keys are scoped to the account **and to this tool** — reusing this key on [`send_draft`](/reference/mcp/send-draft) is not a retry. Remembered for 15 minutes.
+</ParamField>
+
+## Example
+
+```json Call
+{
+  "inReplyTo": "M4821",
+  "text": "Confirmed — the Q2 figures are final. I'll send the deck tomorrow."
+}
+```
+
+```text Result
+Draft staged in Drafts. Nothing has been sent — send it with send_draft, or leave it in the Drafts folder for the user to review and send from their mail app.
+draftId: 6b1f3c2e-8d4a-4e7b-9a10-2c5d7e9f0a11
+from: Dana Okonjo <dana@langmail.me>
+to: Nadia Bram <nadia@example.org>
+subject: Re: Quarterly numbers
+threadId: T77
+threading: In-Reply-To/References set — this message continues an existing conversation
+body (text): Confirmed — the Q2 figures are final. I'll send the deck tomorrow.
+```
+
+## Notes
+
+- The original message is **not** quoted into a reply. Include whatever context the recipient needs in `text`.
+- **Files are attached with `attachments`.** Each entry names its file either by `blobId` — one already in the mailbox, as [`search_emails`](/reference/mcp/search-emails), [`get_email`](/reference/mcp/get-email), or [`get_draft`](/reference/mcp/get-draft) reports it — or by base64 `content` for a file you generated. Prefer `blobId` whenever the file is already there: it transfers nothing, which is what makes forwarding an attachment free. At most 10 files, and the `content` entries may come to at most 25 MB between them. `filename` is always worth setting; `mimeType` is guessed from its extension when omitted.
+- **A file path cannot be used.** The MCP server runs on a different machine from the agent and cannot read its filesystem, so there is no `path` parameter — upload the file with [`upload_attachments`](/reference/mcp/upload-attachments) and pass the `blobId` it returns.
+- Explicit `to`/`cc`/`bcc` override the recipients derived from `inReplyTo`; an empty array is an explicit "nobody". Combining them with `replyAll` is rejected rather than resolved — "reply to everyone, but only these people" has no defensible reading, and per-field precedence would silently drop the person being answered.
+- Every address the account can send as is excluded from a derived reply, not just the one it is going out as. A message addressed to one of the user's aliases does not put that alias on the reply.
+- Replying to the user's own message leaves no recipient (every address on it is theirs) and is refused; pass `to` explicitly for a follow-up.
+- The draft is marked `$draft` and `$seen`, so it shows up as an unsent draft rather than unread mail.
+
+## Errors
+
+- `Provide a body: text, html, or both.` — no body was given.
+- `Not a valid email address: …` — a recipient was neither a bare address nor the `Name <address>` form. Nothing was staged.
+- `This account cannot send as …` — the `from` address is not one of the account's sending identities. The available addresses are listed.
+- `Provide recipients: to (or cc/bcc), or inReplyTo to derive them…` — a draft with no recipients could never be sent, so it is refused at staging time rather than at send time. An empty array counts as no recipients.
+- `replyAll cannot be combined with to/cc/bcc. … Nothing was staged.`
+- `Cannot reply: message not found: …` — the `inReplyTo` id doesn't exist.
+- `Cannot stage a reply to <id>: it leaves no recipient.` — replying to the user's own mail.
+- `This account cannot send as …`, or `Could not tell which address to send as…` when the signed-in address is not one of several sending identities.
+- `This account has no Drafts folder, so a draft cannot be staged.`
+- `Attachment <n> names no file.` — an entry gave neither `blobId` nor `content`. A file path is not accepted; upload the file with `upload_attachments` and pass its `blobId`.
+- `<file> gives both blobId and content, so it is ambiguous which file was meant.`
+- `Attachment <n> gives a blobId but no filename…` — a blob carries no name of its own; pass the filename listed beside it.
+- `The content of <file> is not valid base64…` — encode the file's raw bytes, not its text and not a `data:` URL.
+- `The content of <file> is empty…` — the payload decoded to zero bytes, so the file was never written or was read back empty.
+- `These attachments come to more than the 25 MB of new files a message can carry…` — checked before anything is uploaded, so nothing was staged. Attach a file already in the mailbox by `blobId` instead of re-uploading it, or link to the large one.
+- `The server refused this draft (invalidProperties).` — most often an attachment `blobId` the server does not recognise; blobIds belong to one account and do not outlive the message they were read from. Re-read it and use the blobId reported now, or pass the file as `content`.

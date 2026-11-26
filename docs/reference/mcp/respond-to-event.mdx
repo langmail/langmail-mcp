@@ -1,0 +1,37 @@
+---
+title: "respond_to_event"
+description: "RSVP to a calendar invitation — accept, decline, or tentative — on the authenticated user's behalf."
+keywords: ["respond_to_event", "rsvp", "invitation", "accept", "decline", "mcp tool"]
+---
+
+Sets the user's own attendance status on an event they were invited to and saves it back; the organizer is notified automatically. This only answers the invitation — it never modifies the event itself.
+
+## Parameters
+
+<ParamField body="uid" type="string" required>
+  The event's iCalendar UID, from [`list_calendar_events`](/reference/mcp/list-calendar-events).
+</ParamField>
+
+<ParamField body="response" type="string" required>
+  One of `accept`, `decline`, or `tentative`.
+</ParamField>
+
+<ParamField body="calendarUrl" type="string">
+  A CalDAV URL from [`list_calendars`](/reference/mcp/list-calendars). Defaults to the user's default calendar — pass this if the invitation lives in another calendar.
+</ParamField>
+
+## Example
+
+```json Call
+{ "uid": "5f2e8c1d-4b3a-4f6e-9d2c-1a0b9c8d7e6f@example.com", "response": "accept" }
+```
+
+```text Result
+RSVP'd accepted to "Planning".
+```
+
+## Errors
+
+- `You are not an attendee of this event, so you can't RSVP.` — the event doesn't list the user as an attendee.
+- `Event not found: <uid>` — no event with that UID in the target calendar.
+- `Calendar not found: <url>` — the `calendarUrl` didn't resolve.

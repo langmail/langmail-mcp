@@ -1,0 +1,36 @@
+---
+title: "trash_emails"
+description: "Move one or more messages to the Trash. Recoverable until Trash is emptied; annotated as destructive."
+keywords: ["trash_emails", "delete", "trash", "bin", "mcp tool"]
+---
+
+Moves up to 50 messages to the Trash mailbox, replacing whatever folders they were in. Trashed messages stay recoverable in the mail client until Trash is emptied; there is no permanent delete on this surface. Re-running it on the same ids is harmless.
+
+It is the only filing tool annotated as destructive (`destructiveHint: true`), so a client can ask for confirmation before running it without hard-coding tool names. To clear the inbox without deleting, use [`archive_emails`](/reference/mcp/archive-emails); to file into a folder, use [`move_emails`](/reference/mcp/move-emails).
+
+## Parameters
+
+<ParamField body="ids" type="string[]" required>
+  1–50 message ids, as returned by [`search_emails`](/reference/mcp/search-emails) or [`get_thread`](/reference/mcp/get-thread). Duplicates are collapsed.
+</ParamField>
+
+## Example
+
+```json Call
+{ "ids": ["Mf9c2"] }
+```
+
+```text Result
+Trashed 1 message(s).
+```
+
+Ids the server refused are listed with the reason; the call only counts as an error when nothing was trashed:
+
+```text Result — one stale id
+Trashed 1 message(s). Not updated (1): Mf31a (notFound).
+```
+
+## Errors
+
+- `This account has no Trash mailbox. Nothing was trashed. …` — create one in the mail client, or use `archive_emails` or `move_emails`.
+- `Trashed 0 message(s). Not updated (N): … Re-run search_emails or get_thread for current ids.` — every id was refused.

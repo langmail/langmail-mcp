@@ -1,0 +1,55 @@
+---
+title: "Mistral Le Chat"
+sidebarTitle: "Le Chat"
+description: "Add the Langmail MCP server to Mistral Le Chat as a custom MCP connector."
+keywords: ["mistral", "le chat", "connector", "mcp", "connect"]
+---
+
+Mistral Le Chat supports custom MCP connectors.
+
+## Prerequisites
+
+- A Langmail account — [sign up at app.langmail.me](https://app.langmail.me/signup).
+- A Le Chat account with access to connectors.
+
+## Connect
+
+<Steps>
+  <Step title="Add the Langmail connector">
+    In Le Chat, open the connectors settings (**Intelligence → Connectors**), choose **Add connector**, and fill in:
+
+    - **Name**: `Langmail`
+    - **Server URL**: `https://mcp.langmail.me/mcp`
+  </Step>
+  <Step title="Authorize access">
+    Le Chat starts the authorization flow: sign in to your Langmail account and approve the consent screen.
+  </Step>
+  <Step title="Enable it in a chat">
+    In a conversation, enable **Langmail** in the tools menu. The tools now appear in the agent's tool list.
+  </Step>
+</Steps>
+
+## Test it
+
+Ask Le Chat:
+
+```text Prompt
+Search my Langmail inbox for the 5 most recent messages.
+```
+
+It calls `search_emails` with `{ "mailbox": "Inbox", "limit": 5 }` and answers from the result.
+
+## Ending access
+
+Remove the connector from the connectors settings. Removing it discards its tokens; without the refresh token, access lapses when the current access token expires.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Search and triage email" icon="magnifying-glass" href="/guides/search-and-triage">
+    Real prompts and the tool calls they produce.
+  </Card>
+  <Card title="How authorization works" icon="key" href="/connect/authorization">
+    What happens between "add connector" and "connected".
+  </Card>
+</CardGroup>

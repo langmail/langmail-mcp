@@ -1,0 +1,58 @@
+---
+title: "Claude"
+description: "Add the Langmail MCP server to claude.ai or Claude Desktop as a custom connector and authorize it against your mailbox."
+keywords: ["claude", "claude desktop", "claude.ai", "connector", "mcp", "connect"]
+---
+
+Claude on the web ([claude.ai](https://claude.ai)) and Claude Desktop share the same connector settings — the steps below work in both.
+
+## Prerequisites
+
+- A Langmail account — [sign up at app.langmail.me](https://app.langmail.me/signup).
+- A Claude plan with custom connectors (Pro, Max, Team, or Enterprise).
+
+## Connect
+
+<Steps>
+  <Step title="Open the connector settings">
+    Go to **Settings → Connectors**. On Team and Enterprise plans, connectors may be managed by your admin.
+  </Step>
+  <Step title="Add the Langmail connector">
+    Choose **Add custom connector**, enter a name (for example `Langmail`) and the URL:
+
+    ```text
+    https://mcp.langmail.me/mcp
+    ```
+  </Step>
+  <Step title="Authorize access">
+    Claude starts the authorization flow: sign in to your Langmail account and approve the consent screen.
+  </Step>
+  <Step title="Enable it in a chat">
+    In a conversation, open the search and tools menu and make sure **Langmail** is enabled. The tools now appear in Claude's tool list.
+  </Step>
+</Steps>
+
+## Test it
+
+Ask Claude:
+
+```text Prompt
+Which emails in my Langmail inbox are flagged as to-dos?
+```
+
+Claude calls `search_emails` with `{ "keywords": ["todo"] }` and answers from the result. If the call fails with an authorization error, re-run authentication from **Settings → Connectors**.
+
+## Ending access
+
+Remove the connector from **Settings → Connectors**. Removing it discards its tokens; without the refresh token, access lapses when the current access token expires.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Search and triage email" icon="magnifying-glass" href="/guides/search-and-triage">
+    Real prompts and the tool calls they produce.
+  </Card>
+  <Card title="How authorization works" icon="key" href="/connect/authorization">
+    What happens between "add connector" and "connected".
+  </Card>
+</CardGroup>

@@ -1,0 +1,43 @@
+---
+title: "move_emails"
+description: "Move one or more messages into a named folder, replacing whatever folders they were in."
+keywords: ["move_emails", "move", "folder", "mailbox", "filing", "mcp tool"]
+---
+
+Moves up to 50 messages into one folder. A move replaces the whole folder set: each message is removed from every folder it was in and ends up only in the destination. Read state and flags (to-do, starred) are untouched; use [`mark_emails`](/reference/mcp/mark-emails) to change them. Re-running it on the same ids is harmless.
+
+The `mailbox` argument is resolved exactly like the [`search_emails`](/reference/mcp/search-emails) `mailbox` filter: the standard places — Inbox, Archive, Sent, Drafts, Junk — resolve to the folder holding that role under whatever name the server uses, and any other value must match an existing folder name (case-insensitive). Folders are never created; an unknown name returns the folders that do exist.
+
+Trash is refused — by place name (`Trash`, `Bin`) and by the resolved trash-role mailbox whatever it is called — so this tool stays a non-destructive write. Use [`trash_emails`](/reference/mcp/trash-emails) to delete, and [`archive_emails`](/reference/mcp/archive-emails) to clear the inbox without picking a folder.
+
+## Parameters
+
+<ParamField body="ids" type="string[]" required>
+  1–50 message ids, as returned by [`search_emails`](/reference/mcp/search-emails) or [`get_thread`](/reference/mcp/get-thread). Duplicates are collapsed.
+</ParamField>
+
+<ParamField body="mailbox" type="string" required>
+  Destination folder, e.g. `Projects`, `Inbox`, `Archive`. 1–200 characters.
+</ParamField>
+
+## Example
+
+```json Call
+{ "ids": ["Mf2f0", "Mf31a"], "mailbox": "Projects" }
+```
+
+```text Result
+Moved 2 message(s) to Projects.
+```
+
+Ids the server refused are listed with the reason; the call only counts as an error when nothing moved:
+
+```text Result — one stale id
+Moved 1 message(s) to Projects. Not updated (1): Mf31a (notFound).
+```
+
+## Errors
+
+- `Mailbox not found: <mailbox>. Nothing was moved. Available folders: Inbox, Archive, Projects, …` — pick one of the listed names.
+- `Moving to <mailbox> is a delete. Use trash_emails instead. Nothing was moved.`
+- `Moved 0 message(s) to <mailbox>. Not updated (N): … Re-run search_emails or get_thread for current ids.` — every id was refused.

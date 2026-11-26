@@ -1,0 +1,130 @@
+---
+title: "Use a calendar client"
+sidebarTitle: "Calendar clients"
+description: "Connect your Langmail calendar to Apple Calendar, Thunderbird, or Android — CalDAV settings and an app password for two-way sync."
+keywords: ["caldav", "calendar", "apple calendar", "thunderbird", "davx5", "android", "app password"]
+---
+
+Your Langmail calendars are standard CalDAV collections on `mail.langmail.me`. Any client that speaks CalDAV can subscribe to them for two-way sync, so events stay consistent across every client — including the invitations your agent sends.
+
+## Before you start
+
+Interactive sign-in for Langmail happens in the browser, so calendar clients authenticate with an **app password** instead of your account password — the same credential mail clients use.
+
+Open [Access](https://app.langmail.me/access), find **App passwords**, and choose **Create app password**. The secret is shown once, so copy it right away. One app password works for mail, calendar and contacts; you can create one per device and revoke each independently from the same section.
+
+<Note>
+Clients discover your calendars automatically from your `you@langmail.me` address — the `_caldavs` SRV record on the domain points them at `mail.langmail.me`, and RFC 6764 (`/.well-known/caldav`) does the rest — so you shouldn't need a full calendar URL. Apple's setup screens still show a **Server** field; entering `mail.langmail.me` there is all the discovery needs. **If your client insists on a complete URL**, your default calendar is `https://mail.langmail.me/dav/cal/you%40langmail.me/default/` — replace `you@langmail.me` with your own address, percent-encoding the `@` as `%40`. (The parent `/dav/cal/you%40langmail.me/` holds all your calendars; each additional one has its own `/dav/cal/you%40langmail.me/<id>/` URL.)
+</Note>
+
+## Connect your client
+
+Use your full `you@langmail.me` address as the username and the app password as the password everywhere below.
+
+<Tabs>
+  <Tab title="Apple Calendar (Mac)">
+    1. Open **System Settings → Internet Accounts → Add Account → Add Other Account**.
+    2. Choose **CalDAV account**.
+    3. Set **Account Type** to **Manual** and fill in:
+
+    | Field | Value |
+    |---|---|
+    | User Name | `you@langmail.me` |
+    | Password | your app password |
+    | Server Address | `mail.langmail.me` |
+
+    4. Select **Sign In**. Your Langmail calendars appear in Calendar.
+  </Tab>
+  <Tab title="Apple Calendar (iPhone/iPad)">
+    <Note>
+    The quickest route is the [Langmail configuration profile](/guides/mail-clients#iphone-and-ipad): it sets up Calendar alongside Mail and Contacts in one tap, with no app password to paste. The manual steps below remain if you want the calendar on its own.
+    </Note>
+
+    1. Have an app password ready to paste (see [Before you start](#before-you-start)) — the setup cannot finish without one.
+    2. Open **Settings → Apps → Calendar → Calendar Accounts → Add Account → Other**. (On older iOS versions: **Settings → Calendar → Accounts → Add Account → Other**.)
+    3. Tap **Add CalDAV Account** and fill in — Description is the only optional field:
+
+    | Field | Value |
+    |---|---|
+    | Server | `mail.langmail.me` |
+    | User Name | `you@langmail.me` (your full address) |
+    | Password | your app password |
+    | Description | anything, e.g. `Langmail` |
+
+    4. Tap **Next**. iOS verifies the account, discovers your calendars via `/.well-known/caldav`, and they sync into the Calendar app.
+
+    If iOS shows **"CalDAV account verification failed"**, see [Troubleshooting](#troubleshooting) below — it is almost always the password.
+  </Tab>
+  <Tab title="Thunderbird">
+    1. Open **File → New → Calendar → On the Network**.
+    2. Enter your username `you@langmail.me` and the location `https://mail.langmail.me`, then let Thunderbird find your calendars.
+    3. When prompted, enter the app password.
+    4. Select the calendars you want and **Subscribe**.
+  </Tab>
+  <Tab title="Android (DAVx⁵)">
+    Android has no built-in CalDAV support, so use [DAVx⁵](https://www.davx5.com), the standard open-source sync app (F-Droid or Play Store).
+
+    1. In DAVx⁵, add an account with **Login with URL and user name**.
+    2. Fill in:
+
+    | Field | Value |
+    |---|---|
+    | Base URL | `https://mail.langmail.me` |
+    | User name | `you@langmail.me` |
+    | Password | your app password |
+
+    3. Finish setup, then pick which calendars to sync. They appear in your Android Calendar app. Your contacts sync in the same DAVx⁵ account: see [Use a contacts app](/guides/contacts-clients).
+  </Tab>
+</Tabs>
+
+## Connection details
+
+For any other CalDAV client, these are the settings:
+
+| Setting | Value |
+|---|---|
+| Server address | `mail.langmail.me` (discovery at `https://mail.langmail.me/.well-known/caldav`) |
+| Username | your full `you@langmail.me` address |
+| Password | an app password from [Access](https://app.langmail.me/access) (**App passwords**) |
+| Calendar URL | `https://mail.langmail.me/dav/cal/you%40langmail.me/default/` (your default calendar) — only if the client can't auto-discover |
+
+An OAuth bearer token works too, over the same endpoint — that's what the MCP calendar tools use — but app passwords are the practical choice for desktop and mobile calendar apps.
+
+## Troubleshooting
+
+When the server rejects the sign-in, iPhone and iPad show **"CalDAV account verification failed"**; Apple Calendar on the Mac words it differently but fails the same way. The connection itself is rarely the problem — check the credentials first:
+
+- **Use an app password, not your account password.** Signing in to Langmail happens in the browser, so the password you use there (or your Google password) is never accepted by CalDAV. Create one in [Access](https://app.langmail.me/access) under **App passwords** → **Create app password** and paste that instead.
+- **Don't leave the password empty.** iOS lets you save the account form without a password, but verification then fails immediately.
+- **Username is your full address** — `you@langmail.me`, not just `you`.
+- **The app password may have been revoked.** App passwords are shown once and can be revoked per device in [Access](https://app.langmail.me/access) under **App passwords**. If in doubt, generate a fresh one and try again.
+
+If the credentials are right and it still fails, take the manual route: in the account's advanced settings, set the account URL to `https://mail.langmail.me/dav/cal/you%40langmail.me/` — the parent collection that lists all your calendars; replace `you@langmail.me` with your own address, percent-encoding the `@` as `%40` — with SSL enabled on port `443`.
+
+## Google Calendar and Outlook
+
+Neither Google Calendar nor classic Outlook can subscribe to a third-party CalDAV server for two-way sync — they only sync calendars within their own accounts. You can still invite people on those systems to your events: invitations go out as standard iMIP emails they can accept from Google Calendar, Outlook, or anything else that speaks iCalendar (see [Calendar workflows](/guides/calendar-workflows)). For two-way access from an Android phone, use DAVx⁵ as shown above.
+
+## Scheduling tools
+
+Scheduling platforms that speak CalDAV can use your Langmail calendar the same way — reading it for conflicts and writing bookings back. See [Connect Cal.com](/guides/cal-com) for the Cal.com setup.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Calendar workflows" icon="calendar" href="/guides/calendar-workflows">
+    Schedule meetings, recurring series, and RSVPs through an agent.
+  </Card>
+  <Card title="Connect Cal.com" icon="calendar-check" href="/guides/cal-com">
+    Use your Langmail calendar as a Cal.com scheduling source.
+  </Card>
+  <Card title="Use a mail client" icon="envelope" href="/guides/mail-clients">
+    Read the same mailbox from Apple Mail, Thunderbird, or Outlook.
+  </Card>
+  <Card title="Use a contacts app" icon="address-book" href="/guides/contacts-clients">
+    Sync your contacts and their birthdays into the same apps.
+  </Card>
+  <Card title="Open protocols" icon="plug" href="/reference/protocols">
+    The full endpoint map for JMAP, CalDAV, CardDAV, IMAP, and SMTP.
+  </Card>
+</CardGroup>

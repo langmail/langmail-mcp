@@ -1,0 +1,105 @@
+---
+title: "create_contact"
+description: "Create a contact from a name plus optional email addresses, phone numbers, structured postal addresses, an organization, a birthday, a note, and roles."
+keywords: ["create_contact", "contacts", "address book", "add contact", "mcp tool"]
+---
+
+The address book maintains itself from mail headers and calendar attendees, which means it can only ever hold people who have already written to you or shared an event with you. Someone you met in person, spoke to on the phone, or know through a channel Langmail does not see has no way in. `create_contact` is that way in.
+
+The record it writes is a full vCard-shaped one, not just a routing target: alongside the name and email addresses it holds phone numbers, structured postal addresses, an organization, a birthday, and a free note. A contact does **not** need an email address — a name and a postal address is a valid record.
+
+Search with [`search_contacts`](/reference/mcp/search-contacts) first. If the person is already known, use [`update_contact`](/reference/mcp/update-contact) instead, so their interaction history stays on one record.
+
+<Warning>
+Contacts are stored in the account's address book, which syncs to every device connected over CardDAV. A contact an agent creates appears on the user's phone.
+</Warning>
+
+## Parameters
+
+<ParamField body="name" type="string" required>
+  The display name, 1–200 characters.
+</ParamField>
+
+<ParamField body="emails" type="object[]">
+  Up to 10 entries, each `{ address, context? }`. `context` is `work` or `private`; when omitted it is inferred from the domain.
+</ParamField>
+
+<ParamField body="phones" type="object[]">
+  Up to 10 entries, each `{ number, label? }`. `label` is `mobile`, `home`, `work`, `fax`, or `other` (the default).
+</ParamField>
+
+<ParamField body="postalAddresses" type="object[]">
+  Up to 5 entries, each `{ street?, postalCode?, city?, region?, country?, label? }`. At least one of `street`, `postalCode`, `city`, or `region` is required. `country` is an ISO 3166-1 alpha-2 code such as `DE` — convert a country name yourself. `label` is `home`, `work`, or `other` (the default).
+</ParamField>
+
+<ParamField body="organization" type="string">
+  Company or organization, 1–200 characters.
+</ParamField>
+
+<ParamField body="roles" type="string[]">
+  What the person is to the user, such as `lawyer` or `landlord`; up to 10, each 1–50 characters. Stored lowercase, with a leading "my" dropped, so [`search_contacts`](/reference/mcp/search-contacts) finds the person for "my lawyer". Record only a role the user said or confirmed, never one inferred from mail. CardDAV clients show it as the vCard `ROLE` field, not as a contact group.
+</ParamField>
+
+<ParamField body="birthday" type="string">
+  `YYYY-MM-DD`, or `--MM-DD` when the year is unknown. Stored as the standard JSContact `birth` anniversary, which CardDAV clients show as the birthday field, so it appears on the user's phone. A date that is not a real calendar date (`2024-02-30`) is refused and nothing is created; `--02-29` is accepted. An empty string means none.
+</ParamField>
+
+<ParamField body="note" type="string">
+  Free-text note, up to 2000 characters.
+</ParamField>
+
+## Why postal addresses are structured
+
+A single free-text block is easier to write and harder to use. Address formats are country-specific, and an agent addressing a letter needs the components separately. The components map onto the standard [JSContact](https://www.rfc-editor.org/rfc/rfc9553) address model, so a CardDAV client renders them the way it renders any other contact's address.
+
+## Example
+
+```json Call
+{
+  "name": "Robin Fairweather",
+  "postalAddresses": [
+    {
+      "street": "Beispielweg 1",
+      "postalCode": "80331",
+      "city": "München",
+      "country": "DE",
+      "label": "home"
+    }
+  ]
+}
+```
+
+```text Result
+Created contact:
+
+Robin Fairweather
+   contact_id: c17
+   postal_addresses:
+   - [a0] Beispielweg 1, 80331 München, DE (home)
+   source: authored
+
+It is in the account address book, so it syncs to every device connected over CardDAV. Edit single fields with update_contact; the handles in square brackets address one phone or postal address.
+```
+
+The `contact_id` addresses the record in [`update_contact`](/reference/mcp/update-contact) and [`delete_contact`](/reference/mcp/delete-contact). The `[a0]`-style handles address one postal address or phone number within it.
+
+The contact is written to the account's default address book — never to the machine-maintained `Collected` book, which is where derivation puts what it infers.
+
+## Provenance
+
+Every contact carries a `source`:
+
+| Value | Meaning |
+|---|---|
+| `authored` | Written through this tool. |
+| `derived` | Built by collection from mail headers and calendar attendees. |
+| `imported` | Already in an address book on the account — a CardDAV client, a vCard import — and never observed here. |
+
+The marker matters because a confidence rating means different things across them: confidence in a derived address is an inference from headers, confidence in an authored one is the user's own assertion. Collection only ever fills blanks on a record, so nothing typed here is overwritten by what Langmail later infers — and a later sighting never relabels an authored record as derived.
+
+## Errors
+
+- `<address> already belongs to an existing contact (contact_id: …)` — the address is on another card. Use `update_contact` against that id instead of splitting the person across two records.
+- `a postal address needs at least a street, city, postal code, or region` — a postal address entry carried only a label.
+- `Birthday "<value>" is not a date.` / `… is not a calendar date` — pass `YYYY-MM-DD` or `--MM-DD`, with a day the month actually has. Nothing was created.
+- Schema rejection on `country` — pass a two-letter ISO 3166-1 alpha-2 code, not a country name.

@@ -1,0 +1,81 @@
+---
+title: "Connect Cal.com"
+sidebarTitle: "Cal.com"
+description: "Use your Langmail calendar as a scheduling source in Cal.com over CalDAV — check for conflicts and write new bookings back, with an app password."
+keywords: ["cal.com", "caldav", "scheduling", "bookings", "conflicts", "app password", "calendar"]
+---
+
+[Cal.com](https://cal.com) is an open-source scheduling tool. Because your Langmail calendars are standard CalDAV collections on `mail.langmail.me`, Cal.com's **CalDav (Beta)** app connects to them directly — no plugin or bridge. Once connected, Cal.com:
+
+- **checks your Langmail calendar for conflicts** so it never offers a slot you're already busy on, and
+- **writes each new booking into a Langmail calendar** you choose, where your agent and every connected calendar client immediately see it.
+
+This is the same open-protocol surface the MCP calendar tools use — Cal.com is just another CalDAV client.
+
+## Before you start
+
+Interactive sign-in for Langmail happens in the browser, so Cal.com authenticates with an **app password** instead of your account password — the same credential mail and calendar clients use.
+
+Open [Access](https://app.langmail.me/access), find **App passwords**, and choose **Create app password**. The secret is shown once, so copy it right away. Use a dedicated app password for Cal.com so you can revoke it independently.
+
+## Connect your Langmail calendar
+
+<Steps>
+  <Step title="Open the App Store">
+    In Cal.com, go to **Settings → [Calendars](https://app.cal.com/settings/my-account/calendars)** and select **Add** to open the App Store (or open the [CalDav (Beta)](https://cal.com/apps/caldav-calendar) app directly).
+  </Step>
+  <Step title="Install CalDav (Beta)">
+    Choose **CalDav (Beta)** — the generic CalDAV app, not the separate **Apple Calendar** app, which is hard-wired to iCloud — and select **Install**. It's free and available on both Cal.com cloud (`app.cal.com`) and self-hosted instances.
+  </Step>
+  <Step title="Enter your Langmail details">
+    Fill in the three fields:
+
+    | Field | Value |
+    |---|---|
+    | Calendar URL | `https://mail.langmail.me/` |
+    | Username | your full `you@langmail.me` address |
+    | Password | your app password |
+
+    Cal.com discovers your calendars from the server URL over RFC 6764 (`/.well-known/caldav`). **If it reports that no calendars were found,** enter your calendar-home URL instead — `https://mail.langmail.me/dav/cal/you%40langmail.me/`, replacing `you@langmail.me` with your own address — the `@` percent-encoded as `%40`.
+  </Step>
+  <Step title="Save">
+    Select **Save**. Your Langmail calendars appear under **Installed Calendars**.
+  </Step>
+</Steps>
+
+## Configure conflict checking and the destination
+
+On the **Calendars** page, two independent settings control how Cal.com uses the connection:
+
+- **Check for conflicts** — toggle each Langmail calendar you want counted as "busy." Cal.com reads their events and hides any time slot that overlaps one, preventing double-bookings.
+- **Add to** (destination) — pick the one Langmail calendar Cal.com writes new bookings into. Every meeting booked through Cal.com lands there as a real CalDAV event.
+
+You can check many calendars for conflicts but write bookings to only one.
+
+## How it fits together
+
+Once connected, a booking flows straight into your Langmail mailbox's calendar:
+
+1. Someone books a time on your Cal.com page.
+2. Cal.com confirms the slot is free against your Langmail calendar(s), then writes the event into your chosen Langmail calendar over CalDAV.
+3. The event is now a first-class calendar object on the open-protocol surface — your [agent](/guides/calendar-workflows) and any [connected calendar client](/guides/calendar-clients) see it at once, and it counts toward conflict checks for future bookings.
+
+Cal.com sends its own booking confirmations and reminders to invitees, so you don't need Langmail's iMIP invitations for Cal.com bookings. When you'd rather have your agent schedule and invite attendees directly — recurring series, RSVPs, cancellations — use the [calendar workflows](/guides/calendar-workflows) instead; both write to the same calendars.
+
+<Note>
+The CalDav app is marked **Beta** in Cal.com. If a newly booked event doesn't appear in Langmail, re-check that the destination calendar is set on the **Calendars** page and that your app password is still valid.
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Calendar workflows" icon="calendar" href="/guides/calendar-workflows">
+    Schedule meetings, recurring series, and RSVPs through an agent.
+  </Card>
+  <Card title="Use a calendar client" icon="calendar-days" href="/guides/calendar-clients">
+    Two-way sync with Apple Calendar, Thunderbird, or Android.
+  </Card>
+  <Card title="Open protocols" icon="plug" href="/reference/protocols">
+    The full endpoint map for JMAP, CalDAV, IMAP, and SMTP.
+  </Card>
+</CardGroup>

@@ -1,0 +1,51 @@
+---
+title: "get_email"
+description: "Fetch a single message's recipients, folders and full plain-text body by id."
+keywords: ["get_email", "read email", "message body", "mcp tool"]
+---
+
+Fetches one message in full: subject, sender, recipients, date, folders, tags, the plain-text body and the list of attachments. [`search_emails`](/reference/mcp/search-emails) and [`get_thread`](/reference/mcp/get-thread) deliberately omit bodies; use this tool to open a specific hit.
+
+## Parameters
+
+<ParamField body="id" type="string" required>
+  The message id, as returned by `search_emails` or `get_thread`.
+</ParamField>
+
+## Example
+
+```json Call
+{ "id": "Mabc123" }
+```
+
+```text Result
+Subject: Your invoice for June
+From: Acme Billing <billing@acme.example>
+To: you@langmail.me
+Date: 2026-07-05T08:12:00Z
+Folders: Inbox
+Tags: receipt
+
+Hi,
+
+your invoice for June is attached. The total is EUR 49.00, due July 20.
+
+Thanks,
+Acme Billing
+
+Attachments (2):
+1. invoice-2026-06.pdf — application/pdf, 182.4 KB — blobId: Gd41d8cd
+2. logo.png — image/png, 3.1 KB — inline — blobId: G98f00b2
+```
+
+`Folders:` names the folders the message is in, the same way [`search_emails`](/reference/mcp/search-emails) hits do. The standard places carry their place name (Inbox, Archive, Sent, Drafts, Junk, Trash) and any other folder its own name. It is left out when the folder listing fails. `Cc:` appears only when the message has CC recipients; `Tags:` only when the message carries an email type or sub-agent label. A message without a text body returns `(no text body)` in place of the body.
+
+The attachments section lists every file part with its filename, media type, human-readable size, and the `blobId` handle that [`download_attachment`](/reference/mcp/download-attachment) takes. Parts marked `inline` are images referenced by the HTML body (logos, signatures, tracking pixels) rather than genuine documents. Messages without attachments omit the section entirely — and the bytes themselves are never returned by this tool. For the message's raw source (an `.eml` with every header), use [`download_email`](/reference/mcp/download-email).
+
+<Note>
+Bodies are capped at 100,000 bytes; longer bodies are truncated at that limit.
+</Note>
+
+## Errors
+
+- `Email not found: <id>` — no message with that id in the caller's mailbox.

@@ -1,0 +1,172 @@
+---
+title: "Search and triage email"
+description: "End-to-end email tasks through an agent — find to-dos, filter by email type and sender, read full messages and threads."
+keywords: ["search", "triage", "todo", "email type", "email", "agent workflows"]
+---
+
+Langmail classifies every incoming message into an email type and flags the ones that need action. Your agent can use those types as structured search filters instead of paging through an inbox. This guide shows common tasks as the prompt you give, the tool call the agent makes, and what comes back.
+
+The three email tools divide the work:
+
+- [`search_emails`](/reference/mcp/search-emails) finds messages — compact hit lists, no bodies.
+- [`get_email`](/reference/mcp/get-email) reads one message in full.
+- [`get_thread`](/reference/mcp/get-thread) lists every message in a conversation.
+
+## Find what needs action
+
+```text Prompt
+What's on my email to-do list from the last week?
+```
+
+The agent combines the `todo` flag with a date filter:
+
+```json Tool call — search_emails
+{
+  "keywords": ["todo"],
+  "after": "2026-06-30T00:00:00Z"
+}
+```
+
+```text Result
+2 of 2 message(s) matched:
+
+1. Please confirm your new contract
+   id: Mf31a
+   from: HR <hr@acme.example>
+   date: 2026-07-03T09:20:00Z
+   tags: direct, todo
+
+2. Your domain renewal expires soon
+   id: Mf2c8
+   from: Registrar <noreply@registrar.example>
+   date: 2026-07-01T12:05:00Z
+   tags: notification, todo
+```
+
+## Filter by email type
+
+The `keywords` filter takes any of the ten classified types — `direct`, `newsletter`, `promotional`, `notification`, `ticket`, `receipt`, `order`, `scheduling`, `security_alert`, `terms` — plus the orthogonal `todo` flag, combined with OR:
+
+```text Prompt
+Collect all receipts from June for my expense report.
+```
+
+```json Tool call — search_emails
+{
+  "keywords": ["receipt"],
+  "after": "2026-06-01T00:00:00Z",
+  "before": "2026-07-01T00:00:00Z",
+  "limit": 100
+}
+```
+
+What the types mean and how they get applied is covered in [Email intelligence](/concepts/email-intelligence).
+
+## Find transactional mail that never says what it is
+
+A booking confirmation is titled after the film, an invoice after the vendor — the word you would search for appears nowhere in the message. This is where the type filter replaces free text rather than narrowing it:
+
+```text Prompt
+Show me the cinema tickets of yesterday's show.
+```
+
+```json Tool call — search_emails
+{
+  "keywords": ["ticket"],
+  "after": "2026-07-09T00:00:00Z",
+  "before": "2026-07-31T00:00:00Z"
+}
+```
+
+Note the window: `after`/`before` filter the **received** date, and the confirmation arrived when the seats were booked, not when the film ran. Anchor on the event, then widen the start by a booking lead time. Paired with the type filter, that wide window costs nothing — the newsletters advertising cinema tickets are typed `newsletter` and never appear.
+
+Mail analyzed before classification existed carries no type; if a type filter comes back empty, fall back to a free-text `query`.
+
+## Search by sender and text
+
+`from` matches a substring of the sender's name or address; `query` is free-text over subject, body, and addresses — terms are OR'd, so a message matches if it contains any of them; messages containing every term come first, then the rest by how many terms they hold (quote a phrase to match only those words next to each other, in that order). When more match than one page shows, the result prints a `cursor`: repeat the search with it for the next page. They compose:
+
+```text Prompt
+Find the message from Jonas about the offsite budget.
+```
+
+```json Tool call — search_emails
+{
+  "from": "jonas",
+  "query": "offsite budget"
+}
+```
+
+## Read the full message
+
+Search results are deliberately body-free to stay light on tokens. The agent opens a specific hit by id:
+
+```json Tool call — get_email
+{ "id": "Mf31a" }
+```
+
+```text Result
+Subject: Please confirm your new contract
+From: HR <hr@acme.example>
+To: you@langmail.me
+Date: 2026-07-03T09:20:00Z
+Tags: direct, todo
+
+Hi,
+
+please review the attached contract draft and confirm by Friday.
+...
+```
+
+## Follow a conversation
+
+Given any message id, `get_thread` returns the whole conversation oldest-first, so the agent can reconstruct context before answering:
+
+```json Tool call — get_thread
+{ "id": "Mf31a" }
+```
+
+```text Result
+3 message(s) in thread:
+
+1. Contract renewal timeline
+   id: Mf2f0
+   from: HR <hr@acme.example>
+   date: 2026-06-28T10:00:00Z
+   tags: direct
+
+2. Re: Contract renewal timeline
+   id: Mf2f4
+   from: You <you@langmail.me>
+   date: 2026-06-28T14:12:00Z
+
+3. Please confirm your new contract  ← requested
+   id: Mf31a
+   from: HR <hr@acme.example>
+   date: 2026-07-03T09:20:00Z
+   tags: direct, todo
+```
+
+## Clear the inbox
+
+Once a conversation is handled, the agent can file it. Every id `get_thread` listed goes into one call, and the outcome is reported per id:
+
+```json Tool call — archive_emails
+{ "ids": ["Mf2f0", "Mf2f4", "Mf31a"] }
+```
+
+```text Result
+Archived 3 message(s).
+```
+
+Three verbs cover filing, and they are separate tools on purpose: [`archive_emails`](/reference/mcp/archive-emails) clears the inbox, [`move_emails`](/reference/mcp/move-emails) files into a named folder, and [`trash_emails`](/reference/mcp/trash-emails) — the only one annotated as destructive — deletes. None of them creates a folder or changes a flag — read state, to-dos and stars stay as they were.
+
+Reading doesn't mark anything read either. When the user wants handled mail to look handled, the agent says so with [`mark_emails`](/reference/mcp/mark-emails). The same tool sets and clears the to-do flag, so finishing a to-do is one call before the archive:
+
+```json Tool call — mark_emails
+{ "ids": ["Mf2f0", "Mf2f4", "Mf31a"], "read": true, "todo": false }
+```
+
+```text Result
+Marked 3 message(s) as read, not to-do.
+```

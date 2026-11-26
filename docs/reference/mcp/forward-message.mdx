@@ -1,0 +1,86 @@
+---
+title: "forward_message"
+description: "Forward a message, with its attachments, formatting and headers, and send it in one call."
+keywords: ["forward_message", "forward", "fwd", "send", "attachments", "mcp tool"]
+---
+
+Forwards a message and sends the forward immediately. This delivers mail to the recipients and cannot be undone.
+
+Use it when the user has already asked for the message to be forwarded. To stage a forward for review instead, use [`create_draft`](/reference/mcp/create-draft) with `forwardOf`: the same forward, no delivery.
+
+The recipient gets what a mail client sends when you forward:
+
+- the optional note on top;
+- a `Forwarded message` block with the original's real From, Date, Subject, To and Cc;
+- the original body, as both HTML (its formatting kept, active content removed) and plain text;
+- every file the original carried, inline images included, attached by blobId. Nothing is downloaded or re-uploaded.
+
+The subject is `Fwd: <original subject>`, with no second prefix when it already starts with `Fwd:` or `Fw:`. The sent copy lands in the original's conversation: its `References` header is the original's references plus its Message-ID. Once the send succeeds, the original is marked `$forwarded`.
+
+## Parameters
+
+<ParamField body="messageId" type="string" required>
+  Id of the message to forward, as returned by [`search_emails`](/reference/mcp/search-emails) or [`get_thread`](/reference/mcp/get-thread).
+</ParamField>
+
+<ParamField body="to" type="string[]" required>
+  Recipients, at least one. A bare address (`person@example.com`) or the `Name <person@example.com>` form [`search_contacts`](/reference/mcp/search-contacts) returns. Recipients are never taken from the original.
+</ParamField>
+
+<ParamField body="cc" type="string[]">
+  Carbon-copy recipients.
+</ParamField>
+
+<ParamField body="bcc" type="string[]">
+  Blind-copy recipients.
+</ParamField>
+
+<ParamField body="text" type="string">
+  Optional note above the forwarded message, in plain text.
+</ParamField>
+
+<ParamField body="html" type="string">
+  HTML version of the note. Either form alone is enough: the other part is derived from it.
+</ParamField>
+
+<ParamField body="subject" type="string">
+  Override the subject. Defaults to `Fwd: <original subject>`.
+</ParamField>
+
+<ParamField body="idempotencyKey" type="string">
+  Client-chosen key that makes the call safe to retry: a repeat with the same key returns the first call's answer instead of sending a second forward. Keys are scoped to the account **and to this tool**. Remembered for 15 minutes.
+</ParamField>
+
+## Example
+
+```json Call
+{ "messageId": "M4821", "to": ["accountant@example.com"], "text": "For the tax return." }
+```
+
+```text Result
+Forward sent.
+messageId: M5141
+from: Dana Okonjo <dana@langmail.me>
+to: accountant@example.com
+subject: Fwd: Invoice March
+threadId: T77
+body (text + html): For the tax return. ---------- Forwarded message --------- From: Ola Landlord <landlord@example.org> …
+attachments (1):
+  1. invoice.pdf — application/pdf — 120 KB — blobId: B9
+The message is in Sent — read it back with get_email using the messageId above.
+```
+
+## Notes
+
+- A body too long to include in full is shortened in the forward, and the whole original is then attached as an `.eml` file (`message/rfc822`, by its own blobId). The result says so.
+- The forward always goes out from the account's own address. To forward from an alias, use [`create_draft`](/reference/mcp/create-draft) with `forwardOf` and `from`, then [`send_draft`](/reference/mcp/send-draft).
+- Files cannot be added here. To forward with an extra file, use [`create_draft`](/reference/mcp/create-draft) with `forwardOf` and `attachments`.
+- To answer the sender, use [`reply_to_message`](/reference/mcp/reply-to-message).
+- The forward is written into Drafts before it is submitted, so a submission that fails leaves a recoverable draft. The error names its id.
+
+## Errors
+
+- `Cannot forward: message not found: <id>. Nothing was sent.`
+- `Not a valid email address: … Nothing was sent.`
+- `<id> carries a file that cannot be forwarded by reference (…), so it would be left out. Nothing was sent.` A part with no blobId. Stage the forward with `create_draft` and `forwardOf` instead: the staged forward carries the whole original as an `.eml` file, which includes it.
+- `A forward of <id> is already in progress. Nothing was sent by this call.`

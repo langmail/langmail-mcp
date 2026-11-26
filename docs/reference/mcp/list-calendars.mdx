@@ -1,0 +1,32 @@
+---
+title: "list_calendars"
+description: "List the authenticated user's calendars with their display names, CalDAV URLs, colors, and who each one is shared with."
+keywords: ["list_calendars", "calendars", "caldav url", "mcp tool"]
+---
+
+Lists the user's calendars with their color, when one is set, and every person each one is shared with, at which level. The share links themselves are never shown again; see [`share_calendar`](/reference/mcp/share-calendar). The returned CalDAV URL is the `calendarUrl` value that the event tools take to target a specific calendar; omit it there to use the default calendar. To rename or recolor a calendar, pass its name or URL to [`update_calendar`](/reference/mcp/update-calendar); to move events onto one, pass it to [`move_calendar_events`](/reference/mcp/move-calendar-events).
+
+## Parameters
+
+This tool takes no parameters.
+
+## Example
+
+```json Call
+{}
+```
+
+```text Result
+2 calendar(s):
+
+1. Personal
+   url: https://mail.langmail.me/dav/cal/you%40langmail.me/default/
+   color: #2E6FD8
+   shared with: Sam (busy times only), my partner (full details)
+
+2. Marketing
+   url: https://mail.langmail.me/dav/cal/you%40langmail.me/a1b2c3/
+   not shared
+```
+
+A user with no calendars gets `No calendars found.`

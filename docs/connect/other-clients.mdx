@@ -1,0 +1,173 @@
+---
+title: "Connect other MCP clients"
+sidebarTitle: "Other clients"
+description: "Connect any MCP client that supports remote Streamable HTTP servers with OAuth to the Langmail MCP server."
+keywords: ["mcp client", "streamable http", "oauth", "remote server", "codex", "gemini cli", "copilot cli", "opencode", "factory", "goose", "zed", "antigravity", "kiro", "windsurf", "kimi code"]
+---
+
+Looking for a specific client? Codex, Gemini CLI, Copilot CLI, opencode, Factory, Goose, Zed, Antigravity, Kiro, Windsurf and Kimi Code are covered under [Client-specific setup](#client-specific-setup) below. [Claude](/connect/claude), [Claude Code](/connect/claude-code), [ChatGPT](/connect/chatgpt), [Cursor](/connect/cursor), [VS Code](/connect/vs-code), [Notion](/connect/notion), and [Mistral Le Chat](/connect/le-chat) each have a dedicated page.
+
+Any other MCP client can use Langmail if it supports two things:
+
+1. **Remote servers over the Streamable HTTP transport** — the server lives at `https://mcp.langmail.me/mcp`; there is no local process to spawn.
+2. **The MCP authorization flow (OAuth 2.1)** — the client discovers the authorization server, registers itself dynamically, and opens a browser for you to sign in and consent. No manual API keys are involved.
+
+If your client meets both, connecting is one config entry.
+
+## Connect
+
+Point the client at the server URL using its remote/HTTP server option:
+
+```text
+https://mcp.langmail.me/mcp
+```
+
+The client handles the rest through standard MCP authorization discovery. What it needs to support, concretely:
+
+- OAuth 2.0 protected resource metadata (RFC 9728) and authorization server metadata (RFC 8414)
+- Dynamic client registration (RFC 7591) as a public client
+- The authorization code grant with PKCE (S256)
+
+Every step, with the exact endpoints and example responses, is documented in [How authorization works](/connect/authorization) — useful if you are building an MCP client or debugging one.
+
+<Note>
+The user signing in needs a Langmail account with an active `@langmail.me` mailbox. Tokens for accounts without a mailbox are rejected with `401 invalid_token`.
+</Note>
+
+## Client-specific setup
+
+Each client below signs you in through the browser the first time it connects. Where it needs a separate sign-in step, that step is listed.
+
+### Codex
+
+```bash
+codex mcp add langmail --url https://mcp.langmail.me/mcp
+```
+
+Codex detects that the server uses OAuth and starts the sign-in right away. If it doesn't, or to sign in again later, run `codex mcp login langmail`.
+
+### Gemini CLI
+
+```bash
+gemini mcp add --scope user --transport http langmail https://mcp.langmail.me/mcp
+```
+
+Then sign in from inside Gemini CLI with `/mcp auth langmail`. Leave out `--scope user` to add the server to the current project only.
+
+### GitHub Copilot CLI
+
+```bash
+copilot mcp add --transport http langmail https://mcp.langmail.me/mcp
+```
+
+Copilot CLI asks you to sign in when it connects; `/mcp auth langmail` signs in again. For Copilot inside VS Code, follow the [VS Code](/connect/vs-code) guide instead.
+
+### opencode
+
+```bash
+opencode mcp add langmail --global --url https://mcp.langmail.me/mcp
+```
+
+Or add the server to your opencode config by hand:
+
+```json opencode.jsonc
+{
+  "mcp": {
+    "servers": {
+      "langmail": {
+        "type": "remote",
+        "url": "https://mcp.langmail.me/mcp"
+      }
+    }
+  }
+}
+```
+
+If `opencode mcp list` shows the server as needing authentication, run `opencode mcp auth langmail`.
+
+### Factory
+
+```bash
+droid mcp add langmail https://mcp.langmail.me/mcp --type http
+```
+
+Then run `/mcp` inside droid to sign in.
+
+### Goose
+
+Run `goose configure`, choose **Add Extension**, then **Remote Extension (Streamable HTTP)**, and enter `langmail` as the name and `https://mcp.langmail.me/mcp` as the URL. Goose opens the sign-in when it first connects.
+
+### Zed
+
+Add the server to your Zed settings (**zed: open settings file**). Zed nests MCP servers under `context_servers`:
+
+```json settings.json
+{
+  "context_servers": {
+    "langmail": {
+      "url": "https://mcp.langmail.me/mcp"
+    }
+  }
+}
+```
+
+### Antigravity
+
+Open the MCP config from Antigravity's settings (**Customizations → Open MCP Config**) and add the server. Antigravity wants the key `serverUrl`, not `url`:
+
+```json mcp_config.json
+{
+  "mcpServers": {
+    "langmail": {
+      "serverUrl": "https://mcp.langmail.me/mcp"
+    }
+  }
+}
+```
+
+Then authenticate the server from Antigravity's MCP settings.
+
+### Kiro
+
+Add the server to `.kiro/settings/mcp.json` in your workspace, or to `~/.kiro/settings/mcp.json` for every workspace:
+
+```json mcp.json
+{
+  "mcpServers": {
+    "langmail": {
+      "url": "https://mcp.langmail.me/mcp"
+    }
+  }
+}
+```
+
+### Windsurf
+
+Open the MCP config from Cascade (**MCP → Open MCP config**; on most installs `~/.codeium/windsurf/mcp_config.json`) and add the server. Windsurf wants the key `serverUrl`:
+
+```json mcp_config.json
+{
+  "mcpServers": {
+    "langmail": {
+      "serverUrl": "https://mcp.langmail.me/mcp"
+    }
+  }
+}
+```
+
+### Kimi Code
+
+```bash
+kimi mcp add --transport http --auth oauth langmail https://mcp.langmail.me/mcp
+kimi mcp auth langmail
+```
+
+## Verify the connection
+
+However you connected, the check is the same — ask the agent:
+
+```text Prompt
+List my Langmail calendars.
+```
+
+A connected agent calls `list_calendars` and returns your calendars with their CalDAV URLs.

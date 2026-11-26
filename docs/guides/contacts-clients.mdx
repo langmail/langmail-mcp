@@ -1,0 +1,129 @@
+---
+title: "Use a contacts app"
+sidebarTitle: "Contacts apps"
+description: "Connect your Langmail contacts to Apple Contacts, Thunderbird, or Android — CardDAV settings and an app password for two-way sync, birthdays included."
+keywords: ["carddav", "contacts", "address book", "apple contacts", "thunderbird", "davx5", "android", "birthdays", "app password"]
+---
+
+Your Langmail contacts live in a standard CardDAV address book on `mail.langmail.me`. Keep the contacts app you already use: any app that speaks CardDAV syncs it both ways, so a contact your agent creates appears on your phone, and a contact you edit on your phone is what your agent reads.
+
+## Before you start
+
+Interactive sign-in for Langmail happens in the browser, so contacts apps authenticate with an **app password** instead of your account password — the same credential mail and calendar apps use.
+
+Open [Access](https://app.langmail.me/access), find **App passwords**, and choose **Create app password**. The secret is shown once, so copy it right away. One app password works for mail, calendar and contacts; you can create one per device and revoke each independently from the same section.
+
+<Note>
+Apps discover your address books automatically from your `you@langmail.me` address — the `_carddavs` SRV record on the domain points them at `mail.langmail.me`, and RFC 6764 (`/.well-known/carddav`) does the rest — so you shouldn't need a full address book URL. **If your app insists on a complete URL**, your personal address book is `https://mail.langmail.me/dav/card/you%40langmail.me/default/` — replace `you@langmail.me` with your own address, percent-encoding the `@` as `%40`. (The parent `/dav/card/you%40langmail.me/` holds all your address books, including **Collected**, the one your agent builds from your mail and calendar traffic; each has its own `/dav/card/you%40langmail.me/<id>/` URL.)
+</Note>
+
+## Connect your app
+
+Use your full `you@langmail.me` address as the username and the app password as the password everywhere below.
+
+<Tabs>
+  <Tab title="Apple Contacts (Mac)">
+    1. Open **System Settings → Internet Accounts → Add Account → Add Other Account**.
+    2. Choose **CardDAV account**.
+    3. Set **Account Type** to **Manual** and fill in:
+
+    | Field | Value |
+    |---|---|
+    | User Name | `you@langmail.me` |
+    | Password | your app password |
+    | Server Address | `mail.langmail.me` |
+
+    4. Select **Sign In**. Your Langmail contacts appear in Contacts as a separate account.
+  </Tab>
+  <Tab title="Apple Contacts (iPhone/iPad)">
+    <Note>
+    The quickest route is the [Langmail configuration profile](/guides/mail-clients#iphone-and-ipad): it sets up Contacts alongside Mail and Calendar in one tap, with no app password to paste. The manual steps below remain if you want contacts on their own.
+    </Note>
+
+    1. Have an app password ready to paste (see [Before you start](#before-you-start)) — the setup cannot finish without one.
+    2. Open **Settings → Apps → Contacts → Contacts Accounts → Add Account → Other**. (On older iOS versions: **Settings → Contacts → Accounts → Add Account → Other**.)
+    3. Tap **Add CardDAV Account** and fill in — Description is the only optional field:
+
+    | Field | Value |
+    |---|---|
+    | Server | `mail.langmail.me` |
+    | User Name | `you@langmail.me` (your full address) |
+    | Password | your app password |
+    | Description | anything, e.g. `Langmail` |
+
+    4. Tap **Next**. iOS verifies the account, discovers your address book via `/.well-known/carddav`, and your contacts sync into the Contacts app.
+
+    To save new contacts to Langmail by default, set **Settings → Apps → Contacts → Default Account** to the Langmail account.
+  </Tab>
+  <Tab title="Thunderbird">
+    1. Open the **Address Book**, then **New Address Book → Add CardDAV Address Book**.
+    2. Enter your username `you@langmail.me` and the location `https://mail.langmail.me`, then select **Continue**.
+    3. When prompted, enter the app password.
+    4. Select your Langmail address books and **Continue**. They appear in the Address Book's list.
+  </Tab>
+  <Tab title="Android (DAVx⁵)">
+    Android has no built-in CardDAV support, so use [DAVx⁵](https://www.davx5.com), the standard open-source sync app (F-Droid or Play Store).
+
+    1. In DAVx⁵, add an account with **Login with URL and user name**.
+    2. Fill in:
+
+    | Field | Value |
+    |---|---|
+    | Base URL | `https://mail.langmail.me` |
+    | User name | `you@langmail.me` |
+    | Password | your app password |
+
+    3. Finish setup, then on the **CardDAV** tab turn on your address books — your personal one and **Collected**, once your agent has started collecting contacts. Your contacts appear in the Android Contacts app under the DAVx⁵ account.
+
+    The same DAVx⁵ account syncs your calendars too: turn them on in its **CalDAV** tab (see [Use a calendar client](/guides/calendar-clients)).
+  </Tab>
+</Tabs>
+
+## Birthdays
+
+A birthday you set on a contact syncs like any other field, so a birthday you add on your phone is the one your agent's birthday tools read — `list_upcoming_birthdays` and `search_contacts` — and one your agent adds shows up on your phone.
+
+- **On the contact card**, in every app above.
+- **In Apple Calendar**, on the Mac, iPhone and iPad: the **Birthdays** calendar is built from the contacts on your devices, Langmail's included. Turn it on in Calendar's list of calendars if you don't see it.
+
+Your agent reads birthdays without a year too, and can set them.
+
+## Connection details
+
+For any other CardDAV app, these are the settings:
+
+| Setting | Value |
+|---|---|
+| Server address | `mail.langmail.me` (discovery at `https://mail.langmail.me/.well-known/carddav`) |
+| Username | your full `you@langmail.me` address |
+| Password | an app password from [Access](https://app.langmail.me/access) (**App passwords**) |
+| Address book URL | `https://mail.langmail.me/dav/card/you%40langmail.me/default/` (your personal address book; the parent `/dav/card/you%40langmail.me/` lists all of them, **Collected** included) — only if the app can't auto-discover |
+
+## Troubleshooting
+
+When the server rejects the sign-in, the app reports that the account could not be verified. The connection itself is rarely the problem — check the credentials first:
+
+- **Use an app password, not your account password.** Signing in to Langmail happens in the browser, so the password you use there (or your Google password) is never accepted by CardDAV. Create one in [Access](https://app.langmail.me/access) under **App passwords** → **Create app password** and paste that instead.
+- **Don't leave the password empty.** iOS lets you save the account form without a password, but verification then fails immediately.
+- **Username is your full address** — `you@langmail.me`, not just `you`.
+- **The app password may have been revoked.** If in doubt, generate a fresh one in [Access](https://app.langmail.me/access) and try again.
+
+If the credentials are right and it still fails, take the manual route: in the account's advanced settings, set the account URL to `https://mail.langmail.me/dav/card/you%40langmail.me/` — replace `you@langmail.me` with your own address, percent-encoding the `@` as `%40` — with SSL enabled on port `443`.
+
+## Google Contacts and Outlook
+
+Neither Google Contacts nor classic Outlook can sync a third-party CardDAV address book — they only sync contacts within their own accounts. On an Android phone, use DAVx⁵ as shown above: your Langmail contacts then appear in the phone's Contacts app next to your Google ones.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Use a calendar client" icon="calendar" href="/guides/calendar-clients">
+    Sync your Langmail calendars into the same apps.
+  </Card>
+  <Card title="Use a mail client" icon="envelope" href="/guides/mail-clients">
+    Read the same mailbox from Apple Mail, Thunderbird, or Outlook.
+  </Card>
+  <Card title="Open protocols" icon="plug" href="/reference/protocols">
+    The full endpoint map for JMAP, CalDAV, CardDAV, IMAP, and SMTP.
+  </Card>
+</CardGroup>

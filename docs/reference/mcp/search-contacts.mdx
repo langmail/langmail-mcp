@@ -1,0 +1,136 @@
+---
+title: "search_contacts"
+description: "Resolve a name, partial name, email address, organization, or role (\"my lawyer\") to known contacts — role holders first, then ranked by interaction recency and frequency, with a confidence rating per address."
+keywords: ["search_contacts", "contacts", "address book", "resolve name", "mcp tool"]
+---
+
+Resolves a person to the addresses you actually have for them, so an agent asked to "schedule lunch with Robin" can find the address instead of guessing. Matches are drawn from the **collected address book** — maintained automatically from mail headers in both directions (Sent included) and from calendar attendees and organizers — plus any personal address books on the account. Each match carries an address confidence, a relationship label, and the last few interactions as concrete evidence, so the agent can justify its choice to the user. Call it before [`create_calendar_event`](/reference/mcp/create-calendar-event) or before drafting mail whenever only a name is known.
+
+A query is required: this tool searches, it does not enumerate the address book. When several plausible people match, present the candidates rather than picking one. For "whose birthday is coming up", use [`list_upcoming_birthdays`](/reference/mcp/list-upcoming-birthdays) instead.
+
+People are also found by what they are to you. "Write to my lawyer" searches for `my lawyer`, and the contact you said is your lawyer comes first, ahead of anyone who only matches by name, organization or address (a `lawyerhouse.example` domain, or a Lawyer Referral Service). Roles are stored with [`update_contact`](/reference/mcp/update-contact) or [`create_contact`](/reference/mcp/create-contact), only when you name or confirm one; nothing is inferred from mail. The first time you ask for a role nobody has, the result says so, and the agent finds the person in your mail, checks with you, and records the role, so every later request takes one lookup.
+
+Names, organizations, addresses and roles are searched across the first 50,000 cards of your address books, and every match among them is ranked. Contacts with no email address at all — the kind [`create_contact`](/reference/mcp/create-contact) writes from a name and a postal address — are found the same way as any other, and so is a contact written a moment ago. On an address book larger than that, the result cannot rule out someone past those cards, so it ends with: `Only the first 50000 cards of the address books were searched; a contact past them may be missing.`
+
+## Parameters
+
+<ParamField body="query" type="string" required>
+  Name, partial name, email address, organization, or role. 1–200 characters. Matched against display names, organization names, addresses, address domains and roles — so `acme.example` finds everyone at that domain, and `my lawyer` finds the contact whose role is `lawyer` (a leading "my" is dropped, case does not matter).
+</ParamField>
+
+<ParamField body="context" type="string" default="any">
+  Biases which address is reported as the best one when a person has addresses in several contexts. `work` prefers organization-domain addresses, `private` prefers personal-domain addresses, and `any` applies no bias. This never filters a person out of the results.
+</ParamField>
+
+<ParamField body="response_format" type="string" default="concise">
+  `concise` returns the name, contact id, roles, best address, confidence, relationship, the birthday when one is stored, and the last three interactions. `detailed` adds every known address with its own confidence and last-seen date, the phone numbers, structured postal addresses and note kept on the record, where the record came from, the full interaction log with record ids for chaining into [`get_email`](/reference/mcp/get-email) or [`list_calendar_events`](/reference/mcp/list-calendar-events), and any excluded relay addresses.
+</ParamField>
+
+<ParamField body="limit" type="integer" default="5">
+  Maximum number of matching people, 1–25.
+</ParamField>
+
+## Ratings
+
+Every match carries two independent ratings. They are separate because a person you have frequent contact with may still have no usable address — someone reachable only through a platform's notification relay, for example.
+
+`address_confidence` says how reliable the name-to-address pairing is:
+
+| Value | Meaning |
+|---|---|
+| `confirmed` | You wrote to the address, or scheduled or accepted an event with it. Addresses you entered by hand also count as confirmed. |
+| `strong` | The address appeared as a direct sender or recipient, or as an attendee on a small event, without a reply. |
+| `weak` | The address was inferred — a CC, or an attendee on an event with many guests. |
+
+The best address is the one marked as preferred, if the contact has one (set with `preferredEmail` on [`update_contact`](/reference/mcp/update-contact) or [`merge_contacts`](/reference/mcp/merge-contacts)), and otherwise the one with the highest confidence. A `context` bias still comes first: a `work` search prefers a work address over a preferred private one. In the `detailed` format the preferred address is marked `preferred`.
+
+`relationship` says how much interaction exists, regardless of address quality:
+
+| Value | Meaning |
+|---|---|
+| `active` | Three or more interactions, at least one in the last 60 days. |
+| `occasional` | Repeated contact that is older or thinner than that. |
+| `incidental` | A single sighting, or a contact you added by hand and never corresponded with. |
+
+Raw interaction counts are deliberately not exposed. The label answers "how much"; the `last_interactions` lines answer "which person is this" and give the agent something concrete to cite.
+
+## Example
+
+```json Call
+{
+  "query": "Robin",
+  "context": "work",
+  "limit": 5
+}
+```
+
+```text Result
+2 person(s) matched:
+
+1. Robin Fairweather
+   contact_id: c17
+   organization: Northwind
+   roles: accountant
+   birthday: 1990-03-03
+   best_address: robin@northwind.example (work)
+   address_confidence: confirmed | relationship: active
+   last_interactions:
+   - 4 days ago — calendar: Lunch with Northwind
+   - 3 weeks ago — email sent: Onboarding follow-up
+   - 2 months ago — email received: Re: kickoff notes
+
+2. Robin Achterberg
+   contact_id: c42
+   best_address: r.achterberg@example.org (work)
+   address_confidence: weak | relationship: incidental
+   last_interactions:
+   - 7 months ago — calendar: Q1 planning workshop
+```
+
+In `detailed` format each person additionally lists every known address and the record ids behind the interactions:
+
+```text Result
+1. Robin Fairweather
+   contact_id: c17
+   organization: Northwind
+   birthday: 1990-03-03
+   best_address: robin@northwind.example (work)
+   address_confidence: confirmed | relationship: active
+   last_interactions:
+   - 4 days ago — calendar: Lunch with Northwind
+   addresses:
+   - robin@northwind.example (work, confirmed, last seen 4 days ago)
+   - robin.fairweather@example.com (private, weak, last seen 8 months ago)
+   phones:
+   - [p0] +49 89 1234567 (mobile)
+   postal_addresses:
+   - [a0] Beispielweg 1, 80331 München, DE (home)
+   note: Prefers letters.
+   source: authored
+   interaction_records:
+   - 4 days ago — calendar: Lunch with Northwind [event uid: 6f2c1a90-...]
+   - 3 weeks ago — email sent: Onboarding follow-up [email id: Mabc123]
+   excluded_relays: messaging-digest-noreply@example.net (relay addresses, not usable for direct contact)
+```
+
+`contact_id` addresses the record in [`update_contact`](/reference/mcp/update-contact) and [`delete_contact`](/reference/mcp/delete-contact); it is in the concise format too, so editing a contact never costs an extra detailed round-trip. The `[p0]` and `[a0]` handles address one phone number or one postal address within the record — `update_contact` takes them directly.
+
+`source` says where the record came from: `derived` (built by collection from mail headers and calendar attendees), `authored` (written with [`create_contact`](/reference/mcp/create-contact)), or `imported` (came in from outside Langmail, such as a vCard import or another address-book app; it can still carry collected history). It is reported because `address_confidence` means different things across them — an inference in the first case, the user's own assertion in the second.
+
+Phone numbers, postal addresses and the note appear only in `detailed`: an agent resolving a name before drafting mail has no use for a street address, and `concise` is what that call reads. The birthday is the one authored field shown in both formats — one line, `1990-03-03` or `--03-03` when the year is unknown, printed only when a birthday is stored — so "when is Robin's birthday" needs no second call.
+
+Interaction lines are hydrated at query time — subjects and event titles are never stored on the contact card, so a message or event that has since been deleted renders as `(message no longer available)` or `(event no longer available)`. When any shown person has excluded relays, the response ends with a note pointing at the `detailed` format. When a query phrased as a role (`my plumber`) matches people only by name or address, the response ends with a note that nobody has that role, or, on an address book past 50,000 cards, that none of the people shown has it. When more people matched than `limit` allows, it ends with a truncation note naming the total and asking for a narrower query. The total is exact; only on an address book past 50,000 cards is it reported as "at least", followed by the note on the first 50,000 cards.
+
+## Errors
+
+- `query must not be empty.` — the `query` value was only whitespace.
+- `No contact matched "<query>" in the collected address book ...` — not an error but an empty result. It names what was searched and that no contact has it as a role, suggests searching for part of the address or the organization instead, says how to get to a role nobody has yet (find the person in mail, confirm with the user, record the role), and points out that a person you only know through a platform relay has no email address in the account's data. On an address book past 50,000 cards it does not claim that nobody has the role, and it ends with the note on the first 50,000 cards.
+- On a self-hosted server (your own Stalwart), the text says `in any address book` instead, since no collected book exists there. When no contact matches, the search first looks in the From, To and Cc of the newest 50 messages whose headers match, outside Junk and Trash, and lists the people it finds there, each marked as not saved as a contact. Only when that finds no one either does the empty result say both were searched.
+
+## Where the data comes from
+
+The collected address book is populated by two writers, and a third source sits alongside it: contacts written with [`create_contact`](/reference/mcp/create-contact), which cover the people derivation structurally cannot reach. The email-agent adds senders and recipients as mail is ingested, skipping junk, drafts, and Langmail's own daily brief. The calendar tools add attendees and organizers whenever an event is created, updated, or responded to — which is how an address that only ever appeared in an invitation you sent becomes findable.
+
+Relay and machine addresses (no-reply senders, bounce plumbing, platform digest addresses) never become contacts. When one is seen alongside a person you do know, it is remembered on that person's card and reported as excluded, so "you only have platform contact with this person" is distinguishable from "this person is unknown".
+
+Cards carry no mail content — no subjects, no event titles — because the address book syncs to every device you connect over CardDAV. Only record identifiers are stored, and the readable lines are fetched under your own credentials when you call the tool.

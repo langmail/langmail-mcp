@@ -1,0 +1,143 @@
+---
+title: "update_calendar_event"
+description: "Edit an existing event — identified by its uid — by passing only the fields that change, and re-send iMIP notifications to attendees."
+keywords: ["update_calendar_event", "reschedule", "move event", "edit event", "change time", "add attendee", "all-day", "reminder", "mcp tool"]
+---
+
+Updates are **partial**. Pass the event's `uid` plus only the fields you want to change; every field you omit keeps its stored value. Rescheduling a meeting is `uid` + `start`. Renaming one is `uid` + `title`; to rename a calendar itself, use [`update_calendar`](/reference/mcp/update-calendar). To put an event on a different calendar, use [`move_calendar_events`](/reference/mcp/move-calendar-events). Nothing you don't mention is touched — a recurring series stays recurring, attendees invited elsewhere stay invited, the location survives.
+
+There is no full-replacement mode. Because omission means "keep", clearing a field needs an explicit empty value:
+
+| To do this | Pass |
+|---|---|
+| Uninvite everyone | `attendees: []` |
+| Clear the location or description | `location: ""` / `description: ""` |
+| Make a repeating series a one-off | `recurrence: "none"` |
+| Remove every reminder | `reminderMinutesBefore: "none"` |
+
+A call that names no changeable field at all (just a `uid`) is rejected.
+
+**Times.** An explicit `end` always wins. Omitting `end` while moving `start` keeps the event's stored **duration** — "push the standup an hour later" is a two-field call and won't silently stretch the meeting. Omitting both keeps the stored time.
+
+**All-day events.** A partial edit keeps an all-day event all-day: renaming it or changing its reminder leaves its dates alone, and a date-only `start` moves it while keeping its length in days. To switch an event between all-day and timed, pass both `start` and `end`, as dates (end exclusive) or as date-times. With only one of them, the other side's clock time or length would have to be made up, so the edit is refused. `timeZone` does not affect all-day dates.
+
+**Reminders.** Reminders the event already has, including ones written by another client, carry over unchanged unless you pass `reminderMinutesBefore`. A number replaces all of them with one reminder, and `"none"` removes them. A call that changes only the reminder edits the reminders in place: attendees keep their responses and are not notified. On a series, that replaces the reminder on every occurrence, including ones you changed individually. To change one occurrence's reminder, pass its `recurrenceId`. On a series with attendees, that works only once the occurrence has individual changes, because creating them would reset the attendees' responses to it.
+
+**Attendees.** `attendees` replaces the whole list. `addedAttendees` / `removedAttendees` change specific addresses against the stored list instead, so you can drop one person without reading the list back first. They cannot be combined with `attendees`.
+
+**One occurrence.** Pass `recurrenceId` (the occurrence's original start) to change a single occurrence of a repeating series; the master rule and every other occurrence stay unchanged. Omitted fields merge against *that occurrence's* stored state — an override you wrote earlier if there is one, otherwise the occurrence's own slot — so re-editing a moved occurrence never drags it back to the series' time. Attendee deltas cannot be combined with `recurrenceId` (membership is a property of the series).
+
+By default the attendees are re-notified by iMIP. Pass `notify: "none"` to make the edit silent — useful for a trivial change such as dropping your own duplicate address.
+
+## Parameters
+
+All parameters of [`create_calendar_event`](/reference/mcp/create-calendar-event), each of them optional here, plus the fields below.
+
+<ParamField body="uid" type="string" required>
+  The event's iCalendar UID, from `create_calendar_event` or [`list_calendar_events`](/reference/mcp/list-calendar-events). Up to 255 characters; must not contain path separators.
+</ParamField>
+
+<ParamField body="attendees" type="string[]">
+  The complete attendee list after the edit, replacing the stored one. `[]` uninvites everyone and turns the event into a personal one. Omit to keep the stored attendees.
+</ParamField>
+
+<ParamField body="addedAttendees" type="string[]">
+  Email addresses to invite on top of the stored attendees. Cannot be combined with `attendees`.
+</ParamField>
+
+<ParamField body="removedAttendees" type="string[]">
+  Email addresses to uninvite, matched case-insensitively against the stored attendees. Removing an address that isn't invited is a no-op. Cannot be combined with `attendees`.
+</ParamField>
+
+<ParamField body="recurrence" type="string | object">
+  New repeat rule for the whole series, in the same shape `create_calendar_event` takes. The literal string `"none"` collapses the series to a single event. Omit to keep the stored rule.
+</ParamField>
+
+<ParamField body="notify" type="string" default="all">
+  `all` re-sends invitations/updates to the attendees; `none` makes the edit silent (the attendees on the event are not notified). A removed attendee may still receive a cancellation.
+</ParamField>
+
+<ParamField body="recurrenceId" type="string">
+  ISO 8601 instant naming one occurrence of a repeating series (its original start) to change in isolation. For an all-day series, the occurrence's date (`2026-06-23`). Cannot be combined with `recurrence` or with attendee deltas.
+</ParamField>
+
+<ParamField body="reminderMinutesBefore" type="integer | &quot;none&quot;">
+  Replaces every stored reminder with one that fires this many minutes before the start. `"none"` removes all reminders. Omit to keep the stored ones.
+</ParamField>
+
+## Examples
+
+Reschedule a meeting an hour later, keeping its length, attendees, title and recurrence:
+
+```json Call
+{
+  "uid": "9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d@langmail.me",
+  "start": "2026-07-15T15:00:00+02:00"
+}
+```
+
+```text Result
+Recurring event "unvibe meeting" updated (notifications requested for 4 attendee(s): …).
+```
+
+Remove one attendee from a recurring meeting, quietly, re-passing nothing else:
+
+```json Call
+{
+  "uid": "9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d@langmail.me",
+  "removedAttendees": ["me@gmail.com"],
+  "notify": "none"
+}
+```
+
+```text Result
+Recurring event "unvibe meeting" updated (notifications suppressed for the remaining attendees; a removed attendee may still receive a cancellation).
+```
+
+Move one occurrence of a weekly series without touching the rest:
+
+```json Call
+{
+  "uid": "9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d@langmail.me",
+  "recurrenceId": "2026-06-23T10:00:00Z",
+  "start": "2026-06-23T11:00:00Z",
+  "end": "2026-06-23T12:00:00Z"
+}
+```
+
+```text Result
+Occurrence of "Weekly Sync" on 2026-06-23T10:00:00Z updated (notifications requested for 1 attendee(s): guest@example.com).
+The rest of the series is unchanged.
+```
+
+## Errors
+
+- `Nothing to update: …` — the call named no changeable field.
+- `Event not found: <uid>` — no event with that UID in the target calendar.
+- ``Input validation error: … start: Expected a date (2026-10-03) for an all-day event, or a date-time with seconds …`` — a `start` or `end` in a form `create_calendar_event` does not take (see its `start`). Nothing was changed.
+- `Event end must be after its start. Nothing was changed.`
+- `Calendar not found: <url>` — the `calendarUrl` didn't resolve.
+- `Removing those attendees would leave the event with none.` — a delta removed the last attendee. To strip every attendee deliberately, pass `attendees: []` instead.
+- `recurrenceId … does not match an occurrence of this series` — the instant must equal an occurrence's original start (its date, for an all-day series).
+- `This series is not all-day; pass recurrenceId as the occurrence's original start date-time …` — a date `recurrenceId` on a timed series.
+- `This series is all-day; pass recurrenceId as the occurrence's date …` — a date-time `recurrenceId` on an all-day series. It is refused, not truncated, because a date-time's calendar day depends on its offset.
+- `To switch an event between all-day and timed, pass both start and end …` — only one of them was passed, in the other kind.
+- ``Pass `start` and `end` both as dates … or both as date-times …`` — a date mixed with a date-time.
+- ``An all-day event's `end` is exclusive …`` — an all-day `end` on or before its `start`. The message names the right `end`.
+- `The occurrence on <recurrenceId> was cancelled, so there is nothing to edit. Nothing was changed.` — the occurrence was cancelled with [`delete_calendar_event`](/reference/mcp/delete-calendar-event), so an override for it would be an orphan the series never shows.
+
+Because an edit rebuilds the event from its stored state, it refuses (with a clear message, changing nothing) when that state can't be reproduced faithfully:
+
+- **Individually-customized occurrences.** A whole-event edit would flatten them. Edit the occurrence directly with `recurrenceId`, or re-specify the whole event (`start`, `end`, `title`, `attendees` *and* `recurrence`) to deliberately replace the series — note that this escape hatch does discard the customizations.
+- **Cancelled occurrences.** A series with an occurrence cancelled via [`delete_calendar_event`](/reference/mcp/delete-calendar-event) can't be edited as a whole event: the rebuild would restore the cancelled instance and re-invite everyone to it.
+- **An attendee stored in a non-email address format.** Pass the complete `attendees` list instead.
+- **An event stored with a `DURATION` and no end.** Pass `start` and `end`.
+- **A moved series that contradicts its repeat rule.** Moving `start` onto a weekday the kept rule doesn't list (e.g. a Friday under `BYDAY=TU`) would add one occurrence rather than move the series. Pass `recurrence` with the new rule as well.
+
+### What an edit keeps
+
+An edit changes only what you pass. Everything else the event carries stays as stored, including what this tool has no parameter for and what another client wrote: reminders (`VALARM`), categories, privacy (`CLASS`), a link (`URL`), free/busy (`TRANSP`), status, and vendor `X-` properties. A new override of one occurrence starts from the series' own values for these.
+
+Only a value tied to a field you changed goes with it: the HTML or styled copy of a description when you pass `description`; the map position (`GEO`, Apple's structured location) and Apple's travel time when you pass `location`; Thunderbird's snooze state when you move the event or change its reminder; and the extra dates of a series (`RDATE`) when you move it or pass `recurrence`.
+
+Attendees keep their replies unless the edit reschedules the event, which asks them to answer again.

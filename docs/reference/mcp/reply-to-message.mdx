@@ -1,0 +1,84 @@
+---
+title: "reply_to_message"
+description: "Reply to a message and send it in one call, with threading derived from the original."
+keywords: ["reply_to_message", "reply", "reply all", "send", "mcp tool"]
+---
+
+Replies to a message and sends the reply immediately. This delivers mail to the recipients and cannot be undone.
+
+Use it when the user has already asked for the reply to be sent. To stage a reply for review instead, use [`create_draft`](/reference/mcp/create-draft) with `inReplyTo` — same threading, no delivery.
+
+The recipients, the `Re:` subject, and the `In-Reply-To`/`References` headers all come from the original message. The reply is written into Drafts first and only then submitted, so a submission that fails leaves a recoverable draft rather than nothing at all.
+
+## Parameters
+
+<ParamField body="messageId" type="string" required>
+  Id of the message being replied to, as returned by [`search_emails`](/reference/mcp/search-emails) or [`get_thread`](/reference/mcp/get-thread).
+</ParamField>
+
+<ParamField body="text" type="string">
+  Plain-text body of the reply. Either `text` or `html` (or both) is required.
+</ParamField>
+
+<ParamField body="html" type="string">
+  HTML body of the reply.
+</ParamField>
+
+<ParamField body="replyAll" type="boolean">
+  Reply to everyone: the original's To and Cc are added to Cc, minus the user themselves. Cannot be combined with `to`, `cc`, or `bcc`.
+</ParamField>
+
+<ParamField body="to" type="string[]">
+  Override the recipients instead of deriving them from the original. Cannot be combined with `replyAll`.
+</ParamField>
+
+<ParamField body="cc" type="string[]">
+  Override the carbon-copy recipients. Cannot be combined with `replyAll`.
+</ParamField>
+
+<ParamField body="bcc" type="string[]">
+  Blind-copy recipients. Cannot be combined with `replyAll`.
+</ParamField>
+
+<ParamField body="subject" type="string">
+  Override the subject. Defaults to `Re: <original subject>`.
+</ParamField>
+
+<ParamField body="idempotencyKey" type="string">
+  Client-chosen key that makes the call safe to retry: a repeat with the same key returns the first call's answer instead of sending a second reply. Keys are scoped to the account **and to this tool**. Remembered for 15 minutes.
+</ParamField>
+
+## Example
+
+```json Call
+{ "messageId": "M4821", "replyAll": true, "text": "Confirmed — the Q2 figures are final." }
+```
+
+```text Result
+Reply sent.
+messageId: M5140
+from: Dana Okonjo <dana@langmail.me>
+to: Nadia Bram <nadia@example.org>
+cc: tomas@example.com, carl@example.org
+subject: Re: Quarterly numbers
+threadId: T77
+threading: In-Reply-To/References set — this message continues an existing conversation
+body (text): Confirmed — the Q2 figures are final.
+The message is in Sent — read it back with get_email using the messageId above.
+```
+
+## Notes
+
+- `replyAll` and explicit recipients are **mutually exclusive**, and the conflict is rejected rather than resolved. "Reply to everyone, but only these people" has no defensible reading, and silently picking one is how an agent mails the wrong list.
+- The original is not quoted into the reply. Include any context the recipient needs in `text`.
+- Every address the account can send as is excluded from the reply's recipients, not just the one it is going out as — a message addressed to one of the user's aliases does not put that alias on the reply.
+- The reply always goes out from the account's own address. To reply from an alias, use [`create_draft`](/reference/mcp/create-draft) with `from` and then [`send_draft`](/reference/mcp/send-draft).
+- **Attachments cannot be added here.** This tool stages and sends in one call, so there is no point to inspect what is attached before it goes out. To reply with a file, use [`create_draft`](/reference/mcp/create-draft) with `inReplyTo` and `attachments`, then [`send_draft`](/reference/mcp/send-draft).
+- The reply is written into Drafts before it is submitted, so a submission that fails leaves a recoverable draft — the error names its id.
+
+## Errors
+
+- `replyAll cannot be combined with to/cc/bcc. … Nothing was sent.`
+- `Provide a body: text, html, or both.`
+- `Cannot reply: message not found: <id>. Nothing was sent.`
+- `Cannot reply: <id> has no sender address to reply to. Pass to explicitly. Nothing was sent.`

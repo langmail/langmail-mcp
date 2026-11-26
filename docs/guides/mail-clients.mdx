@@ -1,0 +1,82 @@
+---
+title: "Use a mail client"
+sidebarTitle: "Mail clients"
+description: "Read your Langmail mailbox from Apple Mail, Thunderbird, Outlook, or any IMAP client — app passwords for IMAP and SMTP, plus the connection settings."
+keywords: ["imap", "smtp", "app password", "apple mail", "thunderbird", "outlook"]
+---
+
+Your `@langmail.me` mailbox is a standard mailbox on open protocols. You read it in the mail client you already use while your agent works on it over MCP: anything that speaks IMAP can read it and anything that speaks SMTP submission can send from it.
+
+## Desktop and mobile clients
+
+Interactive sign-in for Langmail happens in the browser, so classic mail clients authenticate with an **app password** instead of your account password.
+
+<Steps>
+  <Step title="Create an app password">
+    Open [Access](https://app.langmail.me/access), find **App passwords**, and choose **Create app password**. Name the device, then copy the secret right away — it is shown once. You can create one per device and revoke each independently from the same section.
+
+    A mailbox holds at most **five** app passwords. Langmail keeps one for its own sync, so **four** are yours; Access shows how many you have left. If you are at the limit, revoke one you no longer use first.
+  </Step>
+  <Step title="Enter your email address and app password">
+    In Apple Mail on the Mac or Thunderbird, add a new account with your full `you@langmail.me` address and the app password. These clients discover the IMAP and SMTP servers on their own — Apple Mail over DNS (RFC 6186), Thunderbird via autoconfig — so you should not have to type any server name or port.
+
+    **iPhone, iPad, and Outlook are exceptions.** iOS Mail ignores every discovery mechanism and drops you on the manual IMAP screen — use the [configuration profile](#iphone-and-ipad). Outlook needs [its servers entered by hand](#outlook).
+  </Step>
+  <Step title="Verify">
+    Your inbox appears with the same messages — and the same sub-agent tags — your agent sees over MCP. Langmail's classification is stored as standard mailbox keywords, so it travels with the protocol; clients that render keywords show whatever your sub-agents applied.
+  </Step>
+</Steps>
+
+## iPhone and iPad
+
+iOS Mail resolves account setup against Apple's own built-in provider database rather than the open discovery mechanisms — it does not query DNS SRV, does not fetch Mozilla autoconfig, and ignores Autodiscover for plain IMAP accounts. Adding your address by hand therefore lands you on the manual IMAP/POP screen.
+
+Instead, install a **configuration profile**: open [Langmail account](https://app.langmail.me/settings) on the device itself and tap **Set up iPhone or iPad**. The profile carries the mail, calendar, and contacts settings plus a freshly minted app password, so there is nothing to type.
+
+<Steps>
+  <Step title="Tap the setup button in Safari, on the device">
+    It must be the iPhone or iPad you are setting up: the profile installer only triggers on a direct download, so a file transferred from your desktop will not work.
+
+    It must also be **Safari**. Some iOS browsers — Brave among them — hand the profile download to a component that does not carry your Langmail session, so setup fails with *"Sign in to Langmail on this device first"* even though you are signed in. Safari is the supported path today.
+  </Step>
+  <Step title="Open Settings → General → VPN & Device Management">
+    On modern iOS the download does **not** install anything by itself. Safari only tells you the profile was downloaded; the profile then waits under **Settings → General → VPN & Device Management**. Tap the downloaded **Langmail** profile there.
+  </Step>
+  <Step title="Tap Install">
+    iOS shows a red **Not Signed** warning — expected for now; the profile is served over TLS from `auth.langmail.me` but is not yet code-signed. Confirm, and Mail, Calendar, and Contacts appear configured.
+  </Step>
+  <Step title="Delete the downloaded file">
+    The profile stays in **Files → Downloads** after installing, and it contains your app password in plain text — delete it. This matters most if your Safari downloads go to iCloud Drive, where the file would otherwise sync off the device.
+  </Step>
+</Steps>
+
+<Note>
+The profile carries an app password listed as **iPhone / iPad profile** in [Access](https://app.langmail.me/access) under **App passwords** — revoke it there whenever you want the device cut off. Downloading it again replaces both the profile on the device and that app password, so device setup only ever occupies one slot — but it also means the previous copy stops working, so re-download only on the device you are setting up.
+</Note>
+
+## Outlook
+
+Langmail publishes Microsoft Autodiscover and the endpoints return correct settings, but recent Outlook releases — Outlook for iOS among them — do not reliably apply them for IMAP accounts and drop you on the manual setup screen instead. When that happens, choose **IMAP** and enter the [server details below](#if-your-client-asks-for-server-details).
+
+The iPhone configuration profile does not help here: it configures Apple's own Mail, Calendar, and Contacts apps, and Outlook keeps its own separate account store.
+
+## If your client asks for server details
+
+Some clients still ask for servers manually. Use your full `you@langmail.me` address as the username and the app password as the password:
+
+| Setting | Value |
+|---|---|
+| IMAP server | `mail.langmail.me`, port `993` (SSL/TLS) or `143` (STARTTLS) |
+| SMTP server | `mail.langmail.me`, port `465` (SSL/TLS) or `587` (STARTTLS) |
+
+<Note>
+One app password covers the mail, calendar and contacts protocols (IMAP, SMTP, CalDAV, CardDAV). MCP clients use [OAuth](/connect/authorization) and never need one.
+</Note>
+
+## Calendars
+
+The same host serves your calendars as CalDAV collections. To sync them into Apple Calendar, Thunderbird, or Android, see [Use a calendar client](/guides/calendar-clients). Day to day, the calendar surface is also designed for agents: see [Calendar workflows](/guides/calendar-workflows).
+
+## Contacts
+
+Your contacts are a CardDAV address book on the same host. To sync them, birthdays included, into Apple Contacts, Thunderbird, or Android, see [Use a contacts app](/guides/contacts-clients).

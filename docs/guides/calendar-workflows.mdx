@@ -1,0 +1,162 @@
+---
+title: "Calendar workflows"
+description: "End-to-end calendar tasks through an agent — schedule meetings with invitations, create recurring series, reschedule, cancel, and RSVP."
+keywords: ["calendar", "events", "invitations", "recurring", "rsvp", "caldav"]
+---
+
+The calendar tools are read-write: your agent can create real events, invite real attendees, and answer the invitations you receive. Invitations and cancellations go out as standard iMIP emails, so attendees on any calendar system receive them.
+
+Two identifiers flow between the tools:
+
+- **`calendarUrl`** — a calendar's CalDAV URL, from [`list_calendars`](/reference/mcp/list-calendars). Optional everywhere; tools default to your default calendar.
+- **`uid`** — an event's iCalendar UID, returned by [`create_calendar_event`](/reference/mcp/create-calendar-event) and [`list_calendar_events`](/reference/mcp/list-calendar-events). Required to update, delete, or RSVP.
+
+## Schedule a meeting
+
+```text Prompt
+Set up a 45-minute review with anna@example.com next Tuesday at 10:00 Berlin time.
+```
+
+```json Tool call — create_calendar_event
+{
+  "title": "Review",
+  "start": "2026-07-14T10:00:00+02:00",
+  "end": "2026-07-14T10:45:00+02:00",
+  "attendees": ["anna@example.com"]
+}
+```
+
+```text Result
+Event "Review" created (invitations requested for 1 attendee(s): anna@example.com).
+uid: 9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d@langmail.me
+calendarUrl: https://mail.langmail.me/dav/cal/you%40langmail.me/default/
+```
+
+Anna receives a standard calendar invitation she can accept from Google Calendar, Outlook, or anything else that speaks iCalendar.
+
+## Block your own time
+
+Not every calendar entry is a meeting. Omit `attendees` to place a personal event — a focus block, a travel buffer, a placeholder for plans still firming up — and no invitation email goes out:
+
+```json Tool call — create_calendar_event
+{
+  "title": "Focus block",
+  "start": "2026-07-14T09:00:00+02:00",
+  "end": "2026-07-14T11:00:00+02:00"
+}
+```
+
+When the plans firm up, invite people with `addedAttendees` on [`update_calendar_event`](/reference/mcp/update-calendar-event) — they get a normal invitation at that point.
+
+## Create a recurring series
+
+`recurrence` turns a single create call into a series. Use the structured form, or pass a raw RFC 5545 RRULE:
+
+```text Prompt
+Create a weekly team standup, Mondays 9:00–9:15 Berlin time, with team@example.com.
+```
+
+```json Tool call — create_calendar_event
+{
+  "title": "Team standup",
+  "start": "2026-07-13T09:00:00+02:00",
+  "end": "2026-07-13T09:15:00+02:00",
+  "attendees": ["team@example.com"],
+  "recurrence": { "frequency": "weekly", "byDay": ["MO"] }
+}
+```
+
+`start` and `end` describe the first occurrence. Bound a series with either `until` (an instant) or `count` (number of occurrences) — not both.
+
+## Reschedule or edit
+
+An update is a diff, not a re-specification: pass the `uid` and only the fields that change. Everything you omit — the title, the other attendees, the recurrence rule — is kept as stored, so a series never collapses by accident.
+
+```json Tool call — update_calendar_event
+{
+  "uid": "9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d@langmail.me",
+  "start": "2026-07-15T14:00:00+02:00"
+}
+```
+
+That moves the event and keeps its length; pass `end` too when the duration changes. Attendees are notified of the change automatically.
+
+Because omitting a field means "keep it", clearing one takes an explicit empty value: `attendees: []` uninvites everyone, `location: ""` and `description: ""` clear those fields, and `recurrence: "none"` turns a series back into a one-off.
+
+### Change just the attendees
+
+To add or drop specific attendees without reading the list back first, pass `addedAttendees` / `removedAttendees` — they act against the stored list, so you name only the address that changes. (`attendees` replaces the whole list instead; read the current one from [`list_calendar_events`](/reference/mcp/list-calendar-events) if you use it.) Add `notify: "none"` to keep a trivial edit silent (e.g. dropping your own duplicate address without disturbing everyone else):
+
+```json Tool call — update_calendar_event
+{
+  "uid": "9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d@langmail.me",
+  "removedAttendees": ["me@gmail.com"],
+  "notify": "none"
+}
+```
+
+To edit a single occurrence of a series, pass `recurrenceId` (the occurrence's original start); the master rule and every other occurrence stay unchanged.
+
+## Cancel an event
+
+```json Tool call — delete_calendar_event
+{ "uid": "9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d@langmail.me" }
+```
+
+Attendees receive iMIP cancellations. For a recurring event this cancels the **whole series**.
+
+## Cancel one occurrence
+
+To skip a single instance of a recurring series — say this week's standup — pass `recurrenceId`, the occurrence's original start. The master rule and every other occurrence stay put, and attendees are notified so just that instance drops off their calendars.
+
+```text Prompt
+Cancel this week's team standup — the one on June 23rd.
+```
+
+```json Tool call — delete_calendar_event
+{
+  "uid": "9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d@langmail.me",
+  "recurrenceId": "2026-06-23T10:00:00Z"
+}
+```
+
+```text Result
+Occurrence of 9b1de2a4-6f0e-4c8b-a1d2-3e4f5a6b7c8d@langmail.me on 2026-06-23T10:00:00Z cancelled; attendees are notified so just that instance is removed from their calendars. The rest of the series is unchanged.
+```
+
+`recurrenceId` must name an actual occurrence by its original start (find occurrences with [`list_calendar_events`](/reference/mcp/list-calendar-events)). Omit it to cancel the entire series.
+
+## RSVP to an invitation
+
+When someone invites *you*, the invitation lands in your calendar and your agent can answer it:
+
+```text Prompt
+Accept the invite to Friday's planning meeting.
+```
+
+The agent finds the event's `uid` with `list_calendar_events`, then:
+
+```json Tool call — respond_to_event
+{ "uid": "5f2e...@example.com", "response": "accept" }
+```
+
+```text Result
+RSVP'd accepted to "Planning".
+```
+
+The organizer is notified automatically. `respond_to_event` only sets your own attendance — it never modifies the event itself.
+
+## Keep a workstream separate
+
+A dedicated calendar keeps project events out of your personal one:
+
+```json Tool call — create_calendar
+{ "name": "Marketing", "color": "#7FA6C9" }
+```
+
+```text Result
+Calendar "Marketing" created.
+calendarUrl: https://mail.langmail.me/dav/cal/you%40langmail.me/a1b2c3/
+```
+
+Pass that `calendarUrl` to `create_calendar_event` to add events to it. Calendars are plain CalDAV collections on the open-protocol surface — see [Open protocols](/reference/protocols).

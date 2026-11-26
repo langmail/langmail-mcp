@@ -1,0 +1,38 @@
+---
+title: "archive_emails"
+description: "Take one or more messages out of the Inbox, Junk and Trash and file them in the Archive mailbox."
+keywords: ["archive_emails", "archive", "inbox zero", "filing", "mcp tool"]
+---
+
+Archives up to 50 messages in one call: each is taken out of the Inbox, Junk and Trash and added to the Archive mailbox. Sent and any other folder a message is in stay as they are, so your own reply in a thread keeps its place in Sent. Read state and flags (to-do, starred) are untouched. Re-running it on the same ids is harmless. To file into a specific folder use [`move_emails`](/reference/mcp/move-emails); to delete use [`trash_emails`](/reference/mcp/trash-emails).
+
+A message in Junk is mail the server filtered as spam. Archive it only when the user says it is not spam.
+
+Nothing is created: an account without an Archive mailbox gets an error, not a new folder.
+
+## Parameters
+
+<ParamField body="ids" type="string[]" required>
+  1–50 message ids, as returned by [`search_emails`](/reference/mcp/search-emails) or [`get_thread`](/reference/mcp/get-thread). Duplicates are collapsed. To archive a whole conversation, pass every id `get_thread` lists.
+</ParamField>
+
+## Example
+
+```json Call
+{ "ids": ["Mf2f0", "Mf2f4", "Mf31a"] }
+```
+
+```text Result
+Archived 3 message(s).
+```
+
+A batch is not all-or-nothing. Ids the server refused are listed with the reason, and the call only counts as an error when nothing was archived:
+
+```text Result — one stale id
+Archived 2 message(s). Not updated (1): Mf31a (notFound).
+```
+
+## Errors
+
+- `This account has no Archive mailbox. Nothing was archived. …` — create one in the mail client, or use `move_emails` with an existing folder.
+- `Archived 0 message(s). Not updated (N): … Re-run search_emails or get_thread for current ids.` — every id was refused, typically because the messages no longer exist.

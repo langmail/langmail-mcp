@@ -1,0 +1,71 @@
+---
+title: "list_drafts"
+description: "List the drafts staged in the Drafts folder, newest first, each with the draft id the other draft tools take."
+keywords: ["list_drafts", "draft", "drafts folder", "mcp tool"]
+---
+
+Lists what is staged in the user's Drafts folder, newest first. Use it to find a draft staged in an earlier session, to spot a stale or duplicate copy before staging another, or to tell the user what is waiting to be sent.
+
+Each draft comes with two ids, because they answer different tools:
+
+- **`draftId`** — what [`get_draft`](/reference/mcp/get-draft), [`update_draft`](/reference/mcp/update-draft), [`send_draft`](/reference/mcp/send-draft) and [`delete_draft`](/reference/mcp/delete-draft) take. It survives edits.
+- **`messageId`** — the current version's message id, which [`trash_emails`](/reference/mcp/trash-emails) takes to discard the draft recoverably.
+
+[`search_emails`](/reference/mcp/search-emails) with `mailbox: "Drafts"` finds the same messages, but it returns message ids only, and an edited draft's message id changes on every edit.
+
+A draft that another mail client left in Trash as well as in Drafts is not listed. The draft tools refuse it as discarded, so it is not pending.
+
+## Parameters
+
+<ParamField body="query" type="string">
+  Whole words matched against the subject and every recipient (to, cc, bcc), by name or address — `"invoice"`, `"Nadia"`, `"nadia@example.org"` or `"example.org"`. A fragment of a word does not match: `"invo"` finds nothing. The body is not searched.
+</ParamField>
+
+<ParamField body="after" type="string">
+  Only drafts last staged or edited on or after this UTC ISO-8601 timestamp, e.g. `"2026-10-01T00:00:00Z"`.
+</ParamField>
+
+<ParamField body="before" type="string">
+  Only drafts last staged or edited strictly before this UTC ISO-8601 timestamp.
+</ParamField>
+
+<ParamField body="limit" type="number" default="20">
+  How many drafts to return, newest first. 1–50.
+</ParamField>
+
+## Example
+
+```json Call
+{ "query": "Nadia" }
+```
+
+```text Result
+1 draft(s) (not sent), newest first:
+
+1. draftId: 6b1f3c2e-8d4a-4e7b-9a10-2c5d7e9f0a11
+   messageId: M8d2a
+   last staged: 2026-10-07T12:00:00Z
+   reply to: message M41c9 (read it with get_email)
+   from: Dana Okonjo <dana@langmail.me>
+   to: Nadia Bram <nadia@example.org>
+   bcc: archive@example.org
+   subject: Re: Quarterly numbers
+   threadId: T77
+   threading: In-Reply-To/References set — this message continues an existing conversation
+   body (text): Confirmed — the Q2 figures are final.
+   attachments (1):
+     1. Q2-figures.pdf — application/pdf — 284.1 KB — blobId: Gd4f21c
+```
+
+`last staged` is when the current version was written. An edit rewrites the message, so it is the last edit, not when the draft was first created, and `after`/`before` filter on the same time. `reply to` names the message a reply draft answers, when the draft was staged by Langmail.
+
+When more drafts match than `limit` allows, the heading reads `Showing the newest 20 of 34 draft(s)` and a closing line says how many were left out. There is no paging: narrow with `query` or `after`/`before`, or raise `limit`.
+
+## Results with nothing listed
+
+- `The Drafts folder is empty.` — no filter was given and there are no drafts.
+- `No drafts matched.` — a filter was given and nothing matched it.
+
+## Errors
+
+- `This account has no Drafts folder, so there are no staged drafts to list.`
