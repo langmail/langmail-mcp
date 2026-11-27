@@ -14,8 +14,20 @@
 //
 // The `sub` claim is the user's `auth.user` id, which the agent-activity
 // record (activity/record-agent-activity.ts) is keyed on.
+//
+// The `langmail_access` claim is the access level the user gave the token's
+// agent (src/access/levels.ts). Auth leaves it out only when its lookup fails,
+// so a missing or unknown value is our bug: the agent runs at Read only, which
+// never widens what it can do, and we log an error. Rejecting the token instead
+// would disconnect the agent for that bug.
+
+import { type AccessLevel, isAccessLevel } from '../access/levels.ts'
+import { logger } from '../logger/index.ts'
+
+export const ACCESS_CLAIM = 'langmail_access'
 
 export interface UserinfoResult {
+  access: AccessLevel
   // Unix seconds
   exp: number
   principal: string
@@ -37,6 +49,17 @@ const TRAILING_SLASHES_RE = /\/+$/u
 // answer fast — so this deadline is short. Without it a stalled auth service
 // hangs every request indefinitely instead of failing them visibly.
 const USERINFO_TIMEOUT_MS = 5000
+
+const readAccess = (claim: unknown): AccessLevel => {
+  if (isAccessLevel(claim)) {
+    return claim
+  }
+  logger.error(
+    { claim: typeof claim === 'string' ? claim : typeof claim },
+    `userinfo ${ACCESS_CLAIM} claim is missing or not an access level; running the agent at read-only`
+  )
+  return 'read-only'
+}
 
 export const fetchUserinfo = async (authIssuer: string, token: string): Promise<UserinfoResult> => {
   const url = `${authIssuer.replace(TRAILING_SLASHES_RE, '')}/oauth2/userinfo`
@@ -60,6 +83,7 @@ export const fetchUserinfo = async (authIssuer: string, token: string): Promise<
   if (!userId) {
     throw new UserinfoError(200, 'userinfo response missing sub claim')
   }
+  const access = readAccess(body[ACCESS_CLAIM])
   const exp = typeof body.exp === 'number' ? (body.exp as number) : Math.floor(Date.now() / 1000) + DEFAULT_TTL_SECONDS
-  return { exp, principal, userId }
+  return { access, exp, principal, userId }
 }

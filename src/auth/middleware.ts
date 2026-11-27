@@ -6,9 +6,10 @@
 //     RFC 9728 protected-resource metadata so MCP clients can self-
 //     bootstrap discovery.
 //
-// Token validity is established by calling Better Auth's /oauth2/userinfo
-// once per token, then caching the (principal, exp) tuple until the
-// token expires. See docs/reference/security/authentication.md.
+// Token validity and the agent's access level are established by calling
+// Better Auth's /oauth2/userinfo, then caching the answer for at most a minute
+// or until the token expires (token-cache.ts). See
+// docs/reference/security/authentication.md in langmail/platform.
 
 import { type AccessLevel } from '../access/levels.ts'
 import { MCP_SCOPES } from './scopes.ts'
@@ -16,8 +17,8 @@ import { type TokenCache } from './token-cache.ts'
 import { fetchUserinfo, UserinfoError } from './userinfo.ts'
 
 export interface AuthContext {
-  // The agent's access level (src/access/levels.ts). Every connection runs at
-  // Everything until it is read from Auth (langmail/platform#1452).
+  // The agent's access level (src/access/levels.ts), from userinfo's
+  // `langmail_access` claim.
   access: AccessLevel
   exp: number
   principal: string
@@ -64,13 +65,13 @@ export const createAuthMiddleware = (opts: AuthMiddlewareOptions): AuthMiddlewar
 
     const cached = opts.cache.get(token)
     if (cached) {
-      return { access: 'everything', exp: cached.exp, principal: cached.principal, token, userId: cached.userId }
+      return { ...cached, token }
     }
 
     try {
-      const { principal, exp, userId } = await fetchUserinfo(opts.authIssuer, token)
-      opts.cache.set(token, { exp, principal, userId })
-      return { access: 'everything', exp, principal, token, userId }
+      const resolved = await fetchUserinfo(opts.authIssuer, token)
+      opts.cache.set(token, resolved)
+      return { ...resolved, token }
     } catch (error) {
       if (error instanceof UserinfoError) {
         return unauth('invalid_token')

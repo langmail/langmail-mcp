@@ -132,6 +132,7 @@ describe('routes', () => {
   test('POST /mcp with valid bearer reaches the (stub) MCP handler', async () => {
     const cache = new TokenCache()
     cache.set('good', {
+      access: 'everything',
       exp: Math.floor(Date.now() / 1000) + 60,
       principal: 'alice',
       userId: 'user_123',

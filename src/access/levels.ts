@@ -27,6 +27,9 @@ export type AccessLevel = 'read-only' | 'no-send' | 'everything'
 
 export const ACCESS_LEVELS: readonly AccessLevel[] = ['read-only', 'no-send', 'everything']
 
+export const isAccessLevel = (raw: unknown): raw is AccessLevel =>
+  typeof raw === 'string' && (ACCESS_LEVELS as readonly string[]).includes(raw)
+
 // The names the user sees on the consent screen and under Access.
 export const ACCESS_LEVEL_NAMES: Record<AccessLevel, string> = {
   everything: 'Everything',
