@@ -7,7 +7,7 @@
 
 import { parseArgs } from 'node:util'
 
-import { ACCESS_LEVELS, type AccessLevel } from '../access/levels.ts'
+import { ACCESS_LEVELS, type AccessLevel, isAccessLevel } from '../access/levels.ts'
 
 export type Transport = 'http' | 'stdio'
 
@@ -205,8 +205,6 @@ const missingSettings = (raw: Raw): Setting[] =>
     raw.password ? undefined : STALWART_PASSWORD,
     raw.transport === 'http' && !raw.authToken ? MCP_AUTH_TOKEN : undefined,
   ].filter((s): s is Setting => s !== undefined)
-
-const isAccessLevel = (raw: string): raw is AccessLevel => (ACCESS_LEVELS as readonly string[]).includes(raw)
 
 const invalidSettings = (raw: Raw): string[] => {
   const problems: string[] = []

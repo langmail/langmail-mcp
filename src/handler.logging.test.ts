@@ -34,7 +34,12 @@ const requestLines = async (fn: () => Promise<unknown>): Promise<Record<string, 
 describe('/mcp request logging', () => {
   test('records method, route, status and duration for an authenticated request', async () => {
     const cache = new TokenCache()
-    cache.set('good', { exp: Math.floor(Date.now() / 1000) + 60, principal: 'alice@langmail.me', userId: 'user_123' })
+    cache.set('good', {
+      access: 'everything',
+      exp: Math.floor(Date.now() / 1000) + 60,
+      principal: 'alice@langmail.me',
+      userId: 'user_123',
+    })
 
     const lines = await requestLines(() =>
       makeRoutes(cache).fetch(

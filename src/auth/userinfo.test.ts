@@ -1,5 +1,6 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { describe, expect, mock, spyOn, test } from 'bun:test'
 
+import { logger } from '../logger/index.ts'
 import { fetchUserinfo, UserinfoError } from './userinfo.ts'
 
 const AUTH = 'https://auth.example.com/api/auth'
@@ -16,7 +17,7 @@ const withFetch = <T>(
 }
 
 describe('fetchUserinfo', () => {
-  test('resolves the mailbox address (email claim), user id (sub) + exp from /oauth2/userinfo', async () => {
+  test('resolves the mailbox address (email claim), user id (sub), access level + exp from /oauth2/userinfo', async () => {
     const f = mock((url: string, init?: RequestInit) => {
       expect(url).toBe(`${AUTH}/oauth2/userinfo`)
       expect((init?.headers as Record<string, string>)?.authorization).toBe('Bearer abc')
@@ -25,6 +26,7 @@ describe('fetchUserinfo', () => {
           {
             email: 'alice@langmail.me',
             exp: 1_900_000_000,
+            langmail_access: 'no-send',
             // Better Auth's `sub` is the user id, not the mailbox: the principal stays the email.
             sub: 'user_123',
           },
@@ -33,7 +35,7 @@ describe('fetchUserinfo', () => {
       )
     })
     const got = await withFetch(f, () => fetchUserinfo(AUTH, 'abc'))
-    expect(got).toEqual({ exp: 1_900_000_000, principal: 'alice@langmail.me', userId: 'user_123' })
+    expect(got).toEqual({ access: 'no-send', exp: 1_900_000_000, principal: 'alice@langmail.me', userId: 'user_123' })
     expect(f).toHaveBeenCalledTimes(1)
   })
 
@@ -74,5 +76,35 @@ describe('fetchUserinfo', () => {
     const got = await withFetch(f, () => fetchUserinfo(AUTH, 'tok'))
     expect(got.exp).toBeGreaterThanOrEqual(before + 60)
     expect(got.exp).toBeLessThanOrEqual(before + 7200)
+  })
+
+  describe('langmail_access claim', () => {
+    const accessFor = async (claims: Record<string, unknown>) => {
+      const f = mock(() =>
+        Promise.resolve(Response.json({ email: 'alice@langmail.me', sub: 'user_123', ...claims }, { status: 200 }))
+      )
+      const error = spyOn(logger, 'error').mockImplementation(() => undefined)
+      try {
+        const got = await withFetch(f, () => fetchUserinfo(AUTH, 'tok'))
+        return { access: got.access, errors: error.mock.calls.length }
+      } finally {
+        error.mockRestore()
+      }
+    }
+
+    test.each(['read-only', 'no-send', 'everything'])('reads %s as that level', async (level) => {
+      expect(await accessFor({ langmail_access: level })).toEqual({ access: level, errors: 0 })
+    })
+
+    test('a missing claim runs the agent at read-only and logs an error', async () => {
+      expect(await accessFor({})).toEqual({ access: 'read-only', errors: 1 })
+    })
+
+    test.each(['admin', 'Everything', 42, null])(
+      'an unknown value (%p) runs it at read-only and logs an error',
+      async (value) => {
+        expect(await accessFor({ langmail_access: value })).toEqual({ access: 'read-only', errors: 1 })
+      }
+    )
   })
 })

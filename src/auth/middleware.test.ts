@@ -91,6 +91,7 @@ describe('auth middleware', () => {
           {
             email: 'alice@langmail.me',
             exp: Math.floor(Date.now() / 1000) + 60,
+            langmail_access: 'read-only',
             sub: 'user_123',
           },
           { status: 200 }
@@ -109,12 +110,14 @@ describe('auth middleware', () => {
     expect(ctx.principal).toBe('alice@langmail.me')
     expect(ctx.token).toBe('good')
     expect(ctx.userId).toBe('user_123')
+    expect(ctx.access).toBe('read-only')
     expect(cache.size).toBe(1)
   })
 
   test('subsequent calls within exp hit the cache, not the network', async () => {
     const cache = new TokenCache()
     cache.set('good', {
+      access: 'everything',
       exp: Math.floor(Date.now() / 1000) + 60,
       principal: 'alice',
       userId: 'user_123',
@@ -133,5 +136,58 @@ describe('auth middleware', () => {
     const ctx = out as AuthContext
     expect(ctx.principal).toBe('alice')
     expect(f).not.toHaveBeenCalled()
+  })
+
+  describe('a level changed at Auth', () => {
+    const T0 = 1_900_000_000
+
+    // A fake userinfo whose answer the test changes, and a cache on a clock the
+    // test moves.
+    const setup = (tokenExp: number) => {
+      const auth = { calls: 0, level: 'everything' }
+      let now = T0
+      const cache = new TokenCache({ nowSec: () => now })
+      const mw = makeMw({ cache })
+      const f = mock(() => {
+        auth.calls += 1
+        return Promise.resolve(
+          Response.json(
+            { email: 'alice@langmail.me', exp: tokenExp, langmail_access: auth.level, sub: 'user_123' },
+            { status: 200 }
+          )
+        )
+      })
+      const request = () =>
+        withFetch(f, () =>
+          mw(new Request('https://mcp.example.com/mcp', { headers: { authorization: 'Bearer good' } }))
+        ) as Promise<AuthContext>
+      const at = (t: number) => {
+        now = t
+      }
+      return { at, auth, request }
+    }
+
+    test('holds for the next request more than 60 seconds after the change', async () => {
+      const { at, auth, request } = setup(T0 + 3600)
+      expect((await request()).access).toBe('everything')
+
+      auth.level = 'read-only'
+      at(T0 + 59)
+      expect((await request()).access).toBe('everything')
+      at(T0 + 61)
+      expect((await request()).access).toBe('read-only')
+      expect(auth.calls).toBe(2)
+    })
+
+    test('a token still expires at its exp when that comes sooner', async () => {
+      const { at, auth, request } = setup(T0 + 10)
+      await request()
+      at(T0 + 9)
+      await request()
+      expect(auth.calls).toBe(1)
+      at(T0 + 10)
+      await request()
+      expect(auth.calls).toBe(2)
+    })
   })
 })

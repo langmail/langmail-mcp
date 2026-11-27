@@ -105,8 +105,8 @@ package writes no log file.
 
 `--access` (or `MCP_ACCESS`) sets what the agent may do through the server:
 `read-only` (Read only), `no-send` (Change, never send) or `everything`
-(Everything, the default). Langmail is to offer the same levels per agent
-(<https://github.com/langmail/platform/issues/1452>), and the one table of which tools each level allows is
+(Everything, the default). Langmail offers the same levels per agent
+(<https://github.com/langmail/platform/issues/1447>), and the one table of which tools each level allows is
 [Access levels](reference/mcp/overview.mdx#access-levels) in the tool
 reference; `src/access/levels.test.ts` fails when it disagrees with
 `src/access/levels.ts`. The startup log names the level. A tool outside the
