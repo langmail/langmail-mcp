@@ -13,6 +13,8 @@ model: claude-opus-5-5
 schedule: "CRON_TZ=Europe/Berlin 30 7 * * *"
 triggers:
   - schedule
+  # RemoteTrigger get does not return GitHub event triggers.
+  - github: issues.opened
 tools: [Bash, Read, Write, Edit, Glob, Grep, WebFetch, WebSearch, Agent, Skill]
 connectors: []
 # Off in a public repository: anyone can comment on the routine's PRs.
