@@ -156,7 +156,7 @@ At Change, never send, five tools have a narrowed form that handles only what st
 - [`create_calendar_event`](/reference/mcp/create-calendar-event#at-change-never-send), [`update_calendar_event`](/reference/mcp/update-calendar-event#at-change-never-send) and [`delete_calendar_event`](/reference/mcp/delete-calendar-event#at-change-never-send) handle personal events, ones nobody else is on, and notify nobody.
 - [`create_mail_rule`](/reference/mcp/create-mail-rule#at-change-never-send) and [`update_mail_rule`](/reference/mcp/update-mail-rule#at-change-never-send) offer every action except `forward`.
 
-The level limits only what the agent does through this server. The credential the server acts with keeps full rights on the mail server: the OAuth bearer token on `mcp.langmail.me`, the app password on a self-hosted server. On `mcp.langmail.me` a level changed in Langmail holds for the agent's next request a minute later at most, without connecting it again. Until Langmail lets the user choose it, every agent connects at Everything.
+The level limits only what the agent does through this server. The credential the server acts with keeps full rights on the mail server: the OAuth bearer token on `mcp.langmail.me`, the app password on a self-hosted server. On `mcp.langmail.me` a level changed in Langmail holds for the agent's next request a minute later at most, without connecting it again. The consent screen asks for the level when the agent connects, with Everything preselected.
 
 ## Result conventions
 
