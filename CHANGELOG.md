@@ -1,3 +1,10 @@
+# [0.7.0](https://github.com/langmail/langmail-mcp/compare/v0.6.0...v0.7.0) (2026-11-27)
+
+
+### Features
+
+* **auth:** run each hosted agent at the access level Langmail has for it ([#41](https://github.com/langmail/langmail-mcp/issues/41)) ([a34f910](https://github.com/langmail/langmail-mcp/commit/a34f910204294fdbb5b714a85357c518bb993da1)), closes [langmail/platform#1452](https://github.com/langmail/platform/issues/1452)
+
 # [0.6.0](https://github.com/langmail/langmail-mcp/compare/v0.5.0...v0.6.0) (2026-11-26)
 
 
