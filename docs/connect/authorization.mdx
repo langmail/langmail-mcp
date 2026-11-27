@@ -117,16 +117,28 @@ The parties involved:
   </Step>
 </Steps>
 
+## What the agent may do
+
+Each agent you connect has an access level, which decides which tools the server offers it:
+
+- **Read only:** search and read your mail, calendars and contacts. It can't change anything.
+- **Change, never send:** also file mail, stage drafts and manage contacts, mail rules and events only you are on. Nothing leaves your account.
+- **Everything:** also send mail, invite people, answer invitations, share calendars, unsubscribe and forward mail by rule.
+
+[Access levels](/reference/mcp/overview#access-levels) lists every tool in each level. You pick the level on the consent screen, and [Access](https://app.langmail.me/access) shows each agent's level and changes it without connecting the agent again. A change holds within a minute; a tool the agent gained may only show up in a new chat, since most clients read the tool list when a chat starts.
+
+The level limits what the agent does through Langmail's MCP server. Its access token keeps full rights on your mailbox, so treat it like a password. A [self-hosted server](https://github.com/langmail/langmail-mcp/blob/main/docs/self-hosted.md#access-levels) takes the same levels from its `--access` setting, and there the app password keeps full rights.
+
 ## Tokens
 
 - **Access tokens are opaque** — treat them as bearer credentials, not as JWTs to inspect.
 - **Refresh tokens** are issued when `offline_access` is granted, so clients can stay connected without re-prompting you to sign in.
-- **Ending access:** every agent you connected is listed under [Access](https://app.langmail.me/access) with the scopes you granted. **Revoke** deletes its tokens and your consent, so it cannot refresh and has to connect again. An agent that is running can keep working for up to an hour after the revoke. Removing the server from your MCP client discards its tokens as well.
+- **Ending access:** every agent you connected is listed under [Access](https://app.langmail.me/access) with its access level. **Revoke** deletes its tokens and your consent, so it cannot refresh and has to connect again. An agent that is running stops working within a minute of the revoke. Removing the server from your MCP client discards its tokens as well.
 
 ## Requirements on the user
 
 The signed-in account must belong to a Langmail user with an active `@langmail.me` mailbox. Accounts without one are rejected at the MCP server with `401 invalid_token` — sign up at [app.langmail.me](https://app.langmail.me/signup) first.
 
 <Note>
-Authorization gives a client access to the tools the server exposes for your mailbox — currently read access to mail and read-write access to calendars. See the [tool reference](/reference/mcp/overview) for the exact surface.
+Authorization gives a client the tools of the access level you picked for it: mail, calendars and contacts, read only, changed without sending, or everything. See the [tool reference](/reference/mcp/overview) for the exact surface.
 </Note>
