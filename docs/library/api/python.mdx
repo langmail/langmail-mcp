@@ -1,0 +1,143 @@
+---
+title: "langmail library Python API"
+sidebarTitle: "Python"
+description: "The full API of the open-source langmail Python package: preprocess, preprocess_gmail, to_llm_context, their options, ProcessedEmail and ParseError."
+keywords: ["langmail library", "python", "pypi", "api reference"]
+---
+
+```python
+from langmail import (
+    preprocess,
+    preprocess_string,
+    preprocess_with_options,
+    preprocess_gmail,
+    to_llm_context,
+    to_llm_context_with_options,
+    ProcessedEmail,
+    PreprocessOptions,
+    LlmContextOptions,
+    RenderMode,
+    ParseError,
+)
+```
+
+## preprocess()
+
+Takes raw RFC 5322 email bytes and returns a structured `ProcessedEmail` object.
+
+```python
+def preprocess(raw: bytes) -> ProcessedEmail
+def preprocess_string(raw: str) -> ProcessedEmail
+def preprocess_with_options(
+    raw: bytes,
+    options: PreprocessOptions,
+) -> ProcessedEmail
+```
+
+Open `.eml` files in binary mode (`"rb"`) so you get `bytes`. Use `preprocess_string` if you already have a `str`. Use `preprocess_with_options` to override the defaults (see [`PreprocessOptions`](#preprocessoptions)).
+
+<Note>
+  Prefer `preprocess(bytes)` for legacy sources that aren't UTF-8. `preprocess_string` takes a `str`, so the text has already been decoded, and any loss in decoding happened before langmail sees it.
+</Note>
+
+Raises `langmail.ParseError` if the input can't be parsed as an email.
+
+### ProcessedEmail
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| body | str | Cleaned body text, with quotes and signature removed |
+| subject | str \| None | Subject line |
+| from_address | Address \| None | Sender (`from` is a reserved keyword in Python) |
+| to | list[Address] | To recipients |
+| cc | list[Address] | Cc recipients |
+| date | str \| None | ISO 8601 date string |
+| rfc_message_id | str \| None | `Message-ID` header value |
+| in_reply_to | list[str] \| None | `In-Reply-To` header values (for threading) |
+| references | list[str] \| None | `References` header values (for threading) |
+| signature | str \| None | Extracted signature, if found |
+| raw_body_length | int | Length of the original body before cleaning |
+| clean_body_length | int | Length of the cleaned body |
+| primary_cta | CallToAction \| None | Primary call-to-action link extracted from the HTML body |
+| thread_messages | list[ThreadMessage] | Quoted reply messages, oldest first |
+| is_newsletter | bool | `True` if the email was identified as a newsletter or bulk marketing message (from the headers; platform notifications are excluded) |
+
+`Address` has `name: str | None` and `email: str`. `CallToAction` has `url: str`, `text: str` and `confidence: float`. `ThreadMessage` has `sender: str`, `timestamp: str | None` and `body: str`.
+
+### PreprocessOptions
+
+```python
+PreprocessOptions(
+    strip_quotes: bool = True,
+    strip_signature: bool = True,
+    max_body_length: int = 0,
+)
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| strip_quotes | `True` | Remove quoted reply chains |
+| strip_signature | `True` | Remove the trailing signature block |
+| max_body_length | `0` | Truncate the body after N characters. `0` means no limit |
+
+## preprocess_gmail()
+
+Adapter for the Gmail API. Takes a Gmail `users.messages.get` response (`format='full'`) serialized as JSON and returns the same `ProcessedEmail` shape as `preprocess()`. The walk of the body tree, the base64url decoding and the header parsing all happen in Rust, shared with the Node.js binding.
+
+```python
+def preprocess_gmail(
+    msg_json: str,
+    options: PreprocessOptions | None = None,
+) -> ProcessedEmail
+```
+
+Pass the message as a JSON string, usually through `json.dumps(msg)`. It accepts either the bare `Schema$Message` or the full googleapis-style wrapper (`{"data": ..., "status": 200}`). The message must have been fetched with `format='full'`, so that `payload` is present with headers and base64url-encoded body parts.
+
+```python
+import json
+from googleapiclient.discovery import build
+from langmail import preprocess_gmail, to_llm_context
+
+gmail = build("gmail", "v1", credentials=creds)
+msg = gmail.users().messages().get(
+    userId="me", id=message_id, format="full"
+).execute()
+
+email   = preprocess_gmail(json.dumps(msg))
+context = to_llm_context(email)
+```
+
+**Body selection:** walks `payload.parts` depth-first and picks the first non-attachment leaf of each type. When both `text/html` and `text/plain` are present, HTML wins. Parts with `Content-Disposition: attachment` or a `filename` are skipped.
+
+**Raises `ParseError`** if:
+
+- the input is not valid JSON,
+- the input is not a JSON object (for example `json.dumps(42)` or `json.dumps(None)`),
+- `payload` is missing (fetch with `format='full'`), or
+- the chosen body part is stored as an attachment: Gmail returned `body.attachmentId` because the body was too large to inline. Fetch it with `users.messages.attachments.get` and inline the decoded content.
+
+<Note>
+  langmail does not bundle a Gmail client: it only reads the shape of the response. Install `google-api-python-client`, or any client that returns the same `Schema$Message`, yourself.
+</Note>
+
+## to_llm_context()
+
+```python
+def to_llm_context(email: ProcessedEmail) -> str
+def to_llm_context_with_options(
+    email: ProcessedEmail,
+    options: LlmContextOptions,
+) -> str
+```
+
+### LlmContextOptions
+
+```python
+LlmContextOptions(render_mode: RenderMode = RenderMode.LatestOnly)
+```
+
+`RenderMode` is an enum with the values `LatestOnly` and `ThreadHistory`. See [Concepts, Rendering modes](/library/concepts#rendering-modes).
+
+## Errors
+
+`langmail.ParseError`, a subclass of `ValueError`, is raised when the input can't be parsed as an RFC 5322 message, or when `preprocess_gmail` gets a malformed Gmail message (invalid JSON, a missing `payload`, or a body stored as an attachment that needs a separate fetch).
