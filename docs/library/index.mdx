@@ -28,14 +28,14 @@ langmail removes it in two steps. `preprocess()` parses the raw email and strips
 
 - **HTML to Markdown:** converts HTML email bodies to clean Markdown, keeping their semantic structure and stripping tracking pixels.
 - **Reply detection:** identifies and removes quoted content from Gmail, Outlook, Apple Mail and non-standard clients.
-- **Signature stripping:** removes email signatures with heuristic pattern matching. No machine learning, no training data.
+- **Signature stripping:** removes email signatures with heuristic pattern matching, without machine learning or training data.
 - **CTA extraction:** finds the primary call to action by its position and structure, and returns it as structured data your model can act on.
 
 ## Quick install
 
 <Tabs>
   <Tab title="AI coding agents">
-    Drop this prompt into Claude Code, Cursor or any other coding agent to have it integrate langmail into your project:
+    Paste this prompt into Claude Code, Cursor or any other coding agent to have it integrate langmail into your project:
 
     ```text
     Integrate the langmail library into this project. langmail is an
@@ -77,10 +77,9 @@ langmail does not send or receive emails, and it does not connect to any email p
 
 ## Implementation
 
-The core is written in Rust. Bindings are available for:
+The core is written in Rust and published to crates.io as `langmail`. Two bindings wrap it:
 
 - **Node.js:** via napi-rs, published to npm as `langmail`.
 - **Python:** via PyO3, published to PyPI as `langmail`.
-- **Rust:** published to crates.io as `langmail`.
 
 langmail is licensed under MIT or Apache 2.0, at your option. The source code is on [GitHub](https://github.com/langmail/langmail), and contributions are welcome.

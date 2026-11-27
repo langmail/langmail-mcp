@@ -22,7 +22,7 @@ Raw email bytes go in, and a structured `ProcessedEmail` comes out. The pipeline
 
 ## ProcessedEmail
 
-The structured output. Field names follow each language's conventions: `from` in TypeScript and Rust, `from_address` in Python, where `from` is a reserved keyword. The meaning is the same everywhere. The names below are the TypeScript ones; in Python and Rust they are in snake_case (`rfcMessageId` is `rfc_message_id`, `primaryCta` is `primary_cta`, `threadMessages` is `thread_messages`).
+`ProcessedEmail` is the structured output. Field names follow each language's conventions: `from` in TypeScript and Rust, `from_address` in Python, where `from` is a reserved keyword. The meaning is the same everywhere. The names below are the TypeScript ones; in Python and Rust they are in snake_case (`rfcMessageId` is `rfc_message_id`, `primaryCta` is `primary_cta`, `threadMessages` is `thread_messages`).
 
 | Field | Meaning | Empty when |
 | --- | --- | --- |
@@ -31,7 +31,7 @@ The structured output. Field names follow each language's conventions: `from` in
 | from | Sender address | absent on the source message |
 | to | Recipient addresses | no `To:` header present |
 | cc | Carbon-copy addresses | no `Cc:` header present |
-| date | ISO 8601 string | absent or unparseable |
+| date | ISO 8601 string in UTC, from the `Date:` header or, when that is missing or implausible, the newest `Received:` header | no usable date in either |
 | rfcMessageId | `Message-ID` header value | absent on the source message |
 | inReplyTo | `In-Reply-To` header values (for threading) | absent on the source message |
 | references | `References` header values (for threading) | absent on the source message |
@@ -39,8 +39,8 @@ The structured output. Field names follow each language's conventions: `from` in
 | rawBodyLength | Length of the body before cleaning | always present |
 | cleanBodyLength | Length of the cleaned body | always present |
 | primaryCta | Primary call-to-action link from the HTML | no CTA scored above the threshold |
-| threadMessages | Quoted reply messages, oldest first | no quotes detected |
-| isNewsletter | `true` if detected as a newsletter or bulk marketing email (from the headers; platform notifications are excluded) | always present |
+| threadMessages | Quoted reply messages from HTML `<blockquote>` blocks, oldest first | the message has no HTML part or no `<blockquote>` quotes |
+| isNewsletter | `true` if detected as a newsletter or bulk marketing email (from the headers; platform notifications are excluded). Always `false` from the Gmail adapter, which has no raw headers | always present |
 
 An `Address` carries an optional display name and an email address. A `CallToAction` has a URL, anchor text and a confidence score in `[0.0, 1.0]`. A `ThreadMessage` has a sender, an optional ISO 8601 timestamp and a cleaned body with no nested quotes.
 
@@ -51,11 +51,11 @@ An `Address` carries an optional display name and an email address. A `CallToAct
 | Mode | Behavior |
 | --- | --- |
 | `LatestOnly` (default) | Renders only the latest message and leaves `threadMessages` out. |
-| `ThreadHistory` | Renders the latest message first, then `---` and a chronological transcript of `threadMessages`. |
+| `ThreadHistory` | Renders the latest message first, then `---` and a chronological transcript of `threadMessages`. For a plain-text email, whose quotes don't end up in `threadMessages`, this is the same as `LatestOnly`. |
 
 ## Caveats
 
 - **Quote detection is heuristic.** It is accurate for Gmail, Outlook and Apple Mail, and less so for non-standard clients. If precision matters, check the output before you pass it to a production model.
-- **Bodies are decoded as UTF-8.** The `charset` parameter of each part is not read. Modern email is UTF-8 in practice, but legacy encodings come out garbled.
+- **The Gmail adapter decodes bodies as UTF-8.** It does not read the `charset` parameter of each part, so legacy encodings come out garbled. Raw MIME input is decoded with each part's charset.
 - **Attachments are skipped.** langmail is a text pipeline and does not extract binary parts.
-- **URLs are stripped from the body; anchor text is kept.** The goal is readability for the model, not link fidelity. The one exception is `primaryCta`, which keeps its URL.
+- **URLs are stripped from the body; anchor text is kept.** This keeps the body readable for the model. The one exception is `primaryCta`, which keeps its URL.

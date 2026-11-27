@@ -31,9 +31,9 @@ For a typical email in a reply chain, the output looks like this:
 
 ```text
 FROM: Alice <alice@example.com>
+TO: Bob <bob@example.com>
 SUBJECT: Q4 budget review
-DATE: 2024-11-12
-
+DATE: 2024-11-12T09:30:00Z
 CONTENT:
 Hi,
 
@@ -60,7 +60,7 @@ const parsed  = preprocessGmail(msg)
 const context = toLlmContext(parsed)
 ```
 
-`preprocessGmail` walks `payload.parts`, base64url-decodes the HTML or text body, normalizes the headers and runs the same cleaning pipeline as `preprocess`, with no MIME re-parsing and no extra fetch.
+`preprocessGmail` walks `payload.parts`, base64url-decodes the HTML or text body, normalizes the headers and runs the same cleaning pipeline as `preprocess`, with no MIME re-parsing and no extra fetch. On this path `isNewsletter` is always `false`, because newsletter detection needs the raw headers.
 
 <Note>
   langmail does not bundle or depend on `googleapis`: it only reads the shape of the response. Install `googleapis`, or any client that returns the same `Schema$Message`, yourself.
@@ -100,7 +100,7 @@ parsed  = preprocess_gmail(json.dumps(msg))
 context = to_llm_context(parsed)
 ```
 
-`preprocess_gmail` walks `payload.parts`, base64url-decodes the HTML or text body and runs the same cleaning pipeline as `preprocess`. It shares the Rust core with the other bindings, so the output is byte-identical.
+`preprocess_gmail` walks `payload.parts`, base64url-decodes the HTML or text body and runs the same cleaning pipeline as `preprocess`.
 
 ## Rust
 
@@ -109,11 +109,14 @@ context = to_llm_context(parsed)
 ```rust
 use langmail::preprocess;
 
-let raw = std::fs::read("email.eml")?;
-let parsed  = preprocess(&raw)?;
-let context = parsed.to_llm_context();
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let raw = std::fs::read("email.eml")?;
+    let parsed  = preprocess(&raw)?;
+    let context = parsed.to_llm_context();
 
-println!("{}", context);
+    println!("{}", context);
+    Ok(())
+}
 ```
 
 ### Gmail API
@@ -131,8 +134,8 @@ let parsed  = preprocess_gmail(&msg_json)?;
 let context = parsed.to_llm_context();
 ```
 
-It accepts either the bare `Schema$Message` or a googleapis-style `{"data": ...}` wrapper. The walk of the body tree, the base64url decoding and the header parsing are shared with the Node.js and Python bindings.
+It accepts either the bare `Schema$Message` or a googleapis-style `{"data": ...}` wrapper.
 
 <Tip>
-  Don't have a `.eml` file at hand? Any raw RFC 5322 message works, including bytes fetched over IMAP, from the Gmail API or from any other email source.
+  Any raw RFC 5322 message works in place of a `.eml` file, including bytes fetched over IMAP, from the Gmail API or from any other email source.
 </Tip>

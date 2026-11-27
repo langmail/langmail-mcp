@@ -22,6 +22,7 @@ import type {
   Address,
   CallToAction,
   ThreadMessage,
+  GmailInput,
 } from "langmail"
 ```
 
@@ -31,7 +32,7 @@ import type {
 
 ## preprocess()
 
-Takes raw RFC 5322 email bytes and returns a structured `ProcessedEmail` object. It handles MIME multipart messages, HTML and plain-text bodies, and character encodings.
+Takes raw RFC 5322 email bytes and returns a structured `ProcessedEmail` object. It handles MIME multipart messages and HTML and plain-text bodies, and decodes each part with its charset.
 
 ```ts
 function preprocess(raw: Buffer): ProcessedEmail
@@ -64,7 +65,7 @@ Optional fields are declared with `?:` in the generated `.d.ts`, so their type i
 | cleanBodyLength | number | Length of the cleaned body |
 | primaryCta | CallToAction \| undefined | Primary call-to-action link extracted from the HTML body |
 | threadMessages | ThreadMessage[] | Quoted reply messages, oldest first |
-| isNewsletter | boolean | `true` if the email was identified as a newsletter or bulk marketing message (from the headers; platform notifications are excluded) |
+| isNewsletter | boolean | `true` if the email was identified as a newsletter or bulk marketing message (from the headers; platform notifications are excluded). Always `false` from `preprocessGmail` |
 
 `Address` is `{ name?: string, email: string }`. `CallToAction` is `{ url: string, text: string, confidence: number }`. `ThreadMessage` is `{ sender: string, timestamp?: string, body: string }`.
 
@@ -78,7 +79,7 @@ Optional fields are declared with `?:` in the generated `.d.ts`, so their type i
 
 ## preprocessGmail()
 
-Adapter for the Gmail API. Takes the response of `gmail.users.messages.get({ id, format: "full" })` from `googleapis` and returns the same `ProcessedEmail` shape as `preprocess()`. It skips MIME parsing: the Gmail API has already split the message into typed parts, so the adapter walks `payload.parts`, base64url-decodes the bodies and feeds them into the shared cleaning pipeline. The walk, the header parsing and the decoding all happen in Rust; this function only serializes your object to JSON and passes it to the native binding, so the output is byte-identical to the Python and Rust entry points.
+Adapter for the Gmail API. Takes the response of `gmail.users.messages.get({ id, format: "full" })` from `googleapis` and returns the same `ProcessedEmail` shape as `preprocess()`. It skips MIME parsing, because the Gmail API has already split the message into parts. The decoding and cleaning run in Rust, and the output is byte-identical to the Python and Rust Gmail adapters for the same message. `isNewsletter` is always `false` on this path, because newsletter detection needs the raw headers.
 
 ```ts
 function preprocessGmail(
@@ -87,13 +88,14 @@ function preprocessGmail(
 ): ProcessedEmail
 ```
 
-It accepts either the bare `Schema$Message` or the full googleapis response (`{ data: Schema$Message, ... }`). The message must have been fetched with `format: "full"`, so that `payload` is present with headers and base64url-encoded body parts.
+`GmailInput` is either the bare `Schema$Message` or the full googleapis response (`{ data: Schema$Message, ... }`). The message must have been fetched with `format: "full"`, so that `payload` is present with headers and base64url-encoded body parts.
 
 **Body selection:** walks `payload.parts` depth-first and picks the first non-attachment leaf of each type. When both `text/html` and `text/plain` are present, HTML wins. Parts with `Content-Disposition: attachment` or a `filename` are skipped.
 
 **Throws:**
 
-- `TypeError` if the input is not an object or has no `payload` (the message wasn't fetched with `format: "full"`).
+- `TypeError` if the input is not an object.
+- `Error` if the message has no `payload` (it wasn't fetched with `format: "full"`).
 - `Error` if the chosen body part is stored as an attachment: Gmail returned `body.attachmentId` instead of `body.data` because the body was too large to inline. Fetch it with `users.messages.attachments.get` and inline the decoded content.
 
 <Note>

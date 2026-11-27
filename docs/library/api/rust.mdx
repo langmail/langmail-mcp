@@ -9,7 +9,7 @@ The Rust API is documented inline with rustdoc. [docs.rs/langmail](https://docs.
 
 ## API at a glance
 
-The entry points and options. The payload structs (`Address`, `CallToAction`, `ThreadMessage`) and the entry point for provider adapters (`preprocess_parsed` with `ParsedInput`) are documented on [docs.rs/langmail](https://docs.rs/langmail).
+This table lists the entry points and options. The payload structs (`Address`, `CallToAction`, `ThreadMessage`) and the entry point for provider adapters (`preprocess_parsed` with `ParsedInput`) are documented on [docs.rs/langmail](https://docs.rs/langmail).
 
 | Item | Description |
 | --- | --- |
@@ -30,4 +30,4 @@ The entry points and options. The payload structs (`Address`, `CallToAction`, `T
 - `preprocess` returns a `Result`; unlike the Node.js and Python bindings, it throws no exceptions.
 - `to_llm_context` is a method on `ProcessedEmail`, not a free function.
 - All data types (`ProcessedEmail`, `Address`, `CallToAction`, `ThreadMessage`, `PreprocessOptions`, `LlmContextOptions`, `RenderMode`) derive `serde::Serialize` and `Deserialize` for JSON round trips, with camelCase field names in JSON. `LangmailError` does not.
-- Provider adapters live under `langmail::adapters`. They take the provider's JSON as `&str`: serialize a Gmail `users.messages.get` response with `serde_json::to_string` and pass the result. The adapter walks `payload.parts`, base64url-decodes the bodies and feeds them into the same cleaning pipeline as `preprocess`, so the output is byte-identical to the MIME path. Gmail-specific errors are `LangmailError::InvalidGmailMessage` and `LangmailError::BodyRequiresAttachmentFetch`.
+- Provider adapters live under `langmail::adapters`. They take the provider's JSON as `&str`: serialize a Gmail `users.messages.get` response with `serde_json::to_string` and pass the result. The adapter walks `payload.parts`, base64url-decodes the bodies and feeds them into the same cleaning pipeline as `preprocess`. `is_newsletter` is always `false` on this path, because newsletter detection needs the raw headers. Gmail-specific errors are `LangmailError::InvalidGmailMessage` and `LangmailError::BodyRequiresAttachmentFetch`.

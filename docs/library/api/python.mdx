@@ -60,7 +60,7 @@ Raises `langmail.ParseError` if the input can't be parsed as an email.
 | clean_body_length | int | Length of the cleaned body |
 | primary_cta | CallToAction \| None | Primary call-to-action link extracted from the HTML body |
 | thread_messages | list[ThreadMessage] | Quoted reply messages, oldest first |
-| is_newsletter | bool | `True` if the email was identified as a newsletter or bulk marketing message (from the headers; platform notifications are excluded) |
+| is_newsletter | bool | `True` if the email was identified as a newsletter or bulk marketing message (from the headers; platform notifications are excluded). Always `False` from `preprocess_gmail` |
 
 `Address` has `name: str | None` and `email: str`. `CallToAction` has `url: str`, `text: str` and `confidence: float`. `ThreadMessage` has `sender: str`, `timestamp: str | None` and `body: str`.
 
@@ -82,7 +82,7 @@ PreprocessOptions(
 
 ## preprocess_gmail()
 
-Adapter for the Gmail API. Takes a Gmail `users.messages.get` response (`format='full'`) serialized as JSON and returns the same `ProcessedEmail` shape as `preprocess()`. The walk of the body tree, the base64url decoding and the header parsing all happen in Rust, shared with the Node.js binding.
+Adapter for the Gmail API. Takes a Gmail `users.messages.get` response (`format='full'`) serialized as JSON and returns the same `ProcessedEmail` shape as `preprocess()`. It runs the same Rust code as the Node.js and Rust Gmail adapters. `is_newsletter` is always `False` on this path, because newsletter detection needs the raw headers.
 
 ```python
 def preprocess_gmail(
