@@ -70,7 +70,9 @@ describe('fetchUserinfo', () => {
 
   test('synthesises exp ~1h ahead when response has no exp', async () => {
     const f = mock(() =>
-      Promise.resolve(Response.json({ email: 'alice@langmail.me', sub: 'user_123' }, { status: 200 }))
+      Promise.resolve(
+        Response.json({ email: 'alice@langmail.me', langmail_access: 'everything', sub: 'user_123' }, { status: 200 })
+      )
     )
     const before = Math.floor(Date.now() / 1000)
     const got = await withFetch(f, () => fetchUserinfo(AUTH, 'tok'))

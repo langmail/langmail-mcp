@@ -105,7 +105,7 @@ package writes no log file.
 
 `--access` (or `MCP_ACCESS`) sets what the agent may do through the server:
 `read-only` (Read only), `no-send` (Change, never send) or `everything`
-(Everything, the default). Langmail offers the same levels per agent
+(Everything, the default). Langmail uses the same levels per agent
 (<https://github.com/langmail/platform/issues/1447>), and the one table of which tools each level allows is
 [Access levels](reference/mcp/overview.mdx#access-levels) in the tool
 reference; `src/access/levels.test.ts` fails when it disagrees with
@@ -120,8 +120,8 @@ What differs from Langmail:
   ([What the mode leaves out](#what-the-mode-leaves-out)), so Everything
   self-hosted has no calendar sharing.
 - The level is fixed for the life of the process and holds for every client:
-  changing it needs a restart with the new value. On Langmail the user is to
-  change it per agent under Access.
+  changing it needs a restart with the new value. On Langmail the level is set
+  per agent and a change applies within a minute, without connecting again.
 - The level limits what the agent does through `langmail-mcp` only. The
   Stalwart app password keeps full rights on the account, so whatever else
   holds it can still do everything.

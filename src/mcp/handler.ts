@@ -6,8 +6,8 @@
 // per-request cost is modest (no DB connections to open; the JMAP
 // session lookup is cached across requests via `makeLiveDeps`), and
 // avoiding shared session state simplifies reasoning about token
-// revocation — a 401 from /auth/userinfo is the only thing that gates
-// access, and it runs before we get here.
+// revocation — the userinfo answer (a 401, or the agent's access level)
+// is what gates access, and it runs before we get here.
 
 import { McpServer, WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server'
 
