@@ -94,7 +94,7 @@ The parties involved:
 
     A client that sends no `scope` asks for `openid email offline_access`, the same scopes the challenge and metadata advertise.
 
-    A user without a session is sent to the Langmail login page first (Google sign-in is optional). Then a consent screen shows what the named client is asking for; approving redirects back to the client's `redirect_uri` with an authorization code. Every dynamically registered client goes through consent — there are no silent grants.
+    A user without a session is sent to the Langmail login page first (Google sign-in is optional). Then a consent screen shows what the named client is asking for and asks what the agent may do: Read only, Change, never send or Everything, which is preselected (see [Access levels](/reference/mcp/overview#access-levels)). Approving saves that level, then redirects back to the client's `redirect_uri` with an authorization code. Every dynamically registered client goes through consent — there are no silent grants.
   </Step>
   <Step title="Exchange the code for tokens">
     ```sh Request
