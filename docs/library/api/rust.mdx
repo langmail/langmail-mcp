@@ -1,0 +1,33 @@
+---
+title: "langmail library Rust API"
+sidebarTitle: "Rust"
+description: "The public API of the open-source langmail Rust crate at a glance, with links to the full reference on docs.rs."
+keywords: ["langmail library", "rust", "crates.io", "docs.rs", "api reference"]
+---
+
+The Rust API is documented inline with rustdoc. [docs.rs/langmail](https://docs.rs/langmail) is the full, versioned reference, including error variants, method receivers and `serde` derives.
+
+## API at a glance
+
+This table lists the entry points and options. The payload structs (`Address`, `CallToAction`, `ThreadMessage`) and the entry point for provider adapters (`preprocess_parsed` with `ParsedInput`) are documented on [docs.rs/langmail](https://docs.rs/langmail).
+
+| Item | Description |
+| --- | --- |
+| [`preprocess`](https://docs.rs/langmail/latest/langmail/fn.preprocess.html) | `fn preprocess(raw: &[u8]) -> Result<ProcessedEmail, LangmailError>` |
+| [`preprocess_with_options`](https://docs.rs/langmail/latest/langmail/fn.preprocess_with_options.html) | Preprocess with your own `PreprocessOptions` |
+| [`adapters::preprocess_gmail`](https://docs.rs/langmail/latest/langmail/adapters/gmail/fn.preprocess_gmail.html) | `fn preprocess_gmail(msg_json: &str) -> Result<ProcessedEmail, LangmailError>`: runs a Gmail API `Schema$Message` (JSON) through the shared pipeline |
+| [`adapters::preprocess_gmail_with_options`](https://docs.rs/langmail/latest/langmail/adapters/gmail/fn.preprocess_gmail_with_options.html) | As above, with your own `PreprocessOptions` |
+| [`ProcessedEmail`](https://docs.rs/langmail/latest/langmail/struct.ProcessedEmail.html) | The parsed output struct |
+| [`ProcessedEmail::to_llm_context`](https://docs.rs/langmail/latest/langmail/struct.ProcessedEmail.html#method.to_llm_context) | Method on `ProcessedEmail` that returns the context string for a prompt |
+| [`ProcessedEmail::to_llm_context_with_options`](https://docs.rs/langmail/latest/langmail/struct.ProcessedEmail.html#method.to_llm_context_with_options) | As above, with `LlmContextOptions` |
+| [`PreprocessOptions`](https://docs.rs/langmail/latest/langmail/struct.PreprocessOptions.html) | `strip_quotes`, `strip_signature`, `max_body_length` |
+| [`LlmContextOptions`](https://docs.rs/langmail/latest/langmail/struct.LlmContextOptions.html) | `render_mode: RenderMode` |
+| [`RenderMode`](https://docs.rs/langmail/latest/langmail/enum.RenderMode.html) | `LatestOnly` \| `ThreadHistory` |
+| [`LangmailError`](https://docs.rs/langmail/latest/langmail/enum.LangmailError.html) | Error variants returned by `preprocess` |
+
+## Notes
+
+- `preprocess` returns a `Result`; unlike the Node.js and Python bindings, it throws no exceptions.
+- `to_llm_context` is a method on `ProcessedEmail`, not a free function.
+- All data types (`ProcessedEmail`, `Address`, `CallToAction`, `ThreadMessage`, `PreprocessOptions`, `LlmContextOptions`, `RenderMode`) derive `serde::Serialize` and `Deserialize` for JSON round trips, with camelCase field names in JSON. `LangmailError` does not.
+- Provider adapters live under `langmail::adapters`. They take the provider's JSON as `&str`: serialize a Gmail `users.messages.get` response with `serde_json::to_string` and pass the result. The adapter walks `payload.parts`, base64url-decodes the bodies and feeds them into the same cleaning pipeline as `preprocess`. `is_newsletter` is always `false` on this path, because newsletter detection needs the raw headers. Gmail-specific errors are `LangmailError::InvalidGmailMessage` and `LangmailError::BodyRequiresAttachmentFetch`.

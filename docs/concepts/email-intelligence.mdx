@@ -6,6 +6,8 @@ keywords: ["classification", "email type", "todo", "morning brief", "gmail sync"
 
 Every message that arrives in your Langmail mailbox is processed on arrival — whether it came in natively over SMTP or was synced from a connected Gmail account. The results are stored as standard mailbox keywords, so agents can filter by them over MCP.
 
+Langmail cleans each message with the open-source [langmail library](/library), which strips quoted replies, signatures and HTML noise before the message is classified and summarized.
+
 ## The email types
 
 Each message is classified into exactly one of ten types; the orthogonal `todo` flag comes on top (next section). All eleven values are accepted by the [`search_emails`](/reference/mcp/search-emails) `keywords` filter:

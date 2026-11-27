@@ -161,6 +161,23 @@
             "pages": ["reference/protocols"]
           }
         ]
+      },
+      {
+        "tab": "langmail library",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": ["library/index", "library/installation", "library/quickstart"]
+          },
+          {
+            "group": "Concepts",
+            "pages": ["library/concepts"]
+          },
+          {
+            "group": "API reference",
+            "pages": ["library/api/typescript", "library/api/python", "library/api/rust"]
+          }
+        ]
       }
     ]
   },

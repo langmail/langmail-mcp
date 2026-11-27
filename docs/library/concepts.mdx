@@ -1,0 +1,61 @@
+---
+title: "langmail library concepts"
+sidebarTitle: "Concepts"
+description: "How the open-source langmail library turns a raw email into a ProcessedEmail and a context block for a language model: the pipeline, the output fields, rendering modes and caveats."
+keywords: ["langmail library", "pipeline", "ProcessedEmail", "render mode", "quote stripping", "signature"]
+---
+
+Every binding of the langmail library runs the same pipeline and returns the same output shape. Types and function names follow each language, as the API reference pages for [TypeScript](/library/api/typescript), [Python](/library/api/python) and [Rust](/library/api/rust) show, but what this page describes holds for all three.
+
+## Pipeline
+
+Raw email bytes go in, and a structured `ProcessedEmail` comes out. The pipeline runs these stages in order:
+
+1. **MIME parse:** extracts the RFC 5322 structure and headers. Malformed bodies are recovered where possible; input that cannot be parsed at all returns an error.
+2. **Body selection:** if the message has both a `text/html` and a `text/plain` part, HTML wins. Attachments are skipped.
+3. **Invisible-character normalization:** strips zero-width joiners, byte order marks and soft hyphens from the raw HTML before it is converted.
+4. **HTML to Markdown:** converts HTML to Markdown, keeping the structure (headings, lists, links with anchor text) and dropping presentational noise.
+5. **CTA extraction:** extracts the primary call-to-action link from the raw HTML, from JSON-LD when the message has it and by heuristic scoring otherwise. It runs on the HTML before stripping, so the result does not depend on where quotes and the signature start.
+6. **Quote stripping:** removes reply chains from Gmail, Outlook and Apple Mail, and common ad-hoc markers (`On <date>, <sender> wrote:` and similar), from the body.
+7. **Signature stripping:** removes a trailing signature, detected heuristically, and returns it in a separate `signature` field.
+8. **Thread extraction:** extracts quoted replies from HTML `<blockquote>` blocks into `threadMessages`, oldest first.
+
+## ProcessedEmail
+
+`ProcessedEmail` is the structured output. Field names follow each language's conventions: `from` in TypeScript and Rust, `from_address` in Python, where `from` is a reserved keyword. The meaning is the same everywhere. The names below are the TypeScript ones; in Python and Rust they are in snake_case (`rfcMessageId` is `rfc_message_id`, `primaryCta` is `primary_cta`, `threadMessages` is `thread_messages`).
+
+| Field | Meaning | Empty when |
+| --- | --- | --- |
+| body | Cleaned body text, quotes and signature removed | the source had no body |
+| subject | Subject line | absent on the source message |
+| from | Sender address | absent on the source message |
+| to | Recipient addresses | no `To:` header present |
+| cc | Carbon-copy addresses | no `Cc:` header present |
+| date | ISO 8601 string in UTC, from the `Date:` header or, when that is missing or implausible, the newest `Received:` header | no usable date in either |
+| rfcMessageId | `Message-ID` header value | absent on the source message |
+| inReplyTo | `In-Reply-To` header values (for threading) | absent on the source message |
+| references | `References` header values (for threading) | absent on the source message |
+| signature | Extracted signature block | no signature detected |
+| rawBodyLength | Length of the body before cleaning | always present |
+| cleanBodyLength | Length of the cleaned body | always present |
+| primaryCta | Primary call-to-action link from the HTML | no CTA scored above the threshold |
+| threadMessages | Quoted reply messages from HTML `<blockquote>` blocks, oldest first | the message has no HTML part or no `<blockquote>` quotes |
+| isNewsletter | `true` if detected as a newsletter or bulk marketing email (from the headers; platform notifications are excluded). Always `false` from the Gmail adapter, which has no raw headers | always present |
+
+An `Address` carries an optional display name and an email address. A `CallToAction` has a URL, anchor text and a confidence score in `[0.0, 1.0]`. A `ThreadMessage` has a sender, an optional ISO 8601 timestamp and a cleaned body with no nested quotes.
+
+## Rendering modes
+
+`toLlmContext` (`to_llm_context` in Python and Rust) takes a `ProcessedEmail` and returns a deterministic plain-text block for a prompt. Its rendering mode controls what happens to the quoted reply history:
+
+| Mode | Behavior |
+| --- | --- |
+| `LatestOnly` (default) | Renders only the latest message and leaves `threadMessages` out. |
+| `ThreadHistory` | Renders the latest message first, then `---` and a chronological transcript of `threadMessages`. For a plain-text email, whose quotes don't end up in `threadMessages`, this is the same as `LatestOnly`. |
+
+## Caveats
+
+- **Quote detection is heuristic.** It is accurate for Gmail, Outlook and Apple Mail, and less so for non-standard clients. If precision matters, check the output before you pass it to a production model.
+- **The Gmail adapter decodes bodies as UTF-8.** It does not read the `charset` parameter of each part, so legacy encodings come out garbled. Raw MIME input is decoded with each part's charset.
+- **Attachments are skipped.** langmail is a text pipeline and does not extract binary parts.
+- **URLs are stripped from the body; anchor text is kept.** This keeps the body readable for the model. The one exception is `primaryCta`, which keeps its URL.

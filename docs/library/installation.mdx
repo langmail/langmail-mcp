@@ -1,0 +1,51 @@
+---
+title: "Install the langmail library"
+sidebarTitle: "Installation"
+description: "Install the open-source langmail library for Node.js, Python or Rust. All three run the same pipeline and return the same output."
+keywords: ["langmail library", "install", "npm", "pip", "cargo"]
+---
+
+## Node.js
+
+Requires Node.js 18 or later. The package includes pre-compiled native binaries, so you don't need a Rust toolchain.
+
+<CodeGroup>
+```sh npm
+npm install langmail
+```
+
+```sh pnpm
+pnpm add langmail
+```
+
+```sh yarn
+yarn add langmail
+```
+</CodeGroup>
+
+## Python
+
+Requires Python 3.9 or later. Wheels are pre-compiled for macOS, Linux and Windows.
+
+```sh
+pip install langmail
+```
+
+## Rust
+
+Add `langmail` as a dependency:
+
+```sh
+cargo add langmail
+```
+
+Or add it to your `Cargo.toml` yourself:
+
+```toml
+[dependencies]
+langmail = "0.11"
+```
+
+<Note>
+  The pre-compiled binaries for Node.js and Python cover macOS (arm64, x64), Linux (x64, arm64) and Windows (x64).
+</Note>
